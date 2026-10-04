@@ -74,10 +74,15 @@ pub(crate) enum HarnessGlyph {
 pub(crate) enum PermissionGlyph {
     Yolo,
     Default,
+    /// A legacy session's command, never classified.
     Unknown,
     Approve,
     SmartApprove,
     Chat,
+    /// A command launch asserted YOLO; drawn as [`PermissionGlyph::Yolo`].
+    AssertedYolo,
+    /// A command launch asserted not YOLO; drawn as a plain shield.
+    AssertedNotYolo,
 }
 
 /// An ended session's distinct sidebar silhouette.
@@ -244,12 +249,13 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
 #[component]
 pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
     let token = match glyph {
-        PermissionGlyph::Yolo => "yolo",
+        PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo => "yolo",
         PermissionGlyph::Unknown => "unknown",
         PermissionGlyph::Default
         | PermissionGlyph::Approve
         | PermissionGlyph::SmartApprove
-        | PermissionGlyph::Chat => "shielded",
+        | PermissionGlyph::Chat
+        | PermissionGlyph::AssertedNotYolo => "shielded",
     };
     rsx! {
         svg { class: "sidebar-glyph permission-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.25", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
@@ -258,7 +264,7 @@ pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
                 path { d: "M6 9.5v.1" }
             } else {
                 path { d: "M6 1.3 10 2.8v3c0 2.3-2.2 4-4 4.9-1.8-.9-4-2.6-4-4.9v-3z" }
-                if glyph == PermissionGlyph::Yolo {
+                if matches!(glyph, PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo) {
                     path { d: "M1.3 1.3 10.7 10.7" }
                 }
             }

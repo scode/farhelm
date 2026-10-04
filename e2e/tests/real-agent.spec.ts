@@ -27,6 +27,7 @@
 // `FARHELM_REAL_AGENT=1 npx playwright test real-agent.spec.ts` away
 // instead of a re-discovery.
 import { expect, test } from "./helpers/evidence";
+import { answerYolo } from "./helpers/term";
 import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
@@ -93,6 +94,7 @@ async function createSession(
   await form.getByRole("button", { name: "other / command" }).click();
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
+  await answerYolo(form);
   // Name is visible on the top action row now; find it by label rather
   // than by DOM position, which a future reorder could otherwise retarget.
   await form.getByLabel("name (optional)").fill(title);
@@ -470,10 +472,10 @@ test("drives a real `claude` session through the trust dialog to a detected repl
         await page.goto("/");
         const created = await createSession(page, {
           cwd: scratch,
-          // No flags, and Claude Code found on PATH: the plain invocation
-          // is the one a real user types (SPEC.md), and the one basename
-          // derivation must recognize.
+          // No flags, and Claude Code found on PATH: the plain command a
+          // real user types (SPEC.md), declared as Claude so its hooks run.
           invocation: "claude",
+          agent_kind: "claude",
           title,
         });
         id = created.id;

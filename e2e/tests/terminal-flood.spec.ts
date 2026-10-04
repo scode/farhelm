@@ -212,7 +212,7 @@ async function createFloodGatedSession(
   title: string,
 ): Promise<string> {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: FLOOD_GATED_AGENT_INVOCATION, title },
+    data: { cwd: "/tmp", command: { command: FLOOD_GATED_AGENT_INVOCATION, yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   return (await created.json()).id;

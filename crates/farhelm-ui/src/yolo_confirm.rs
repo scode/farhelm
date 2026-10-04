@@ -49,23 +49,22 @@ pub(crate) enum YoloReason {
     ChosenPermission,
     /// A structured launch on a harness that offers only YOLO.
     OnlyMode(LaunchHarness),
-    /// A raw command line whose invocation turns the agent's approval
-    /// prompts off.
-    CommandLine,
+    /// A command launch its user (or an agent) asserted is YOLO. Farhelm
+    /// never reads the command to check the assertion.
+    Asserted,
 }
 
 impl YoloReason {
-    /// The reason for a launch described by its structured selection, or by
-    /// `None` for a raw command line.
+    /// The reason for a launch described by its agent selection, or by
+    /// `None` for a command launch, which reaches this question only when
+    /// it was asserted YOLO.
     ///
     /// Derives the wording from the harness capability table rather than
     /// naming harnesses here, so adding a single-mode harness gets the right
-    /// sentence without touching this. A raw `pi …` command line is explained as a
-    /// command line: the GUI does not re-parse argv to find out which rule
-    /// the helm applied, and the sentence it gets is still true.
+    /// sentence without touching this.
     pub(crate) fn of_launch(selection: Option<&LaunchSelection>) -> Self {
         match selection {
-            None => YoloReason::CommandLine,
+            None => YoloReason::Asserted,
             Some(selection) if selection.harness.offers_only_yolo() => {
                 YoloReason::OnlyMode(selection.harness)
             }
@@ -81,8 +80,8 @@ impl YoloReason {
                 let name = crate::launch_composer::harness_label(harness);
                 format!("Farhelm offers {name} only in YOLO mode, so every {name} session runs this way.")
             }
-            YoloReason::CommandLine => {
-                "Its command line turns off the agent's approval prompts.".to_string()
+            YoloReason::Asserted => {
+                "This command was asserted to run without approval prompts.".to_string()
             }
         }
     }
@@ -297,7 +296,7 @@ mod tests {
     /// other structured launch was YOLO by choice.
     #[test]
     fn the_reason_follows_the_kind_of_launch_that_was_sent() {
-        assert_eq!(YoloReason::of_launch(None), YoloReason::CommandLine);
+        assert_eq!(YoloReason::of_launch(None), YoloReason::Asserted);
         assert_eq!(
             YoloReason::of_launch(Some(&selection(LaunchHarness::Pi, None))),
             YoloReason::OnlyMode(LaunchHarness::Pi),

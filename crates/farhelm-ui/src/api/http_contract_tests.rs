@@ -39,14 +39,17 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     assert_eq!(row.title, "Fix the widget");
     assert_eq!(row.cwd, "~/src/widgets");
     assert_eq!(row.canonical_cwd.as_deref(), Some("/home/user/src/widgets"));
-    assert_eq!(row.invocation, "codex --model gpt-5");
     assert_eq!(
-        row.launch,
-        Some(LaunchSelection {
+        row.invocation,
+        "codex -m gpt-5 -c 'model_reasoning_effort=high' --yolo -c {codex:trusted-cwd}"
+    );
+    assert_eq!(
+        row.agent_selection(),
+        Some(&LaunchSelection {
             harness: LaunchHarness::Codex,
             model: Some("gpt-5".to_string()),
             effort: Some(LaunchEffort::High),
-            permissions: Some(LaunchPermission::SmartApprove),
+            permissions: Some(LaunchPermission::Yolo),
             workspace_trust: Some(true),
         })
     );

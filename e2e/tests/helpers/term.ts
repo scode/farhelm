@@ -1,7 +1,7 @@
 // Shared terminal-island test surface: only stable cross-spec helpers live
 // here. Divergent one-off helpers remain local to the specs that need them.
 
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { waitForSessionReady } from "./terminal-readiness";
 import { recordPage } from "./timeline";
 
@@ -127,6 +127,18 @@ export async function attachSession(page: Page, id: string): Promise<void> {
 }
 
 /**
+ * Answer a command launch's required YOLO question in the launcher (`yolo`,
+ * default no). The question has no default, so a command-mode create cannot
+ * be submitted without it.
+ */
+export async function answerYolo(form: Locator, yolo = false) {
+  await form
+    .getByRole("group", { name: "runs without approval prompts" })
+    .getByLabel(yolo ? "yes (YOLO)" : "no", { exact: true })
+    .check();
+}
+
+/**
  * Open the inline create form and fill its required fields without submitting.
  *
  * This is the list view's plain toggled `<div>`, not a modal. `title` is
@@ -134,11 +146,12 @@ export async function attachSession(page: Page, id: string): Promise<void> {
  * empty-title case. Filling and submitting stay separate because callers need
  * to inspect the form while a request is pending or after it fails. Only the
  * "other / command" path accepts an arbitrary command, so the helper selects
- * it before the command field becomes the request's source of intent.
+ * it before the command field becomes the request's source of intent, and
+ * answers the command's required YOLO question (`yolo`, default no).
  */
 export async function fillCreateForm(
   page: Page,
-  { cwd, invocation, title }: { cwd: string; invocation: string; title: string },
+  { cwd, invocation, title, yolo = false }: { cwd: string; invocation: string; title: string; yolo?: boolean },
 ) {
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
@@ -146,6 +159,8 @@ export async function fillCreateForm(
   await form.getByRole("button", { name: "other / command" }).click();
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
+  // A command launch has no default YOLO answer: the form asks every time.
+  await answerYolo(form, yolo);
   // The name field sits on the top action row now, visible without opening
   // anything — fill it by its label directly rather than by DOM position.
   await form.getByLabel("name (optional)").fill(title);

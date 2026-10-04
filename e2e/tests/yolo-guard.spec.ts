@@ -115,7 +115,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     expect(confirmed.ok(), `the confirmed launch must be admitted: ${await confirmed.text()}`).toBe(true);
     const session = await confirmed.json();
     created.push(session.id);
-    expect(session.launch).toMatchObject({ harness: "codex", permissions: "yolo" });
+    expect(session.launch.selection).toMatchObject({ harness: "codex", permissions: "yolo" });
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     const bodies = createPosts.map((body) => JSON.parse(body));
     expect(bodies.map((body) => body.confirm_yolo ?? false)).toEqual([false, false, false, true]);

@@ -207,8 +207,8 @@ pub struct ApiBase(pub String);
 ///
 /// `TabInfo` keeps its UI name `Tab`: the tab strip calls it that throughout.
 pub use farhelm_proto::{
-    DeleteGuard, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer,
-    SessionStatus, TabInfo as Tab,
+    CommandLaunch, DeleteGuard, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    RestartOffer, SessionLaunch, SessionStatus, TabInfo as Tab,
 };
 
 /// Which agent a session runs, as the helm's session JSON reports it
@@ -296,9 +296,13 @@ pub struct Session {
     /// `Unrecognized`.
     #[serde(default)]
     pub agent_kind: SessionAgentKind,
-    /// The explicit composer selection which produced this invocation.
-    /// Legacy raw rows intentionally carry no guessed replacement.
-    pub launch: Option<LaunchSelection>,
+    /// What the session runs (SPEC.md's launch kinds): an agent launch's
+    /// selection and composed commands, a command launch's command and
+    /// assertion, or a legacy session's stored fields. `None` only for a
+    /// helm reply that predates launch kinds, which this page treats like a
+    /// legacy row.
+    #[serde(default)]
+    pub launch: Option<SessionLaunch>,
     #[serde(default)]
     pub status: SessionStatus,
     /// SPEC.md's qualifier on an ended session — "stopped by user" is the
@@ -459,6 +463,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// The agent launch's selection, when this session is an agent launch:
+    /// what Clone, Replace with, Restart with and the sidebar mark read for
+    /// one. A command or legacy launch has none, and nothing guesses one
+    /// from its command.
+    pub fn agent_selection(&self) -> Option<&LaunchSelection> {
+        match &self.launch {
+            Some(SessionLaunch::Agent { selection, .. }) => Some(selection),
+            Some(SessionLaunch::Command(_)) | Some(SessionLaunch::Legacy { .. }) | None => None,
+        }
+    }
+
     /// The activity stamp to DISPLAY by: [`Session::last_activity_at`] when
     /// the helm supplied one, [`Session::created_at`] when it did not.
     ///

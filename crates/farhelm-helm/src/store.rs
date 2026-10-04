@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 36;
+const SCHEMA_VERSION: i64 = 37;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -1704,6 +1704,10 @@ pub struct HelmStore {
 ///   the `profiles` catalog and the `remembered_profile` default go with no
 ///   conversion, and cached sessions lose their `source_profile` snapshot,
 ///   which `SessionInfo` no longer carries and the decoder ignores.
+/// - 37: cached sessions gain the `launch` protocol 39 requires, converted
+///   by the rule the supervisors' own rows follow
+///   (`SessionLaunch::from_pre_launch_kinds`), and lose `resume_template`,
+///   so a down host's cached sessions keep decoding and keep being listed.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1989,7 +1993,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 36;",
+              PRAGMA user_version = 37;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2850,6 +2854,12 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 36")?;
         version = 36;
     }
+    if version == 36 {
+        migrate_cached_sessions_to_launch_kinds(&tx)?;
+        tx.execute_batch("PRAGMA user_version = 37;")
+            .context("migrating helm.db to schema version 37")?;
+        version = 37;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -2861,6 +2871,95 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         "helm.db has schema version {version}, but this build only understands version \
          {SCHEMA_VERSION}; refusing to open it rather than risk misreading it"
     )
+}
+
+/// Schema 37's rewrite of cached `SessionInfo` rows for launch kinds: each
+/// row's old launch fields (`invocation`, `agent_kind`, `resume_template`,
+/// and the structured `launch` selection) become the `launch` value its
+/// host's supervisor computes for the same session at its own upgrade,
+/// through the one shared rule, and `resume_template` goes. The cache is a
+/// copy, so the supervisor's next listing replaces each row anyway; the
+/// rewrite exists so a host that is down at the upgrade keeps its sessions
+/// in the list until it returns (P9 in the launch-kinds plan).
+///
+/// A row that is not a JSON object, or has no string `invocation`, is left
+/// untouched for the reader's existing skip-and-log policy: there is no
+/// session to describe. A row that already carries a launch is left as it
+/// is too, so the rewrite is idempotent. Unknown members are preserved.
+fn migrate_cached_sessions_to_launch_kinds(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
+    let cached = {
+        let mut stmt = tx
+            .prepare("SELECT host_id, session_id, info_json FROM session_cache")
+            .context("preparing cached sessions for schema version 37")?;
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, HostId>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .context("reading cached sessions for schema version 37")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("decoding cached session rows for schema version 37")?
+    };
+    for (host, session_id, json) in cached {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&json) else {
+            continue;
+        };
+        let Some(object) = value.as_object_mut() else {
+            continue;
+        };
+        let Some(invocation) = object
+            .get("invocation")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        // A row whose `launch` already decodes as a launch was written by a
+        // build with launch kinds (a database rewound below this version, as
+        // the ladder's own tests do); converting it again would read its
+        // tagged launch as an old selection and turn it legacy.
+        if object.get("launch").is_some_and(|launch| {
+            serde_json::from_value::<farhelm_proto::SessionLaunch>(launch.clone()).is_ok()
+        }) {
+            continue;
+        }
+        // Each old member is read leniently: a value this build cannot
+        // decode is treated as absent, exactly as the old decoder's own
+        // defaults would have read a row missing it.
+        let agent_kind = object
+            .get("agent_kind")
+            .and_then(|kind| serde_json::from_value(kind.clone()).ok())
+            .unwrap_or(farhelm_proto::AgentKind::Generic);
+        let resume_template = object
+            .remove("resume_template")
+            .and_then(|template| serde_json::from_value::<Option<Vec<String>>>(template).ok())
+            .flatten();
+        let selection = object
+            .get("launch")
+            .and_then(|selection| {
+                serde_json::from_value::<Option<farhelm_proto::LaunchSelection>>(selection.clone())
+                    .ok()
+            })
+            .flatten();
+        let launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+            &invocation,
+            agent_kind,
+            resume_template,
+            selection,
+        );
+        object.insert(
+            "launch".to_string(),
+            serde_json::to_value(&launch).context("encoding a migrated cached launch")?,
+        );
+        tx.execute(
+            "UPDATE session_cache SET info_json = ?3 WHERE host_id = ?1 AND session_id = ?2",
+            rusqlite::params![host, session_id, serde_json::to_string(&value)?],
+        )
+        .context("rewriting a cached session's launch for schema version 37")?;
+    }
+    Ok(())
 }
 
 /// Mint the reserved local row if no row of [`HostKind::Local`] exists yet.
@@ -5158,7 +5257,7 @@ impl HelmStore {
                 display_cwd: &entry.cwd,
             },
             None,
-            entry.launch.as_ref(),
+            entry.launch.agent_selection(),
         )
         .await
     }
@@ -6318,8 +6417,7 @@ mod tests {
             cwd: format!("/{id}"),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -6361,7 +6459,7 @@ mod tests {
         let repo = farhelm_proto::parse_github_repo("acme/bar").unwrap();
         let other = farhelm_proto::parse_github_repo("acme/other").unwrap();
         let mut entry = session("repo-first", 100);
-        entry.launch = Some(LaunchSelection {
+        entry.launch = crate::launches::test_agent_launch(LaunchSelection {
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -6380,7 +6478,7 @@ mod tests {
                         display_cwd: "/work/bar-1"
                     },
                     Some(&repo),
-                    entry.launch.as_ref()
+                    entry.launch.agent_selection()
                 )
                 .await
                 .unwrap()
@@ -6396,7 +6494,7 @@ mod tests {
                         display_cwd: "/changed"
                     },
                     Some(&other),
-                    entry.launch.as_ref()
+                    entry.launch.agent_selection()
                 )
                 .await
                 .unwrap(),
@@ -6415,7 +6513,7 @@ mod tests {
                         display_cwd: "/work/bar-2"
                     },
                     Some(&repo),
-                    entry.launch.as_ref()
+                    entry.launch.agent_selection()
                 )
                 .await
                 .unwrap()
@@ -6456,7 +6554,7 @@ mod tests {
                     display_cwd: "/work/bar-1",
                 },
                 None,
-                entry.launch.as_ref(),
+                entry.launch.agent_selection(),
             )
             .await
             .unwrap();
@@ -6658,7 +6756,7 @@ mod tests {
         let host = host_with_identity(&store, "history.example", "identity-a").await;
         let entry = SessionInfo {
             creation_seq: Some(7),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
@@ -6690,7 +6788,7 @@ mod tests {
                 github_repo: None,
                 canonical_cwd: None,
                 cwd: "/created".to_string(),
-                selection: entry.launch.clone().expect("selection"),
+                selection: entry.launch.agent_selection().cloned().expect("selection"),
                 created_at: 100,
                 creation_seq: Some(7),
             }]
@@ -6723,7 +6821,7 @@ mod tests {
         let host = host_with_identity(&store, "permissions.example", "identity-a").await;
         let yolo = |id: &str, seq: u64| SessionInfo {
             creation_seq: Some(seq),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -6773,7 +6871,7 @@ mod tests {
                     display_cwd: &user_origin.cwd,
                 },
                 None,
-                user_origin.launch.as_ref(),
+                user_origin.launch.agent_selection(),
             )
             .await
             .expect("record a user-originated structured create");
@@ -6848,7 +6946,7 @@ mod tests {
         {
             let entry = SessionInfo {
                 creation_seq: Some(index as u64 + 3),
-                launch: Some(LaunchSelection {
+                launch: crate::launches::test_agent_launch(LaunchSelection {
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
@@ -6867,7 +6965,7 @@ mod tests {
                         display_cwd: &entry.cwd,
                     },
                     None,
-                    entry.launch.as_ref(),
+                    entry.launch.agent_selection(),
                 )
                 .await
                 .expect("record a Goose permission mode");
@@ -6942,7 +7040,7 @@ mod tests {
         ] {
             let entry = SessionInfo {
                 creation_seq: Some(seq),
-                launch: Some(LaunchSelection {
+                launch: crate::launches::test_agent_launch(LaunchSelection {
                     harness,
                     model: None,
                     effort: None,
@@ -6961,7 +7059,11 @@ mod tests {
                         display_cwd: &entry.cwd,
                     },
                     None,
-                    if user { entry.launch.as_ref() } else { None },
+                    if user {
+                        entry.launch.agent_selection()
+                    } else {
+                        None
+                    },
                 )
                 .await
                 .expect("record admitted structured launch");
@@ -7080,21 +7182,21 @@ mod tests {
             cwd: "/link-a/project".to_string(),
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
-            launch: Some(selection.clone()),
+            launch: crate::launches::test_agent_launch(selection.clone()),
             ..session("link-a", 1)
         };
         let second = SessionInfo {
             cwd: "/link-b/project".to_string(),
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(2),
-            launch: Some(selection.clone()),
+            launch: crate::launches::test_agent_launch(selection.clone()),
             ..session("link-b", 2)
         };
         let repointed = SessionInfo {
             cwd: "/link-a/project".to_string(),
             canonical_cwd: Some("/other/project".to_string()),
             creation_seq: Some(3),
-            launch: Some(selection),
+            launch: crate::launches::test_agent_launch(selection),
             ..session("link-a-repointed", 3)
         };
         for entry in [&first, &second, &repointed] {
@@ -7408,7 +7510,7 @@ mod tests {
             cwd: "/submitted-link".to_string(),
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -7483,7 +7585,7 @@ mod tests {
             cwd: "/submitted-link".to_string(),
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -7628,7 +7730,7 @@ mod tests {
         let host = host_with_identity(&store, "history-before.example", "identity-a").await;
         let entry = SessionInfo {
             creation_seq: Some(1),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -7715,7 +7817,7 @@ mod tests {
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
             let entry = SessionInfo {
                 creation_seq: Some(sequence),
-                launch: Some(selection.clone()),
+                launch: crate::launches::test_agent_launch(selection.clone()),
                 ..session(&format!("session-{sequence:03}"), sequence as i64)
             };
             assert!(
@@ -7727,7 +7829,7 @@ mod tests {
         }
         let old = SessionInfo {
             creation_seq: Some(0),
-            launch: Some(selection),
+            launch: crate::launches::test_agent_launch(selection),
             ..session("late-old", 999)
         };
         assert!(
@@ -7774,7 +7876,7 @@ mod tests {
         let host = host_with_identity(&store, "window.example", "identity-a").await;
         let structured = SessionInfo {
             creation_seq: Some(1),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -7840,7 +7942,7 @@ mod tests {
         };
         let first = SessionInfo {
             creation_seq: Some(1),
-            launch: Some(selection.clone()),
+            launch: crate::launches::test_agent_launch(selection.clone()),
             ..session("first", 1)
         };
         store
@@ -8038,7 +8140,7 @@ mod tests {
         };
         let early = SessionInfo {
             creation_seq: Some(1),
-            launch: Some(selection),
+            launch: crate::launches::test_agent_launch(selection),
             ..session("clock-ahead", 10_000)
         };
         store
@@ -8176,7 +8278,7 @@ mod tests {
                     "identity-a",
                     &SessionInfo {
                         creation_seq: Some(sequence),
-                        launch: Some(selection.clone()),
+                        launch: crate::launches::test_agent_launch(selection.clone()),
                         ..session(&format!("before-{sequence}"), sequence as i64)
                     },
                 )
@@ -8198,7 +8300,7 @@ mod tests {
                 "identity-a",
                 &SessionInfo {
                     creation_seq: Some(101),
-                    launch: Some(selection),
+                    launch: crate::launches::test_agent_launch(selection),
                     ..session("rejected-by-trigger", 101)
                 },
             )
@@ -9457,6 +9559,120 @@ mod tests {
         }
     }
 
+    /// Schema 37 gives every cached session the launch protocol 39
+    /// requires: a row cached from structured choices becomes an agent
+    /// launch, a typed command a legacy one with its stored fields, and
+    /// `resume_template` leaves the JSON. A row with no command to describe
+    /// is left for the reader to skip.
+    ///
+    /// Why: the cache reader skips a row it cannot decode, and `launch` is a
+    /// required field now, so without the rewrite every session on a host
+    /// that is down at the upgrade would vanish from the list (P9 in the
+    /// launch-kinds plan). The conversion must match the supervisor's own
+    /// upgrade of the same rows, or the listing would change when the host
+    /// returns.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v36_gives_cached_sessions_their_launch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        let host: HostId = 1;
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            // Hand-written in the shape a schema-36 helm stored.
+            let rows = [
+                (
+                    "structured",
+                    r#"{"id":"structured","title":"s","created_at":100,"cwd":"/w","invocation":"codex -m gpt-x","agent_kind":"codex","resume_template":["codex","-m","gpt-x","resume","{conversation}"],"launch":{"harness":"codex","model":"gpt-x","effort":null,"permissions":null},"status":{"state":"running"},"restart_offer":"resume","tabs":[]}"#,
+                ),
+                (
+                    "typed",
+                    r#"{"id":"typed","title":"t","created_at":100,"cwd":"/w","invocation":"claude --model opus","agent_kind":"claude","resume_template":["claude","--model","opus","--resume","{conversation}"],"launch":null,"status":{"state":"running"},"restart_offer":"resume","tabs":[]}"#,
+                ),
+                (
+                    "nameless",
+                    r#"{"id":"nameless","title":"n","created_at":100,"cwd":"/w","status":{"state":"running"}}"#,
+                ),
+            ];
+            for (id, row) in rows {
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (?1, ?2, 100, ?3)",
+                    rusqlite::params![host, id, row],
+                )
+                .expect("plant a cached session");
+            }
+            conn.execute_batch("PRAGMA user_version = 36;")
+                .expect("mark the file schema 36");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let mut cached = store.cached_sessions(host).await.expect("stale list");
+        cached.sort_by(|a, b| a.id.cmp(&b.id));
+        let ids: Vec<&str> = cached.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["structured", "typed"], "the nameless row is skipped");
+        let farhelm_proto::SessionLaunch::Agent {
+            selection,
+            start,
+            resume,
+        } = &cached[0].launch
+        else {
+            panic!(
+                "the structured row is an agent launch: {:?}",
+                cached[0].launch
+            );
+        };
+        assert_eq!(selection.model.as_deref(), Some("gpt-x"));
+        assert_eq!(start, &["codex", "-m", "gpt-x", "{farhelm_args}"]);
+        assert_eq!(
+            resume.as_deref(),
+            Some(
+                &[
+                    "codex",
+                    "-m",
+                    "gpt-x",
+                    "resume",
+                    "{conversation}",
+                    "{farhelm_args}"
+                ]
+                .map(String::from)[..]
+            )
+        );
+        assert_eq!(
+            cached[1].launch,
+            farhelm_proto::SessionLaunch::Legacy {
+                invocation: "claude --model opus".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: Some(
+                    ["claude", "--model", "opus", "--resume", "{conversation}"]
+                        .map(String::from)
+                        .to_vec()
+                ),
+            }
+        );
+        drop(store);
+
+        let conn = Connection::open(&db_path).expect("reopen raw");
+        let leftover: i64 = conn
+            .query_row(
+                // A legacy launch keeps its own `resume_template` inside
+                // `launch`; only the retired top-level key must be gone.
+                "SELECT COUNT(*) FROM session_cache
+                 WHERE json_type(info_json, '$.resume_template') IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query the cache");
+        assert_eq!(
+            leftover, 0,
+            "no cached row keeps a top-level resume_template"
+        );
+    }
+
     /// A migrated database and a freshly created one must end up with
     /// identical schemas after SQL formatting normalization — the invariant
     /// that lets [`apply_schema`]'s version-0 branch create the final shape directly instead of
@@ -9636,7 +9852,7 @@ mod tests {
 
         let admitted = SessionInfo {
             creation_seq: Some(2),
-            launch: Some(LaunchSelection {
+            launch: crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,

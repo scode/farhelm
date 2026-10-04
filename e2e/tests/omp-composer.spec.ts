@@ -1,4 +1,5 @@
 import { expect, test } from "./helpers/evidence";
+import { agentLaunchRow } from "./helpers/fleet";
 
 /**
  * OMP can use its configured model while keeping its own effort and permission
@@ -117,7 +118,7 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
             title: "omp approve row",
             cwd: "/srv/omp",
             invocation: "omp --provider openrouter --model x-ai/grok-4.6 --approval-mode always-ask",
-            launch: { harness: "omp", model: "x-ai/grok-4.6", effort: null, permissions: "approve" },
+            launch: agentLaunchRow({ harness: "omp", model: "x-ai/grok-4.6", effort: null, permissions: "approve" }),
             host: 999_993,
             host_name: "remote-omp-host",
             status: { state: "running" },
@@ -128,7 +129,7 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
             title: "omp default row",
             cwd: "/srv/omp",
             invocation: "omp --provider openrouter --model z-ai/glm-5.3",
-            launch: { harness: "omp", model: "z-ai/glm-5.3", effort: null, permissions: null },
+            launch: agentLaunchRow({ harness: "omp", model: "z-ai/glm-5.3", effort: null, permissions: null }),
             host: 999_993,
             host_name: "remote-omp-host",
             status: { state: "running" },

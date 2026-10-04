@@ -16,8 +16,8 @@ use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
-    ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, Session,
-    SessionStatus,
+    ApiBase, CommandLaunch, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    Session, SessionStatus,
 };
 
 use super::SharedPreferences;
@@ -80,10 +80,33 @@ pub(crate) struct CreatedSession {
 /// mode can no longer change what the key is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LaunchIntent {
-    /// The invocation as typed into the form.
-    Command(String),
+    /// A command launch as the form's command fields hold it.
+    Command(CommandLaunch),
     /// Declarative structured intent compiled only by the helm.
     Structured(LaunchSelection),
+}
+
+/// The command launch the form's command fields describe, or `None` while
+/// the YOLO assertion is still unanswered: SPEC.md makes it a required
+/// choice with no default, so there is nothing to launch until the user
+/// makes it. The resume command counts only while Resume is opted into
+/// AND an agent type is declared: the Resume controls are shown only with
+/// a declared type, so a resume command left behind by clearing the type
+/// would be a hidden field the helm refuses and the user cannot see to
+/// clear.
+fn command_intent(
+    command: String,
+    yolo: Option<bool>,
+    agent: Option<LaunchHarness>,
+    resume_on: bool,
+    resume: &str,
+) -> Option<CommandLaunch> {
+    Some(CommandLaunch {
+        command,
+        yolo: yolo?,
+        agent,
+        resume: (resume_on && agent.is_some()).then(|| resume.to_string()),
+    })
 }
 
 /// The active creation surface. Typed commands and structured
@@ -925,11 +948,16 @@ pub(super) struct CreatePrefill {
     pub(super) title: String,
     /// The row's raw launch command: the seed for custom-command mode.
     pub(super) invocation: String,
-    /// Declarative provenance for a structured source session.
+    /// The source's agent launch choices, for an agent launch.
     ///
-    /// This remains absent for legacy rows. Clone must preserve that absence
-    /// rather than reverse-engineering a harness from an arbitrary command.
+    /// Absent for a command or legacy launch. Clone must preserve that
+    /// absence rather than reverse-engineering a harness from a command.
     pub(super) launch: Option<LaunchSelection>,
+    /// The source's command launch, whole, for a command launch: its
+    /// assertion, agent type and resume command seed the command fields.
+    /// Absent for a legacy session, whose command alone (in `invocation`)
+    /// is filled in (SPEC.md, the launch-kinds upgrade).
+    pub(super) command: Option<CommandLaunch>,
     /// `Some(source id)` for a "replace with" prefill, `None` for a plain
     /// clone — the one field that distinguishes the two, everything else
     /// about how a prefill seeds the form being identical between them
@@ -979,9 +1007,24 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         cwd: session.cwd.clone(),
         title: session.title.clone(),
         invocation: session.invocation.clone(),
-        launch: session.launch.clone(),
+        launch: session.agent_selection().cloned(),
+        command: match &session.launch {
+            Some(crate::SessionLaunch::Command(command)) => Some(command.clone()),
+            Some(crate::SessionLaunch::Agent { .. })
+            | Some(crate::SessionLaunch::Legacy { .. })
+            | None => None,
+        },
         replace_source: None,
         replace_source_opened: None,
+    }
+}
+
+/// An agent type's value in the command form's agent-type select: its
+/// protocol spelling, so the option values are stable whatever the labels.
+fn harness_value(harness: LaunchHarness) -> String {
+    match serde_json::to_value(harness) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => String::new(),
     }
 }
 
@@ -1512,6 +1555,13 @@ pub(super) fn CreateSessionForm(
     let mut observed_checkout_revision = use_signal(|| 0_i64);
     let mut live_preview_authority = use_signal(|| None::<PreviewAuthority>);
     let mut invocation = use_signal(String::new);
+    // The command launch's other fields (SPEC.md, Creation): the YOLO
+    // assertion, unanswered until the user picks; the declared agent type;
+    // and Resume with its own command.
+    let mut command_yolo = use_signal(|| None::<bool>);
+    let mut command_agent = use_signal(|| None::<LaunchHarness>);
+    let mut command_resume_on = use_signal(|| false);
+    let mut command_resume = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut creation_surface = use_signal(|| CreationSurface::Structured);
     let mut structured_harness = use_signal(|| None::<LaunchHarness>);
@@ -1886,6 +1936,26 @@ pub(super) fn CreateSessionForm(
                     &mut invocation_edited,
                     &prefill.invocation,
                 );
+                // A command launch's clone carries its assertion, agent
+                // type and resume command (SPEC.md, Clone). Anything else —
+                // an agent launch, or a legacy session whose command is all
+                // the launcher gets — leaves them for the user, the YOLO
+                // assertion unanswered.
+                match &prefill.command {
+                    Some(command) => {
+                        command_yolo.set(Some(command.yolo));
+                        command_agent.set(command.agent);
+                        command_resume_on.set(command.resume.is_some());
+                        command_resume.set(command.resume.clone().unwrap_or_default());
+                        creation_surface.set(CreationSurface::Legacy);
+                    }
+                    None => {
+                        command_yolo.set(None);
+                        command_agent.set(None);
+                        command_resume_on.set(false);
+                        command_resume.set(String::new());
+                    }
+                }
                 if let Some(launch) = &prefill.launch {
                     // A structured snapshot is the source's explicit
                     // request, whereas its invocation is only the compiler's
@@ -2023,6 +2093,12 @@ pub(super) fn CreateSessionForm(
                 invocation_edited(),
                 invocation_raw_seed.peek().as_deref()
             ),
+        ) + &format!(
+            ":{:?}:{:?}:{}:{}",
+            command_yolo(),
+            command_agent(),
+            command_resume_on(),
+            command_resume()
         )
     };
     // Configuration epochs are global and monotonic. Retain the highest
@@ -2248,11 +2324,18 @@ pub(super) fn CreateSessionForm(
             })
         })
     } else {
-        Some(LaunchIntent::Command(submitted_field(
-            &invocation(),
-            invocation_edited(),
-            invocation_raw_seed.peek().as_deref(),
-        )))
+        command_intent(
+            submitted_field(
+                &invocation(),
+                invocation_edited(),
+                invocation_raw_seed.peek().as_deref(),
+            ),
+            command_yolo(),
+            command_agent(),
+            command_resume_on(),
+            &command_resume(),
+        )
+        .map(LaunchIntent::Command)
     };
     let retry_binding = current_launch.and_then(|launch| {
         let draft = IntentBinding::of(
@@ -2955,11 +3038,26 @@ pub(super) fn CreateSessionForm(
                     // The RAW bytes while untouched, not the escaped display
                     // the field shows — see [`submitted_field`]
                     // (item2-review2.md F5).
-                    LaunchIntent::Command(submitted_field(
-                        &invocation.peek(),
-                        *invocation_edited.peek(),
-                        invocation_raw_seed.peek().as_deref(),
-                    ))
+                    let Some(command) = command_intent(
+                        submitted_field(
+                            &invocation.peek(),
+                            *invocation_edited.peek(),
+                            invocation_raw_seed.peek().as_deref(),
+                        ),
+                        *command_yolo.peek(),
+                        *command_agent.peek(),
+                        *command_resume_on.peek(),
+                        &command_resume.peek(),
+                    ) else {
+                        error.set(Some(
+                            "say whether this command runs without approval prompts (YOLO) before \
+                             launching"
+                                .to_string(),
+                        ));
+                        ops.release();
+                        return;
+                    };
+                    LaunchIntent::Command(command)
                 };
                 // The HOST is derived here too, from the live signal — never
                 // from what the last render computed. The same one-turn window
@@ -3087,6 +3185,7 @@ pub(super) fn CreateSessionForm(
                     structured_model.peek().clone(), *structured_effort.peek(),
                     *structured_permissions.peek(),
                     submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
+                    (*command_yolo.peek(), *command_agent.peek(), *command_resume_on.peek(), command_resume.peek().clone()),
                     submitted_title(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo().is_some()),
                     *chosen_host.peek(),
                 );
@@ -3324,7 +3423,7 @@ pub(super) fn CreateSessionForm(
                         }
                     }
                     let agent = match &bound.agent {
-                        LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
+                        LaunchIntent::Command(command) => CreateAgent::Command(command),
                         LaunchIntent::Structured(selection) => CreateAgent::Structured(selection),
                     };
                     // The one branch point between the two verbs this form
@@ -4685,6 +4784,105 @@ pub(super) fn CreateSessionForm(
                     },
                 }
             }
+            // The YOLO assertion: a required choice with no default
+            // (SPEC.md, Creation). Farhelm believes it and never reads the
+            // command to check it.
+            fieldset { class: "launch-command-yolo",
+                legend { "runs without approval prompts" }
+                label {
+                    input {
+                        r#type: "radio",
+                        name: "launch-command-yolo",
+                        checked: command_yolo() == Some(true),
+                        disabled: busy,
+                        onchange: move |_| {
+                            if !draft_transition_allowed(ops) { return; }
+                            command_yolo.set(Some(true));
+                            intent_key.set(None);
+                        },
+                    }
+                    "yes (YOLO)"
+                }
+                label {
+                    input {
+                        r#type: "radio",
+                        name: "launch-command-yolo",
+                        checked: command_yolo() == Some(false),
+                        disabled: busy,
+                        onchange: move |_| {
+                            if !draft_transition_allowed(ops) { return; }
+                            command_yolo.set(Some(false));
+                            intent_key.set(None);
+                        },
+                    }
+                    "no"
+                }
+            }
+            label {
+                "agent type"
+                select {
+                    class: "launch-command-agent",
+                    disabled: busy,
+                    onchange: move |evt| {
+                        if !draft_transition_allowed(ops) { return; }
+                        command_agent.set(
+                            LaunchHarness::ALL
+                                .iter()
+                                .copied()
+                                .find(|harness| harness_value(*harness) == evt.value()),
+                        );
+                        intent_key.set(None);
+                    },
+                    option { value: "", selected: command_agent().is_none(), "none" }
+                    for harness in LaunchHarness::ALL.iter().copied() {
+                        option {
+                            value: harness_value(harness),
+                            selected: command_agent() == Some(harness),
+                            {crate::launch_composer::harness_label(harness)}
+                        }
+                    }
+                }
+            }
+            if command_agent().is_some() {
+                p { class: "launch-command-hint",
+                    "Put {{farhelm_args}} in the command where Farhelm adds its own arguments."
+                }
+                label {
+                    input {
+                        r#type: "checkbox",
+                        class: "launch-command-resume-toggle",
+                        checked: command_resume_on(),
+                        disabled: busy,
+                        onchange: move |evt| {
+                            if !draft_transition_allowed(ops) { return; }
+                            command_resume_on.set(evt.checked());
+                            intent_key.set(None);
+                        },
+                    }
+                    "resume"
+                }
+                if command_resume_on() {
+                    label {
+                        "resume command"
+                        input {
+                            r#type: "text",
+                            class: "launch-command-resume",
+                            autocomplete: "off",
+                            autocorrect: "off",
+                            autocapitalize: "none",
+                            spellcheck: "false",
+                            dir: "ltr",
+                            value: "{command_resume}",
+                            disabled: busy,
+                            oninput: move |evt| {
+                                if !draft_transition_allowed(ops) { return; }
+                                command_resume.set(evt.value());
+                                intent_key.set(None);
+                            },
+                        }
+                    }
+                }
+            }
                         }
                     }
                 }
@@ -4823,6 +5021,68 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// A command launch with only its command, asserted not YOLO: the
+    /// command-mode intent these tests vary.
+    fn test_command(command: &str) -> super::CommandLaunch {
+        super::CommandLaunch {
+            command: command.to_string(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        }
+    }
+
+    /// Spec: the command form describes no launch until the YOLO question
+    /// is answered; once answered it carries the command, the answer, the
+    /// declared agent type and, only while Resume is ticked AND a type is
+    /// declared, the resume command.
+    ///
+    /// Why: SPEC.md makes the YOLO assertion a required choice with no
+    /// default, so an unanswered form must not launch as "not YOLO". The
+    /// Resume controls are shown only with a declared type, so a resume
+    /// command left behind after the type is cleared must not be sent: the
+    /// helm refuses it, naming a field the user can no longer see.
+    #[test]
+    fn the_command_form_needs_a_yolo_answer_and_drops_a_hidden_resume_command() {
+        use farhelm_proto::LaunchHarness;
+        assert_eq!(
+            super::command_intent("c".into(), None, None, false, ""),
+            None
+        );
+        assert_eq!(
+            super::command_intent(
+                "c {farhelm_args}".into(),
+                Some(true),
+                Some(LaunchHarness::Claude),
+                true,
+                "c --resume {conversation} {farhelm_args}",
+            ),
+            Some(super::CommandLaunch {
+                command: "c {farhelm_args}".to_string(),
+                yolo: true,
+                agent: Some(LaunchHarness::Claude),
+                resume: Some("c --resume {conversation} {farhelm_args}".to_string()),
+            })
+        );
+        assert_eq!(
+            super::command_intent(
+                "c".into(),
+                Some(false),
+                Some(LaunchHarness::Claude),
+                false,
+                "c --resume {conversation} {farhelm_args}",
+            )
+            .and_then(|launch| launch.resume),
+            None,
+            "an unticked Resume sends no resume command"
+        );
+        assert_eq!(
+            super::command_intent("c".into(), Some(false), None, true, "left over"),
+            Some(test_command("c")),
+            "clearing the agent type drops the resume command it hid"
+        );
+    }
+
     /// The helm's remembered permissions word seeds the composer's segment
     /// only when it is a mode this build knows: `"yolo"` preselects yolo,
     /// nothing remembered preselects default, and a word a newer helm might
@@ -4877,7 +5137,7 @@ mod tests {
             Some(1),
             &[option(1, "target", true)],
             "/old/bar-1".into(),
-            LaunchIntent::Command("agent-a".into()),
+            LaunchIntent::Command(test_command("agent-a")),
             "work".into(),
             Some("source-a".into()),
         )
@@ -4910,7 +5170,7 @@ mod tests {
             "install-a"
         ));
         let mut changed = current.clone();
-        changed.agent = LaunchIntent::Command("agent".into());
+        changed.agent = LaunchIntent::Command(test_command("agent"));
         assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
         let mut changed = current.clone();
         changed.title = "different".into();
@@ -4939,7 +5199,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_intent_binding_changes_with_the_host_incarnation_and_with_the_fields() {
         let hosts = vec![option(1, "this machine", true)];
-        let command = || LaunchIntent::Command("agent".to_string());
+        let command = || LaunchIntent::Command(test_command("agent"));
         let base = IntentBinding::of(
             Some(1),
             &hosts,
@@ -4977,7 +5237,7 @@ mod tests {
                 ..base.clone()
             },
             IntentBinding {
-                agent: LaunchIntent::Command("other-agent".to_string()),
+                agent: LaunchIntent::Command(test_command("other-agent")),
                 ..base.clone()
             },
             IntentBinding {
@@ -5198,7 +5458,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn no_selected_host_yields_no_binding() {
         let hosts = vec![option(1, "this machine", true)];
-        let nothing = || LaunchIntent::Command(String::new());
+        let nothing = || LaunchIntent::Command(test_command(""));
         assert!(
             IntentBinding::of(None, &hosts, String::new(), nothing(), String::new(), None)
                 .is_none()
@@ -5289,12 +5549,16 @@ mod tests {
     fn prefill_from_carries_the_raw_invocation_even_for_a_structured_clone() {
         let session = Session {
             invocation: "claude --resume abc".to_string(),
-            launch: Some(LaunchSelection {
-                harness: LaunchHarness::Claude,
-                model: None,
-                effort: None,
-                permissions: None,
-                workspace_trust: None,
+            launch: Some(crate::SessionLaunch::Agent {
+                start: Vec::new(),
+                resume: None,
+                selection: LaunchSelection {
+                    harness: LaunchHarness::Claude,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    workspace_trust: None,
+                },
             }),
             ..row_specimen("s1")
         };
@@ -5315,11 +5579,55 @@ mod tests {
         };
         let session = Session {
             invocation: "muse --model muse-spark-1.3-contributor --yolo".to_string(),
-            launch: Some(launch.clone()),
+            launch: Some(crate::SessionLaunch::Agent {
+                selection: launch.clone(),
+                start: Vec::new(),
+                resume: None,
+            }),
             ..row_specimen("structured")
         };
 
         assert_eq!(prefill_from(&session, 1).launch, Some(launch));
+        assert_eq!(prefill_from(&session, 1).command, None);
+    }
+
+    /// A command launch's clone carries its whole command launch (command,
+    /// YOLO assertion, declared agent type, resume command), and a legacy
+    /// session's carries its command text alone.
+    ///
+    /// Why: SPEC.md has Clone carry a command launch's fields verbatim, and
+    /// open a legacy session's launcher with the stored command filled in
+    /// and nothing else; a legacy assertion would be a guess.
+    #[farhelm_testtrace::test]
+    fn prefill_from_carries_a_command_launch_whole_and_a_legacy_command_alone() {
+        let command = crate::CommandLaunch {
+            command: "claude --x {farhelm_args}".to_string(),
+            yolo: true,
+            agent: Some(LaunchHarness::Claude),
+            resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
+        };
+        let session = Session {
+            invocation: command.command.clone(),
+            launch: Some(crate::SessionLaunch::Command(command.clone())),
+            ..row_specimen("command")
+        };
+        let prefill = prefill_from(&session, 1);
+        assert_eq!(prefill.command, Some(command));
+        assert_eq!(prefill.launch, None);
+
+        let legacy = Session {
+            invocation: "claude --model opus".to_string(),
+            launch: Some(crate::SessionLaunch::Legacy {
+                invocation: "claude --model opus".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: None,
+            }),
+            ..row_specimen("legacy")
+        };
+        let prefill = prefill_from(&legacy, 1);
+        assert_eq!(prefill.invocation, "claude --model opus");
+        assert_eq!(prefill.command, None);
+        assert_eq!(prefill.launch, None);
     }
 
     /// Everything else on a prefill travels off the row unmodified — no

@@ -66,8 +66,8 @@ use crate::tmux::{
 };
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionStatus,
-    TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionLaunch,
+    SessionStatus, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -832,7 +832,7 @@ pub struct SupervisorSeams {
     /// Which agent kinds get the per-launch conversation hook appended to
     /// their argv — the `FARHELM_AGENT_HOOKS` opt-out (plan D5). See
     /// [`crate::agent_kind::AgentHooks`], and
-    /// [`Supervisor::with_hook_argv`] for the one place it is consulted.
+    /// [`Supervisor::with_farhelm_args`] for the one place it is consulted.
     ///
     /// A production knob for the same reason `tmux_program` above is one,
     /// and it obeys the same rule this struct's `Default` states: nothing
@@ -856,7 +856,7 @@ pub struct SupervisorSeams {
     /// Obeys the same environment-hygiene rule as `agent_hooks` above: the
     /// single `std::env::var` read happens in `farhelm supervisor run`'s
     /// CLI arm and the PARSED value arrives here. It is consulted only
-    /// where `agent_hooks` is, in [`Supervisor::with_hook_argv`], and only
+    /// where `agent_hooks` is, in [`Supervisor::with_farhelm_args`], and only
     /// for a launch that is being hooked at all — a skipped launch has no
     /// hook to announce with, which is why "the user turned hooks off"
     /// also means "no pointer" without this value having to say so.
@@ -1531,191 +1531,60 @@ fn classify_unallocated_checkout_conflict(
 ///
 /// ## What is in it, and what is deliberately not
 ///
-/// Every SESSION-shaping field: `cwd`, the resolved launch bundle, `title` (as SENT —
-/// `None` means "auto-generate", which is a different request from an
-/// explicit title that happens to equal the derived one), and — as of
-/// PLAN_M7.md item 2 — `parent`. The bundle includes the invocation,
-/// `agent_kind`, and resume template.
-/// `cols`/`rows` are excluded by
-/// design: they shape the ATTACHMENT, not the session, so the same intent
-/// retried from a differently-sized client is still the same intent — a
-/// point the plan makes explicitly, and the reason this function takes no
-/// dimensions at all rather than taking and ignoring them.
+/// Every SESSION-shaping field: `parent`, `cwd`, `title` (as SENT — `None`
+/// means "auto-generate", which is a different request from an explicit
+/// title that happens to equal the derived one), and the resolved launch
+/// whole, so a retry that would launch anything different (another
+/// command, another YOLO assertion, another resume command, or an agent
+/// launch composed from other choices) is a different request, refused as
+/// key reuse. `cols`/`rows` are excluded by design: they shape the
+/// ATTACHMENT, not the session, so the same intent retried from a
+/// differently-sized client is still the same intent.
 ///
-/// ## The RAW encoding is frozen, byte for byte
+/// ## Earlier encodings are retired
 ///
-/// Existing interactive reservations are PERMANENT tombstones (see
-/// `store::DedupScope`), and every replay compares the stored string
-/// verbatim. So their fingerprints are not caches that age out: an
-/// encoding change re-reads every key a supervisor has ever seen as
-/// belonging to a DIFFERENT request, and the identical retry that should
-/// have replayed is refused as a key reuse (`Conflict`) instead. Forever,
-/// for that key, with no way for the client to recover except minting a new
-/// one — which is exactly the confusion an idempotency key exists to
-/// prevent.
-///
-/// That is why version 10 does NOT append its mode to the existing tuple.
-/// The raw mode's five elements are the encoding pre-M6.75 supervisors
-/// wrote, unchanged and unreordered, so a raw retry across the upgrade
-/// still matches its own tombstone and replays. `invocation` is `Option`
-/// now, but `Some("x")` and `"x"` serialize to the same JSON, so the bytes
-/// are identical rather than merely equivalent.
-///
-/// Version 11's parented creates received a discriminated tuple rather than
-/// extending the frozen raw encoding. Version 15 followed the same rule for
-/// a resolved profile bundle (`"resolved_profile"`); that encoder went with
-/// profiles in protocol 38. A reservation stored under it can no longer be
-/// matched by any request this build fingerprints, so a retry crossing the
-/// upgrade with its old key is refused as key reuse rather than duplicated
-/// (SPEC_impl.md, "Launch-kinds reservations").
+/// Every create since protocol 39 fingerprints as `"session_launch_v1"`.
+/// The raw, parented and structured tuples earlier builds wrote are no
+/// longer produced, so a reservation stored under one matches no request
+/// this build fingerprints: a retry crossing the upgrade with its old key
+/// is refused as key reuse, never duplicated, and the reservation rows
+/// themselves are kept for exactly that reason (SPEC_impl.md,
+/// "Launch-kinds reservations").
 ///
 /// ## Representation
 ///
 /// The canonical FIELDS, JSON-encoded as a fixed-order tuple — not a
-/// digest. A JSON array is unambiguous (no field can bleed into its
-/// neighbour the way a delimiter-joined string can, since every element is
-/// separately quoted and escaped), deterministic (element order is this
-/// function's, and no map is involved to have an ordering question),
-/// comparable with `==`, and readable by a human debugging a database.
+/// digest: unambiguous (every element separately quoted), deterministic
+/// (the launch's own JSON is a tagged enum of fixed-order fields, with no
+/// map to have an ordering question), comparable with `==`, and readable by
+/// a human debugging a database. A digest would end the command (which
+/// may embed credentials) being retained past its session's deletion in a
+/// tombstone; that is about retention rather than exposure, since the same
+/// text sits in the session row in the same 0600 database, and it is
+/// separate work from bounding the row COUNT (see `store::Reservation`).
 ///
-/// The `agent_kind` element is spelled with the STORE's stable column
-/// vocabulary (`store::agent_kind_column`) rather than the wire type's
-/// serde representation: the two agree today, but a future protocol rename
-/// would otherwise change every stored fingerprint at once and turn
-/// identical requests into key-reuse conflicts across an upgrade. Sharing
-/// the store's spelling rather than defining a second one is deliberate —
-/// item 7 writes the same kind into the session row, and two vocabularies
-/// that drifted apart would produce exactly that upgrade-time conflict
-/// from the inside. The persisted encoding is pinned by a golden test for
-/// the same reason `LastOutcome`'s column vocabulary is.
-///
-/// What a DIGEST would have bought, and why it is not here: a constant-size
-/// row, and an end to the `invocation` — which may embed credentials —
-/// being retained past its session's deletion in a tombstone. Only the
-/// second is a real property, and it is about RETENTION rather than
-/// exposure: the same string already sits in `sessions.invocation`, in the
-/// same 0600 database inside the same 0700 state directory, so what changes
-/// is how long a copy outlives its session, not who can read it. That is a
-/// separate piece of work from bounding the row COUNT (see
-/// `store::Reservation`), and neither is owned here.
+/// A FRESH GitHub-checkout create gets its own versioned encoding
+/// ([`FreshCreateFingerprint`]), binding the helm's authoritative
+/// resolution beside the launch, because reconciliation decodes it.
 pub(crate) fn create_fingerprint(
     checkout: Option<&farhelm_proto::ResolvedGithubCheckout>,
     parent: Option<&str>,
     cwd: &str,
-    mode: &CreateMode,
+    launch: &SessionLaunch,
     title: Option<&str>,
 ) -> String {
-    // A FRESH GitHub-checkout create gets its own versioned encoding
-    // (R1.4), binding the raw request AND the helm's authoritative
-    // resolution — repo, root, hook snapshot, and the preview binding the
-    // user launched with. Deliberately a SEPARATE discriminant from every
-    // existing tuple: those are FROZEN byte-for-byte (schema-18-preserved
-    // rows must keep replaying against them), and no fresh-destination
-    // fingerprint ever existed before this feature, so there is nothing
-    // historical to stay compatible with. Root/hook/basename changes all
-    // change the fingerprint, which is the point: a same-key retry under a
-    // DIFFERENT resolution is a different request, refused as key reuse.
     if let Some(checkout) = checkout {
-        // Retain a typed launch snapshot, not a nested legacy fingerprint:
-        // reconciliation must recover the accepted mode without compiling
-        // today's structured selection again.
         return serde_json::to_string(&FreshCreateFingerprint::GithubCheckout {
             parent: parent.map(str::to_owned),
             requested_cwd: cwd.to_owned(),
-            mode: mode.clone(),
+            launch: launch.clone(),
             title: title.map(str::to_owned),
             checkout: Box::new(checkout.clone()),
         })
         .expect("a fingerprint of strings and options always serializes");
     }
-    // Infallible in practice: every element is a string, an option, or an
-    // array of strings, none of which can fail to serialize. The `expect`
-    // documents that rather than inviting a caller to handle an error that
-    // cannot occur.
-    //
-    // Raw creates keep their historical encoding.
-    match (parent, mode) {
-        // FROZEN — see this function's own docs. Five elements, in this
-        // order, exactly as every pre-M6.75 supervisor wrote them.
-        (
-            None,
-            CreateMode::Raw {
-                invocation,
-                agent_kind,
-                resume_template,
-                ..
-            },
-        ) => serde_json::to_string(&(
-            cwd,
-            Some(invocation.as_str()),
-            title,
-            agent_kind.map(crate::store::agent_kind_column),
-            resume_template.as_deref(),
-        )),
-        // A parent cannot be appended to either frozen encoding: doing so
-        // would change every pre-v11 fingerprint. New discriminants give
-        // parented creates their own collision-proof shapes instead.
-        (
-            Some(parent),
-            CreateMode::Raw {
-                invocation,
-                agent_kind,
-                resume_template,
-                ..
-            },
-        ) => serde_json::to_string(&(
-            "parented_raw",
-            parent,
-            cwd,
-            invocation,
-            title,
-            agent_kind.map(crate::store::agent_kind_column),
-            resume_template.as_deref(),
-        )),
-        // Structured input is already a resolved bundle. Its discriminant
-        // keeps the frozen raw encodings byte-for-byte stable while
-        // binding both the user selection and the exact command it became.
-        (
-            parent,
-            CreateMode::Structured {
-                invocation,
-                agent_kind,
-                resume_template: None,
-                selection,
-            },
-        ) => serde_json::to_string(&(
-            "structured_launch_v1",
-            parent,
-            cwd,
-            invocation,
-            title,
-            crate::store::agent_kind_column(*agent_kind),
-            selection,
-        )),
-        // An explicitly inherited structured spawn preserves the parent's stored
-        // resume bundle. It is a distinct fingerprint because the same
-        // explicit selection with a different durable resume argv is a
-        // different create intent.
-        (
-            parent,
-            CreateMode::Structured {
-                invocation,
-                agent_kind,
-                resume_template: Some(resume_template),
-                selection,
-            },
-        ) => serde_json::to_string(&(
-            "structured_launch_v2",
-            parent,
-            cwd,
-            invocation,
-            title,
-            crate::store::agent_kind_column(*agent_kind),
-            resume_template,
-            selection,
-        )),
-    }
-    .expect("a fingerprint of strings and options always serializes")
+    serde_json::to_string(&("session_launch_v1", parent, cwd, title, launch))
+        .expect("a fingerprint of strings and options always serializes")
 }
 
 /// Serializes creates that share an intent key, so concurrent retries of
@@ -2134,21 +2003,14 @@ struct LaunchRequest {
     /// a path with no symlinks left in it cannot be repointed out from
     /// under the launch.
     launch_cwd: String,
-    /// The command line this session will run and record, whoever supplied
-    /// it: the caller's own, or the one an inherited bundle carried. OWNED
-    /// rather than borrowed from `CreateInputs` for exactly that reason — an
-    /// inherited invocation belongs to a parent row read during validation,
-    /// which outlives nothing.
-    invocation: String,
+    /// The start command to spawn, still holding its placeholders.
     argv: Vec<String>,
     title: String,
     cols: u16,
     rows: u16,
-    /// The resolved integration snapshot (PLAN_M3.md item 7). Part of the
-    /// VALIDATED bundle rather than something the launch derives, because
-    /// resolving it is itself one of the checks — an integrated kind with
-    /// a placeholder-free resume template is refused right here, before
-    /// any side effect exists.
+    /// The launch's integration kind and resume command
+    /// ([`IntegrationSnapshot::of`]), carried beside it because the spawn
+    /// and the entry both need them.
     snapshot: IntegrationSnapshot,
     /// `cwd` with symlinks, `.`/`..`, and a trailing slash resolved away
     /// — the identity used to refuse a later symlink repoint.
@@ -2163,9 +2025,9 @@ struct LaunchRequest {
     /// `launch_reserved` records the accepted directory
     /// (`SessionStore::accept_working_directory`).
     canonical_cwd: Option<String>,
-    /// The user-selected structured launch, if this was compiled by the
-    /// helm. It is carried as data, never inferred from `invocation`.
-    launch: Option<farhelm_proto::LaunchSelection>,
+    /// What the session runs, recorded with it. Owned because an
+    /// inherited launch belongs to a parent row read during validation.
+    launch: SessionLaunch,
 }
 
 /// The launch inputs retained after a create's wire shape is fingerprinted.
@@ -2186,47 +2048,12 @@ pub(crate) struct CreateInputs<'a> {
     /// helm's RESOLVED value, never raw repo text (the helm refuses
     /// unparsable repo text before this ever reaches the supervisor).
     pub(crate) github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
-    /// Which launch selector this request chose, already resolved to one.
-    pub(crate) mode: CreateMode,
+    /// What the new session runs, already resolved: the request's own
+    /// launch, or the authenticated parent's for an inherited spawn.
+    pub(crate) launch: SessionLaunch,
     pub(crate) title: Option<String>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-}
-
-/// The resolved launch bundle a `CreateSession` carries after its wire
-/// shape has been validated.
-///
-/// An explicitly inherited spawn is resolved from the authenticated parent
-/// session before fingerprinting, so every launch is an invocation plus its
-/// optional integration, or a structured launch.
-///
-/// Lives here rather than in `handlers` because the create path is what
-/// consumes it: [`create_fingerprint`] encodes it, and
-/// [`Supervisor::validate_create`] validates it.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) enum CreateMode {
-    /// A complete raw launch bundle.
-    Raw {
-        invocation: String,
-        /// `None` means "derive the kind from the invocation's basename",
-        /// which is a guess a raw caller may want.
-        agent_kind: Option<AgentKind>,
-        resume_template: Option<Vec<String>>,
-        launch: Option<farhelm_proto::LaunchSelection>,
-    },
-    /// A helm-compiled structured launch. The selection is retained beside
-    /// the resolved invocation so future lifecycle operations never have to
-    /// reverse-engineer user intent from shell syntax.
-    Structured {
-        invocation: String,
-        agent_kind: AgentKind,
-        /// The source's durable resume bundle when a structured launch is
-        /// inherited. A freshly helm-compiled selection leaves this absent,
-        /// allowing the established integration derivation; copying a parent
-        /// must instead preserve the bundle that parent actually stored.
-        resume_template: Option<Vec<String>>,
-        selection: farhelm_proto::LaunchSelection,
-    },
 }
 
 /// Durable launch inputs for fresh-checkout reconciliation, independent of
@@ -2244,11 +2071,14 @@ enum FreshCreateFingerprint {
     /// a permanent Failed/CheckoutConflict reservation, never launch recovery.
     #[serde(rename = "github_checkout_refused_v1")]
     RefusedGithubCheckout { client_identity: String },
-    #[serde(rename = "github_checkout_v3")]
+    /// Since protocol 39: the resolved launch replaces v3's create mode. A
+    /// v3 reservation no longer decodes, and its retry is refused rather
+    /// than treated as a new key (SPEC_impl.md, "Launch-kinds reservations").
+    #[serde(rename = "github_checkout_v4")]
     GithubCheckout {
         parent: Option<String>,
         requested_cwd: String,
-        mode: CreateMode,
+        launch: SessionLaunch,
         title: Option<String>,
         checkout: Box<farhelm_proto::ResolvedGithubCheckout>,
     },
@@ -2427,7 +2257,9 @@ pub struct SessionSnapshot {
     /// The resume template with `{conversation}` filled in, or `None` when
     /// there is no template or nothing captured to fill it with. A
     /// `RestartOffer::Resume` session always has one; that is what the
-    /// offer means.
+    /// offer means. For an agent or command launch it still holds
+    /// `{farhelm_args}`, which only the spawn expands: Farhelm's arguments
+    /// depend on that launch's hook policy and paths, not on the row.
     pub resume_argv: Option<Vec<String>>,
     /// The ownership provenance read beside `captured_conversation` from
     /// the same row. Restart conditions its claim on both (see
@@ -2615,8 +2447,110 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
     Arc::new(std::sync::atomic::AtomicBool::new(raised))
 }
 
-/// The decision half of [`Supervisor::with_hook_argv`], with every input
-/// it needs passed in rather than read off a `Supervisor` (plan §2.3).
+/// How one spawn adds Farhelm's own launch arguments: by expanding the
+/// launch's `{farhelm_args}` for the command `phase` runs, or, for a legacy
+/// session only, by the injection the previous release used (SPEC.md:
+/// "Farhelm's arguments are still added where the previous release added
+/// them, but only for a legacy session").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FarhelmArgsMode {
+    Expand(crate::agent_kind::LaunchPhase),
+    Legacy,
+}
+
+impl FarhelmArgsMode {
+    /// The mode for spawning `launch`'s command for `phase`.
+    pub(crate) fn of(launch: &SessionLaunch, phase: crate::agent_kind::LaunchPhase) -> Self {
+        match launch {
+            SessionLaunch::Agent { .. } | SessionLaunch::Command(_) => {
+                FarhelmArgsMode::Expand(phase)
+            }
+            SessionLaunch::Legacy { .. } => FarhelmArgsMode::Legacy,
+        }
+    }
+}
+
+/// The decision half of [`Supervisor::with_farhelm_args`]: the argv to
+/// spawn, the environment the agent gets on top of the shim's own, and
+/// whether the launch is HOOKED.
+///
+/// For a new launch, `{farhelm_args}` (exactly once, as validation
+/// guarantees) is replaced by the kind's arguments from
+/// [`crate::agent_kind::AgentIntegration::farhelm_args`], or by nothing for
+/// a kind with no integration; nothing else in the argv is read. A legacy
+/// session goes through [`with_hook_argv_using`], unchanged from before
+/// launch kinds, and gets no separate environment because that path writes
+/// its reporter settings as an `env` prefix. Pure apart from tracing, like
+/// [`with_hook_argv_using`], whose docs explain the log policy this shares.
+#[allow(clippy::too_many_arguments)]
+fn with_farhelm_args_using(
+    argv: Vec<String>,
+    mode: FarhelmArgsMode,
+    snapshot: &IntegrationSnapshot,
+    hooks: &crate::agent_kind::AgentHooks,
+    instructions: crate::agent_kind::AgentInstructions,
+    exe: Option<&str>,
+    vendor_extension: Option<&str>,
+    session: &str,
+) -> (Vec<String>, Vec<(String, String)>, bool) {
+    let FarhelmArgsMode::Expand(phase) = mode else {
+        let (argv, hooked) = with_hook_argv_using(
+            argv,
+            snapshot,
+            hooks,
+            instructions,
+            exe,
+            vendor_extension,
+            session,
+        );
+        return (argv, Vec::new(), hooked);
+    };
+    let expansion = match snapshot.integration() {
+        Some(integration) => integration.farhelm_args(
+            phase,
+            &crate::agent_kind::HookPolicy {
+                hooks,
+                instructions,
+                exe,
+                vendor_extension,
+            },
+        ),
+        None => crate::agent_kind::FarhelmArgs::none(),
+    };
+    match expansion.log {
+        crate::agent_kind::HookLog::Silent => {}
+        crate::agent_kind::HookLog::Skipped(reason) => info!(
+            session = %session,
+            kind = ?snapshot.kind,
+            reason,
+            "conversation hook flags not injected"
+        ),
+        crate::agent_kind::HookLog::Injected => info!(
+            session = %session,
+            kind = ?snapshot.kind,
+            announce = instructions.announces(),
+            "conversation hook flags injected"
+        ),
+    }
+    let mut expanded = Vec::with_capacity(argv.len() + expansion.args.len());
+    let mut args = Some(expansion.args);
+    for element in argv {
+        if element == crate::agent_kind::FARHELM_ARGS_PLACEHOLDER {
+            expanded.extend(args.take().into_iter().flatten());
+        } else {
+            expanded.push(element);
+        }
+    }
+    (expanded, expansion.env, expansion.hooked)
+}
+
+/// The LEGACY injection: how a session created before launch kinds gets
+/// Farhelm's arguments, unchanged from the previous release. Only
+/// [`FarhelmArgsMode::Legacy`] reaches it, through
+/// [`with_farhelm_args_using`]; every new launch expands `{farhelm_args}`
+/// instead and nothing here reads its command. It is the decision half of
+/// the (now test-only) [`Supervisor::with_hook_argv`], with every input it
+/// needs passed in rather than read off a `Supervisor` (plan §2.3).
 ///
 /// Split out for testability, and the split is worth its keep: the
 /// interesting behaviour here is a list of kind-specific REFUSALS, and
@@ -3028,38 +2962,77 @@ fn canonical_cwd_text(cwd: &str, resolved: std::path::PathBuf) -> anyhow::Result
 const RELAUNCH_COLS: u16 = 80;
 const RELAUNCH_ROWS: u16 = 24;
 
-/// Parse a restart-with bundle's invocation and hold the bundle to create's
-/// input checks, before the session is looked up or anything is stopped.
+/// Hold Restart with's replacement launch to create's input checks, before
+/// the session is looked up or anything is stopped (SPEC.md: "The edited
+/// launch is validated exactly as a create validates it before anything is
+/// stopped").
 ///
-/// SPEC_impl.md ("Restart-with backend wire and persistence") says
-/// restart-with uses create's checks: an executable argv, no `{cwd}` as the
-/// program, at most create's number of template elements, and a supplied
-/// template whose shape `ensure_resume_template` accepts. The new bundle is
-/// stored on success, and loading refuses a row that fails any of these, so
-/// one bad bundle accepted here would leave the supervisor unable to load its
-/// sessions after its next restart. All of them are the caller's to fix,
-/// hence `InvalidRequest`. These need nothing from the session; the check on
-/// the template a kind DERIVES from the invocation runs after resolution.
-fn restart_with_bundle_argv(
-    invocation: &str,
-    resume_template: Option<&[String]>,
-) -> Result<Vec<String>, RequestError> {
+/// The new launch is stored on success and loading refuses a row that fails
+/// these, so one bad launch accepted here would leave the supervisor unable
+/// to load its sessions after its next restart. All of them are the
+/// caller's to fix, hence `InvalidRequest`. Whether the launch fits THIS
+/// session (same launch kind and agent type, a resume command) needs the
+/// session and is checked once it has been read.
+fn validate_restart_with(launch: &SessionLaunch) -> Result<(), RequestError> {
     let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
-    let argv = shell_words::split(invocation)
-        .map_err(|error| invalid(format!("restart-with invocation does not parse: {error}")))?;
-    crate::agent_kind::ensure_executable_argv("restart-with invocation", &argv).map_err(invalid)?;
-    crate::agent_kind::ensure_no_cwd_program("restart-with invocation", &argv).map_err(invalid)?;
-    if let Some(template) = resume_template {
-        if template.len() > crate::store::RESUME_TEMPLATE_ELEMENT_CAP {
+    // Create's byte bound, applied to the one field Restart with changes:
+    // the launch is stored on success and echoed in every listing, which
+    // is the reply growth `CREATE_FIELD_CAP` exists to keep bounded.
+    let bytes = launch.field_bytes();
+    let cap = super::handlers::CREATE_FIELD_CAP;
+    if bytes > cap {
+        return Err(invalid(format!(
+            "the launch is {bytes} bytes, exceeding the {cap}-byte limit"
+        )));
+    }
+    launch.validate_new().map_err(invalid)?;
+    let argv = launch.start_argv().map_err(invalid)?;
+    crate::agent_kind::ensure_executable_argv("command", &argv).map_err(invalid)?;
+    if let Some(resume) = launch.resume_argv().map_err(invalid)? {
+        if resume.len() > crate::store::RESUME_TEMPLATE_ELEMENT_CAP {
             return Err(invalid(format!(
-                "resume template has {} elements, exceeding the {}-element limit",
-                template.len(),
+                "resume command has {} elements, exceeding the {}-element limit",
+                resume.len(),
                 crate::store::RESUME_TEMPLATE_ELEMENT_CAP
             )));
         }
-        crate::agent_kind::ensure_resume_template(template).map_err(invalid)?;
+        crate::agent_kind::ensure_resume_template(&resume).map_err(invalid)?;
     }
-    Ok(argv)
+    Ok(())
+}
+
+/// Why `replacement` cannot be this session's Restart with, or `None` when
+/// it can: SPEC.md keeps the launch kind and agent type fixed, refuses a
+/// legacy session with a remedy, and Restart with resumes, so the new launch
+/// needs a resume command.
+fn restart_with_refusal(stored: &SessionLaunch, replacement: &SessionLaunch) -> Option<String> {
+    if let SessionLaunch::Legacy { .. } = stored {
+        return Some(
+            "this session was created before launch kinds, so Restart with cannot change its \
+             launch; use Replace with to start it over with a new launch"
+                .to_string(),
+        );
+    }
+    if stored.launch_kind() != replacement.launch_kind() {
+        return Some(format!(
+            "Restart with keeps the launch kind; this session is a {} launch, not a {} launch",
+            stored.launch_kind().word(),
+            replacement.launch_kind().word()
+        ));
+    }
+    if stored.agent_type() != replacement.agent_type() {
+        return Some(
+            "Restart with keeps the agent type; use Replace with to change it".to_string(),
+        );
+    }
+    if !replacement.has_resume() {
+        return Some(
+            "Restart with resumes the session's conversation, so the launch needs a resume \
+             command"
+                .to_string(),
+        );
+    }
+    None
 }
 
 /// The command a restart runs: the session's resume command filled with its
@@ -3129,7 +3102,7 @@ struct Spawned {
     spec_path: PathBuf,
     status_path: PathBuf,
     /// Whether this launch's argv carried the conversation hook — see
-    /// [`Supervisor::with_hook_argv`], which decided it.
+    /// [`Supervisor::with_farhelm_args`], which decided it.
     ///
     /// Returned rather than left on the supervisor because the cell that
     /// records it, [`RunCells::hooked`], belongs to the entry
@@ -3415,7 +3388,7 @@ struct Relaunched {
     /// the relaunch intended — see the call sites.
     outcome: LastOutcome,
     /// Whether THIS relaunch's argv carried the conversation hook, as
-    /// [`Supervisor::with_hook_argv`] decided and [`Spawned::hooked`]
+    /// [`Supervisor::with_farhelm_args`] decided and [`Spawned::hooked`]
     /// reported back.
     ///
     /// It travels with the publication rather than being applied to
@@ -3439,11 +3412,7 @@ struct Relaunched {
 /// The integration snapshot is resolved before destructive work. Carrying it
 /// here avoids another fallible resolution after the new process is running.
 struct RestartWithBundle {
-    invocation: String,
-    launch: farhelm_proto::LaunchSelection,
-    /// The validated, concrete template the store can reload for this kind.
-    /// Claude's compiled override is absent, but its resolved default is not.
-    resume_template: Option<Vec<String>>,
+    launch: SessionLaunch,
     snapshot: IntegrationSnapshot,
 }
 
@@ -3694,7 +3663,7 @@ pub(crate) struct RunCells {
     /// same state the published entry is read from.
     pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
     /// Whether THIS launch's argv carried the conversation-reporting hook
-    /// ([`Supervisor::with_hook_argv`], which is what decides it).
+    /// ([`Supervisor::with_farhelm_args`], which is what decides it).
     ///
     /// Diagnostics only: nothing about capture, restart, or the wire reply
     /// consults it, and nothing persists it. It describes what this
@@ -5882,10 +5851,7 @@ impl Supervisor {
             // and never re-guessed (`crate::agent_kind`), which is exactly
             // what makes a session's kind survive a supervisor upgrade
             // whose derivation heuristic has changed.
-            let snapshot = IntegrationSnapshot {
-                kind: row.agent_kind,
-                resume_template: row.resume_template,
-            };
+            let snapshot = IntegrationSnapshot::of(&row.launch);
             // Stored identities survive upgrades regardless of their source.
             // Historical scan claims are not re-identified or re-verified.
             let capture = match row.captured_conversation {
@@ -5921,8 +5887,7 @@ impl Supervisor {
                         // Reload must carry it forward, not resolve the
                         // display spelling again after a symlink may move.
                         canonical_cwd: row.canonical_cwd.clone(),
-                        invocation: row.invocation,
-                        resume_template: snapshot.resume_template.clone(),
+                        invocation: row.launch.display_command(),
                         agent_kind: snapshot.kind,
                         launch: row.launch,
                         // Placeholder only: `ListSessions` recomputes
@@ -6123,10 +6088,7 @@ impl Supervisor {
                 "the reported conversation changed while its restart offer was being verified; refresh the session",
             ).into());
         }
-        let snapshot = IntegrationSnapshot {
-            kind: row.agent_kind,
-            resume_template: row.resume_template,
-        };
+        let snapshot = IntegrationSnapshot::of(&row.launch);
         let captured = row.captured_conversation;
         let restart_offer =
             snapshot.restart_offer(captured.as_deref(), row.capture_ownership_version);
@@ -6160,7 +6122,7 @@ impl Supervisor {
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        if !crate::agent_kind::refreshes_reported_capture(row.agent_kind) {
+        if !crate::agent_kind::refreshes_reported_capture(row.agent_kind()) {
             return Ok(true);
         }
         // The claim is taken HERE rather than by the caller: `session_snapshot`
@@ -6182,7 +6144,7 @@ impl Supervisor {
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        match row.agent_kind {
+        match row.agent_kind() {
             AgentKind::Codex => self.refresh_codex_capture_claimed(row).await,
             AgentKind::Grok => self.refresh_grok_capture_claimed(row).await,
             AgentKind::Claude
@@ -6827,7 +6789,7 @@ impl Supervisor {
         let FreshCreateFingerprint::GithubCheckout {
             parent,
             requested_cwd,
-            mode,
+            launch,
             title,
             checkout,
         } = fingerprint
@@ -6846,7 +6808,7 @@ impl Supervisor {
                 cwd: &requested_cwd,
                 parent,
                 github_checkout: Some(*checkout),
-                mode,
+                launch,
                 title,
                 cols,
                 rows,
@@ -6979,12 +6941,7 @@ impl Supervisor {
                 cwd,
                 parent: None,
                 github_checkout: None,
-                mode: CreateMode::Raw {
-                    invocation: invocation.to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
+                launch: SessionLaunch::plain_command(invocation.to_string()),
                 title,
                 cols,
                 rows,
@@ -7032,31 +6989,12 @@ impl Supervisor {
         let CreateInputs {
             cwd,
             parent,
-            mode,
+            launch,
             title,
             cols,
             rows,
             github_checkout,
         } = inputs;
-        let (invocation, agent_kind, resume_template, launch) = match mode {
-            CreateMode::Raw {
-                invocation,
-                agent_kind,
-                resume_template,
-                launch,
-            } => (invocation, agent_kind, resume_template, launch),
-            CreateMode::Structured {
-                invocation,
-                agent_kind,
-                resume_template,
-                selection,
-            } => (
-                invocation,
-                Some(agent_kind),
-                resume_template,
-                Some(selection),
-            ),
-        };
         // The destination is resolved FIRST because it decides which
         // directory every later check speaks about — and because a fresh
         // checkout's directory does not exist yet, so the working-directory
@@ -7097,33 +7035,31 @@ impl Supervisor {
             }
         };
         let cwd_path = PathBuf::from(&cwd);
-        // The invocation itself stays out of the error: it may carry
-        // credentials (`--api-key ...`), and this message travels into
-        // the HTTP error body and the helm's stderr/journal. shell-words'
-        // own error names the syntax problem. Attached as `.context(...)`
-        // (not the root cause) specifically so that diagnostic keeps
-        // reaching the user through the `{e:#}` chain — `RequestError` is
-        // still findable via `downcast_ref` at this depth (see its docs).
-        let argv = shell_words::split(&invocation).context(RequestError::new(
-            ErrorKind::InvalidRequest,
-            "parsing agent invocation",
-        ))?;
-        // The SHARED executable-argv rule, not a local emptiness test. An
-        // `argv.is_empty()` check on its own accepts `''`, which
-        // `shell_words` splits into a one-element argv holding the empty
-        // string — a command line that exists and names nothing — and it
-        // says nothing about a NUL byte, which truncates an argument
-        // silently rather than failing.
-        crate::agent_kind::ensure_executable_argv("agent invocation", &argv)
+        // The launch's own shape rules (SPEC.md's command-launch rules, and
+        // the placeholder counts of an agent launch) were checked where the
+        // request was decoded; they are checked again here because this is
+        // the refusal recorded against the intent key, and because an
+        // inherited launch was read from a row rather than a request. The
+        // command itself stays out of the error: it may carry credentials
+        // (`--api-key ...`), and this message travels into the HTTP error
+        // body and the helm's stderr/journal.
+        launch
+            .validate_new()
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        // A `{cwd}` placeholder as the PROGRAM is refused here — the rule is
-        // about the shape of the argv, not about which door it came through.
-        crate::agent_kind::ensure_no_cwd_program("agent invocation", &argv)
+        let argv = launch
+            .start_argv()
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        // The resume-template OVERRIDE is caller data, and it becomes this
-        // session's immutable snapshot — so it is held to the same rule here rather
-        // than at the restart that would otherwise discover it.
-        if let Some(template) = resume_template.as_deref() {
+        // The SHARED executable-argv rule, beyond the shape check above: it
+        // also refuses a NUL byte, which would truncate an argument
+        // silently rather than fail.
+        crate::agent_kind::ensure_executable_argv("command", &argv)
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        // The resume command becomes what every Restart runs, so it is held
+        // to the restart rule here rather than at the restart that would
+        // otherwise discover it; `decode_session_row` refuses at load what
+        // this lets through, and a load fails as a whole on one bad row.
+        let snapshot = IntegrationSnapshot::of(&launch);
+        if let Some(template) = snapshot.resume_template.as_deref() {
             crate::agent_kind::ensure_resume_template(template)
                 .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
@@ -7198,23 +7134,6 @@ impl Supervisor {
                 .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
                 .collect(),
         };
-        // Derived from the ORIGINAL parsed argv — before launch-only hook
-        // arguments are appended — so permission/configuration arguments
-        // survive a derived resume. `crate::agent_kind` owns the kind and
-        // suffix rules, including the one failure this whole function can
-        // produce that is not about the filesystem.
-        let snapshot = IntegrationSnapshot::resolve(&argv, agent_kind, resume_template)
-            .map_err(|e| RequestError::new(ErrorKind::InvalidRequest, e.to_string()))?;
-        // The DERIVED template is held to the same rule as an override. The
-        // override check above cannot see it: a kind derives its template from
-        // the invocation, so an invocation whose program is `{conversation}`
-        // yields a template `decode_session_row` refuses at load. Loading
-        // fails as a whole on one bad row, so accepting it here would leave the
-        // supervisor unable to start after its next restart.
-        if let Some(template) = snapshot.resume_template.as_deref() {
-            crate::agent_kind::ensure_resume_template(template)
-                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        }
         // The canonical spelling is the
         // directory's IDENTITY: every restart and keyed retry re-resolves
         // `cwd` and refuses unless it equals the stored value exactly
@@ -7252,7 +7171,6 @@ impl Supervisor {
             // caller's own spelling is what tmux gets. See
             // [`LaunchRequest::launch_cwd`].
             launch_cwd: launch_cwd.clone(),
-            invocation,
             argv,
             title,
             cols,
@@ -7703,10 +7621,12 @@ impl Supervisor {
             };
             self.refuse_pending_archive(&row.cwd, row.canonical_cwd.as_deref())
                 .await?;
-            let argv = shell_words::split(&row.invocation).context(RequestError::new(
-                ErrorKind::InvalidRequest,
-                "parsing the interrupted attempt's recorded agent invocation",
-            ))?;
+            let argv = row.launch.start_argv().map_err(|message| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("the interrupted attempt's recorded launch: {message}"),
+                )
+            })?;
             // Same shared rule the raw path applies, for the reason this
             // function's docs give about the database being a trust boundary:
             // `''` and an embedded NUL both survive a round trip through
@@ -7727,7 +7647,8 @@ impl Supervisor {
                 &argv,
             )
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-            if let Some(template) = row.resume_template.as_deref() {
+            let snapshot = IntegrationSnapshot::of(&row.launch);
+            if let Some(template) = snapshot.resume_template.as_deref() {
                 crate::agent_kind::ensure_resume_template(template)
                     .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             }
@@ -7741,15 +7662,11 @@ impl Supervisor {
                 // that check and the tmux call. `None` only for a row with no
                 // recorded identity, where there was nothing to verify.
                 launch_cwd: verified.unwrap_or_else(|| row.cwd.clone()),
-                invocation: row.invocation,
                 argv,
                 title: row.title,
                 cols: inputs.cols,
                 rows: inputs.rows,
-                snapshot: IntegrationSnapshot {
-                    kind: row.agent_kind,
-                    resume_template: row.resume_template,
-                },
+                snapshot,
                 // `None` only for a row whose directory was never accepted —
                 // a pre-mkdir crash of a fresh checkout — or written before
                 // the column existed. The stored value is carried verbatim:
@@ -8155,10 +8072,7 @@ impl Supervisor {
                     )
                     .into());
                 }
-                let snapshot = IntegrationSnapshot {
-                    kind: row.agent_kind,
-                    resume_template: row.resume_template,
-                };
+                let snapshot = IntegrationSnapshot::of(&row.launch);
                 let info = SessionInfo {
                     parent: row.parent,
                     restart_offer: snapshot.restart_offer(
@@ -8177,8 +8091,7 @@ impl Supervisor {
                     creation_seq: Some(row.creation_seq),
                     cwd: row.cwd,
                     canonical_cwd: row.canonical_cwd,
-                    invocation: row.invocation,
-                    resume_template: snapshot.resume_template.clone(),
+                    invocation: row.launch.display_command(),
                     agent_kind: snapshot.kind,
                     launch: row.launch,
                     status: SessionStatus::Unknown,
@@ -8435,7 +8348,6 @@ impl Supervisor {
             parent,
             cwd,
             launch_cwd,
-            invocation,
             argv,
             title,
             cols,
@@ -8616,13 +8528,10 @@ impl Supervisor {
                 last_work_started_at: created_at.saturating_mul(1_000),
                 creation_seq: 0,
                 cwd: cwd.to_string(),
-                invocation: invocation.clone(),
                 launch: launch.clone(),
                 tmux_name: tmux_name.clone(),
                 pane: String::new(),
                 outcome: LastOutcome::Launching,
-                agent_kind: snapshot.kind,
-                resume_template: snapshot.resume_template.clone(),
                 canonical_cwd: canonical_cwd.clone(),
                 captured_conversation: None,
                 // Fallback for the invariant-breaking no-row case. A row
@@ -8754,15 +8663,12 @@ impl Supervisor {
                 last_work_started_at: created_at.saturating_mul(1_000),
                 creation_seq: 0,
                 cwd: cwd.to_string(),
-                invocation: invocation.clone(),
                 launch: launch.clone(),
                 tmux_name: tmux_name.clone(),
                 // Not known until tmux has created the session —
                 // see `StoredSession::pane`.
                 pane: String::new(),
                 outcome: LastOutcome::Launching,
-                agent_kind: snapshot.kind,
-                resume_template: snapshot.resume_template.clone(),
                 // For a FRESH checkout this is deliberately None:
                 // no directory has been accepted yet (see
                 // `LaunchRequest::canonical_cwd`). The accepted
@@ -9066,6 +8972,7 @@ impl Supervisor {
             self.simulate_crash(CreateStage::AfterPreparationPublication)?;
         }
         let launch_scope = launch_scope_unit(&id, generation, scoped);
+        let args_mode = FarhelmArgsMode::of(&launch, crate::agent_kind::LaunchPhase::Start);
         let info = SessionInfo {
             parent,
             id: id.clone(),
@@ -9092,8 +8999,7 @@ impl Supervisor {
             // with the row, so helm history never needs to resolve the
             // path itself.
             canonical_cwd: canonical_cwd.clone(),
-            invocation: invocation.clone(),
-            resume_template: snapshot.resume_template.clone(),
+            invocation: launch.display_command(),
             agent_kind: snapshot.kind,
             launch,
             // Create-time placeholder, deliberately NOT a live status:
@@ -9177,6 +9083,7 @@ impl Supervisor {
                 // the session is durably recorded as. Re-deriving it here
                 // would be a second classifier for one decision.
                 &snapshot,
+                args_mode,
                 // The VERIFIED directory, not the caller's spelling: see
                 // [`LaunchRequest::launch_cwd`]. They differ only on the
                 // retry path, and only there because that path had an
@@ -9808,42 +9715,19 @@ impl Supervisor {
     /// [`relaunch_argv`]). The captured conversation identity is RETAINED
     /// across the relaunch; [`SessionStore::begin_relaunch`] says why.
     ///
-    /// An optional compiled invocation and selection make this Restart
-    /// with. Validation uses the current durable offer and builds the
-    /// replacement snapshot before this operation stops the old process.
+    /// A replacement launch makes this Restart with. It is validated as a
+    /// create would validate it, and checked against the session's stored
+    /// launch and current durable offer, before this operation stops the
+    /// old process.
     pub(crate) async fn restart_session(
         self: &Arc<Self>,
         session_id: &str,
         stop_if_running: bool,
-        override_invocation: Option<String>,
-        override_launch: Option<farhelm_proto::LaunchSelection>,
-        override_resume_template: Option<Vec<String>>,
+        restart_with: Option<SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
-        let restart_with = match (
-            override_invocation,
-            override_launch,
-            override_resume_template,
-        ) {
-            (Some(invocation), Some(launch), resume_template) => {
-                Some((invocation, launch, resume_template))
-            }
-            (None, None, None) => None,
-            _ => {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    "restart-with requires invocation and launch together",
-                )
-                .into());
-            }
-        };
-        // The bundle's argv rides with it from here, parsed and checked
-        // before the session is looked up (`restart_with_bundle_argv`).
-        let restart_with = restart_with
-            .map(|(invocation, launch, resume_template)| {
-                restart_with_bundle_argv(&invocation, resume_template.as_deref())
-                    .map(|argv| (invocation, launch, resume_template, argv))
-            })
-            .transpose()?;
+        if let Some(launch) = &restart_with {
+            validate_restart_with(launch)?;
+        }
         // R1.1: directory admission is taken BEFORE the lifecycle claim —
         // every create takes intent → directory → lifecycle, so a restart
         // that claimed lifecycle first could cycle against a restricted
@@ -9957,20 +9841,9 @@ impl Supervisor {
         {
             return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
         }
-        let (argv, restart_with) = if let Some((invocation, launch, resume_template, new_argv)) =
-            restart_with
-        {
-            if !entry
-                .info
-                .launch
-                .as_ref()
-                .is_some_and(|stored| stored.harness == launch.harness)
-            {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "restart-with requires a structured session with the stored harness",
-                )
-                .into());
+        let (argv, restart_with) = if let Some(launch) = restart_with {
+            if let Some(refusal) = restart_with_refusal(&entry.info.launch, &launch) {
+                return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
             }
             // The same reason a plain restart's refusal gives
             // (`relaunch_argv`), so Restart with's dialog can show it.
@@ -9981,32 +9854,18 @@ impl Supervisor {
                 )
                 .into());
             }
-            let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
-            let integration = IntegrationSnapshot::resolve(
-                &new_argv,
-                Some(snapshot.kind),
-                resume_template.clone(),
-            )
-            .map_err(|error| invalid(error.to_string()))?;
-            // The RESOLVED template, which a kind may have derived from the
-            // invocation rather than taken from the request; see the same
-            // check in create.
-            if let Some(template) = integration.resume_template.as_deref() {
-                crate::agent_kind::ensure_resume_template(template).map_err(invalid)?;
-            }
+            let integration = IntegrationSnapshot::of(&launch);
             let conversation = snapshot
                 .captured_conversation
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("restart-with requires a captured conversation"))?;
             let argv = integration
                 .filled_resume_argv(conversation)
-                .ok_or_else(|| anyhow::anyhow!("restart-with resume template cannot be filled"))?;
+                .ok_or_else(|| anyhow::anyhow!("restart-with resume command cannot be filled"))?;
             (
                 argv,
                 Some(RestartWithBundle {
-                    invocation,
                     launch,
-                    resume_template: integration.resume_template.clone(),
                     snapshot: integration,
                 }),
             )
@@ -10384,13 +10243,7 @@ impl Supervisor {
         if published && let Some(bundle) = restart_with {
             if let Err(error) = self
                 .store
-                .update_restart_with_bundle(
-                    &id,
-                    claim.generation,
-                    &bundle.invocation,
-                    &bundle.launch,
-                    bundle.resume_template.as_deref(),
-                )
+                .update_launch(&id, claim.generation, &bundle.launch)
                 .await
             {
                 // The new agent is already running. A bundle-write error
@@ -10411,14 +10264,14 @@ impl Supervisor {
                     "restart-with must update the generation it spawned"
                 );
                 let mut live_info = current.info.clone();
-                live_info.invocation = bundle.invocation;
-                live_info.launch = Some(bundle.launch);
-                live_info.resume_template = bundle.resume_template;
+                live_info.invocation = bundle.launch.display_command();
+                live_info.agent_kind = bundle.launch.agent_kind();
+                live_info.launch = bundle.launch;
                 *current = same_launch_entry(current, live_info.clone(), bundle.snapshot);
                 if let Ok(info) = &mut relaunched {
                     info.invocation = live_info.invocation;
+                    info.agent_kind = live_info.agent_kind;
                     info.launch = live_info.launch;
-                    info.resume_template = live_info.resume_template;
                 }
                 drop(sessions);
                 // The launch settings changed after `publish_relaunched`'s
@@ -10702,6 +10555,10 @@ impl Supervisor {
                 // resume is `claude --resume <id>`, not the original
                 // invocation at all).
                 &entry.snapshot,
+                // A relaunch always runs the resume command. Restart with
+                // keeps the launch kind, so the stored launch answers
+                // whether this session is legacy.
+                FarhelmArgsMode::of(&entry.info.launch, crate::agent_kind::LaunchPhase::Resume),
                 // The path `restart_session` VERIFIED against this
                 // session's recorded identity, not `entry.info.cwd` — see
                 // `ensure_cwd_identity` for the check-then-repoint window
@@ -11284,7 +11141,6 @@ impl Supervisor {
             cwd: entry.info.cwd.clone(),
             canonical_cwd: entry.info.canonical_cwd.clone(),
             invocation: entry.info.invocation.clone(),
-            resume_template: entry.snapshot.resume_template.clone(),
             agent_kind: entry.snapshot.kind,
             launch: entry.info.launch.clone(),
             // Deliberately not a fabricated live status: the pane exists, but
@@ -12922,6 +12778,7 @@ impl Supervisor {
     /// itself. Re-running the user-input checks over it would be checking
     /// this crate's own output for user mistakes, and the only outcomes
     /// available would be a false refusal or a no-op.
+    #[cfg(test)]
     fn with_hook_argv(
         &self,
         argv: Vec<String>,
@@ -12931,6 +12788,28 @@ impl Supervisor {
     ) -> (Vec<String>, bool) {
         with_hook_argv_using(
             argv,
+            snapshot,
+            &self.seams.agent_hooks,
+            self.seams.agent_instructions,
+            Some(self.session_farhelm_exe_str.as_str()),
+            vendor_extension,
+            session,
+        )
+    }
+
+    /// [`with_farhelm_args_using`] with this supervisor's resolved hook
+    /// policy: the one place a spawn's argv gets Farhelm's own arguments.
+    fn with_farhelm_args(
+        &self,
+        argv: Vec<String>,
+        mode: FarhelmArgsMode,
+        snapshot: &IntegrationSnapshot,
+        vendor_extension: Option<&str>,
+        session: &str,
+    ) -> (Vec<String>, Vec<(String, String)>, bool) {
+        with_farhelm_args_using(
+            argv,
+            mode,
             snapshot,
             &self.seams.agent_hooks,
             self.seams.agent_instructions,
@@ -12994,6 +12873,7 @@ impl Supervisor {
         tmux_name: &str,
         argv: Vec<String>,
         snapshot: &IntegrationSnapshot,
+        args_mode: FarhelmArgsMode,
         cwd: &str,
         cols: u16,
         rows: u16,
@@ -13043,7 +12923,8 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, hooked) = self.with_hook_argv(argv, snapshot, vendor_extension.as_deref(), id);
+        let (argv, env, hooked) =
+            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -13067,6 +12948,7 @@ impl Supervisor {
             // hook, and only then execs the agent — all inside this
             // session's terminal. `None` is an ordinary launch.
             preparation,
+            env,
         };
         // Serialized before the write so the (practically impossible)
         // encoding failure shares the write's rollback path rather than
@@ -13464,10 +13346,7 @@ impl Supervisor {
         row: &StoredSession,
         preserve_current_entry: bool,
     ) {
-        let snapshot = IntegrationSnapshot {
-            kind: row.agent_kind,
-            resume_template: row.resume_template.clone(),
-        };
+        let snapshot = IntegrationSnapshot::of(&row.launch);
         let info = SessionInfo {
             parent: row.parent.clone(),
             id: row.id.clone(),
@@ -13478,8 +13357,7 @@ impl Supervisor {
             creation_seq: Some(row.creation_seq),
             cwd: row.cwd.clone(),
             canonical_cwd: row.canonical_cwd.clone(),
-            invocation: row.invocation.clone(),
-            resume_template: row.resume_template.clone(),
+            invocation: row.launch.display_command(),
             agent_kind: snapshot.kind,
             launch: row.launch.clone(),
             status: SessionStatus::Unknown,
@@ -13876,7 +13754,7 @@ impl Supervisor {
         let (kind, generation) = match &entry {
             Some(entry) => (entry.snapshot.kind, entry.generation),
             None => match self.store.session(id).await {
-                Ok(Some(row)) => (row.agent_kind, row.generation),
+                Ok(Some(row)) => (row.agent_kind(), row.generation),
                 Ok(None) => {
                     return Err(RequestError::new(
                         ErrorKind::NotFound,
@@ -14045,7 +13923,7 @@ impl Supervisor {
                     .ok_or_else(|| {
                         RequestError::new(ErrorKind::NotFound, "the session no longer exists")
                     })?;
-                if row.generation != generation || row.agent_kind != kind {
+                if row.generation != generation || row.agent_kind() != kind {
                     return Err(RequestError::new(
                         ErrorKind::Conflict,
                         "this session has moved on to another launch",
@@ -14074,7 +13952,7 @@ impl Supervisor {
             .ok_or_else(|| {
                 RequestError::new(ErrorKind::NotFound, "the session no longer exists")
             })?;
-        if row.generation != generation || row.agent_kind != kind {
+        if row.generation != generation || row.agent_kind() != kind {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "this session has moved on to another launch",
@@ -14551,7 +14429,7 @@ pub(crate) mod tests {
     use super::super::status::session_status;
     use super::super::uploads::UploadRoute;
     use super::*;
-    use farhelm_proto::{ControlMsg, Frame};
+    use farhelm_proto::{ControlMsg, Frame, LaunchHarness};
     use tokio::sync::mpsc;
 
     /// An empty upload routing map, for the many tests that drive
@@ -14823,6 +14701,7 @@ pub(crate) mod tests {
                 None,
                 None,
             ),
+            RestartOffer::NoResumeCommand => (AgentKind::Claude, None, None, None),
         };
         SessionSnapshot {
             kind,
@@ -14854,6 +14733,7 @@ pub(crate) mod tests {
             RestartOffer::Resume,
             RestartOffer::NotCaptured,
             RestartOffer::NoConversationReporting,
+            RestartOffer::NoResumeCommand,
         ] {
             let result = relaunch_argv(&snapshot_offering(offer));
             match offer.unavailable_reason() {
@@ -15087,6 +14967,49 @@ pub(crate) mod tests {
         );
     }
 
+    /// A command launch declaring `agent`, asserted not YOLO, with its
+    /// command and optional resume command as written.
+    pub(crate) fn declared_command(
+        command: &str,
+        agent: LaunchHarness,
+        resume: Option<&str>,
+    ) -> SessionLaunch {
+        SessionLaunch::Command(farhelm_proto::CommandLaunch {
+            command: command.to_string(),
+            yolo: false,
+            agent: Some(agent),
+            resume: resume.map(str::to_string),
+        })
+    }
+
+    /// The snapshot of a session launched as bare `program`: its agent kind
+    /// and the resume command that agent type's launch carries (what the
+    /// helm composes, and what sessions from before launch kinds stored),
+    /// or a generic snapshot for any other program.
+    pub(crate) fn program_snapshot(program: &str) -> IntegrationSnapshot {
+        let (kind, suffix): (AgentKind, &[&str]) = match program {
+            "claude" => (AgentKind::Claude, &["--resume"]),
+            "codex" => (AgentKind::Codex, &["resume"]),
+            "goose" => (AgentKind::Goose, &["session", "--resume", "--session-id"]),
+            "pi" => (AgentKind::Pi, &["--session"]),
+            "omp" => (AgentKind::Omp, &["--resume"]),
+            "grok" => (AgentKind::Grok, &["--no-leader", "--resume"]),
+            _ => {
+                return IntegrationSnapshot {
+                    kind: AgentKind::Generic,
+                    resume_template: None,
+                };
+            }
+        };
+        let mut resume = vec![program.to_string()];
+        resume.extend(suffix.iter().map(|element| element.to_string()));
+        resume.push(crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string());
+        IntegrationSnapshot {
+            kind,
+            resume_template: Some(resume),
+        }
+    }
+
     /// The conversation id [`create_resumable_session`] records.
     pub(crate) const TEST_CONVERSATION: &str = "conv-test";
 
@@ -15095,13 +15018,14 @@ pub(crate) mod tests {
     ///
     /// Restart only ever resumes a captured conversation (SPEC.md), so the
     /// tests of restart mechanics that used to restart a plain `sleep`
-    /// "fresh" need a session that offers Resume. This one declares itself
-    /// Goose, with a resume command that runs the same script and passes
-    /// the conversation id as a positional argument the script ignores, and
-    /// then records [`TEST_CONVERSATION`] for it. Goose because, unlike
-    /// Claude, it has no screen reader of its own, adds nothing to a launch
-    /// whose program is not `goose`, and does not verify a resume target on
-    /// disk: the session behaves exactly like the plain `sh -c` it runs.
+    /// "fresh" need a session that offers Resume. This one is a command
+    /// launch declaring Goose, with a resume command that runs the same
+    /// script and passes the conversation id as a positional argument the
+    /// script ignores, and then records [`TEST_CONVERSATION`] for it. Goose
+    /// because, unlike Claude, it has no screen reader of its own and does
+    /// not verify a resume target on disk, and its `{farhelm_args}` land as
+    /// positional arguments `sh -c` hands the script unread: the session
+    /// behaves exactly like the plain `sh -c` it runs.
     pub(crate) async fn create_resumable_session(
         sup: &Arc<Supervisor>,
         cwd: &str,
@@ -15113,18 +15037,14 @@ pub(crate) mod tests {
                     cwd,
                     parent: None,
                     github_checkout: None,
-                    mode: CreateMode::Raw {
-                        invocation: format!("sh -c {}", shell_words::quote(script)),
-                        agent_kind: Some(AgentKind::Goose),
-                        resume_template: Some(vec![
-                            "sh".to_string(),
-                            "-c".to_string(),
-                            script.to_string(),
-                            "farhelm-test-resume".to_string(),
-                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                        ]),
-                        launch: None,
-                    },
+                    launch: declared_command(
+                        &format!("sh -c {} {{farhelm_args}}", shell_words::quote(script)),
+                        LaunchHarness::Goose,
+                        Some(&format!(
+                            "sh -c {} farhelm-test-resume {{conversation}} {{farhelm_args}}",
+                            shell_words::quote(script)
+                        )),
+                    ),
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -15147,95 +15067,140 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
-    /// A template-only wire override must never fall through to plain restart.
+    /// Restart with keeps the launch kind and agent type, refuses a legacy
+    /// session with the remedy SPEC.md names, and needs a resume command.
     ///
-    /// Refusing before session lookup distinguishes the partial-bundle rule
-    /// from a later missing-session error and prevents a valid target from
-    /// being stopped while its supplied template is silently ignored.
+    /// Why: SPEC.md fixes the launch kind, agent type, host and folder
+    /// across Restart with (Replace with changes them), and Restart with
+    /// resumes, so a launch without a resume command could only start
+    /// fresh; a legacy session has no launch to change at all. These are
+    /// checked against the stored launch before anything is stopped.
     #[farhelm_testtrace::test]
-    async fn restart_refuses_a_template_without_invocation_and_selection() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor for early refusal");
-        let error = sup
-            .restart_session(
-                "missing",
-                false,
-                None,
-                None,
-                Some(vec![
-                    "claude".into(),
-                    "--resume".into(),
-                    "{conversation}".into(),
-                ]),
-            )
-            .await
-            .expect_err("a lone template cannot be treated as plain restart");
-        assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
-        assert!(error.to_string().contains("invocation and launch together"));
+    fn restart_with_keeps_kind_and_type_and_needs_a_resume_command() {
+        let command =
+            |agent, resume: Option<&str>| declared_command("claude {farhelm_args}", agent, resume);
+        let resumable = command(
+            LaunchHarness::Claude,
+            Some("claude --resume {conversation} {farhelm_args}"),
+        );
+        let agent = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            start: vec!["claude".into(), "{farhelm_args}".into()],
+            resume: Some(vec![
+                "claude".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        };
+        let legacy = SessionLaunch::Legacy {
+            invocation: "claude".to_string(),
+            agent_kind: AgentKind::Claude,
+            resume_template: Some(vec!["claude".into(), "{conversation}".into()]),
+        };
+        assert_eq!(restart_with_refusal(&resumable, &resumable), None);
+        assert_eq!(restart_with_refusal(&agent, &agent), None);
+        for (stored, replacement, says) in [
+            (&legacy, &resumable, "Replace with"),
+            (&resumable, &agent, "keeps the launch kind"),
+            (
+                &resumable,
+                &command(
+                    LaunchHarness::Codex,
+                    Some("claude --resume {conversation} {farhelm_args}"),
+                ),
+                "keeps the agent type",
+            ),
+            (
+                &resumable,
+                &command(LaunchHarness::Claude, None),
+                "needs a resume command",
+            ),
+        ] {
+            let refusal = restart_with_refusal(stored, replacement).expect("refused");
+            assert!(refusal.contains(says), "{says}: {refusal}");
+        }
     }
 
-    /// Why: restart-with stored its new bundle without create's checks,
-    /// while loading refuses a row that fails them; the stored-row and
-    /// reload consequences are pinned end to end in the e2e
+    /// Why: Restart with stores its new launch, and loading refuses a row
+    /// that fails create's checks, so one accepted here would leave the
+    /// supervisor unable to load its sessions after its next restart; the
+    /// stored-row and reload consequences are pinned end to end in the e2e
     /// `restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing`.
-    /// Spec pinned here: each input-only check (parse, `{cwd}` as the
-    /// program, the template element cap, `{conversation}` as the supplied
-    /// template's program) refuses as `InvalidRequest` before the session is
-    /// even looked up, so it cannot depend on, or disturb, any session.
+    /// Spec pinned here: each input-only check (a command that does not
+    /// split, a placeholder as the program, the resume command's element
+    /// cap, a legacy launch) refuses as `InvalidRequest` before the session
+    /// is even looked up, so it cannot depend on, or disturb, any session.
     #[farhelm_testtrace::test]
     async fn restart_with_refuses_create_check_failures_before_lookup() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor for early refusal");
-        let launch = farhelm_proto::LaunchSelection {
-            harness: farhelm_proto::LaunchHarness::Claude,
-            model: None,
-            effort: None,
-            permissions: None,
-            workspace_trust: None,
-        };
-        let too_many = vec!["x".to_string(); crate::store::RESUME_TEMPLATE_ELEMENT_CAP + 1];
-        let conversation = crate::agent_kind::CONVERSATION_PLACEHOLDER;
+        let too_many = format!(
+            "claude {} {{conversation}} {{farhelm_args}}",
+            vec!["x"; crate::store::RESUME_TEMPLATE_ELEMENT_CAP].join(" ")
+        );
         let cwd = crate::agent_kind::CWD_PLACEHOLDER;
-        for (invocation, template, says) in [
+        for (launch, says) in [
             (
-                "claude".to_string(),
-                Some(vec![conversation.to_string(), "--resume".to_string()]),
-                format!("resume template's first element is {conversation}"),
+                declared_command(
+                    "claude {farhelm_args}",
+                    LaunchHarness::Claude,
+                    Some("{conversation} --resume {farhelm_args}"),
+                ),
+                "cannot be the program".to_string(),
             ),
             (
-                format!("{cwd} --flag"),
-                None,
-                format!("restart-with invocation's first element is {cwd}"),
+                declared_command(
+                    &format!("{cwd} --flag {{farhelm_args}}"),
+                    LaunchHarness::Claude,
+                    None,
+                ),
+                "cannot be the program".to_string(),
             ),
             (
-                "claude".to_string(),
-                Some(too_many),
+                declared_command(
+                    "claude {farhelm_args}",
+                    LaunchHarness::Claude,
+                    Some(&too_many),
+                ),
                 "-element limit".to_string(),
             ),
             (
-                "claude 'unterminated".to_string(),
-                None,
-                "does not parse".to_string(),
+                SessionLaunch::plain_command("claude 'unterminated"),
+                "command:".to_string(),
+            ),
+            (
+                SessionLaunch::plain_command(format!(
+                    "claude {}",
+                    "x".repeat(crate::service::handlers::CREATE_FIELD_CAP)
+                )),
+                "-byte limit".to_string(),
+            ),
+            (
+                SessionLaunch::Legacy {
+                    invocation: "claude".to_string(),
+                    agent_kind: AgentKind::Claude,
+                    resume_template: None,
+                },
+                "before launch kinds".to_string(),
             ),
         ] {
             let error = sup
-                .restart_session(
-                    "missing",
-                    true,
-                    Some(invocation.clone()),
-                    Some(launch.clone()),
-                    template,
-                )
+                .restart_session("missing", true, Some(launch.clone()))
                 .await
-                .expect_err("a bundle loading would refuse is refused");
+                .expect_err("a launch loading would refuse is refused");
             assert_eq!(error_kind(&error), ErrorKind::InvalidRequest, "{error:#}");
             assert!(
                 format!("{error:#}").contains(&says),
-                "{invocation}: {error:#}"
+                "{launch:?}: {error:#}"
             );
         }
     }
@@ -15319,19 +15284,20 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: canonical.clone(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(vec![
+                            "agent".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
                     // Restart only resumes, so the row carries a captured
                     // conversation and the resume command to enter it.
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(vec![
-                        "agent".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: Some(canonical.clone()),
                     captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
@@ -15356,7 +15322,7 @@ pub(crate) mod tests {
             .await
             .insert(id.to_string(), Arc::new(entry));
 
-        sup.restart_session(id, false, None, None, None)
+        sup.restart_session(id, false, None)
             .await
             .expect("an unknown-status row restarts without stop consent");
         let entry = sup
@@ -15418,8 +15384,15 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: canonical.clone(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(vec![
+                            "agent".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
@@ -15428,12 +15401,6 @@ pub(crate) mod tests {
                     },
                     // Restart only resumes, so the row carries a captured
                     // conversation and the resume command to enter it.
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(vec![
-                        "agent".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: Some(canonical.clone()),
                     captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
@@ -15460,7 +15427,7 @@ pub(crate) mod tests {
             .insert(id.to_string(), Arc::new(entry));
 
         let error = sup
-            .restart_session(id, false, None, None, None)
+            .restart_session(id, false, None)
             .await
             .expect_err("an unconfirmed prior scope must block the relaunch");
         assert!(
@@ -16590,8 +16557,7 @@ pub(crate) mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -16647,13 +16613,14 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: entry.info.cwd.clone(),
-                    invocation: entry.info.invocation.clone(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: entry.info.invocation.clone(),
+                        agent_kind: AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-rename-fixture".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -17335,7 +17302,7 @@ pub(crate) mod tests {
             );
 
             let error = sup
-                .restart_session(&created.id, false, None, None, None)
+                .restart_session(&created.id, false, None)
                 .await
                 .expect_err("a working agent needs stop consent");
             assert_eq!(error_kind(&error), ErrorKind::Conflict);
@@ -17358,7 +17325,7 @@ pub(crate) mod tests {
                 SessionStatus::Running,
                 "fixture premise: the agent no longer reads working"
             );
-            sup.restart_session(&created.id, false, None, None, None)
+            sup.restart_session(&created.id, false, None)
                 .await
                 .unwrap_or_else(|error| {
                     panic!("an agent reading {quiet:?} restarts without consent: {error:#}")
@@ -17426,7 +17393,7 @@ pub(crate) mod tests {
         let restart = tokio::spawn({
             let sup = Arc::clone(&sup);
             let id = created.id.clone();
-            async move { sup.restart_session(&id, true, None, None, None).await }
+            async move { sup.restart_session(&id, true, None).await }
         });
         let mut restart = restart;
         // A restart that fails before the window never reaches the gate, so
@@ -17537,7 +17504,7 @@ pub(crate) mod tests {
         );
 
         let restarted = sup
-            .restart_session(&created.id, true, None, None, None)
+            .restart_session(&created.id, true, None)
             .await
             .expect("restart with a surviving tab");
         assert_eq!(
@@ -17674,7 +17641,7 @@ pub(crate) mod tests {
         };
 
         let restarted = sup
-            .restart_session(&created.id, true, None, None, None)
+            .restart_session(&created.id, true, None)
             .await
             .expect("restart with a live agent pane");
         assert_eq!(restarted.tabs, vec![TabInfo { id: tab.id.clone() }]);
@@ -17747,7 +17714,7 @@ pub(crate) mod tests {
             .await
             .expect("forge the agent marker on the tab");
 
-        sup.restart_session(&created.id, true, None, None, None)
+        sup.restart_session(&created.id, true, None)
             .await
             .expect_err("ambiguous old-window identity must be reported");
         let entry = sup
@@ -17860,7 +17827,7 @@ pub(crate) mod tests {
                 "fixture premise: the tab kept the session alive"
             );
 
-            sup.restart_session(&created.id, true, None, None, None)
+            sup.restart_session(&created.id, true, None)
                 .await
                 .expect_err("the injected replacement stage must fail");
             if stage == ReplacementStage::BeforeCreation {
@@ -17987,13 +17954,14 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-renamed".to_string(),
                     pane: pane.clone(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18083,13 +18051,14 @@ pub(crate) mod tests {
                         last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
-                        invocation: "agent".to_string(),
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::Legacy {
+                            invocation: "agent".to_string(),
+                            agent_kind: farhelm_proto::AgentKind::Generic,
+                            resume_template: None,
+                        },
                         tmux_name: tmux_name.to_string(),
                         pane: String::new(),
                         outcome: LastOutcome::Launching,
-                        agent_kind: farhelm_proto::AgentKind::Generic,
-                        resume_template: None,
                         canonical_cwd: None,
                         captured_conversation: None,
                         generation: 0,
@@ -18231,15 +18200,16 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: tmux_name.to_string(),
                     pane: pane.clone(),
                     outcome: LastOutcome::Error {
                         detail: "exec failed".to_string(),
                     },
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18386,13 +18356,14 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-scoped".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18511,19 +18482,20 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "ANTHROPIC_API_KEY=sk-not-for-agents my-wrapper".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "ANTHROPIC_API_KEY=sk-not-for-agents my-wrapper".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(vec![
+                            "my-wrapper".to_string(),
+                            "--resume".to_string(),
+                            "{conversation}".to_string(),
+                        ]),
+                    },
                     tmux_name: "fh-kind-gone".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Interrupted,
-                    agent_kind: farhelm_proto::AgentKind::Claude,
                     // An integrated kind must carry a conversation-bearing
                     // template, or reload refuses the row outright.
-                    resume_template: Some(vec![
-                        "my-wrapper".to_string(),
-                        "--resume".to_string(),
-                        "{conversation}".to_string(),
-                    ]),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18560,8 +18532,7 @@ pub(crate) mod tests {
         source: Option<&str>,
         version: i64,
     ) {
-        let integration =
-            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        let integration = program_snapshot("codex");
         sup.store
             .insert_session(
                 StoredSession {
@@ -18577,16 +18548,17 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "codex".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "codex".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Codex,
+                        resume_template: integration.resume_template.clone(),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: farhelm_proto::AgentKind::Codex,
-                    resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: captured.map(str::to_string),
                     generation: 0,
@@ -18603,8 +18575,7 @@ pub(crate) mod tests {
     /// service tests use this seam to exercise reload and publication after
     /// the report's atomic store transaction has already succeeded.
     async fn seed_grok_row(sup: &Arc<Supervisor>, id: &str, captured: &str) {
-        let integration =
-            IntegrationSnapshot::resolve(&["grok".to_string()], None, None).expect("grok");
+        let integration = program_snapshot("grok");
         sup.store
             .insert_session(
                 StoredSession {
@@ -18620,16 +18591,17 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "grok".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "grok".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Grok,
+                        resume_template: integration.resume_template.clone(),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: farhelm_proto::AgentKind::Grok,
-                    resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: Some(captured.to_string()),
                     generation: 0,
@@ -18661,8 +18633,7 @@ pub(crate) mod tests {
             },
         )
         .expect("encode Pi locator");
-        let integration =
-            IntegrationSnapshot::resolve(&["pi".into()], None, None).expect("Pi integration");
+        let integration = program_snapshot("pi");
         sup.store
             .insert_session(
                 StoredSession {
@@ -18674,16 +18645,17 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: state.path().to_string_lossy().into_owned(),
-                    invocation: "pi".into(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "pi".into(),
+                        agent_kind: AgentKind::Pi,
+                        resume_template: integration.resume_template.clone(),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: AgentKind::Pi,
-                    resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18720,11 +18692,8 @@ pub(crate) mod tests {
         let row = sup.store.session(id).await.unwrap().unwrap();
         let mut entry = entry_with(None, row.outcome.clone());
         entry.info.id = id.to_string();
-        entry.info.agent_kind = row.agent_kind;
-        entry.snapshot = IntegrationSnapshot {
-            kind: row.agent_kind,
-            resume_template: row.resume_template.clone(),
-        };
+        entry.info.agent_kind = row.agent_kind();
+        entry.snapshot = IntegrationSnapshot::of(&row.launch);
         entry.generation = row.generation;
         let entry = Arc::new(entry);
         assert_eq!(row.captured_conversation, None, "fixture starts unbound");
@@ -18811,7 +18780,7 @@ pub(crate) mod tests {
         let id = uuid::Uuid::new_v4().to_string();
         let peer = fixture.spawn_claude_runtime(&id).await;
         let sup = fixture.sup.as_ref().unwrap();
-        let integration = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
+        let integration = program_snapshot("claude");
         sup.store
             .insert_session(
                 StoredSession {
@@ -18823,13 +18792,14 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: fixture.state.path().to_string_lossy().into_owned(),
-                    invocation: "claude".into(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "claude".into(),
+                        agent_kind: AgentKind::Claude,
+                        resume_template: integration.resume_template,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".into(),
                     outcome: LastOutcome::Running,
-                    agent_kind: AgentKind::Claude,
-                    resume_template: integration.resume_template,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -18976,8 +18946,7 @@ pub(crate) mod tests {
         .encode()
         .expect("encode the fixture locator");
         seed_codex_row(&sup, &id, Some(&token), Some("hook"), 1).await;
-        let integration =
-            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        let integration = program_snapshot("codex");
         let mut entry = entry_with(
             None,
             LastOutcome::Exited {
@@ -19072,8 +19041,7 @@ pub(crate) mod tests {
             "the durable report precedes publication in this fixture"
         );
 
-        let integration =
-            IntegrationSnapshot::resolve(&["grok".to_string()], None, None).expect("grok");
+        let integration = program_snapshot("grok");
         let mut entry = entry_with(
             None,
             LastOutcome::Exited {
@@ -19251,8 +19219,7 @@ pub(crate) mod tests {
             "an unpromoted binding leaves no resume command behind"
         );
 
-        let integration =
-            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        let integration = program_snapshot("codex");
         let mut entry = entry_with(
             None,
             LastOutcome::Exited {
@@ -19332,24 +19299,25 @@ pub(crate) mod tests {
                         last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
-                        invocation: "claude".to_string(),
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::Legacy {
+                            invocation: "claude".to_string(),
+                            agent_kind: farhelm_proto::AgentKind::Claude,
+                            resume_template: Some(vec![
+                                "claude".to_string(),
+                                "--resume".to_string(),
+                                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                            ]),
+                        },
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
                         },
-                        agent_kind: farhelm_proto::AgentKind::Claude,
                         // Reload refuses an integrated kind whose template
                         // carries no `{conversation}` element, so the row
                         // has to be one a create would actually have
                         // accepted.
-                        resume_template: Some(vec![
-                            "claude".to_string(),
-                            "--resume".to_string(),
-                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                        ]),
                         canonical_cwd: Some("/tmp".to_string()),
                         captured_conversation: Some(format!("conv-{id}")),
                         generation: 0,
@@ -19423,7 +19391,7 @@ pub(crate) mod tests {
             },
         )
         .unwrap();
-        let integration = IntegrationSnapshot::resolve(&["pi".into()], None, None).unwrap();
+        let integration = program_snapshot("pi");
         sup.store
             .insert_session(
                 StoredSession {
@@ -19435,16 +19403,17 @@ pub(crate) mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: state.path().to_str().unwrap().into(),
-                    invocation: "pi".into(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "pi".into(),
+                        agent_kind: AgentKind::Pi,
+                        resume_template: integration.resume_template.clone(),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: AgentKind::Pi,
-                    resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -20040,16 +20009,17 @@ exit 0
                         last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: self.state.path().to_str().unwrap().into(),
-                        invocation: "omp".into(),
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::Legacy {
+                            invocation: "omp".into(),
+                            agent_kind: farhelm_proto::AgentKind::Omp,
+                            resume_template: Some(template),
+                        },
                         tmux_name: format!("fh-{id}"),
                         pane: pane.into(),
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
                         },
-                        agent_kind: farhelm_proto::AgentKind::Omp,
-                        resume_template: Some(template),
                         canonical_cwd: None,
                         captured_conversation: None,
                         generation: 0,
@@ -21281,17 +21251,18 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: state.path().to_str().unwrap().into(),
-                    invocation: "omp".into(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "omp".into(),
+                        agent_kind: farhelm_proto::AgentKind::Omp,
+                        resume_template: Some(vec![
+                            "omp".into(),
+                            "--resume".into(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                        ]),
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Omp,
-                    resume_template: Some(vec![
-                        "omp".into(),
-                        "--resume".into(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
-                    ]),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -21328,6 +21299,7 @@ exit 0
                 &tmux_name,
                 vec!["omp".to_string()],
                 &snapshot,
+                FarhelmArgsMode::Legacy,
                 state.path().to_str().unwrap(),
                 80,
                 24,
@@ -21503,16 +21475,17 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "claude".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "claude".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{doomed}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: None,
                     canonical_cwd: Some("/tmp".to_string()),
                     captured_conversation: None,
                     generation: 0,
@@ -21595,16 +21568,17 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -21673,13 +21647,14 @@ exit 0
                         last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
-                        invocation: "agent".to_string(),
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::Legacy {
+                            invocation: "agent".to_string(),
+                            agent_kind: farhelm_proto::AgentKind::Generic,
+                            resume_template: None,
+                        },
                         tmux_name,
                         pane: pane.clone(),
                         outcome: LastOutcome::Running,
-                        agent_kind: farhelm_proto::AgentKind::Generic,
-                        resume_template: None,
                         canonical_cwd: None,
                         captured_conversation: None,
                         generation: 0,
@@ -21771,13 +21746,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -21862,13 +21838,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -22146,13 +22123,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: source.to_str().unwrap().to_owned(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-does-not-exist".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -22547,15 +22525,14 @@ exit 0
                 parent: None,
                 inherit_agent: false,
                 cwd: "/".to_string(),
-                invocation: Some("agent".to_string()),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "agent".to_string(),
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
             },
             ConnectionCtx {
@@ -22591,77 +22568,75 @@ exit 0
     }
 
     /// The fingerprint binds every SESSION-shaping field and nothing else
-    /// (PLAN_M3.md item 6).
+    /// (PLAN_M3.md item 6): the parent, the cwd, the title as sent (an
+    /// omitted title asks the server to derive one, a different request from
+    /// spelling out the same string), and every part of the launch.
     ///
-    /// The override cases are the ones with teeth: acceptance 7 requires a
-    /// request differing ONLY in `agent_kind` or `resume_template` to be
-    /// refused as a key reuse, and as of this PR the fingerprint is the
-    /// only thing in the supervisor that reads those fields at all — so
-    /// nothing else would catch a change that quietly dropped them. The
-    /// `None`-vs-`Some` title case pins the other easy mistake: an omitted
-    /// title asks the server to derive one, which is a different request
-    /// from spelling out the same string by hand.
-    ///
-    /// The MODE cases (PLAN_M6_75.md item 3) are the newest ones with
-    /// teeth, and the reason they are here rather than only in a handler
-    /// test: the fingerprint is the ONLY thing standing between a retried
-    /// intent key and a create that launches something other than what the
-    /// first attempt did. A retry that flips raw-to-structured, or names a
-    /// different selection, must land on a different fingerprint and be
-    /// refused as a key reuse.
+    /// The launch cases are the ones with teeth: the fingerprint is the ONLY
+    /// thing standing between a retried intent key and a create that runs
+    /// something other than what the first attempt did. A retry that changes
+    /// the command, the YOLO assertion, the declared agent type, the resume
+    /// command, or the launch kind must land on a different fingerprint and
+    /// be refused as a key reuse.
     #[farhelm_testtrace::test]
     fn the_create_fingerprint_covers_every_session_shaping_field() {
-        let base = raw_fingerprint("/work", "agent --flag", Some("t"), None, None);
+        let command = |command: &str, yolo: bool, agent, resume: Option<&str>| {
+            SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                command: command.to_string(),
+                yolo,
+                agent,
+                resume: resume.map(str::to_string),
+            })
+        };
+        let plain = command("agent --flag", false, None, None);
+        let base = launch_fingerprint(None, "/work", &plain, Some("t"));
+        let declared = command(
+            "claude {farhelm_args}",
+            false,
+            Some(LaunchHarness::Claude),
+            None,
+        );
+        let agent = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            start: vec!["claude".into(), "{farhelm_args}".into()],
+            resume: None,
+        };
         let cases = [
+            (launch_fingerprint(None, "/other", &plain, Some("t")), "cwd"),
             (
-                raw_fingerprint("/other", "agent --flag", Some("t"), None, None),
-                "cwd",
+                launch_fingerprint(
+                    None,
+                    "/work",
+                    &command("agent --other", false, None, None),
+                    Some("t"),
+                ),
+                "the command",
             ),
             (
-                raw_fingerprint("/work", "agent --other", Some("t"), None, None),
-                "invocation",
+                launch_fingerprint(
+                    None,
+                    "/work",
+                    &command("agent --flag", true, None, None),
+                    Some("t"),
+                ),
+                "the YOLO assertion",
             ),
             (
-                raw_fingerprint("/work", "agent --flag", Some("other"), None, None),
+                launch_fingerprint(None, "/work", &plain, Some("other")),
                 "title",
             ),
             (
-                raw_fingerprint("/work", "agent --flag", None, None, None),
+                launch_fingerprint(None, "/work", &plain, None),
                 "an omitted title",
             ),
             (
-                raw_fingerprint(
-                    "/work",
-                    "agent --flag",
-                    Some("t"),
-                    Some(AgentKind::Claude),
-                    None,
-                ),
-                "the agent-kind override",
-            ),
-            (
-                raw_fingerprint(
-                    "/work",
-                    "agent --flag",
-                    Some("t"),
-                    None,
-                    Some(&["claude", "{conversation}"]),
-                ),
-                "the resume-template override",
-            ),
-            (
-                create_fingerprint(
-                    None,
-                    Some("parent-1"),
-                    "/work",
-                    &CreateMode::Raw {
-                        invocation: "agent --flag".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        launch: None,
-                    },
-                    Some("t"),
-                ),
+                launch_fingerprint(Some("parent-1"), "/work", &plain, Some("t")),
                 "the parent",
             ),
         ];
@@ -22669,80 +22644,42 @@ exit 0
             assert_ne!(fingerprint, base, "{what} must change the fingerprint");
         }
         assert_eq!(
-            raw_fingerprint("/work", "agent --flag", Some("t"), None, None),
+            launch_fingerprint(None, "/work", &plain, Some("t")),
             base,
             "the same request must fingerprint identically every time"
         );
-        // Adjacent fields cannot bleed into one another: a delimiter-joined
-        // encoding would make these two requests indistinguishable.
+        // Adjacent fields cannot bleed into one another.
         assert_ne!(
-            raw_fingerprint("/a", "bc", None, None, None),
-            raw_fingerprint("/ab", "c", None, None, None),
+            launch_fingerprint(None, "/a", &command("bc", false, None, None), None),
+            launch_fingerprint(None, "/ab", &command("c", false, None, None), None),
         );
-        // Distinct override VALUES are distinguished, not merely the
-        // presence of an override: two integrated kinds are two different
-        // requests, and so are two templates of the same length.
-        assert_ne!(
-            raw_fingerprint("/work", "a", None, Some(AgentKind::Claude), None),
-            raw_fingerprint("/work", "a", None, Some(AgentKind::Codex), None),
+        let resumed = command(
+            "claude {farhelm_args}",
+            false,
+            Some(LaunchHarness::Claude),
+            Some("claude --resume {conversation} {farhelm_args}"),
         );
-        assert_ne!(
-            raw_fingerprint("/work", "a", None, None, Some(&["x"])),
-            raw_fingerprint("/work", "a", None, None, Some(&["y"])),
+        let other_type = command(
+            "claude {farhelm_args}",
+            false,
+            Some(LaunchHarness::Codex),
+            None,
         );
+        for (other, what) in [
+            (&resumed, "the resume command"),
+            (&other_type, "the declared agent type"),
+            (&agent, "the launch kind"),
+        ] {
+            assert_ne!(
+                launch_fingerprint(None, "/work", other, None),
+                launch_fingerprint(None, "/work", &declared, None),
+                "{what} must change the fingerprint"
+            );
+        }
         assert_ne!(
-            create_fingerprint(
-                None,
-                Some("parent-1"),
-                "/work",
-                &CreateMode::Raw {
-                    invocation: "agent".to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
-                None,
-            ),
-            create_fingerprint(
-                None,
-                Some("parent-2"),
-                "/work",
-                &CreateMode::Raw {
-                    invocation: "agent".to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
-                None,
-            ),
+            launch_fingerprint(Some("parent-1"), "/work", &plain, None),
+            launch_fingerprint(Some("parent-2"), "/work", &plain, None),
             "same key with a different parent must conflict"
-        );
-        assert_ne!(
-            create_fingerprint(
-                None,
-                Some("parent-1"),
-                "/work",
-                &CreateMode::Raw {
-                    invocation: "claude".to_string(),
-                    agent_kind: Some(AgentKind::Claude),
-                    resume_template: None,
-                    launch: None,
-                },
-                None,
-            ),
-            create_fingerprint(
-                None,
-                Some("parent-2"),
-                "/work",
-                &CreateMode::Raw {
-                    invocation: "claude".to_string(),
-                    agent_kind: Some(AgentKind::Claude),
-                    resume_template: None,
-                    launch: None,
-                },
-                None,
-            ),
-            "a parented create's parent must change its fingerprint"
         );
     }
 
@@ -22768,7 +22705,7 @@ exit 0
         let invocation = "sleep 300 # SECRET-TOKEN-MARKER";
         let claim = |invocation: &str| IntentClaim {
             intent_key: "deleted-key".into(),
-            fingerprint: raw_fingerprint("/tmp", invocation, None, None, None),
+            fingerprint: command_fingerprint("/tmp", invocation, None),
             dedup_scope: DedupScope::Permanent,
         };
         let created = sup
@@ -22835,168 +22772,91 @@ exit 0
         );
     }
 
-    /// [`create_fingerprint`] of a RAW-mode request, spelled as the fields
-    /// a caller actually sends.
-    ///
-    /// The mode enum makes an unrepresentable-state bug impossible but a
-    /// literal verbose, and these tests are about the ENCODING rather than
-    /// about constructing modes; the two helpers keep each case one line so
-    /// the field being varied is the visible thing.
-    fn raw_fingerprint(
+    /// [`create_fingerprint`] of an existing-directory create, one line per
+    /// case so the field being varied is the visible thing.
+    fn launch_fingerprint(
+        parent: Option<&str>,
         cwd: &str,
-        invocation: &str,
+        launch: &SessionLaunch,
         title: Option<&str>,
-        agent_kind: Option<AgentKind>,
-        resume_template: Option<&[&str]>,
     ) -> String {
-        create_fingerprint(
-            None,
-            None,
-            cwd,
-            &CreateMode::Raw {
-                invocation: invocation.to_string(),
-                agent_kind,
-                resume_template: resume_template
-                    .map(|template| template.iter().map(ToString::to_string).collect()),
-                launch: None,
-            },
-            title,
-        )
+        create_fingerprint(None, parent, cwd, launch, title)
+    }
+
+    /// [`create_fingerprint`] of the plain command launch
+    /// `create_session_without_overrides` sends for `invocation`.
+    fn command_fingerprint(cwd: &str, invocation: &str, title: Option<&str>) -> String {
+        launch_fingerprint(None, cwd, &SessionLaunch::plain_command(invocation), title)
     }
 
     /// The PERSISTED fingerprint, byte for byte.
     ///
     /// A golden test because this string is written into a durable,
     /// never-pruned table and compared verbatim on every replay: any change
-    /// to the encoding — a reordered element, a different `AgentKind`
-    /// spelling, a switch to a digest — turns every stored fingerprint into
-    /// a mismatch, so identical requests across the upgrade would be
-    /// refused as key reuse. That is a migration, and this test is what
-    /// makes it impossible to perform by accident. In particular the kind
-    /// is spelled with this module's own vocabulary, so a future rename of
-    /// the WIRE representation fails here rather than in the field.
-    ///
-    /// The RAW strings below are the ones pre-M6.75 supervisors already
-    /// wrote, and they must never change again (PLAN_M6_75.md item 3, and
-    /// `create_fingerprint`'s own "frozen" section): a reservation is a
-    /// permanent tombstone, so an encoding change turns every key a
-    /// supervisor has ever seen into a `Conflict` on its next identical
-    /// retry — permanently, for that key. Version 10 therefore gave the
-    /// profile mode (removed in protocol 38) a separate encoding rather than
-    /// extending this one.
+    /// to the encoding — a reordered element, a renamed launch field, a
+    /// switch to a digest — turns every stored fingerprint into a mismatch,
+    /// so identical requests across the upgrade would be refused as key
+    /// reuse. That is a migration, and this test is what makes it
+    /// impossible to perform by accident.
     #[farhelm_testtrace::test]
     fn the_persisted_fingerprint_encoding_is_pinned() {
         assert_eq!(
-            raw_fingerprint(
-                "/work",
-                "claude --flag",
-                Some("title"),
-                Some(AgentKind::Claude),
-                Some(&["claude", "{conversation}"]),
-            ),
-            r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#
-        );
-        assert_eq!(
-            raw_fingerprint("/work", "agent", None, None, None),
-            r#"["/work","agent",null,null,null]"#
-        );
-        assert_eq!(
-            create_fingerprint(
-                None,
+            launch_fingerprint(
                 Some("parent-1"),
                 "/work",
-                &CreateMode::Raw {
-                    invocation: "agent".to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
+                &SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                    command: "claude {farhelm_args}".to_string(),
+                    yolo: true,
+                    agent: Some(LaunchHarness::Claude),
+                    resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
+                }),
+                Some("title"),
+            ),
+            r#"["session_launch_v1","parent-1","/work","title",{"kind":"command","command":"claude {farhelm_args}","yolo":true,"agent":"claude","resume":"claude --resume {conversation} {farhelm_args}"}]"#
+        );
+        assert_eq!(
+            launch_fingerprint(
+                None,
+                "/work",
+                &SessionLaunch::Agent {
+                    selection: farhelm_proto::LaunchSelection {
+                        harness: LaunchHarness::Codex,
+                        model: Some("gpt-6-astra".to_string()),
+                        effort: Some(farhelm_proto::LaunchEffort::High),
+                        permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                        workspace_trust: None,
+                    },
+                    start: vec!["codex".into(), "--yolo".into(), "{farhelm_args}".into()],
+                    resume: Some(vec![
+                        "codex".into(),
+                        "--yolo".into(),
+                        "resume".into(),
+                        "{conversation}".into(),
+                        "{farhelm_args}".into(),
+                    ]),
                 },
                 None,
             ),
-            r#"["parented_raw","parent-1","/work","agent",null,null,null]"#
-        );
-    }
-
-    /// Structured fingerprints are pinned separately because their snapshot
-    /// is part of the durable meaning of an idempotency key.
-    #[farhelm_testtrace::test]
-    fn the_structured_fingerprint_encoding_is_pinned() {
-        let selection = farhelm_proto::LaunchSelection {
-            harness: farhelm_proto::LaunchHarness::Codex,
-            model: Some("gpt-6-astra".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
-            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
-            workspace_trust: None,
-        };
-        assert_eq!(
-            create_fingerprint(
-                None,
-                Some("parent-1"),
-                "/work",
-                &CreateMode::Structured {
-                    invocation: "codex -m gpt-6-astra -c model_reasoning_effort=high --yolo"
-                        .to_string(),
-                    agent_kind: AgentKind::Codex,
-                    resume_template: None,
-                    selection,
-                },
-                Some("title"),
-            ),
-            r#"["structured_launch_v1","parent-1","/work","codex -m gpt-6-astra -c model_reasoning_effort=high --yolo","title","codex",{"harness":"codex","model":"gpt-6-astra","effort":"high","permissions":"yolo"}]"#,
+            r#"["session_launch_v1",null,"/work",null,{"kind":"agent","selection":{"harness":"codex","model":"gpt-6-astra","effort":"high","permissions":"yolo"},"start":["codex","--yolo","{farhelm_args}"],"resume":["codex","--yolo","resume","{conversation}","{farhelm_args}"]}]"#,
             "changing the encoding would permanently reject a matching retry after upgrade"
         );
     }
 
-    /// The upgrade property the frozen encoding exists for, stated as the
-    /// only thing that actually matters: a fingerprint a v9 supervisor
-    /// wrote must still be produced, byte for byte, by the same request
-    /// today.
-    ///
-    /// Written against a HARD-CODED legacy string rather than against
-    /// `create_fingerprint`'s current output on both sides, because the
-    /// latter would pass under any encoding change at all — including one
-    /// that broke every install in the field. This literal is the fixture;
-    /// its counterpart in the field is a row in somebody's SQLite file that
-    /// nothing will ever rewrite.
-    #[farhelm_testtrace::test]
-    fn a_v9_fingerprint_is_reproduced_exactly_by_the_same_request_today() {
-        // Exactly what `create_fingerprint(cwd, invocation, title,
-        // agent_kind, resume_template)` produced when those were five
-        // separate parameters and the profile mode did not exist.
-        const V9_RAW: &str =
-            r#"["/work","claude --flag","title","claude",["claude","{conversation}"]]"#;
-        assert_eq!(
-            raw_fingerprint(
-                "/work",
-                "claude --flag",
-                Some("title"),
-                Some(AgentKind::Claude),
-                Some(&["claude", "{conversation}"]),
-            ),
-            V9_RAW,
-            "a raw create whose key was claimed before the upgrade must still match its own \
-             tombstone, or every such key conflicts forever"
-        );
-    }
-
-    /// The fingerprint a v9 supervisor stored for
-    /// `create_session_without_overrides("/", "agent", None, ..)` — the
-    /// simplest keyed create this module's tests make, spelled as the bytes
-    /// that are actually sitting in upgraded installs' reservation tables.
-    ///
-    /// A literal rather than a call to `create_fingerprint`: the point of
-    /// the two tests below is that a v10 binary agrees with a string it did
-    /// not produce, and computing both sides would prove only that the
-    /// function agrees with itself.
-    const V9_STORED_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
+    /// A fingerprint a supervisor from before launch kinds stored for
+    /// `create_session_without_overrides("/", "agent", None, ..)`, as the
+    /// bytes sitting in upgraded installs' reservation tables. A literal,
+    /// because the point of the tests that use it is how this build treats
+    /// a string it did not produce.
+    const PRE_LAUNCH_KINDS_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
 
     /// B2/R1.4: upgrading a populated historical database must preserve all
     /// surviving session columns and the literal request fingerprints of live
     /// sessions. A deleted session's fingerprint is reduced to its digest on
-    /// open (see `store::tombstone_fingerprint`), yet its key still behaves
-    /// as before: successful keys still replay their original session,
-    /// deleted-session keys stay spent, and migration invents no checkout
-    /// origin or membership for either.
+    /// open (see `store::tombstone_fingerprint`). Their keys stay spent: a
+    /// retry crossing the launch-kinds upgrade presents a fingerprint no
+    /// earlier build wrote, so it is refused as key reuse, never launched a
+    /// second time (SPEC_impl.md, "Launch-kinds reservations"), and
+    /// migration invents no checkout origin or membership for either.
     /// The OMP row is literal historical data: a stale-base release once
     /// migrated this schema successfully, then failed startup decoding `omp`.
     /// Starting a supervisor here guards that boundary beyond schema opening
@@ -23098,6 +22958,12 @@ exit 0
                             | "first_input_at"
                             | "source_profile_id"
                             | "source_profile_name"
+                            // Schema 26 folds these four into the session's
+                            // launch, checked separately below.
+                            | "invocation"
+                            | "agent_kind"
+                            | "resume_template"
+                            | "launch"
                     )
                 })
                 .collect::<Vec<_>>()
@@ -23113,8 +22979,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                25,
-                "the v17 fixture migrates through scan-column and profile-snapshot removal too"
+                26,
+                "the v17 fixture migrates through scan-column, profile-snapshot and launch-kind \
+                 changes too"
             );
             assert_eq!(
                 conn.query_row(
@@ -23135,6 +23002,28 @@ exit 0
             );
         }
         assert!(store.working_copy_rows().await.unwrap().is_empty());
+        // The structured row became an agent launch; every other row stayed
+        // legacy with its stored fields (SPEC.md, the launch-kinds upgrade).
+        let launches: std::collections::HashMap<String, SessionLaunch> = store
+            .load_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.id, row.launch))
+            .collect();
+        assert!(
+            matches!(launches["old-rich"], SessionLaunch::Agent { .. }),
+            "{:?}",
+            launches["old-rich"]
+        );
+        assert!(matches!(launches["old-omp"], SessionLaunch::Agent { .. }));
+        for legacy in ["old-replay", "old-profile"] {
+            assert!(
+                matches!(launches[legacy], SessionLaunch::Legacy { .. }),
+                "{legacy}: {:?}",
+                launches[legacy]
+            );
+        }
         assert_eq!(
             store
                 .reservation("old-success")
@@ -23142,7 +23031,7 @@ exit 0
                 .unwrap()
                 .unwrap()
                 .fingerprint,
-            V9_STORED_FINGERPRINT
+            PRE_LAUNCH_KINDS_FINGERPRINT
         );
         assert_eq!(
             store
@@ -23151,7 +23040,7 @@ exit 0
                 .unwrap()
                 .unwrap()
                 .fingerprint,
-            crate::store::tombstone_fingerprint(V9_STORED_FINGERPRINT),
+            crate::store::tombstone_fingerprint(PRE_LAUNCH_KINDS_FINGERPRINT),
             "a deleted session's request is kept only as a digest"
         );
         drop(store);
@@ -23168,18 +23057,20 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "old-success".into(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    fingerprint: command_fingerprint("/", "agent", None),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
-            .expect("a migrated successful key must replay");
-        assert_eq!(replay.id, "old-replay");
-        assert_eq!(replay.title, "old title");
-        assert_eq!(replay.last_activity_at, 180);
-        assert_eq!(replay.last_work_started_at, 179001);
-        assert!(replay.github_repo.is_none());
-        assert!(replay.working_copy.is_none());
+            .expect_err("a retry of a pre-upgrade key cannot match its old fingerprint");
+        assert_eq!(
+            replay.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::Conflict
+        );
+        assert!(
+            format!("{replay:#}").contains("already used for a different create request"),
+            "{replay:#}"
+        );
         let error = sup
             .create_session_without_overrides(
                 "/",
@@ -23189,7 +23080,7 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "old-spent".into(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    fingerprint: command_fingerprint("/", "agent", None),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
@@ -23199,8 +23090,11 @@ exit 0
             error.downcast_ref::<RequestError>().unwrap().kind,
             ErrorKind::Conflict
         );
-        assert!(format!("{error:#}").contains("since been deleted"));
-        assert_eq!(sup.store.load_all().await.unwrap().len(), 4);
+        assert_eq!(
+            sup.store.load_all().await.unwrap().len(),
+            4,
+            "neither refused retry launched anything"
+        );
         let omp = sup.session_snapshot("old-omp").await.unwrap().unwrap();
         assert_eq!(omp.kind, AgentKind::Omp);
         let sessions = sup.sessions.lock().await;
@@ -23216,14 +23110,21 @@ exit 0
             .expect("OMP reloaded into live state")
             .info;
         assert_eq!(
-            omp.launch.as_ref(),
-            Some(&farhelm_proto::LaunchSelection {
+            omp.launch.agent_type(),
+            Some(farhelm_proto::LaunchHarness::Omp)
+        );
+        let SessionLaunch::Agent { selection, .. } = &omp.launch else {
+            panic!("the structured OMP row reloads as an agent launch");
+        };
+        assert_eq!(
+            selection,
+            &farhelm_proto::LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Omp,
                 model: Some("x-ai/grok-4.6".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
                 workspace_trust: None,
-            })
+            }
         );
         drop(sessions);
         assert!(
@@ -23245,112 +23146,58 @@ exit 0
         );
     }
 
-    /// A SETTLED reservation written before the upgrade still replays.
+    /// A reservation written before launch kinds, settled or still
+    /// pending, refuses a retry of its key rather than replaying or
+    /// relaunching it.
     ///
-    /// This is the failure mode that would have been permanent: a
-    /// reservation is a tombstone nothing prunes, so a client retrying an
-    /// identical create with a key it claimed on the old binary would be
-    /// told `Conflict` — "this key already means something else" — for as
-    /// long as that database exists, with the session it created sitting
-    /// right there unreachable through its own intent key.
-    ///
-    /// The first create plants the legacy fingerprint the way a v9
-    /// supervisor did (the claim is caller-supplied, so the test can write
-    /// the exact bytes); the retry computes its own the way this build
-    /// does. Replaying to the SAME session id is the whole assertion.
-    ///
-    /// The activity stamp is advanced between the two creates and checked
-    /// on the reply, because a replay is the one create path that answers
-    /// entirely from the DURABLE record rather than from what it just did.
-    /// The session it describes may have been producing output for hours
-    /// since the original create — a retry after a network partition can
-    /// arrive arbitrarily late — so a replay that reported creation time,
-    /// or re-derived the field from `created_at`, would hand a client a
-    /// session that has visibly moved backwards in its own list. Equal
-    /// values on the two sides would let that pass unnoticed.
+    /// Why: SPEC_impl.md ("Launch-kinds reservations") keeps these rows and
+    /// adds no compatibility for them. Every create since protocol 39
+    /// fingerprints its resolved launch, which no earlier build wrote, so
+    /// an identical retry crossing the upgrade cannot match; refusing it is
+    /// what keeps one intended create from becoming two sessions, which
+    /// SPEC.md forbids, and deleting the rows instead would allow exactly
+    /// that. Specified: the retry is a `Conflict` naming key reuse, and no
+    /// session is created by it (a pending claim's row is not launched).
     #[farhelm_testtrace::test]
-    async fn a_settled_v9_reservation_replays_instead_of_conflicting() {
+    async fn a_pre_launch_kinds_reservation_refuses_its_retry() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
+        let old_claim = |key: &str| IntentClaim {
+            intent_key: key.to_string(),
+            fingerprint: PRE_LAUNCH_KINDS_FINGERPRINT.to_string(),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let retry = |key: &str| IntentClaim {
+            intent_key: key.to_string(),
+            fingerprint: command_fingerprint("/", "agent", None),
+            dedup_scope: DedupScope::Permanent,
+        };
 
-        let original = sup
-            .create_session_without_overrides(
-                "/",
-                "agent",
-                None,
-                80,
-                24,
-                Some(IntentClaim {
-                    intent_key: "v9-key".to_string(),
-                    fingerprint: V9_STORED_FINGERPRINT.to_string(),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
+        // Settled: the old binary's create finished.
+        sup.create_session_without_overrides(
+            "/",
+            "agent",
+            None,
+            80,
+            24,
+            Some(old_claim("settled")),
+        )
+        .await
+        .expect("the pre-upgrade create");
+        let refused = sup
+            .create_session_without_overrides("/", "agent", None, 80, 24, Some(retry("settled")))
             .await
-            .expect("the pre-upgrade create");
-        assert_eq!(
-            original.last_activity_at, original.created_at,
-            "a session nothing has watched yet reports its creation time"
+            .expect_err("a retry across the upgrade cannot match the old fingerprint");
+        assert_eq!(error_kind(&refused), ErrorKind::Conflict);
+        assert!(
+            format!("{refused:#}").contains("already used for a different create request"),
+            "{refused:#}"
         );
+        assert_eq!(sup.store.load_all().await.expect("load").len(), 1);
 
-        // Ten minutes of observed output, the way the ticker would have
-        // recorded it while the client was away.
-        let observed_at = original.created_at + 600;
-        sup.store
-            .record_activity(&original.id, observed_at)
-            .await
-            .expect("advance the durable stamp");
-
-        let replayed = sup
-            .create_session_without_overrides(
-                "/",
-                "agent",
-                None,
-                80,
-                24,
-                Some(IntentClaim {
-                    intent_key: "v9-key".to_string(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect("an identical retry across the upgrade must replay, not conflict");
-        assert_eq!(
-            replayed.id, original.id,
-            "the retry must answer with the session the key already made"
-        );
-        assert_eq!(
-            replayed.last_activity_at, observed_at,
-            "a replay answers from the record as it stands, not from the create it is \
-             replaying"
-        );
-        assert_eq!(
-            sup.store.load_all().await.expect("load").len(),
-            1,
-            "and must not have launched a second agent for the same intent"
-        );
-    }
-
-    /// The other half of the same upgrade: a PENDING reservation — a create
-    /// the old binary claimed but never settled (a crash, a kill) — must
-    /// still be recognized as this request's own, so the retry reconciles
-    /// it under the reserved identity instead of being refused as a reuse.
-    ///
-    /// Worth pinning separately from the settled case because the two take
-    /// different paths through `resolve_reservation`, and the fingerprint
-    /// check happens BEFORE either — a mismatch would short-circuit both
-    /// with `Conflict` and leave the reserved identity stranded forever,
-    /// which is worse than the settled case: there is not even a session to
-    /// point at.
-    #[farhelm_testtrace::test]
-    async fn a_pending_v9_reservation_is_reconciled_instead_of_conflicting() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
+        // Pending: the old binary claimed the key and never settled it.
         sup.store
             .insert_session(
                 StoredSession {
@@ -23366,45 +23213,42 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
                 },
                 Some(IntentClaim {
-                    intent_key: "v9-key".to_string(),
-                    fingerprint: V9_STORED_FINGERPRINT.to_string(),
+                    intent_key: "pending".to_string(),
+                    fingerprint: PRE_LAUNCH_KINDS_FINGERPRINT.to_string(),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
             .await
             .expect("plant a pre-upgrade pending claim");
-
-        let session = sup
-            .create_session_without_overrides(
-                "/",
-                "agent",
-                None,
-                80,
-                24,
-                Some(IntentClaim {
-                    intent_key: "v9-key".to_string(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
+        let refused = sup
+            .create_session_without_overrides("/", "agent", None, 80, 24, Some(retry("pending")))
             .await
-            .expect("the retry must reconcile the pre-upgrade claim, not conflict with it");
+            .expect_err("a retry of a pre-upgrade pending claim is refused, not reconciled");
+        assert_eq!(error_kind(&refused), ErrorKind::Conflict);
+        let rows = sup.store.load_all().await.expect("load");
+        assert_eq!(rows.len(), 2, "the refused retry created nothing");
+        let stranded = rows
+            .iter()
+            .find(|row| row.id == "stranded")
+            .expect("the pending row is kept");
         assert_eq!(
-            session.id, "stranded",
-            "the reserved identity is what makes this a reconciliation rather than a new create"
+            stranded.outcome,
+            LastOutcome::Launching,
+            "and is not launched by the refused retry"
         );
     }
 
@@ -23474,8 +23318,8 @@ exit 0
     /// The snapshot is item 7's IMMUTABLE record, and immutability is only
     /// worth anything if the value that lands is the resolved one. This
     /// drives a real create through the store and asserts what came back
-    /// out of it: kind derivation from the first token, the default template
-    /// built from the complete launch argv, and the honest restart offer that
+    /// out of it: the declared agent type, the declared resume command
+    /// split into its stored argv, and the honest restart offer that
     /// follows from having no captured identity yet.
     ///
     /// It also pins the negative half — the validation invariant refuses
@@ -23500,12 +23344,14 @@ exit 0
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "/opt/bin/claude --dangerously-skip-permissions".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        launch: None,
-                    },
+                    launch: declared_command(
+                        "/opt/bin/claude --dangerously-skip-permissions {farhelm_args}",
+                        LaunchHarness::Claude,
+                        Some(
+                            "/opt/bin/claude --dangerously-skip-permissions --resume \
+                             {conversation} {farhelm_args}",
+                        ),
+                    ),
                     title: Some("t".to_string()),
                     cols: 80,
                     rows: 24,
@@ -23520,7 +23366,7 @@ exit 0
         assert_eq!(
             created.as_ref().unwrap().restart_offer,
             RestartOffer::NotCaptured,
-            "nothing can be captured at create time, and the derived template needs an id"
+            "nothing can be captured at create time, and the resume command needs an id"
         );
         let snapshot = sup
             .session_snapshot(&id)
@@ -23534,9 +23380,10 @@ exit 0
                 "/opt/bin/claude",
                 "--dangerously-skip-permissions",
                 "--resume",
-                crate::agent_kind::CONVERSATION_PLACEHOLDER
+                crate::agent_kind::CONVERSATION_PLACEHOLDER,
+                crate::agent_kind::FARHELM_ARGS_PLACEHOLDER
             ],
-            "the template preserves the original program path and launch arguments"
+            "the stored resume command is the declared one, split, with its placeholders"
         );
         assert_eq!(snapshot.captured_conversation, None);
         assert_eq!(snapshot.resume_argv, None);
@@ -23549,12 +23396,11 @@ exit 0
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "claude".to_string(),
-                        agent_kind: None,
-                        resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
-                        launch: None,
-                    },
+                    launch: declared_command(
+                        "claude {farhelm_args}",
+                        LaunchHarness::Claude,
+                        Some("claude --continue {farhelm_args}"),
+                    ),
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -23571,13 +23417,11 @@ exit 0
         );
     }
 
-    /// A raw create's invocation comes straight from the HTTP API's
+    /// A command launch's command comes straight from the HTTP API's
     /// `CreateSession` (or a test), never from `farhelm spawn`, which only
-    /// inherits a bundle and never carries a raw invocation. So `{cwd}` as
-    /// the invocation's PROGRAM has to be refused here, in the shared
-    /// wording (`agent_kind::ensure_no_cwd_program`) — otherwise a
-    /// wrapper-shaped invocation given directly to the raw-create path would
-    /// reach tmux.
+    /// inherits a launch. So `{cwd}` as the command's PROGRAM has to be
+    /// refused here, in the shared wording — otherwise a wrapper-shaped
+    /// command given directly to the create path would reach tmux.
     #[farhelm_testtrace::test]
     async fn a_raw_create_refuses_a_cwd_placeholder_as_the_program() {
         let state = StateDir::new();
@@ -23591,12 +23435,10 @@ exit 0
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
-                mode: CreateMode::Raw {
-                    invocation: format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
+                launch: SessionLaunch::plain_command(format!(
+                    "{} claude",
+                    crate::agent_kind::CWD_PLACEHOLDER
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -23610,12 +23452,12 @@ exit 0
         let refusal = format!("{refusal:#}");
         // Pin the FULL shared wording, not one fragment: an editor user
         // needs the placeholder name to recognize what tripped the
-        // refusal, "PROGRAM" to understand why, and the remedy to know
+        // refusal, "the program" to understand why, and the remedy to know
         // what to do about it. A test that checked only one substring
         // could pass while any of the other two silently regressed away.
         assert!(
             refusal.contains(crate::agent_kind::CWD_PLACEHOLDER)
-                && refusal.contains("PROGRAM")
+                && refusal.contains("cannot be the program")
                 && refusal.contains("belongs in an argument slot"),
             "the refusal uses the shared placeholder-as-program wording: {refusal}"
         );
@@ -23643,15 +23485,14 @@ exit 0
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
-                mode: CreateMode::Raw {
-                    invocation: format!(
-                        "{} --model x",
+                launch: declared_command(
+                    &format!(
+                        "{} --model x {{farhelm_args}}",
                         crate::agent_kind::CONVERSATION_PLACEHOLDER
                     ),
-                    agent_kind: Some(AgentKind::Claude),
-                    resume_template: None,
-                    launch: None,
-                },
+                    LaunchHarness::Claude,
+                    None,
+                ),
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -23691,12 +23532,10 @@ exit 0
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
-                mode: CreateMode::Raw {
-                    invocation: format!("wrapper {} claude", crate::agent_kind::CWD_PLACEHOLDER),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
+                launch: SessionLaunch::plain_command(format!(
+                    "wrapper {} claude",
+                    crate::agent_kind::CWD_PLACEHOLDER
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -23710,19 +23549,21 @@ exit 0
         );
     }
 
-    /// A restart must preserve the launch arguments that survived create,
-    /// for plain and permission-skipping Claude sessions alike.
+    /// A restart runs the resume command the launch declared, filled with
+    /// the captured conversation and nothing else changed, for plain and
+    /// permission-skipping Claude commands alike; `{farhelm_args}` stays for
+    /// the spawn to expand. Nothing is derived from the start command.
     /// Read both the template and captured identity through the durable
     /// snapshot seam so an in-memory-only fix cannot satisfy this test.
     /// The launch shim is deliberately absent in an owned directory: create
     /// persists its row before launch failure, and no vendor process runs.
     #[farhelm_testtrace::test]
-    async fn derived_resume_preserves_create_argv_for_claude() {
+    async fn a_declared_resume_command_is_what_restart_runs() {
         let cases = [
             (
                 "claude",
-                vec!["claude", "--resume", "{conversation}"],
-                vec!["claude", "--resume", "conversation-1"],
+                vec!["claude", "--resume", "{conversation}", "{farhelm_args}"],
+                vec!["claude", "--resume", "conversation-1", "{farhelm_args}"],
             ),
             (
                 "claude --dangerously-skip-permissions",
@@ -23731,12 +23572,14 @@ exit 0
                     "--dangerously-skip-permissions",
                     "--resume",
                     "{conversation}",
+                    "{farhelm_args}",
                 ],
                 vec![
                     "claude",
                     "--dangerously-skip-permissions",
                     "--resume",
                     "conversation-1",
+                    "{farhelm_args}",
                 ],
             ),
         ];
@@ -23758,12 +23601,11 @@ exit 0
                         github_checkout: None,
                         cwd: &cwd,
                         parent: None,
-                        mode: CreateMode::Raw {
-                            invocation: invocation.to_string(),
-                            agent_kind: None,
-                            resume_template: None,
-                            launch: None,
-                        },
+                        launch: declared_command(
+                            &format!("{invocation} {{farhelm_args}}"),
+                            LaunchHarness::Claude,
+                            Some(&expected_template.join(" ")),
+                        ),
                         title: None,
                         cols: 80,
                         rows: 24,
@@ -23822,7 +23664,7 @@ exit 0
     /// Drive `handle_control`'s create arm three times against one intent
     /// key to pin the two halves of item 6 that need no successful launch:
     /// a failed create REPLAYS its original error, and a key reused for a
-    /// request differing only in an override is a `Conflict`.
+    /// request differing only in one launch field is a `Conflict`.
     ///
     /// The failure is provoked by an unwritable `launch/` (the same
     /// genuine `EACCES` `create_session_never_launches_tmux_after_a_failed_
@@ -23842,20 +23684,22 @@ exit 0
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
-        let request = |req_id: u64, agent_kind: Option<AgentKind>| ControlMsg::CreateSession {
+        let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
             req_id,
             parent: None,
             inherit_agent: false,
             cwd: "/".to_string(),
-            invocation: Some("agent".to_string()),
-            launch: None,
+            launch: Some(SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                command: "agent".to_string(),
+                yolo,
+                agent: None,
+                resume: None,
+            })),
             title: None,
             cols: 80,
             rows: 24,
             intent_key: Some("one-intent".to_string()),
             confirm_yolo: false,
-            agent_kind,
-            resume_template: None,
             github_checkout: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
@@ -23870,7 +23714,7 @@ exit 0
         }
         handle_control(
             &sup,
-            request(1, None),
+            request(1, false),
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -23897,7 +23741,7 @@ exit 0
         // Same key, same request: the ORIGINAL error, verbatim.
         handle_control(
             &sup,
-            request(2, None),
+            request(2, false),
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -23918,11 +23762,11 @@ exit 0
             "an unwritable state directory is not something the caller could have avoided"
         );
 
-        // Same key, a request differing ONLY in the agent-kind override:
-        // a reused key, refused rather than merged.
+        // Same key, a request differing ONLY in the YOLO assertion: a
+        // reused key, refused rather than merged.
         handle_control(
             &sup,
-            request(3, Some(AgentKind::Claude)),
+            request(3, true),
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
@@ -24059,7 +23903,7 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    fingerprint: command_fingerprint("/", "agent", None),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
@@ -24095,7 +23939,7 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    fingerprint: command_fingerprint("/", "agent", None),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
@@ -24135,7 +23979,7 @@ exit 0
         let cwd = work.to_string_lossy().to_string();
         let claim = |fingerprint_cwd: &str, invocation: &str| IntentClaim {
             intent_key: "one-intent".to_string(),
-            fingerprint: raw_fingerprint(fingerprint_cwd, invocation, None, None, None),
+            fingerprint: command_fingerprint(fingerprint_cwd, invocation, None),
             dedup_scope: DedupScope::Permanent,
         };
 
@@ -24247,7 +24091,7 @@ exit 0
 
         // A pending reservation whose attempt never launched: the shape a
         // crash after the claim leaves, and the one a retry relaunches.
-        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
+        let fingerprint = command_fingerprint("/", "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -24263,13 +24107,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -24332,7 +24177,7 @@ exit 0
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
+        let fingerprint = command_fingerprint("/", "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -24348,13 +24193,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-ended".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -24456,15 +24302,14 @@ exit 0
                     parent: None,
                     inherit_agent: false,
                     cwd: "/".to_string(),
-                    invocation: Some("agent".to_string()),
-                    launch: None,
+                    launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                        "agent".to_string(),
+                    )),
                     title: Some(title.clone()),
                     cols: 80,
                     rows: 24,
                     intent_key: None,
                     confirm_yolo: false,
-                    agent_kind: None,
-                    resume_template: None,
                     github_checkout: None,
                 },
                 ConnectionCtx {
@@ -24506,15 +24351,14 @@ exit 0
                 parent: None,
                 inherit_agent: false,
                 cwd: "/".to_string(),
-                invocation: Some("agent".to_string()),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "agent".to_string(),
+                )),
                 title: Some("🚀 デモ project — a normal title".to_string()),
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
             },
             ConnectionCtx {
@@ -24567,15 +24411,14 @@ exit 0
                 parent: None,
                 inherit_agent: false,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
-                invocation: Some("agent".to_string()),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "agent".to_string(),
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
             },
             ConnectionCtx {
@@ -24644,15 +24487,14 @@ exit 0
             parent: None,
             inherit_agent: false,
             cwd: "/".to_string(),
-            invocation: Some("agent".to_string()),
-            launch: None,
+            launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                "agent".to_string(),
+            )),
             title: Some(title.to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("one-intent".to_string()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
             github_checkout: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
@@ -24785,11 +24627,9 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: raw_fingerprint(
+                    fingerprint: command_fingerprint(
                         &work.path().to_string_lossy(),
                         "sh -c 'sleep 300'",
-                        None,
-                        None,
                         None,
                     ),
                     dedup_scope: DedupScope::Permanent,
@@ -24852,7 +24692,7 @@ exit 0
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
+        let fingerprint = command_fingerprint("/", "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -24868,13 +24708,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -24946,7 +24787,7 @@ exit 0
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let fingerprint = raw_fingerprint("/", "agent", None, None, None);
+        let fingerprint = command_fingerprint("/", "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -24962,13 +24803,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -25092,7 +24934,7 @@ exit 0
                 24,
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
-                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    fingerprint: command_fingerprint("/", "agent", None),
                     dedup_scope: DedupScope::Permanent,
                 }),
             )
@@ -25281,16 +25123,11 @@ exit 0
                     parent: None,
                     // A reporting agent type with a resume command: restart
                     // only resumes, and the conversation is recorded below.
-                    mode: CreateMode::Raw {
-                        invocation: "agent".to_string(),
-                        agent_kind: Some(AgentKind::Claude),
-                        resume_template: Some(vec![
-                            "agent".to_string(),
-                            "--resume".to_string(),
-                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                        ]),
-                        launch: None,
-                    },
+                    launch: declared_command(
+                        "agent {farhelm_args}",
+                        LaunchHarness::Claude,
+                        Some("agent --resume {conversation} {farhelm_args}"),
+                    ),
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -25326,7 +25163,7 @@ exit 0
             })
         };
 
-        sup.restart_session(&created.id, true, None, None, None)
+        sup.restart_session(&created.id, true, None)
             .await
             .expect("restart");
         released.wait().await;
@@ -25381,7 +25218,7 @@ exit 0
         std::os::unix::fs::symlink(&original, &link).expect("symlink");
         let cwd = link.to_string_lossy().to_string();
 
-        let fingerprint = raw_fingerprint(&cwd, "agent", None, None, None);
+        let fingerprint = command_fingerprint(&cwd, "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -25397,13 +25234,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     // What the crashed attempt resolved, and what capture
                     // would still identify as the authorized directory.
                     canonical_cwd: Some(
@@ -25546,13 +25384,14 @@ exit 0
             last_work_started_at: 0,
             creation_seq: 0,
             cwd: cwd.clone(),
-            invocation: "agent".to_string(),
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::Legacy {
+                invocation: "agent".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Generic,
+                resume_template: None,
+            },
             tmux_name: "fh-stranded".to_string(),
             pane: String::new(),
             outcome: LastOutcome::Launching,
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
             generation: 7,
@@ -25589,7 +25428,6 @@ exit 0
                     destination: DestinationResolution::Existing,
                     cwd: cwd.clone(),
                     launch_cwd: cwd.clone(),
-                    invocation: "agent".to_string(),
                     argv: vec!["agent".to_string()],
                     // The STALE label: what the retry resolved before the
                     // rename it knows nothing about.
@@ -25601,7 +25439,7 @@ exit 0
                         resume_template: None,
                     },
                     canonical_cwd: Some(cwd.clone()),
-                    launch: None,
+                    launch: SessionLaunch::plain_command("agent"),
                 },
                 &Reserved::Retry(Box::new(reservation)),
                 &sup.admit_create(Some("key"), None)
@@ -25694,7 +25532,7 @@ exit 0
 
         // The retry path reads its argv from the crashed attempt's ROW,
         // which a build with looser rules could have written.
-        let fingerprint = raw_fingerprint(&cwd, "''", None, None, None);
+        let fingerprint = command_fingerprint(&cwd, "''", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -25710,13 +25548,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
-                    invocation: "''".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "''".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: Some(cwd.clone()),
                     captured_conversation: None,
                     generation: 0,
@@ -25884,12 +25723,7 @@ exit 0
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
-                mode: CreateMode::Raw {
-                    invocation: "claude".to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
+                launch: SessionLaunch::plain_command("claude"),
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -25989,7 +25823,7 @@ exit 0
             .expect("supervisor")
         };
 
-        let fingerprint = raw_fingerprint(&cwd, "agent", None, None, None);
+        let fingerprint = command_fingerprint(&cwd, "agent", None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -26005,13 +25839,14 @@ exit 0
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: Some(canonical_original.clone()),
                     captured_conversation: None,
                     generation: 0,
@@ -26110,12 +25945,10 @@ exit 0
     // and the entry's tripwire flag.
     // -----------------------------------------------------------------
 
-    /// A snapshot for `kind`, as the create path would have resolved one.
-    ///
-    /// Built through [`IntegrationSnapshot::resolve`] rather than by
-    /// struct literal so these tests exercise the same snapshot shape a
-    /// real session carries — including the derived resume template, whose
-    /// absence would be a different (and silently passing) fixture.
+    /// A snapshot for `kind`, with the resume command a session of that
+    /// kind carries (see [`program_snapshot`]), so these tests exercise the
+    /// shape a real session has rather than a resume-less fixture that
+    /// would pass silently.
     fn hook_snapshot(kind: AgentKind) -> IntegrationSnapshot {
         let argv0 = match kind {
             AgentKind::Claude => "claude",
@@ -26126,8 +25959,7 @@ exit 0
             AgentKind::Grok => "grok",
             AgentKind::Generic => "agent",
         };
-        IntegrationSnapshot::resolve(&[argv0.to_string()], Some(kind), None)
-            .expect("a derived template resolves")
+        program_snapshot(argv0)
     }
 
     /// The exact tail each integrated kind expects for `exe`, straight
@@ -26146,6 +25978,189 @@ exit 0
         crate::agent_kind::integration_for(kind)
             .expect("an integrated kind")
             .hook_argv(exe, instructions)
+    }
+
+    /// Spec: for a new launch, `{farhelm_args}` is replaced IN PLACE by the
+    /// launch's kind's arguments for the phase being spawned, the reporter
+    /// settings travel as environment rather than argv, and nothing else in
+    /// the command changes. Per kind and setting:
+    /// - Claude and Codex get their hook flags on start and resume alike,
+    ///   and nothing (not hooked) when `FARHELM_AGENT_HOOKS` excludes them;
+    /// - Goose gets its reporter extension on start only, and its controls
+    ///   in the environment on both; with hooks off, a start gets nothing
+    ///   at all while a resume still gets `FARHELM_GOOSE_REPORTER_ENABLED=0`,
+    ///   which is what switches off the reporter the conversation stored;
+    /// - Pi gets its extension plus the instructions pointer, and drops the
+    ///   pointer under `FARHELM_AGENT_INSTRUCTIONS=off`;
+    /// - a kind with no integration loses the placeholder and gains nothing.
+    ///
+    /// Why: this is the path every session created since launch kinds
+    /// spawns through; the legacy injection tests below cover only sessions
+    /// from before them. SPEC.md forbids writing reporter settings into the
+    /// command for a new launch, and a placeholder in the middle of the
+    /// argv proves the expansion is a splice, not an append.
+    #[farhelm_testtrace::test]
+    fn farhelm_args_expand_at_the_placeholder_per_kind_phase_and_setting() {
+        use crate::agent_kind::{AgentHooks, AgentInstructions, LaunchPhase};
+        let argv = |kind: &str| -> Vec<String> {
+            [
+                kind,
+                "--before",
+                crate::agent_kind::FARHELM_ARGS_PLACEHOLDER,
+                "--after",
+            ]
+            .map(String::from)
+            .to_vec()
+        };
+        let around = |kind: &str, args: Vec<String>| -> Vec<String> {
+            [
+                vec![kind.to_string(), "--before".to_string()],
+                args,
+                vec!["--after".to_string()],
+            ]
+            .concat()
+        };
+        let expand = |kind: AgentKind,
+                      phase: LaunchPhase,
+                      hooks: &AgentHooks,
+                      instructions: AgentInstructions| {
+            let name = format!("{kind:?}").to_lowercase();
+            with_farhelm_args_using(
+                argv(&name),
+                FarhelmArgsMode::Expand(phase),
+                &hook_snapshot(kind),
+                hooks,
+                instructions,
+                Some("/opt/farhelm"),
+                Some("/opt/extension.ts"),
+                "session-1",
+            )
+        };
+        let goose_env = |enabled: u8, announce: u8| -> Vec<(String, String)> {
+            vec![
+                (
+                    crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR.to_string(),
+                    enabled.to_string(),
+                ),
+                (
+                    crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR.to_string(),
+                    announce.to_string(),
+                ),
+                (
+                    crate::launch::GOOSE_REPORTER_EXE_ENV_VAR.to_string(),
+                    "/opt/farhelm".to_string(),
+                ),
+            ]
+        };
+
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
+                let name = format!("{kind:?}").to_lowercase();
+                let tail = expected_hook_tail(kind, "/opt/farhelm", AgentInstructions::On);
+                assert_eq!(
+                    expand(kind, phase, &AgentHooks::All, AgentInstructions::On),
+                    (around(&name, tail), Vec::new(), true),
+                    "{kind:?} {phase:?}"
+                );
+                assert_eq!(
+                    expand(kind, phase, &AgentHooks::None, AgentInstructions::On),
+                    (around(&name, Vec::new()), Vec::new(), false),
+                    "{kind:?} {phase:?} with hooks off"
+                );
+            }
+        }
+
+        let extension = [
+            "--with-extension".to_string(),
+            crate::agent_kind::goose::REPORTER_EXTENSION.to_string(),
+        ];
+        assert_eq!(
+            expand(
+                AgentKind::Goose,
+                LaunchPhase::Start,
+                &AgentHooks::All,
+                AgentInstructions::On
+            ),
+            (around("goose", extension.to_vec()), goose_env(1, 1), true)
+        );
+        assert_eq!(
+            expand(
+                AgentKind::Goose,
+                LaunchPhase::Resume,
+                &AgentHooks::All,
+                AgentInstructions::Off
+            ),
+            (around("goose", Vec::new()), goose_env(1, 0), true),
+            "a Goose resume reuses the stored reporter: controls only"
+        );
+        assert_eq!(
+            expand(
+                AgentKind::Goose,
+                LaunchPhase::Start,
+                &AgentHooks::None,
+                AgentInstructions::On
+            ),
+            (around("goose", Vec::new()), Vec::new(), false)
+        );
+        assert_eq!(
+            expand(
+                AgentKind::Goose,
+                LaunchPhase::Resume,
+                &AgentHooks::None,
+                AgentInstructions::On
+            ),
+            (around("goose", Vec::new()), goose_env(0, 0), false),
+            "hooks off must still switch off the reporter a resumed conversation stored"
+        );
+
+        let pi_env = vec![(
+            crate::launch::PI_REPORTER_EXE_ENV_VAR.to_string(),
+            "/opt/farhelm".to_string(),
+        )];
+        let pi_extension = ["-e".to_string(), "/opt/extension.ts".to_string()];
+        assert_eq!(
+            expand(
+                AgentKind::Pi,
+                LaunchPhase::Start,
+                &AgentHooks::All,
+                AgentInstructions::On
+            ),
+            (
+                around(
+                    "pi",
+                    [
+                        pi_extension.to_vec(),
+                        vec![
+                            "--append-system-prompt".to_string(),
+                            crate::agent_kind::INSTRUCTIONS_POINTER.to_string(),
+                        ],
+                    ]
+                    .concat()
+                ),
+                pi_env.clone(),
+                true
+            )
+        );
+        assert_eq!(
+            expand(
+                AgentKind::Pi,
+                LaunchPhase::Resume,
+                &AgentHooks::All,
+                AgentInstructions::Off
+            ),
+            (around("pi", pi_extension.to_vec()), pi_env, true),
+            "instructions off drops the pointer, not the reporter"
+        );
+
+        assert_eq!(
+            expand(
+                AgentKind::Generic,
+                LaunchPhase::Start,
+                &AgentHooks::All,
+                AgentInstructions::On
+            ),
+            (around("generic", Vec::new()), Vec::new(), false)
+        );
     }
 
     /// The injection appends each integrated kind's OWN hook flags after
@@ -27444,8 +27459,21 @@ exit 0
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
+        // A command launch declaring Claude: an undeclared command gets no
+        // hook at all.
         let info = sup
-            .create_session_without_overrides("/", "claude", None, 80, 24, None)
+            .create_session(
+                CreateInputs {
+                    github_checkout: None,
+                    cwd: "/",
+                    parent: None,
+                    launch: declared_command("claude {farhelm_args}", LaunchHarness::Claude, None),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
             .await
             .expect("create");
 
@@ -27462,7 +27490,7 @@ exit 0
         assert_eq!(
             spec.argv,
             [vec!["claude".to_string()], expected].concat(),
-            "the spec the shim execs must be the user's invocation followed by the hook flags"
+            "the spec the shim execs must be the command with the hook flags at {{farhelm_args}}"
         );
 
         assert!(
@@ -27594,12 +27622,7 @@ exit 0
                         cwd: "",
                         parent: None,
                         github_checkout: Some(checkout),
-                        mode: CreateMode::Raw {
-                            invocation: "agent".into(),
-                            agent_kind: None,
-                            resume_template: None,
-                            launch: None,
-                        },
+                        launch: SessionLaunch::plain_command("agent"),
                         title: title.map(str::to_owned),
                         cols: 80,
                         rows: 24,
@@ -27765,127 +27788,52 @@ exit 0
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
     }
 
-    /// Fresh intent must retain launch selection even when two selections
-    /// compile to identical commands. Otherwise a reused key could replay a
-    /// different saved setup. This includes inherited metadata on Raw mode;
-    /// an unset trust choice must retain its older serialized shape too.
-    /// The frozen Existing encodings remain covered by their literal tests.
-    #[farhelm_testtrace::test]
-    fn fresh_fingerprint_binds_launch_selection_without_changing_existing() {
-        let root = tempfile::tempdir().unwrap();
-        let checkout = checkout_fixture(root.path());
-        let selection = farhelm_proto::LaunchSelection {
-            harness: farhelm_proto::LaunchHarness::Codex,
-            model: None,
-            effort: None,
-            permissions: None,
-            workspace_trust: None,
-        };
-        let mut explicit = selection.clone();
-        explicit.model = Some("explicit-model".into());
-        for structured in [false, true] {
-            let mode = |selection: farhelm_proto::LaunchSelection| {
-                if structured {
-                    CreateMode::Structured {
-                        invocation: "same-command".into(),
-                        agent_kind: AgentKind::Codex,
-                        resume_template: None,
-                        selection,
-                    }
-                } else {
-                    CreateMode::Raw {
-                        invocation: "same-command".into(),
-                        agent_kind: Some(AgentKind::Codex),
-                        resume_template: None,
-                        launch: Some(selection),
-                    }
-                }
-            };
-            let implicit_mode = mode(selection.clone());
-            let explicit_mode = mode(explicit.clone());
-            let original = create_fingerprint(Some(&checkout), None, "", &implicit_mode, None);
-            let historical_selection =
-                r#"{"harness":"codex","model":null,"effort":null,"permissions":null}"#;
-            assert!(
-                original.contains(historical_selection),
-                "an unset trust choice must not alter a stored fresh-checkout fingerprint"
-            );
-            assert!(!original.contains("workspace_trust"));
-            assert_ne!(
-                original,
-                create_fingerprint(Some(&checkout), None, "", &explicit_mode, None)
-            );
-            assert_eq!(
-                original,
-                create_fingerprint(Some(&checkout), None, "", &implicit_mode, None)
-            );
-            let mut trusted = selection.clone();
-            trusted.workspace_trust = Some(true);
-            let trusted = create_fingerprint(Some(&checkout), None, "", &mode(trusted), None);
-            assert_ne!(original, trusted);
-            assert!(trusted.contains("\"workspace_trust\":true"));
-            let FreshCreateFingerprint::GithubCheckout {
-                parent,
-                requested_cwd,
-                mode: recovered_mode,
-                title,
-                checkout: recovered_checkout,
-            } = serde_json::from_str(&original).expect("decode durable launch snapshot")
-            else {
-                panic!("a launch fingerprint must retain its resolved snapshot");
-            };
-            assert_eq!(
-                original,
-                create_fingerprint(
-                    Some(&recovered_checkout),
-                    parent.as_deref(),
-                    &requested_cwd,
-                    &recovered_mode,
-                    title.as_deref(),
-                ),
-                "recovery must reconstruct all accepted inputs without a catalog lookup"
-            );
-            if !structured {
-                assert_eq!(
-                    create_fingerprint(None, None, "/work", &implicit_mode, None),
-                    r#"["/work","same-command",null,"codex",null]"#,
-                );
-            }
-        }
-    }
-
-    /// A fresh-checkout reservation retains its accepted raw bundle, including
-    /// parent and title inputs, and refuses other encoding versions. A
-    /// reservation stored before profiles were removed, whose mode still
-    /// carries the `source_profile` member (null or a snapshot), decodes into
-    /// this build's bundle but never re-encodes to the stored string.
+    /// A fresh-checkout reservation keeps the whole resolved launch, with
+    /// its parent and title inputs, so recovery rebuilds the accepted create
+    /// without a catalog lookup, and two launches differing only in a
+    /// choice their commands do not show (an agent launch's selection) never
+    /// share a fingerprint.
     ///
-    /// Why: the member is gone from `CreateMode`, so serde drops it on
-    /// decode. Recovery must still work from such a row, and a retry of it
-    /// must be refused as key reuse rather than matched, because matching
-    /// would launch under a different stored request than the one accepted
-    /// (SPEC_impl.md, "Launch-kinds reservations").
+    /// Why: reconciliation after a lost reply recovers the create from this
+    /// stored value alone; a fingerprint that dropped the selection would let
+    /// a reused key replay a different saved setup.
     #[farhelm_testtrace::test]
-    fn fresh_fingerprint_recovers_the_raw_bundle_and_rejects_other_versions() {
+    fn fresh_fingerprint_binds_and_recovers_the_resolved_launch() {
         let root = tempfile::tempdir().unwrap();
         let checkout = checkout_fixture(root.path());
-        let mode = CreateMode::Raw {
-            invocation: "accepted-command".into(),
-            agent_kind: Some(AgentKind::Codex),
-            resume_template: Some(vec!["accepted-resume".into(), "{session_id}".into()]),
-            launch: None,
+        let agent = |model: Option<&str>| SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: model.map(str::to_string),
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            start: vec!["same-command".into(), "{farhelm_args}".into()],
+            resume: None,
         };
+        let original = create_fingerprint(Some(&checkout), None, "", &agent(None), None);
+        assert_ne!(
+            original,
+            create_fingerprint(Some(&checkout), None, "", &agent(Some("explicit")), None),
+            "the selection is bound even when the commands are identical"
+        );
+        let launch = declared_command(
+            "accepted-command {farhelm_args}",
+            LaunchHarness::Codex,
+            Some("accepted-resume {conversation} {farhelm_args}"),
+        );
         let encoded = create_fingerprint(
             Some(&checkout),
             Some("parent-id"),
             "requested-cwd",
-            &mode,
+            &launch,
             Some("accepted-title"),
         );
         let FreshCreateFingerprint::GithubCheckout {
             parent,
             requested_cwd,
-            mode: recovered,
+            launch: recovered,
             title,
             checkout: resolved,
         } = serde_json::from_str(&encoded).unwrap()
@@ -27896,58 +27844,53 @@ exit 0
         assert_eq!(requested_cwd, "requested-cwd");
         assert_eq!(title.as_deref(), Some("accepted-title"));
         assert_eq!(*resolved, checkout);
-        let CreateMode::Raw {
-            invocation,
-            agent_kind,
-            resume_template,
-            launch,
-        } = recovered
-        else {
-            panic!("a raw launch must retain raw mode");
-        };
-        assert_eq!(invocation, "accepted-command");
-        assert_eq!(agent_kind, Some(AgentKind::Codex));
+        assert_eq!(recovered, launch);
         assert_eq!(
-            resume_template,
-            Some(vec!["accepted-resume".into(), "{session_id}".into()])
+            encoded,
+            create_fingerprint(
+                Some(&resolved),
+                parent.as_deref(),
+                &requested_cwd,
+                &recovered,
+                title.as_deref(),
+            ),
+            "recovery must reconstruct all accepted inputs"
         );
-        assert!(launch.is_none());
+    }
 
-        // Pre-upgrade rows: the same reservation as an older build stored
-        // it, with the `source_profile` member every raw mode carried —
-        // null for a typed command, a snapshot for a profile-backed create.
-        for snapshot in [
-            serde_json::Value::Null,
-            serde_json::json!({"id": "old-profile-id", "name": "old-profile-name"}),
-        ] {
-            let mut stored: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            stored["mode"]["Raw"]["source_profile"] = snapshot.clone();
-            let stored = serde_json::to_string(&stored).unwrap();
-            let FreshCreateFingerprint::GithubCheckout {
-                mode: recovered_old,
-                ..
-            } = serde_json::from_str(&stored).expect("a pre-upgrade reservation still decodes")
-            else {
-                panic!("a launch fingerprint must retain its resolved snapshot");
-            };
-            assert_ne!(
-                create_fingerprint(
-                    Some(&checkout),
-                    Some("parent-id"),
-                    "requested-cwd",
-                    &recovered_old,
-                    Some("accepted-title"),
-                ),
-                stored,
-                "a retry under a pre-upgrade key ({snapshot}) must never match its stored request"
-            );
-        }
-
+    /// A fresh-checkout reservation in any other encoding does not decode:
+    /// an unknown future version, an existing-directory fingerprint, and a
+    /// `github_checkout_v3` reservation written before launch kinds.
+    ///
+    /// Why: SPEC_impl.md ("Launch-kinds reservations") has the retry of such
+    /// a key refused explicitly rather than treated as unknown, which would
+    /// allocate a second checkout for one intended create; reconciliation
+    /// turns this decode failure into that refusal.
+    #[farhelm_testtrace::test]
+    fn fresh_fingerprint_rejects_other_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let launch = SessionLaunch::plain_command("accepted-command");
+        let encoded = create_fingerprint(Some(&checkout), None, "", &launch, None);
         let mut unknown: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         unknown["kind"] = serde_json::json!("github_checkout_future");
         assert!(serde_json::from_value::<FreshCreateFingerprint>(unknown).is_err());
-        let existing = create_fingerprint(None, None, "/work", &mode, None);
+        let existing = create_fingerprint(None, None, "/work", &launch, None);
         assert!(serde_json::from_str::<FreshCreateFingerprint>(&existing).is_err());
+        let mut v3: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let object = v3.as_object_mut().unwrap();
+        object.remove("launch");
+        object.insert("kind".into(), serde_json::json!("github_checkout_v3"));
+        object.insert(
+            "mode".into(),
+            serde_json::json!({"Raw": {
+                "invocation": "accepted-command",
+                "agent_kind": null,
+                "resume_template": null,
+                "launch": null,
+            }}),
+        );
+        assert!(serde_json::from_value::<FreshCreateFingerprint>(v3).is_err());
     }
 
     /// Lookup must distinguish unknown keys from recorded refusals without
@@ -28042,12 +27985,7 @@ exit 0
             None,
             None,
             "/work",
-            &CreateMode::Raw {
-                invocation: "agent".to_string(),
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
-            },
+            &SessionLaunch::plain_command("agent"),
             None,
         );
         for (key, fingerprint) in [
@@ -28474,12 +28412,7 @@ exit 0
             Some(checkout),
             None,
             "",
-            &CreateMode::Raw {
-                invocation: "agent".to_string(),
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
-            },
+            &SessionLaunch::plain_command("agent"),
             None,
         )
     }
@@ -28497,12 +28430,7 @@ exit 0
                 cwd: "",
                 parent: None,
                 github_checkout: Some(checkout.clone()),
-                mode: CreateMode::Raw {
-                    invocation: "agent".to_string(),
-                    agent_kind: None,
-                    resume_template: None,
-                    launch: None,
-                },
+                launch: SessionLaunch::plain_command("agent"),
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -28876,7 +28804,7 @@ exit 0
         let claim = IntentClaim {
             intent_key: "sentinel-recovery".into(),
             fingerprint: checkout.as_ref().map_or_else(
-                || raw_fingerprint("/", "agent", None, None, None),
+                || command_fingerprint("/", "agent", None),
                 checkout_fingerprint,
             ),
             dedup_scope: DedupScope::Permanent,
@@ -30344,16 +30272,11 @@ exit 0
                     cwd: "",
                     parent: None,
                     github_checkout: Some(checkout_fixture(&root)),
-                    mode: CreateMode::Raw {
-                        invocation: "agent".to_string(),
-                        agent_kind: Some(AgentKind::Claude),
-                        resume_template: Some(vec![
-                            "agent".to_string(),
-                            "--resume".to_string(),
-                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                        ]),
-                        launch: None,
-                    },
+                    launch: declared_command(
+                        "agent {farhelm_args}",
+                        LaunchHarness::Claude,
+                        Some("agent --resume {conversation} {farhelm_args}"),
+                    ),
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -30400,7 +30323,7 @@ exit 0
                     .state,
                 incomplete
             );
-            sup.restart_session(&origin.id, true, None, None, None)
+            sup.restart_session(&origin.id, true, None)
                 .await
                 .expect_err("origin setup must finish first");
             assert_eq!(
@@ -30421,7 +30344,7 @@ exit 0
                 .unwrap()
                 .is_none()
         );
-        sup.restart_session(&borrower.id, true, None, None, None)
+        sup.restart_session(&borrower.id, true, None)
             .await
             .expect("borrower does not inherit incomplete setup");
         let borrower_row = sup.store.session(&borrower.id).await.unwrap().unwrap();
@@ -30444,7 +30367,7 @@ exit 0
         )
         .unwrap();
         let ready_bytes = std::fs::read(&path).unwrap();
-        sup.restart_session(&origin.id, true, None, None, None)
+        sup.restart_session(&origin.id, true, None)
             .await
             .expect("Ready permits ordinary restart");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30479,7 +30402,7 @@ exit 0
                 .state,
             PreparationState::Ready,
         );
-        sup.restart_session(&origin.id, true, None, None, None)
+        sup.restart_session(&origin.id, true, None)
             .await
             .expect("Ready permits restart after supervisor reopen");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30509,7 +30432,7 @@ exit 0
             crate::working_copies::IdentityStatus::DifferentObject
         );
         let refusal = sup
-            .restart_session(&origin.id, true, None, None, None)
+            .restart_session(&origin.id, true, None)
             .await
             .expect_err("Ready cannot authorize a foreign path");
         assert!(format!("{refusal:#}").contains("identity"));
@@ -30576,7 +30499,7 @@ exit 0
         let original_preparation = std::fs::read(&state_path).unwrap();
         let claim = IntentClaim {
             intent_key: "borrower-retry".into(),
-            fingerprint: raw_fingerprint(&owner.cwd, "agent", None, None, None),
+            fingerprint: command_fingerprint(&owner.cwd, "agent", None),
             dedup_scope: DedupScope::Permanent,
         };
         let failure = sup
@@ -30709,12 +30632,7 @@ exit 0
                         cwd: cwd.to_str().unwrap(),
                         parent: None,
                         github_checkout: None,
-                        mode: CreateMode::Raw {
-                            invocation: "agent".into(),
-                            agent_kind: None,
-                            resume_template: None,
-                            launch: None,
-                        },
+                        launch: SessionLaunch::plain_command("agent"),
                         title: None,
                         cols: 80,
                         rows: 24,

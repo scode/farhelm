@@ -10,13 +10,13 @@ impl Supervisor {
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        if row.agent_kind != AgentKind::Grok {
+        if row.agent_kind() != AgentKind::Grok {
             return Ok(true);
         }
         let Some(current) = self.store.session(&row.id).await? else {
             return Ok(false);
         };
-        if current.generation != row.generation || current.agent_kind != AgentKind::Grok {
+        if current.generation != row.generation || current.agent_kind() != AgentKind::Grok {
             return Ok(false);
         }
         *row = current;
@@ -180,7 +180,7 @@ impl Supervisor {
             .ok_or_else(|| {
                 RequestError::new(ErrorKind::NotFound, "the Grok session no longer exists")
             })?;
-        if row.generation != generation || row.agent_kind != kind {
+        if row.generation != generation || row.agent_kind() != kind {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "this session has moved on to another launch",

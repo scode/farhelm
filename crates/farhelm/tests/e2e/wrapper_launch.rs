@@ -377,15 +377,15 @@ async fn a_wrapper_launch_receives_the_sessions_directory() {
         .client
         .create_session_with_extras(
             &work.to_string_lossy(),
-            &invocation,
+            declared_command(
+                &format!("{} {{farhelm_args}}", invocation),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Claude),
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a wrapper session in a directory whose path contains a space");
@@ -445,15 +445,15 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
         .client
         .create_session_with_extras(
             &work.to_string_lossy(),
-            &invocation,
+            declared_command(
+                &format!("{} {{farhelm_args}}", invocation),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Claude),
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a wrapper session");
@@ -563,15 +563,15 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
         .client
         .create_session_with_extras(
             &link.to_string_lossy(),
-            &invocation,
+            declared_command(
+                &format!("{} {{farhelm_args}}", invocation),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(format!("{} {{farhelm_args}}", shell_words::join(&template))).as_deref(),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Claude),
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a wrapper session through a symlinked working directory");
@@ -703,7 +703,7 @@ async fn a_generic_wrapper_launch_gets_no_resume_offer() {
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &invocation,
+            farhelm_proto::SessionLaunch::plain_command(invocation.to_string()),
             None,
             80,
             24,

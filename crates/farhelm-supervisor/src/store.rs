@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 25;
+const SCHEMA_VERSION: i64 = 26;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1051,22 +1051,10 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
     })
 }
 
-/// Encode a resume template for its column: a JSON array, or NULL for a
-/// session with no resume invocation.
-///
-/// JSON rather than a delimiter-joined string because the whole point of
-/// storing argv structurally is that an element may contain anything —
-/// spaces, quotes, a delimiter — and still come back as one element.
-fn resume_template_column(template: Option<&[String]>) -> Option<String> {
-    template.map(|template| {
-        serde_json::to_string(template).expect("a vector of strings always serializes")
-    })
-}
-
-/// The inverse of [`resume_template_column`]; a value that is present but
-/// not a JSON string array is refused rather than dropped, since a session
-/// silently losing its resume template would turn a `Resume` offer into a
-/// `NotCaptured` one with no explanation anywhere.
+/// Decode a pre-26 `resume_template` column (a JSON string array, or NULL),
+/// for the migration to launch kinds. A present value that is not a JSON
+/// string array is refused rather than dropped, since a session silently
+/// losing its resume command would lose its Restart with no explanation.
 fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Vec<String>>> {
     text.map(|text| {
         serde_json::from_str::<Vec<String>>(&text).context("decoding a stored resume template")
@@ -1209,11 +1197,14 @@ pub struct StoredSession {
     /// value, so one logical create keeps one place in the sequence.
     pub creation_seq: u64,
     pub cwd: String,
-    pub invocation: String,
-    /// The structured choice that produced `invocation`, when this row came
-    /// from the launch composer. Legacy rows leave it empty;
-    /// this field is never reconstructed by parsing their command lines.
-    pub launch: Option<farhelm_proto::LaunchSelection>,
+    /// What this session runs and how it resumes (SPEC.md's launch kinds),
+    /// JSON in one column. The integration kind and the displayed command
+    /// are derived from it ([`StoredSession::agent_kind`],
+    /// [`farhelm_proto::SessionLaunch::display_command`]) rather than stored
+    /// beside it, so the three can never disagree. Only Restart with
+    /// changes it, through [`SessionStore::update_launch`]; the launch kind
+    /// and agent type stay fixed across that.
+    pub launch: farhelm_proto::SessionLaunch,
     pub tmux_name: String,
     /// The tmux pane, or EMPTY for a row still in [`LastOutcome::Launching`]
     /// — the pane id does not exist until tmux has created the session,
@@ -1224,16 +1215,6 @@ pub struct StoredSession {
     pub pane: String,
     /// The last transition the supervisor witnessed for this session.
     pub outcome: LastOutcome,
-    /// The session's integration kind, resolved once at create and immutable
-    /// thereafter. Restart-with changes the other launch columns while
-    /// holding this kind fixed, so its PATH-sensitive identity remains safe.
-    pub agent_kind: farhelm_proto::AgentKind,
-    /// The resume invocation as an argv vector, JSON-encoded in one
-    /// column. Structural rather than a command string so a path with
-    /// spaces survives without quoting (`crate::agent_kind`); `None` is a
-    /// session with no resume invocation at all, which only a `Generic`
-    /// kind can be.
-    pub resume_template: Option<Vec<String>>,
     /// Working directory resolved at create, used to refuse a relaunch if a
     /// symlink now points elsewhere. The user-facing `cwd` retains its spelling.
     /// `None` belongs to rows older than the integration snapshot.
@@ -1515,7 +1496,6 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  id            TEXT PRIMARY KEY,
                  title         TEXT NOT NULL,
                  cwd           TEXT NOT NULL,
-                 invocation    TEXT NOT NULL,
                  tmux_name     TEXT NOT NULL UNIQUE,
                  pane          TEXT NOT NULL,
                  created_at    INTEGER NOT NULL,
@@ -1523,8 +1503,6 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  exit_code     INTEGER,
                  annotation    TEXT,
                  error_detail  TEXT,
-                 agent_kind    TEXT NOT NULL DEFAULT 'generic',
-                 resume_template       TEXT,
                  canonical_cwd         TEXT,
                  captured_conversation TEXT,
                  generation            INTEGER NOT NULL DEFAULT 0,
@@ -1534,12 +1512,12 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  creation_seq          INTEGER,
                  last_activity_at      INTEGER NOT NULL DEFAULT 0,
                  conversation_source   TEXT,
-                 launch                TEXT,
                  last_work_started_at  INTEGER NOT NULL DEFAULT 0,
                  fresh_checkout_id     TEXT,
                  capture_ownership_version INTEGER NOT NULL DEFAULT 0,
                  omp_reporter_asset TEXT,
-                 omp_launch_program TEXT
+                 omp_launch_program TEXT,
+                 session_launch     TEXT
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1585,7 +1563,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 25;
+             PRAGMA user_version = 26;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2177,6 +2155,10 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 24 to 25")?;
         version = 25;
     }
+    if version == 25 {
+        migrate_to_launch_kinds(conn).context("migrating schema from version 25 to 26")?;
+        version = 26;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2184,6 +2166,70 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         "supervisor.db has schema version {version}, but this build only understands \
          version {SCHEMA_VERSION}; refusing to open it rather than risk misreading it"
     )
+}
+
+/// Schema 26: every session's launch becomes one `session_launch` value
+/// (SPEC.md's launch kinds), and the four columns it replaces go.
+///
+/// A row created from structured choices (its `launch` column holds the
+/// selection) becomes an agent launch and every other row stays legacy,
+/// by [`farhelm_proto::SessionLaunch::from_pre_launch_kinds`], the rule the
+/// helm's session cache shares. A row whose old columns no longer decode
+/// is refused, failing the upgrade, rather than converted by a guess: the
+/// load path already refused such rows, so this cannot strand one that
+/// used to open. One transaction, so a crash leaves the old schema whole.
+/// One pre-schema-26 session's launch columns, as stored: `id`,
+/// `invocation`, `agent_kind`, `resume_template` JSON, `launch` selection
+/// JSON.
+type PreLaunchKindsRow = (String, String, String, Option<String>, Option<String>);
+
+fn migrate_to_launch_kinds(conn: &Connection) -> anyhow::Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("beginning the migration")?;
+    let rows: Vec<PreLaunchKindsRow> = tx
+        .prepare("SELECT id, invocation, agent_kind, resume_template, launch FROM sessions")
+        .context("preparing the session read")?
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .context("reading sessions")?
+        .collect::<Result<_, _>>()
+        .context("reading sessions")?;
+    tx.execute("ALTER TABLE sessions ADD COLUMN session_launch TEXT", [])
+        .context("adding the launch column")?;
+    for (id, invocation, kind, template, selection) in rows {
+        let agent_kind = agent_kind_from_column(&kind).with_context(|| format!("session {id}"))?;
+        let resume_template =
+            resume_template_from_column(template).with_context(|| format!("session {id}"))?;
+        let selection: Option<farhelm_proto::LaunchSelection> = selection
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .with_context(|| format!("session {id} has an invalid structured launch selection"))?;
+        let launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+            &invocation,
+            agent_kind,
+            resume_template,
+            selection,
+        );
+        tx.execute(
+            "UPDATE sessions SET session_launch = ?1 WHERE id = ?2",
+            rusqlite::params![
+                serde_json::to_string(&launch).context("serializing a migrated launch")?,
+                id
+            ],
+        )
+        .with_context(|| format!("recording session {id}'s launch"))?;
+    }
+    tx.execute_batch(
+        "ALTER TABLE sessions DROP COLUMN invocation;
+         ALTER TABLE sessions DROP COLUMN agent_kind;
+         ALTER TABLE sessions DROP COLUMN resume_template;
+         ALTER TABLE sessions DROP COLUMN launch;
+         PRAGMA user_version = 26;",
+    )
+    .context("dropping the replaced launch columns")?;
+    tx.commit().context("committing the migration")
 }
 
 /// Seconds since the Unix epoch, for [`StoredSession::created_at`] and the
@@ -2300,6 +2346,27 @@ fn next_creation_seq(conn: &Connection) -> anyhow::Result<u64> {
     u64::try_from(value).context("session creation counter became negative")
 }
 
+#[cfg(test)]
+impl StoredSession {
+    /// The command this row displays, for tests that assert on it.
+    pub(crate) fn invocation(&self) -> String {
+        self.launch.display_command()
+    }
+
+    /// The resume command the launch holds, for tests that assert on it.
+    pub(crate) fn resume_template(&self) -> Option<Vec<String>> {
+        self.launch.resume_argv().ok().flatten()
+    }
+}
+
+impl StoredSession {
+    /// The integration this session's launch runs under (see
+    /// [`farhelm_proto::SessionLaunch::agent_kind`]).
+    pub fn agent_kind(&self) -> farhelm_proto::AgentKind {
+        self.launch.agent_kind()
+    }
+}
+
 fn insert_session_row(
     conn: &Connection,
     row: &StoredSession,
@@ -2313,19 +2380,18 @@ fn insert_session_row(
     let stored_creation_seq = i64::try_from(creation_seq).context("creation sequence overflow")?;
     conn.execute(
         "INSERT INTO sessions \
-         (id, title, cwd, invocation, tmux_name, pane, created_at, creation_seq, \
+         (id, title, cwd, tmux_name, pane, created_at, creation_seq, \
           outcome_state, exit_code, annotation, error_detail, \
-          agent_kind, resume_template, canonical_cwd, captured_conversation, \
+          canonical_cwd, captured_conversation, \
           generation, launch_scoped, parent, session_token, \
-          last_activity_at, last_work_started_at, conversation_source, launch, \
+          last_activity_at, last_work_started_at, conversation_source, session_launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
         rusqlite::params![
             row.id,
             row.title,
             row.cwd,
-            row.invocation,
             row.tmux_name,
             row.pane,
             row.created_at,
@@ -2334,8 +2400,6 @@ fn insert_session_row(
             exit_code,
             annotation,
             error_detail,
-            agent_kind_column(row.agent_kind),
-            resume_template_column(row.resume_template.as_deref()),
             row.canonical_cwd,
             row.captured_conversation,
             row.generation,
@@ -2345,11 +2409,7 @@ fn insert_session_row(
             row.last_activity_at,
             row.last_work_started_at,
             row.conversation_source,
-            row.launch
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()
-                .context("serializing structured launch selection")?,
+            serde_json::to_string(&row.launch).context("serializing the session's launch")?,
             row.capture_ownership_version,
             row.omp_reporter_asset,
             row.omp_launch_program,
@@ -2371,29 +2431,23 @@ fn insert_session_row(
 /// the table: `created_at` sits near the end even though the schema places it
 /// after `pane`. It must match [`read_session_columns`]'s positional reads,
 /// since one misplaced column shifts every later field.
-const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
+const SESSION_COLUMNS: &str = "id, title, cwd, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
-                               agent_kind, resume_template, canonical_cwd, \
+                               canonical_cwd, \
                                captured_conversation, generation, launch_scoped, created_at, \
                                parent, creation_seq, \
-                               last_activity_at, last_work_started_at, conversation_source, launch, \
+                               last_activity_at, last_work_started_at, conversation_source, \
+                               session_launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
 /// rusqlite's own — see `load_all`'s two-stage comment).
 ///
-/// The trailing members are the raw agent-kind text and the raw
-/// resume-template JSON; every other column is already in place on the partially-built
+/// The trailing members are the raw creation sequence and the raw launch
+/// JSON; every other column is already in place on the partially-built
 /// `StoredSession`, because only these (with the outcome) can be REFUSED.
-type SessionColumns = (
-    StoredSession,
-    OutcomeColumns,
-    String,
-    Option<String>,
-    i64,
-    Option<String>,
-);
+type SessionColumns = (StoredSession, OutcomeColumns, i64, Option<String>);
 
 /// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
 ///
@@ -2406,135 +2460,106 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
     Ok((
         StoredSession {
             id: r.get(0)?,
-            parent: r.get(17)?,
+            parent: r.get(14)?,
             title: r.get(1)?,
             cwd: r.get(2)?,
-            invocation: r.get(3)?,
-            launch: None,
-            tmux_name: r.get(4)?,
-            pane: r.get(5)?,
+            launch: farhelm_proto::SessionLaunch::plain_command(""),
+            tmux_name: r.get(3)?,
+            pane: r.get(4)?,
             outcome: LastOutcome::Launching,
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-            canonical_cwd: r.get(12)?,
-            captured_conversation: r.get(13)?,
-            generation: r.get(14)?,
-            launch_scoped: r.get::<_, i64>(15)? != 0,
-            created_at: r.get(16)?,
-            last_activity_at: r.get(19)?,
-            last_work_started_at: r.get(20)?,
+            canonical_cwd: r.get(9)?,
+            captured_conversation: r.get(10)?,
+            generation: r.get(11)?,
+            launch_scoped: r.get::<_, i64>(12)? != 0,
+            created_at: r.get(13)?,
+            last_activity_at: r.get(16)?,
+            last_work_started_at: r.get(17)?,
             creation_seq: 0,
-            conversation_source: r.get(21)?,
-            capture_ownership_version: r.get(23)?,
-            omp_reporter_asset: r.get(24)?,
-            omp_launch_program: r.get(25)?,
+            conversation_source: r.get(18)?,
+            capture_ownership_version: r.get(20)?,
+            omp_reporter_asset: r.get(21)?,
+            omp_launch_program: r.get(22)?,
         },
-        (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
-        r.get(10)?,
-        r.get(11)?,
-        r.get::<_, i64>(18)?,
-        r.get(22)?,
+        (r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?),
+        r.get::<_, i64>(15)?,
+        r.get(19)?,
     ))
 }
 
 /// Finish decoding a row read by [`read_session_columns`], refusing rather
 /// than guessing on anything outside this build's vocabulary.
 ///
-/// Several SEMANTIC checks run here, not only syntactic ones, and they are
-/// deliberately the same invariants `create` enforces (`agent_kind`'s
-/// `IntegrationSnapshot::resolve`). The database is a trust boundary like
-/// any other input: a row is whatever the last process to write it left
-/// behind, plus whatever a crash, a downgrade, or a hand-edit did to it.
-/// A row claiming an integrated kind with no `{conversation}` placeholder
-/// in its template describes a session that could capture an identity and
-/// then be unable to resume with it — SPEC.md's exact-conversation promise
-/// silently false — so it is refused at load rather than allowed to reach
-/// the restart path and be discovered there. A row whose resume template
-/// has [`crate::agent_kind::CWD_PLACEHOLDER`] as its program is refused by
-/// [`crate::agent_kind::ensure_resume_template`] (which folds in the check
-/// below), and a row whose stored invocation has the same shape is refused
-/// separately by [`crate::agent_kind::ensure_no_cwd_program`] — for the
-/// parallel reason in both cases: slot 0 is never substituted, so a
-/// `{cwd}`-first vector that slipped past this refusal would exec a
-/// program literally named `{cwd}` on restart, not the working directory
-/// itself.
+/// The database is a trust boundary like any other input: a row is whatever
+/// the last process to write it left behind, plus whatever a crash, a
+/// downgrade, or a hand-edit did to it. So the stored launch is held to the
+/// rules a create enforces before anything can relaunch from it: an agent
+/// or command launch must still pass
+/// [`farhelm_proto::SessionLaunch::validate_new`], and a legacy launch the
+/// checks this module has always applied to its stored fields — a resume
+/// command a restart could exec, no `{cwd}` as a program, and an
+/// integrated kind's resume command carrying `{conversation}` (without it a
+/// session could capture an identity and then be unable to resume with it,
+/// SPEC.md's exact-conversation promise silently false).
 fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
-    let (
-        mut row,
-        (state, exit_code, annotation, error_detail),
-        kind,
-        template,
-        creation_seq,
-        launch,
-    ) = columns;
+    let (mut row, (state, exit_code, annotation, error_detail), creation_seq, launch) = columns;
     row.creation_seq = u64::try_from(creation_seq)
         .with_context(|| format!("session {} has a negative creation sequence", row.id))?;
     row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
         .with_context(|| format!("session {}", row.id))?;
-    row.agent_kind =
-        agent_kind_from_column(&kind).with_context(|| format!("session {}", row.id))?;
-    row.resume_template =
-        resume_template_from_column(template).with_context(|| format!("session {}", row.id))?;
-    row.launch = launch
-        .map(|json| serde_json::from_str(&json))
-        .transpose()
-        .with_context(|| {
-            format!(
-                "session {} has an invalid structured launch selection",
-                row.id
-            )
-        })?;
-    if let Some(selection) = &row.launch {
-        let expected_kind = selection.harness.agent_kind();
-        if row.agent_kind != expected_kind {
-            anyhow::bail!(
-                "session {} records structured harness {:?} with incompatible agent kind {}",
-                row.id,
-                selection.harness,
-                agent_kind_column(row.agent_kind)
-            );
+    let Some(launch) = launch else {
+        anyhow::bail!("session {} has no recorded launch", row.id);
+    };
+    row.launch = serde_json::from_str(&launch)
+        .with_context(|| format!("session {} has an unreadable launch", row.id))?;
+    match &row.launch {
+        farhelm_proto::SessionLaunch::Agent { .. } | farhelm_proto::SessionLaunch::Command(_) => {
+            if let Err(message) = row.launch.validate_new() {
+                anyhow::bail!("session {}: {message}", row.id);
+            }
         }
+        farhelm_proto::SessionLaunch::Legacy {
+            invocation,
+            agent_kind,
+            resume_template,
+        } => check_legacy_launch(invocation, *agent_kind, resume_template.as_deref())
+            .with_context(|| format!("session {}", row.id))?,
     }
-    // The stored template is an argv a RESTART will hand to `execvp`, so
-    // the shapes that could never be one are refused at the trust boundary
-    // rather than at the restart that needed them. A session's own
-    // create-time validation is not enough on its own: this row may have
-    // been written by a build with looser rules, or edited by hand, and by
-    // restart time the honest options are a garbled command line or
-    // silently declining to resume a conversation the session captured.
-    if let Some(template) = row.resume_template.as_deref()
+    Ok(row)
+}
+
+/// The load-time checks a legacy session's stored launch has always had
+/// (see [`decode_session_row`]).
+///
+/// A stored invocation that does NOT split as a command line is
+/// deliberately tolerated: a legacy session is never started from it again
+/// (Restart runs the resume command, and Replace refuses legacy sessions),
+/// so refusing it at load would make a row unreadable for no reason.
+fn check_legacy_launch(
+    invocation: &str,
+    agent_kind: farhelm_proto::AgentKind,
+    resume_template: Option<&[String]>,
+) -> anyhow::Result<()> {
+    if let Some(template) = resume_template
         && let Err(message) = crate::agent_kind::ensure_resume_template(template)
     {
-        anyhow::bail!("session {}: {message}", row.id);
+        anyhow::bail!("{message}");
     }
-    // The stored INVOCATION gets the same trust-boundary treatment as the
-    // template above, but only when it still parses as a command line: a
-    // hand-edited row with `{cwd}` in argv[0] is refused here rather than
-    // carried into a Replace or inherited spawn that recreates the session
-    // from it. Restart never execs the stored invocation (it runs the
-    // resume command). A string that does NOT parse is deliberately left
-    // alone: refusing it at LOAD would turn a row this build has always
-    // tolerated into a load failure for a reason that has nothing to do
-    // with the `{cwd}` placeholder this check exists for, and the create
-    // that copies it refuses it at that point.
-    if let Ok(argv) = shell_words::split(&row.invocation)
+    if let Ok(argv) = shell_words::split(invocation)
         && let Err(message) = crate::agent_kind::ensure_no_cwd_program("session invocation", &argv)
     {
-        anyhow::bail!("session {}: {message}", row.id);
+        anyhow::bail!("{message}");
     }
-    if crate::agent_kind::integration_for(row.agent_kind).is_some()
-        && !crate::agent_kind::template_has_placeholder(row.resume_template.as_deref())
+    if crate::agent_kind::integration_for(agent_kind).is_some()
+        && !crate::agent_kind::template_has_placeholder(resume_template)
     {
         anyhow::bail!(
-            "session {} is recorded with the integrated agent kind {} but a resume template \
-             carrying no {} element; that combination is refused at create and cannot be \
-             honored at restart either",
-            row.id,
-            agent_kind_column(row.agent_kind),
+            "recorded with the integrated agent kind {} but a resume template carrying no {} \
+             element; that combination cannot be honored at restart",
+            agent_kind_column(agent_kind),
             crate::agent_kind::CONVERSATION_PLACEHOLDER
         );
     }
-    Ok(row)
+    Ok(())
 }
 
 /// Cap on how many argv elements a resume template may carry, whether it
@@ -4499,40 +4524,33 @@ impl SessionStore {
             .await
     }
 
-    /// Persist restart-with's new structured bundle only after its process
-    /// has spawned, fenced to the generation that performed that spawn.
+    /// Persist Restart with's new launch only after its process has
+    /// spawned, fenced to the generation that performed that spawn.
     ///
     /// A zero-row update is a failed fence, not a successful save: the
-    /// relaunch may be running, but later restarts still see the old bundle.
-    pub async fn update_restart_with_bundle(
+    /// relaunch may be running, but later restarts still see the old launch.
+    pub async fn update_launch(
         &self,
         id: &str,
         generation: i64,
-        invocation: &str,
-        launch: &farhelm_proto::LaunchSelection,
-        resume_template: Option<&[String]>,
+        launch: &farhelm_proto::SessionLaunch,
     ) -> anyhow::Result<()> {
         let id = id.to_string();
-        let invocation = invocation.to_string();
         let launch = serde_json::to_string(launch).context("serializing restart-with launch")?;
-        let resume_template = resume_template
-            .map(serde_json::to_string)
-            .transpose()
-            .context("serializing restart-with resume template")?;
         self.conn
             .call(
-                "restart-with bundle task panicked",
+                "restart-with launch task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<()> {
                     let changed = conn
-                .execute(
-                    "UPDATE sessions SET invocation = ?1, launch = ?2, resume_template = ?3 \
-                 WHERE id = ?4 AND generation = ?5",
-                    rusqlite::params![invocation, launch, resume_template, id, generation],
-                )
-                .context("persisting restart-with launch bundle")?;
+                        .execute(
+                            "UPDATE sessions SET session_launch = ?1 \
+                             WHERE id = ?2 AND generation = ?3",
+                            rusqlite::params![launch, id, generation],
+                        )
+                        .context("persisting restart-with launch")?;
                     anyhow::ensure!(
                         changed == 1,
-                        "restart-with bundle update did not match its launch generation"
+                        "restart-with launch update did not match its launch generation"
                     );
                     Ok(())
                 },
@@ -5310,11 +5328,22 @@ pub(crate) fn tombstone_identity_digest(tombstone: &str) -> Option<&str> {
         .map(|(_, identity)| identity)
 }
 
-/// The client identity of a live fresh-checkout fingerprint
-/// (`github_checkout_v3`), read from its JSON without the service's types.
+/// The client identity of a live fresh-checkout fingerprint, read from its
+/// JSON without the service's types.
+///
+/// Both encodings count: `github_checkout_v4` is what launch kinds write,
+/// and `github_checkout_v3` is a reservation left from before them. A v3 row
+/// can no longer be recovered, but its session can still be deleted after
+/// the upgrade, and its tombstone must keep the digest so a retry is still
+/// told the session was deleted (or that the key belongs to another
+/// request) rather than getting the generic no-snapshot refusal. Both put
+/// the identity at `checkout.client_identity`.
 fn fresh_checkout_identity(fingerprint: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(fingerprint).ok()?;
-    if value.get("kind")?.as_str()? != "github_checkout_v3" {
+    if !matches!(
+        value.get("kind")?.as_str()?,
+        "github_checkout_v3" | "github_checkout_v4"
+    ) {
         return None;
     }
     Some(
@@ -5603,14 +5632,18 @@ mod tests {
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             workspace_trust: None,
         };
+        let replacement = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+            "claude --dangerously-skip-permissions",
+            farhelm_proto::AgentKind::Claude,
+            Some(vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+            Some(selection),
+        );
         let error = store
-            .update_restart_with_bundle(
-                "restart-with-fence",
-                before.generation + 1,
-                "claude --dangerously-skip-permissions",
-                &selection,
-                None,
-            )
+            .update_launch("restart-with-fence", before.generation + 1, &replacement)
             .await
             .expect_err("a stale generation cannot save settings");
         assert!(
@@ -5623,9 +5656,9 @@ mod tests {
             .await
             .expect("read row after refused update")
             .expect("row remains");
-        assert_eq!(after.invocation, before.invocation);
+        assert_eq!(after.invocation(), before.invocation());
         assert_eq!(after.launch, before.launch);
-        assert_eq!(after.resume_template, before.resume_template);
+        assert_eq!(after.resume_template(), before.resume_template());
     }
 
     /// Seed a running session with an explicit `launch_scoped` value —
@@ -5649,13 +5682,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -6055,7 +6089,7 @@ mod tests {
         );
         assert_eq!(rows[0].title, "title-s1");
         assert_eq!(rows[0].cwd, "/work/s1");
-        assert_eq!(rows[0].invocation, "agent --for s1");
+        assert_eq!(rows[0].invocation(), "agent --for s1");
         assert_eq!(rows[0].tmux_name, "fh-1");
         assert_eq!(rows[0].pane, "%0");
         assert_eq!(rows[1].tmux_name, "fh-2");
@@ -6522,13 +6556,18 @@ mod tests {
                         && !matches!(
                             column.1.as_str(),
                             // Dropped on purpose by later schemas: the
-                            // scan bookkeeping (24) and the profile
-                            // snapshot (25).
+                            // scan bookkeeping (24), the profile
+                            // snapshot (25), and the launch columns 26
+                            // folds into one launch, checked below.
                             "captured_record"
                                 | "capture_ambiguous"
                                 | "first_input_at"
                                 | "source_profile_id"
                                 | "source_profile_name"
+                                | "invocation"
+                                | "agent_kind"
+                                | "resume_template"
+                                | "launch"
                         )
                 })
                 .map(|column| column.1.clone())
@@ -6558,9 +6597,22 @@ mod tests {
         ] {
             let row = migrated.session(id).await.unwrap().expect("row survives");
             assert_eq!(row.captured_conversation.as_deref(), identity);
+            assert_eq!(
+                row.launch,
+                farhelm_proto::SessionLaunch::Legacy {
+                    invocation: "claude".to_string(),
+                    agent_kind: AgentKind::Claude,
+                    resume_template: Some(
+                        ["claude", "--resume", "{conversation}"]
+                            .map(String::from)
+                            .to_vec()
+                    ),
+                },
+                "a typed command from before launch kinds stays legacy"
+            );
             let integration = IntegrationSnapshot {
                 kind: AgentKind::Claude,
-                resume_template: row.resume_template,
+                resume_template: row.resume_template(),
             };
             assert_eq!(
                 integration.restart_offer(
@@ -6637,6 +6689,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&db_path).expect("open raw v19 fixture");
+            restore_pre_v26_launch_columns(&conn);
             restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN capture_ownership_version;
@@ -7026,13 +7079,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -7077,13 +7131,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -7682,13 +7737,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent --flag".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent --flag".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-abc".to_string(),
                     pane: "%3".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -7707,7 +7763,7 @@ mod tests {
         assert_eq!(rows[0].parent.as_deref(), Some("parent-7"));
         assert_eq!(rows[0].title, "demo");
         assert_eq!(rows[0].cwd, "/tmp/work");
-        assert_eq!(rows[0].invocation, "agent --flag");
+        assert_eq!(rows[0].invocation(), "agent --flag");
         assert_eq!(rows[0].tmux_name, "fh-abc");
         assert_eq!(rows[0].pane, "%3");
         assert_eq!(rows[0].outcome, LastOutcome::Running);
@@ -7729,6 +7785,20 @@ mod tests {
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             workspace_trust: None,
         };
+        let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+            "codex --model gpt-6-astra",
+            farhelm_proto::AgentKind::Codex,
+            Some(vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+            Some(launch.clone()),
+        );
+        assert!(
+            matches!(session_launch, farhelm_proto::SessionLaunch::Agent { .. }),
+            "the fixture is an agent launch"
+        );
         let expected_work_start = 1_700_000_123_456;
         store
             .insert_session(
@@ -7745,17 +7815,10 @@ mod tests {
                     last_work_started_at: expected_work_start,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "codex --model gpt-6-astra".to_string(),
-                    launch: Some(launch.clone()),
+                    launch: session_launch.clone(),
                     tmux_name: "fh-s1".to_string(),
                     pane: "%3".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Codex,
-                    resume_template: Some(vec![
-                        "codex".to_string(),
-                        "resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: Some("conversation-7".to_string()),
                     generation: 0,
@@ -7769,7 +7832,7 @@ mod tests {
         let assert_columns = |row: &StoredSession| {
             assert_eq!(row.last_work_started_at, expected_work_start);
             assert_eq!(row.conversation_source.as_deref(), Some("hook"));
-            assert_eq!(row.launch.as_ref(), Some(&launch));
+            assert_eq!(row.launch, session_launch);
         };
         let row = store.session("s1").await.expect("read").expect("present");
         assert_columns(&row);
@@ -7815,6 +7878,12 @@ mod tests {
                 permissions: Some(permissions),
                 workspace_trust: None,
             };
+            let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+                invocation,
+                kind,
+                resume_template.clone(),
+                Some(launch.clone()),
+            );
             store
                 .insert_session(
                     StoredSession {
@@ -7830,19 +7899,13 @@ mod tests {
                         last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp/work".to_string(),
-                        invocation: invocation.to_string(),
-                        launch: Some(launch.clone()),
+                        launch: session_launch.clone(),
                         tmux_name: "fh-s-structured".to_string(),
                         pane: String::new(),
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
                         },
-                        agent_kind: kind,
-                        // A real structured create stores the derived
-                        // placeholder-bearing template beside the kind; the
-                        // decoder refuses an integrated kind without one.
-                        resume_template: resume_template.clone(),
                         canonical_cwd: None,
                         captured_conversation: None,
                         generation: 0,
@@ -7857,10 +7920,9 @@ mod tests {
                 .await
                 .expect("read")
                 .expect("present");
-            assert_eq!(row.launch.as_ref(), Some(&launch));
-            assert_eq!(row.agent_kind, kind);
-            assert_eq!(row.resume_template, resume_template);
-            assert_eq!(row.invocation, invocation);
+            assert_eq!(row.launch, session_launch);
+            assert_eq!(row.agent_kind(), kind);
+            assert_eq!(row.launch.agent_type(), Some(harness));
         }
     }
 
@@ -7885,14 +7947,17 @@ mod tests {
         };
         let locator = r#"omp:{"version":1,"session_id":"persisted-omp","session_file":"/work/conversation.jsonl"}"#;
         let mut row = launching_row("persisted-omp");
-        row.agent_kind = farhelm_proto::AgentKind::Omp;
-        row.invocation = "omp --provider openrouter --model provider/model".into();
-        row.launch = Some(launch.clone());
-        row.resume_template = Some(vec![
-            "omp".into(),
-            "--resume".into(),
-            crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
-        ]);
+        row.launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
+            "omp --provider openrouter --model provider/model",
+            farhelm_proto::AgentKind::Omp,
+            Some(vec![
+                "omp".into(),
+                "--resume".into(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+            ]),
+            Some(launch.clone()),
+        );
+        let session_launch = row.launch.clone();
         row.captured_conversation = Some(locator.into());
         row.conversation_source = Some("hook".into());
         assert!(matches!(
@@ -7908,6 +7973,7 @@ mod tests {
             // the separate migration-ladder tests cover the latter. Restore
             // archived too, since schema 17 still carried that column.
             let conn = store.conn.lock();
+            restore_pre_v26_launch_columns(&conn);
             restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "DROP TABLE working_copy_members;
@@ -7941,8 +8007,8 @@ mod tests {
             let store = SessionStore::open(&path, true).await.expect(phase);
             let rows = store.load_all().await.expect("startup bulk decode");
             assert_eq!(rows.len(), 1, "{phase} must preserve the session");
-            assert_eq!(rows[0].agent_kind, farhelm_proto::AgentKind::Omp);
-            assert_eq!(rows[0].launch.as_ref(), Some(&launch));
+            assert_eq!(rows[0].agent_kind(), farhelm_proto::AgentKind::Omp);
+            assert_eq!(rows[0].launch, session_launch);
             assert_eq!(rows[0].captured_conversation.as_deref(), Some(locator));
             assert_eq!(rows[0].conversation_source.as_deref(), Some("hook"));
             assert!(store.working_copy_rows().await.unwrap().is_empty());
@@ -7985,6 +8051,7 @@ mod tests {
         std::fs::write(&attachment, b"retained attachment").expect("write attachment");
         {
             let conn = store.conn.lock();
+            restore_pre_v26_launch_columns(&conn);
             restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -8356,13 +8423,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -8400,7 +8468,24 @@ mod tests {
     // PLAN_M3.md item 6: create reservations.
     // -----------------------------------------------------------------
 
-    /// A launching row in the shape `create_session` commits one.
+    /// A legacy launch (a session from before launch kinds) with exactly
+    /// these stored fields: what these store tests used before launch kinds
+    /// gave rows one launch value, and still the shape whose load-time
+    /// checks they exercise.
+    fn legacy_launch(
+        invocation: &str,
+        agent_kind: farhelm_proto::AgentKind,
+        resume_template: Option<Vec<String>>,
+    ) -> farhelm_proto::SessionLaunch {
+        farhelm_proto::SessionLaunch::Legacy {
+            invocation: invocation.to_string(),
+            agent_kind,
+            resume_template,
+        }
+    }
+
+    /// A launching row in the shape `create_session` commits one, with a
+    /// legacy launch so the load-time checks these tests exercise apply.
     fn launching_row(id: &str) -> StoredSession {
         StoredSession {
             conversation_source: None,
@@ -8416,13 +8501,10 @@ mod tests {
             last_work_started_at: 0,
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
-            invocation: "agent".to_string(),
-            launch: None,
+            launch: legacy_launch("agent", farhelm_proto::AgentKind::Generic, None),
             tmux_name: format!("fh-{id}"),
             pane: String::new(),
             outcome: LastOutcome::Launching,
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
             captured_conversation: None,
             generation: 0,
             launch_scoped: false,
@@ -8439,15 +8521,18 @@ mod tests {
     async fn new_agent_kinds_round_trip_and_unknown_spellings_fail_decode() {
         let (_dir, store) = fresh_store().await;
         let mut row = launching_row("s-omp");
-        row.agent_kind = farhelm_proto::AgentKind::Omp;
         // An OMP row must carry the placeholder-bearing template a real
         // create resolves; the decoder refuses an integrated kind whose
         // stored template could never be filled.
-        row.resume_template = Some(vec![
-            "omp".to_string(),
-            "--resume".to_string(),
-            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-        ]);
+        row.launch = legacy_launch(
+            "agent",
+            farhelm_proto::AgentKind::Omp,
+            Some(vec![
+                "omp".to_string(),
+                "--resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        );
         let claimed = store.insert_session(row, None).await.expect("insert");
         assert!(matches!(claimed, Claimed::Ours { .. }));
         let loaded = store
@@ -8455,19 +8540,19 @@ mod tests {
             .await
             .expect("read")
             .expect("present");
-        assert_eq!(loaded.agent_kind, farhelm_proto::AgentKind::Omp);
+        assert_eq!(loaded.agent_kind(), farhelm_proto::AgentKind::Omp);
 
         let mut grok = launching_row("s-grok");
-        grok.agent_kind = farhelm_proto::AgentKind::Grok;
-        // The launch slice persists the future exact-resume command before
-        // capture is enabled, so the later integration can start reporting
-        // identity without rewriting sessions created by this release.
-        grok.resume_template = Some(vec![
-            "grok".to_string(),
-            "--no-leader".to_string(),
-            "--resume".to_string(),
-            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-        ]);
+        grok.launch = legacy_launch(
+            "agent",
+            farhelm_proto::AgentKind::Grok,
+            Some(vec![
+                "grok".to_string(),
+                "--no-leader".to_string(),
+                "--resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        );
         let claimed = store
             .insert_session(grok, None)
             .await
@@ -8478,9 +8563,9 @@ mod tests {
             .await
             .expect("read Grok row")
             .expect("Grok row present");
-        assert_eq!(loaded.agent_kind, farhelm_proto::AgentKind::Grok);
+        assert_eq!(loaded.agent_kind(), farhelm_proto::AgentKind::Grok);
         assert_eq!(
-            loaded.resume_template,
+            loaded.resume_template(),
             Some(vec![
                 "grok".to_string(),
                 "--no-leader".to_string(),
@@ -8492,16 +8577,22 @@ mod tests {
         {
             let conn = store.conn.lock();
             conn.execute(
-                "UPDATE sessions SET agent_kind = 'ompish' WHERE id = 's-omp'",
+                "UPDATE sessions SET session_launch = \
+                 '{\"kind\":\"legacy\",\"invocation\":\"agent\",\"agent_kind\":\"ompish\",\"resume_template\":null}' \
+                 WHERE id = 's-omp'",
                 [],
             )
-            .expect("hand-edit the kind column");
+            .expect("hand-edit the stored kind");
         }
         let error = store
             .session("s-omp")
             .await
             .expect_err("an unknown kind must fail the decode");
-        assert!(format!("{error:#}").contains("unrecognized agent kind"));
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("unreadable launch") && rendered.contains("ompish"),
+            "{rendered}"
+        );
     }
 
     /// Opening the store reduces retry records left raw by deletes from
@@ -9850,13 +9941,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(template.clone()),
+                    },
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(template.clone()),
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: None,
                     generation: 0,
@@ -9867,13 +9959,13 @@ mod tests {
             .await
             .expect("insert");
         let row = store.session("s1").await.expect("read").expect("present");
-        assert_eq!(row.agent_kind, farhelm_proto::AgentKind::Claude);
-        assert_eq!(row.resume_template.as_deref(), Some(template.as_slice()));
+        assert_eq!(row.agent_kind(), farhelm_proto::AgentKind::Claude);
+        assert_eq!(row.resume_template().as_deref(), Some(template.as_slice()));
         // And through the bulk loader, which uses the same decoder but a
         // different statement — the one a supervisor restart runs.
         let loaded = store.load_all().await.expect("load");
         assert_eq!(
-            loaded[0].resume_template.as_deref(),
+            loaded[0].resume_template().as_deref(),
             Some(template.as_slice())
         );
     }
@@ -10117,11 +10209,11 @@ mod tests {
         let store = SessionStore::open(&path, true).await.expect("migrate");
         let row = store.session("old").await.expect("read").expect("present");
         assert_eq!(
-            row.agent_kind,
+            row.agent_kind(),
             farhelm_proto::AgentKind::Generic,
             "a session that predates the snapshot must not acquire an integration"
         );
-        assert_eq!(row.resume_template, None);
+        assert_eq!(row.resume_template(), None);
         assert_eq!(row.captured_conversation, None);
     }
 
@@ -10138,39 +10230,70 @@ mod tests {
     /// decoders and a fix to one says nothing about the others.
     ///
     /// The two `{cwd}` cases (invocation, template) cover the same hazard
-    /// [`decode_session_row`]'s new invocation check exists for: a
-    /// hand-edited row with the placeholder in the program slot would
-    /// otherwise be carried into a Replace or inherited spawn that
-    /// recreates the session from it.
+    /// the legacy invocation check exists for: a hand-edited row with the
+    /// placeholder in the program slot. The last case holds a NEW launch to
+    /// the rules it was created under, since load is where a hand-edited
+    /// row would otherwise slip past them.
     #[farhelm_testtrace::test]
     async fn a_semantically_impossible_session_row_is_refused_at_load() {
+        // Each case plants a whole stored launch: the launch column is the
+        // one place a session's command, kind and resume command live.
+        let legacy = |invocation: &str, kind: &str, template: serde_json::Value| {
+            serde_json::json!({
+                "kind": "legacy",
+                "invocation": invocation,
+                "agent_kind": kind,
+                "resume_template": template,
+            })
+            .to_string()
+        };
         let cases = [
             (
-                "UPDATE sessions SET agent_kind = 'claude', resume_template = \
-                 '[\"claude\",\"--continue\"]'",
+                legacy(
+                    "claude",
+                    "claude",
+                    serde_json::json!(["claude", "--continue"]),
+                ),
                 "{conversation}",
             ),
             (
-                "UPDATE sessions SET agent_kind = 'claude', resume_template = NULL",
+                legacy("claude", "claude", serde_json::Value::Null),
                 "{conversation}",
             ),
+            ("not json at all".to_string(), "unreadable launch"),
             (
-                "UPDATE sessions SET resume_template = 'not json at all'",
-                "resume template",
+                legacy("agent", "generic", serde_json::json!({"not": "an array"})),
+                "unreadable launch",
             ),
             (
-                "UPDATE sessions SET resume_template = '{\"not\":\"an array\"}'",
-                "resume template",
+                legacy("agent", "generic", serde_json::json!([1, 2, 3])),
+                "unreadable launch",
             ),
             (
-                "UPDATE sessions SET resume_template = '[1,2,3]'",
-                "resume template",
-            ),
-            ("UPDATE sessions SET invocation = '{cwd} claude'", "{cwd}"),
-            (
-                "UPDATE sessions SET resume_template = \
-                 '[\"{cwd}\",\"claude\",\"--resume\",\"{conversation}\"]'",
+                legacy("{cwd} claude", "generic", serde_json::Value::Null),
                 "{cwd}",
+            ),
+            (
+                legacy(
+                    "claude",
+                    "claude",
+                    serde_json::json!(["{cwd}", "claude", "--resume", "{conversation}"]),
+                ),
+                "{cwd}",
+            ),
+            // A new launch is held to the rules it was created under: a
+            // declared agent without its `{farhelm_args}` slot would spawn
+            // without Farhelm's hooks.
+            (
+                serde_json::json!({
+                    "kind": "command",
+                    "command": "claude",
+                    "yolo": false,
+                    "agent": "claude",
+                    "resume": null,
+                })
+                .to_string(),
+                "{farhelm_args}",
             ),
         ];
         for (corruption, expected) in cases {
@@ -10178,7 +10301,11 @@ mod tests {
             insert_running(&store, "s1").await;
             {
                 let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
-                conn.execute(corruption, []).expect("plant corruption");
+                conn.execute(
+                    "UPDATE sessions SET session_launch = ?1",
+                    rusqlite::params![corruption],
+                )
+                .expect("plant corruption");
             }
             let rendered = format!(
                 "{:#}",
@@ -10198,9 +10325,9 @@ mod tests {
         }
     }
 
-    /// An invocation that no longer parses as a command line must still
-    /// LOAD, rather than being turned into a refusal by the new `{cwd}`
-    /// program check `decode_session_row` added.
+    /// A legacy session's invocation that no longer parses as a command
+    /// line must still LOAD, rather than being turned into a refusal by the
+    /// `{cwd}` program check.
     ///
     /// That check only fires when `shell_words::split` succeeds AND the
     /// first element is the placeholder — a string that fails to parse at
@@ -10216,8 +10343,15 @@ mod tests {
         {
             let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
             conn.execute(
-                "UPDATE sessions SET invocation = 'claude \"unterminated' WHERE id = 's1'",
-                [],
+                "UPDATE sessions SET session_launch = ?1 WHERE id = 's1'",
+                rusqlite::params![
+                    serde_json::to_string(&legacy_launch(
+                        "claude \"unterminated",
+                        farhelm_proto::AgentKind::Generic,
+                        None
+                    ))
+                    .unwrap()
+                ],
             )
             .expect("plant an unparsable invocation");
         }
@@ -10226,7 +10360,7 @@ mod tests {
             .await
             .expect("an unparsable invocation must still load")
             .expect("the row is present");
-        assert_eq!(row.invocation, "claude \"unterminated");
+        assert_eq!(row.invocation(), "claude \"unterminated");
         // The bulk loader shares the decoder; both readers must agree that
         // this row is tolerated, the same way the corruption matrix above
         // asserts both readers agree on what is REFUSED.
@@ -10267,13 +10401,15 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
-                    invocation: format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER)
+                            .to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(template.clone()),
+                    },
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    resume_template: Some(template.clone()),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -10290,10 +10426,10 @@ mod tests {
             .expect("read")
             .expect("row is present");
         assert_eq!(
-            read.invocation,
+            read.invocation(),
             format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER)
         );
-        assert_eq!(read.resume_template.as_deref(), Some(template.as_slice()));
+        assert_eq!(read.resume_template().as_deref(), Some(template.as_slice()));
 
         let loaded = store
             .load_all()
@@ -10302,7 +10438,10 @@ mod tests {
             .into_iter()
             .find(|row| row.id == "s1")
             .expect("s1 is in the bulk load");
-        assert_eq!(loaded.resume_template.as_deref(), Some(template.as_slice()));
+        assert_eq!(
+            loaded.resume_template().as_deref(),
+            Some(template.as_slice())
+        );
     }
 
     /// An agent-kind column outside this build's vocabulary is refused
@@ -10317,8 +10456,12 @@ mod tests {
         insert_running(&store, "s1").await;
         {
             let conn = Connection::open(dir.path().join("supervisor.db")).expect("open raw");
-            conn.execute("UPDATE sessions SET agent_kind = 'gemini'", [])
-                .expect("plant corruption");
+            conn.execute(
+                "UPDATE sessions SET session_launch = \
+                 '{\"kind\":\"legacy\",\"invocation\":\"agent\",\"agent_kind\":\"gemini\",\"resume_template\":null}'",
+                [],
+            )
+            .expect("plant corruption");
         }
         let rendered = format!(
             "{:#}",
@@ -10363,6 +10506,74 @@ mod tests {
         .expect("restore the historical profile snapshot columns");
     }
 
+    /// Restore the four launch columns every schema before 26 had
+    /// (`invocation`, `agent_kind`, `resume_template`, `launch`) from each
+    /// row's `session_launch`, and drop that column, undoing schema 26.
+    ///
+    /// A fixture built by downgrading a current database must hold the old
+    /// shape, or the schema-26 rung reads columns that are not there. Each
+    /// launch maps back to what the previous release stored: an agent
+    /// launch's commands without `{farhelm_args}` beside its selection, a
+    /// command launch's command, a legacy launch's fields as they were.
+    fn restore_pre_v26_launch_columns(conn: &Connection) {
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT id, session_launch FROM sessions")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE sessions ADD COLUMN invocation TEXT NOT NULL DEFAULT '';
+             ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'generic';
+             ALTER TABLE sessions ADD COLUMN resume_template TEXT;
+             ALTER TABLE sessions ADD COLUMN launch TEXT;",
+        )
+        .expect("restore the historical launch columns");
+        let without_args = |argv: &[String]| -> Vec<String> {
+            argv.iter()
+                .filter(|element| *element != crate::agent_kind::FARHELM_ARGS_PLACEHOLDER)
+                .cloned()
+                .collect()
+        };
+        for (id, json) in rows {
+            let launch: farhelm_proto::SessionLaunch = serde_json::from_str(&json).unwrap();
+            let (invocation, template, selection) = match &launch {
+                farhelm_proto::SessionLaunch::Agent {
+                    selection,
+                    start,
+                    resume,
+                } => (
+                    shell_words::join(without_args(start)),
+                    resume.as_deref().map(without_args),
+                    Some(serde_json::to_string(selection).unwrap()),
+                ),
+                farhelm_proto::SessionLaunch::Command(command) => {
+                    (command.command.clone(), launch.resume_argv().unwrap(), None)
+                }
+                farhelm_proto::SessionLaunch::Legacy {
+                    invocation,
+                    resume_template,
+                    ..
+                } => (invocation.clone(), resume_template.clone(), None),
+            };
+            conn.execute(
+                "UPDATE sessions SET invocation = ?2, agent_kind = ?3, resume_template = ?4, \
+                 launch = ?5 WHERE id = ?1",
+                rusqlite::params![
+                    id,
+                    invocation,
+                    agent_kind_column(launch.agent_kind()),
+                    template.map(|template| serde_json::to_string(&template).unwrap()),
+                    selection,
+                ],
+            )
+            .unwrap();
+        }
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN session_launch;")
+            .expect("drop the launch column schema 26 added");
+    }
+
     /// Spec: schema 25 drops a session's profile snapshot columns
     /// (`source_profile_id`, `source_profile_name`) and keeps everything else
     /// about the row, including one whose snapshot was set.
@@ -10383,6 +10594,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&db_path).expect("open fixture");
+            restore_pre_v26_launch_columns(&conn);
             restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "UPDATE sessions SET source_profile_id = 'p-1',
@@ -10413,6 +10625,256 @@ mod tests {
         );
     }
 
+    /// Spec: a deleted fresh-checkout reservation's tombstone keeps its
+    /// client identity's digest for both fresh-checkout encodings, the
+    /// launch-kinds `github_checkout_v4` and the earlier `github_checkout_v3`,
+    /// and for nothing else.
+    ///
+    /// Why: fresh-checkout reconciliation is asked with the identity alone,
+    /// so without the digest a retry after Delete gets the generic
+    /// no-snapshot refusal instead of "since been deleted", and a key reused
+    /// by another request is no longer told so. Renaming the encoding once
+    /// already dropped the digest for every new reservation; a pre-upgrade
+    /// v3 row deleted after the upgrade must keep it too.
+    #[farhelm_testtrace::test]
+    fn tombstones_keep_the_identity_of_either_fresh_checkout_encoding() {
+        for kind in ["github_checkout_v3", "github_checkout_v4"] {
+            let fingerprint = serde_json::json!({
+                "kind": kind,
+                "checkout": {"client_identity": "request-a"},
+            })
+            .to_string();
+            assert_eq!(
+                tombstone_identity_digest(&tombstone_fingerprint(&fingerprint)),
+                Some(identity_digest("request-a").as_str()),
+                "{kind}"
+            );
+        }
+        let ordinary = serde_json::json!(["session_launch_v1", null, "/w"]).to_string();
+        assert_eq!(
+            tombstone_identity_digest(&tombstone_fingerprint(&ordinary)),
+            None
+        );
+    }
+
+    /// `(id, invocation, agent_kind column, resume_template JSON, launch
+    /// selection JSON)`, the planted shape of [`PreLaunchKindsRow`].
+    type PlantedV25Row<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<String>);
+
+    /// Plant the given rows' pre-schema-26 launch columns in a fresh
+    /// database downgraded to schema 25, for the schema-26 rung's tests.
+    ///
+    /// Each entry is `(id, invocation, agent_kind column, resume_template
+    /// JSON, launch selection JSON)`, written verbatim so a test can plant
+    /// shapes the current write path can no longer produce.
+    async fn plant_v25_launch_rows(db_path: &std::path::Path, rows: &[PlantedV25Row<'_>]) {
+        let store = SessionStore::open(db_path, true)
+            .await
+            .expect("create current db");
+        for (id, ..) in rows {
+            insert_running(&store, id).await;
+        }
+        drop(store);
+        let conn = Connection::open(db_path).expect("open fixture");
+        restore_pre_v26_launch_columns(&conn);
+        for (id, invocation, kind, template, selection) in rows {
+            conn.execute(
+                "UPDATE sessions SET invocation = ?2, agent_kind = ?3, resume_template = ?4, \
+                 launch = ?5 WHERE id = ?1",
+                rusqlite::params![id, invocation, kind, template, selection],
+            )
+            .expect("plant a v25 launch");
+        }
+        conn.execute_batch("PRAGMA user_version = 25;")
+            .expect("mark the file schema 25");
+    }
+
+    /// Spec: schema 26 turns a row created from structured choices into an
+    /// agent launch, with `{farhelm_args}` appended to its stored start and
+    /// resume commands, and keeps every other row's command, kind and
+    /// resume template as a legacy launch.
+    ///
+    /// Why: this is the upgrade promise for sessions that are running when
+    /// the release lands (SPEC.md's launch-kinds upgrade paragraph). A
+    /// structured session must keep behaving exactly as before, which needs
+    /// the placeholder where the old build injected its options; a typed
+    /// command was never classified, so converting it to anything but
+    /// legacy would invent a YOLO answer nobody gave. The helm's session
+    /// cache applies the same rule, so the two must agree.
+    #[farhelm_testtrace::test]
+    async fn schema_26_converts_structured_rows_and_keeps_the_rest_legacy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-x".to_string()),
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        plant_v25_launch_rows(
+            &db_path,
+            &[
+                (
+                    "structured",
+                    "codex -m gpt-x",
+                    "codex",
+                    Some(r#"["codex","-m","gpt-x","resume","{conversation}"]"#),
+                    Some(serde_json::to_string(&selection).unwrap()),
+                ),
+                (
+                    "typed",
+                    "claude --model opus",
+                    "claude",
+                    Some(r#"["claude","--model","opus","--resume","{conversation}"]"#),
+                    None,
+                ),
+            ],
+        )
+        .await;
+
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v25");
+        let structured = store.session("structured").await.unwrap().unwrap();
+        let strings = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            structured.launch,
+            farhelm_proto::SessionLaunch::Agent {
+                selection,
+                start: strings(&["codex", "-m", "gpt-x", "{farhelm_args}"]),
+                resume: Some(strings(&[
+                    "codex",
+                    "-m",
+                    "gpt-x",
+                    "resume",
+                    "{conversation}",
+                    "{farhelm_args}"
+                ])),
+            }
+        );
+        let typed = store.session("typed").await.unwrap().unwrap();
+        assert_eq!(
+            typed.launch,
+            farhelm_proto::SessionLaunch::Legacy {
+                invocation: "claude --model opus".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: Some(strings(&[
+                    "claude",
+                    "--model",
+                    "opus",
+                    "--resume",
+                    "{conversation}"
+                ])),
+            }
+        );
+        drop(store);
+        let columns = columns_of(&db_path);
+        for retired in ["invocation", "agent_kind", "resume_template", "launch"] {
+            assert!(
+                !columns
+                    .iter()
+                    .any(|column| column.0 == "sessions" && column.1 == retired),
+                "schema 26 drops `{retired}`: {columns:?}"
+            );
+        }
+    }
+
+    /// Spec: a structured row in a real schema-23 database (the frozen
+    /// fixture, not one downgraded from today's schema) migrates all the way
+    /// to an agent launch with `{farhelm_args}` appended to its stored start
+    /// and resume commands.
+    ///
+    /// Why: the downgrade helper rebuilds the old columns from today's
+    /// shapes, so it cannot catch a conversion that depends on how an older
+    /// release actually stored a structured row; the frozen DDL is that
+    /// release's own shape.
+    #[farhelm_testtrace::test]
+    async fn a_frozen_v23_structured_row_becomes_an_agent_launch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
+        };
+        {
+            let conn = Connection::open(&path).expect("create v23 fixture");
+            conn.execute_batch(include_str!("../tests/fixtures/supervisor-v23.sql"))
+                .expect("frozen v23 DDL");
+            conn.execute(
+                "INSERT INTO sessions
+                 (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,
+                  agent_kind,resume_template,canonical_cwd,generation,launch_scoped,
+                  session_token,creation_seq,last_activity_at,launch)
+                 VALUES ('s1','s1','/work','claude --dangerously-skip-permissions','fh-s1','',
+                         123,'exited','claude',
+                         '[\"claude\",\"--dangerously-skip-permissions\",\"--resume\",\"{conversation}\"]',
+                         '/work',1,1,'token-s1',1,125,?1)",
+                rusqlite::params![serde_json::to_string(&selection).unwrap()],
+            )
+            .expect("seed a structured v23 row");
+        }
+        let store = SessionStore::open(&path, true).await.expect("migrate v23");
+        let row = store.session("s1").await.unwrap().expect("row survives");
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            row.launch,
+            farhelm_proto::SessionLaunch::Agent {
+                selection,
+                start: words(&["claude", "--dangerously-skip-permissions", "{farhelm_args}"]),
+                resume: Some(words(&[
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "--resume",
+                    "{conversation}",
+                    "{farhelm_args}"
+                ])),
+            }
+        );
+    }
+
+    /// Spec: a row whose old launch columns do not decode fails the schema-26
+    /// upgrade, naming the row, and leaves the file at schema 25.
+    ///
+    /// Why: the upgrade must not guess a launch for a row it cannot read,
+    /// since a guessed legacy launch could resume or relaunch the wrong
+    /// thing; the load path already refused such a row, so failing here
+    /// strands nothing that used to open. The migration is one transaction,
+    /// so the refusal must leave the old columns whole for a fixed build.
+    #[farhelm_testtrace::test]
+    async fn schema_26_refuses_a_row_it_cannot_decode_and_changes_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        plant_v25_launch_rows(&db_path, &[("s1", "gemini", "gemini", None, None)]).await;
+
+        let rendered = format!(
+            "{:#}",
+            SessionStore::open(&db_path, true)
+                .await
+                .expect_err("an unknown kind must fail the upgrade")
+        );
+        assert!(
+            rendered.contains("s1") && rendered.contains("gemini"),
+            "the refusal names the row and the problem: {rendered}"
+        );
+        let conn = Connection::open(&db_path).expect("reopen raw");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 25, "the failed upgrade rolls back");
+        let invocation: String = conn
+            .query_row(
+                "SELECT invocation FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the old columns are still there");
+        assert_eq!(invocation, "gemini");
+    }
+
     /// Restore the profiles table that every schema from v8 through v14 had.
     ///
     /// These downgrade fixtures start from a current database, where the
@@ -10435,7 +10897,8 @@ mod tests {
     /// Version 16 adds only the structured-origin snapshot. A real v15 row
     /// has no such fact to preserve, so migration must retain its launch
     /// bundle and leave the snapshot absent instead of trying to parse a raw
-    /// command into newly invented composer choices.
+    /// command into newly invented composer choices; schema 26 then keeps
+    /// such a row legacy, its command untouched.
     #[farhelm_testtrace::test]
     async fn schema_15_rows_gain_an_empty_structured_launch_snapshot() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -10492,8 +10955,10 @@ mod tests {
             .await
             .expect("read")
             .expect("row survives");
-        assert_eq!(row.invocation, "agent --legacy");
-        assert_eq!(row.launch, None);
+        assert_eq!(
+            row.launch,
+            legacy_launch("agent --legacy", farhelm_proto::AgentKind::Generic, None)
+        );
         drop(store);
 
         let reopened = SessionStore::open(&db_path, true)
@@ -10506,7 +10971,7 @@ mod tests {
                 .expect("read")
                 .expect("row")
                 .launch,
-            None,
+            legacy_launch("agent --legacy", farhelm_proto::AgentKind::Generic, None),
             "reopening must retain the honest absence rather than filling it later"
         );
     }
@@ -10541,6 +11006,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&db_path).expect("open raw v17 fixture");
+            restore_pre_v26_launch_columns(&conn);
             restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN last_work_started_at;
@@ -10653,6 +11119,7 @@ mod tests {
         // Reverse every later schema change, including removed columns.
         // Version 12 still had archived, while activity, provenance, launch
         // metadata and work-start ordering all arrived later.
+        restore_pre_v26_launch_columns(&conn);
         restore_pre_v25_session_profile_columns(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
@@ -10755,6 +11222,7 @@ mod tests {
         // Leaving a work-start or checkout-origin column behind would make its own
         // migration fail on a duplicate instead of exercising provenance.
         // Restore archived as well so its later removal sees the old shape.
+        restore_pre_v26_launch_columns(&conn);
         restore_pre_v25_session_profile_columns(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
@@ -10858,8 +11326,8 @@ mod tests {
         // Everything describing the SESSION rather than the run is
         // untouched — a relaunched session is still the same session.
         assert_eq!(relaunching.tmux_name, stopped.tmux_name);
-        assert_eq!(relaunching.invocation, stopped.invocation);
-        assert_eq!(relaunching.agent_kind, stopped.agent_kind);
+        assert_eq!(relaunching.invocation(), stopped.invocation());
+        assert_eq!(relaunching.agent_kind(), stopped.agent_kind());
     }
 
     /// Item 4's other half, and the contract this PR itself documented: a
@@ -11237,8 +11705,8 @@ mod tests {
         assert_eq!(rows.len(), 1, "the migration must preserve every session");
         assert_eq!(rows[0].id, "s1");
         assert_eq!(rows[0].title, "title-s1");
-        assert_eq!(rows[0].invocation, "claude");
-        assert_eq!(rows[0].agent_kind, farhelm_proto::AgentKind::Claude);
+        assert_eq!(rows[0].invocation(), "claude");
+        assert_eq!(rows[0].agent_kind(), farhelm_proto::AgentKind::Claude);
         assert_eq!(rows[0].outcome, LastOutcome::Running);
         let conn = Connection::open(&path).expect("inspect migrated schema");
         let profile_tables: i64 = conn
@@ -11343,13 +11811,14 @@ mod tests {
             last_work_started_at: 0,
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
-            invocation: "agent".to_string(),
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::Legacy {
+                invocation: "agent".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Generic,
+                resume_template: None,
+            },
             tmux_name: "fh-s1".to_string(),
             pane: String::new(),
             outcome: LastOutcome::Launching,
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
             canonical_cwd: None,
             captured_conversation: None,
             generation: 0,

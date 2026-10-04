@@ -11,7 +11,8 @@
 // across two real launches — reads clearest as its own linear story with
 // the shared stack's memory cleared at its own start.
 import { expect, test } from "./helpers/evidence";
-import { FAKE_AGENT, cleanupSession, patchPreferences, readPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { answerYolo } from "./helpers/term";
+import { FAKE_AGENT, agentLaunchRow, cleanupSession, patchPreferences, readPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 
 test("the remembered structured-launch permissions mode survives an open, a reset, and a later default launch", async ({
@@ -60,7 +61,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     expect(yoloResponse.ok(), `the yolo launch must be admitted: ${await yoloResponse.text()}`).toBe(true);
     const yoloSession = await yoloResponse.json();
     created.push(yoloSession.id);
-    expect(yoloSession.launch).toMatchObject({ harness: "codex", permissions: "yolo" });
+    expect(yoloSession.launch.selection).toMatchObject({ harness: "codex", permissions: "yolo" });
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     await expect
       .poll(async () => (await readPreferences(request)).remembered_permissions, {
@@ -107,7 +108,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     expect(defaultResponse.ok(), `the default-permissions launch must be admitted: ${await defaultResponse.text()}`).toBe(true);
     const defaultSession = await defaultResponse.json();
     created.push(defaultSession.id);
-    expect(defaultSession.launch).toMatchObject({ harness: "codex", permissions: null });
+    expect(defaultSession.launch.selection).toMatchObject({ harness: "codex", permissions: null });
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     await expect
       .poll(async () => (await readPreferences(request)).remembered_permissions, {
@@ -148,7 +149,13 @@ test("a create reply claiming yolo does not change what the next New dialog pres
       const response = await route.fetch();
       if (!response.ok()) return route.fulfill({ response });
       const json = await response.json();
-      json.launch = { harness: "codex", model: null, effort: null, permissions: "yolo", workspace_trust: true };
+      json.launch = agentLaunchRow({
+        harness: "codex",
+        model: null,
+        effort: null,
+        permissions: "yolo",
+        workspace_trust: true,
+      });
       await route.fulfill({ response, json });
     });
     await page.goto("/");
@@ -164,7 +171,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
       expect(response.ok(), `the create must be admitted: ${await response.text()}`).toBe(true);
       const session = await response.json();
       created.push(session.id);
-      expect(session.launch, "the premise: the page received the rewritten reply").toMatchObject({
+      expect(session.launch.selection, "the premise: the page received the rewritten reply").toMatchObject({
         permissions: "yolo",
         workspace_trust: true,
       });
@@ -189,6 +196,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     // A command create, which submits no launch at all.
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     expect(await submit()).not.toHaveProperty("launch");
 
@@ -238,7 +246,7 @@ for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["OMP",
       expect(response.ok(), await response.text()).toBe(true);
       const session = await response.json();
       created.push(session.id);
-      expect(session.launch).toMatchObject({ harness, permissions: "yolo" });
+      expect(session.launch.selection).toMatchObject({ harness, permissions: "yolo" });
       await expect(form).toHaveCount(0);
       expect((await readPreferences(request)).remembered_permissions).toBeUndefined();
       await page.locator(".new-session-button").click();

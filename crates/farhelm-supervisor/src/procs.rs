@@ -483,7 +483,7 @@ fn is_hook_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
 ///
 /// The runtime names are the executable basenames that identify each
 /// integrated kind (`agent_kind::executable_basename`), so a new kind is
-/// recognized here as soon as it is recognized at launch.
+/// recognized here as soon as it names its executable there.
 fn is_other_session_runtime(exe: &[u8]) -> bool {
     let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
     farhelm_proto::AgentKind::ALL

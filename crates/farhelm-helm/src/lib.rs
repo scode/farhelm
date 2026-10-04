@@ -147,6 +147,16 @@ mod hosts;
 /// Release-owned structured launch catalog and argv compiler.
 mod launches;
 
+/// Compose an agent launch from an agent type and its choices with this
+/// helm's catalog, exactly as the launcher's create does: for callers that
+/// drive a supervisor directly rather than through the helm's REST API (the
+/// Rust end-to-end tests). A choice the catalog refuses is the error.
+pub fn compile_agent_launch(
+    selection: farhelm_proto::LaunchSelection,
+) -> Result<farhelm_proto::SessionLaunch, String> {
+    launches::compile(selection)
+}
+
 /// The per-host connection actors, their reconnect state machine, and the
 /// cache refresh that rides them (PLAN_M6.md item 4).
 ///

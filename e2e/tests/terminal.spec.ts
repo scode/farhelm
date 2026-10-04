@@ -50,6 +50,8 @@ import {
   SESSION_LISTING,
   type SessionRow,
   stubFeed,
+  agentLaunchRow,
+  commandLaunchRow,
 } from "./helpers/fleet";
 import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import { waitForIslandMounted, waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -519,7 +521,7 @@ test("switching sessions before the first terminal is ready mounts the second se
   const created = await request.post("/api/sessions", {
     data: {
       cwd: "/tmp",
-      invocation: "sleep 300",
+      command: { command: "sleep 300", yolo: false },
       title: "regression-session-b",
     },
   });
@@ -888,7 +890,7 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
 
   const title = `decrpm-probe-${Date.now()}`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "bash", title },
+    data: { cwd: "/tmp", command: { command: "bash", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -1013,7 +1015,7 @@ test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane 
 
   const title = `decrqss-probe-${Date.now()}`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "bash", title },
+    data: { cwd: "/tmp", command: { command: "bash", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -1539,7 +1541,7 @@ test("create API reports a precondition failure containing the supervisor's own 
   request,
 }) => {
   const resp = await request.post("/api/sessions", {
-    data: { cwd: "/nonexistent/definitely/not/here", invocation: "true" },
+    data: { cwd: "/nonexistent/definitely/not/here", command: { command: "true", yolo: false }},
   });
   expect(resp.status()).toBe(400);
   expect(await resp.text()).toContain("working directory does not exist");
@@ -1558,7 +1560,7 @@ test("stop and delete a session through the HTTP API", async ({ request }) => {
     .total;
 
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2098,7 +2100,7 @@ test("exited session deletes immediately with no confirming state", async ({
   request,
 }) => {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "true" },
+    data: { cwd: "/tmp", command: { command: "true", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2176,7 +2178,7 @@ test("delete confirmation safely displays a title containing executable HTML wit
 }) => {
   const title = `inject-${Date.now()}-<img src=x onerror="window.__pwned=1">`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300", title },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2238,7 +2240,7 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
 }) => {
   const hugeTitle = "x".repeat(20_000);
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300", title: hugeTitle },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }, title: hugeTitle },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2351,7 +2353,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
 }) => {
   const title = `confirm-survives-poll-${Date.now()}`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300", title },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2375,6 +2377,7 @@ test("an inline confirming state survives a listing refresh; cancel still works 
             title,
             cwd: "/tmp",
             invocation: markerArmed ? marker : "sleep 300",
+            launch: commandLaunchRow(markerArmed ? marker : "sleep 300"),
             status: { state: "running" },
           },
         ],
@@ -2417,7 +2420,10 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     await expect(row.locator(".session-agent")).toContainText(marker, {
       timeout: 10_000,
     });
-    await expect(row.locator(".session-agent")).toHaveAttribute("title", `command: ${marker} — ${marker}`);
+    await expect(row.locator(".session-agent")).toHaveAttribute(
+      "title",
+      `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
+    );
 
     // Still confirming, still the same wording and title — a refresh must
     // not have cleared it (nor silently deleted anything: no DELETE was
@@ -2444,10 +2450,10 @@ test("one row's confirming state does not affect another row's controls", async 
   request,
 }) => {
   const createdA = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   const createdB = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(createdA.status()).toBe(200);
   expect(createdB.status()).toBe(200);
@@ -2546,7 +2552,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
 }) => {
   const title = `alive-to-exited-${Date.now()}`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300", title },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2612,7 +2618,7 @@ test("a failed listing read while confirming does not clear the confirming state
 }) => {
   const title = `read-error-while-confirming-${Date.now()}`;
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300", title },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }, title },
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -2993,7 +2999,7 @@ test("stop and delete failures surface in the row's own error line, without dist
   request,
 }) => {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -3065,10 +3071,10 @@ test("a failed action's error is keyed to its own session, not shared across row
   request,
 }) => {
   const createdA = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   const createdB = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(createdA.status()).toBe(200);
   expect(createdB.status()).toBe(200);
@@ -3147,10 +3153,10 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
   request,
 }) => {
   const createdA = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   const createdB = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(createdA.status()).toBe(200);
   expect(createdB.status()).toBe(200);
@@ -3283,10 +3289,10 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
   request,
 }) => {
   const createdA = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   const createdB = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(createdA.status()).toBe(200);
   expect(createdB.status()).toBe(200);
@@ -3387,7 +3393,7 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
   request,
 }) => {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -3443,7 +3449,7 @@ test("the confirm prompt focuses cancel on open; Enter closes it without deletin
   request,
 }) => {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -3557,7 +3563,7 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
   const created = await request.post("/api/sessions", {
     data: {
       cwd: "/tmp",
-      invocation: `sh -c 'trap "exit 7" TERM; sleep 300'`,
+      command: { command: `sh -c 'trap "exit 7" TERM; sleep 300'`, yolo: false },
     },
   });
   expect(created.status()).toBe(200);
@@ -3855,14 +3861,17 @@ test("a long error detail wraps completely and compact ended rows stay one line"
 test("compact rows retain distinct ended and harness glyphs within two characters", async ({ page, request }, testInfo) => {
   const preferences = await readPreferences(request);
   const cases = [
-    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", description: "YOLO permission bypass", status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
-    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "YOLO permission bypass", status: { state: "exited", exit_code: 7 }, annotation: null },
-    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "YOLO permission bypass", status: { state: "interrupted" }, annotation: null },
-    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "YOLO permission bypass", status: { state: "error", detail: "cannot launch" }, annotation: null },
-    { id: "default", invocation: "codex", harness: "codex", permission: "shielded", description: "default permission mode", launch: { harness: "codex", model: null, effort: null, permissions: null }, status: { state: "idle" }, annotation: null },
-    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: "approve permission mode", launch: { harness: "omp", model: null, effort: null, permissions: "approve" }, status: { state: "idle" }, annotation: null },
-    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "unknown", description: "unknown permission mode — custom command", status: { state: "idle" }, annotation: null },
-    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: "unknown", description: "unknown permission mode — custom command", status: { state: "idle" }, annotation: null },
+    // Every mark comes from the launch, never the command line: a command
+    // launch shows its declared agent and the YOLO answer it was launched
+    // with, an agent launch its mode, a legacy session the question mark.
+    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("codex --yolo {farhelm_args}", { yolo: true, agent: "codex" }), status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
+    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("muse --yolo {farhelm_args}", { yolo: true, agent: "muse" }), status: { state: "exited", exit_code: 7 }, annotation: null },
+    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("claude --dangerously-skip-permissions {farhelm_args}", { yolo: true, agent: "claude" }), status: { state: "interrupted" }, annotation: null },
+    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }), status: { state: "error", detail: "cannot launch" }, annotation: null },
+    { id: "default", invocation: "codex", harness: "codex", permission: "shielded", description: "default permission mode", launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
+    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: "approve permission mode", launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "unclassified — a command from before launch kinds, which Farhelm never classified", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
@@ -4271,7 +4280,7 @@ test("list polls and picks up a session created elsewhere", async ({
   await expect(page.locator(".session-list")).toBeVisible();
 
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation: "sleep 300" },
+    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();

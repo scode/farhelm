@@ -27,7 +27,7 @@ import {
 } from "./helpers/focus-trace";
 import { routeGate } from "./helpers/route-gate";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, termText, waitForTermText, answerYolo } from "./helpers/term";
 
 /** Find one session by its opaque server id, independent of title changes. */
 function row(page: Page, id: string) {
@@ -110,7 +110,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
     expect(created.ok(), `creating structured parent: ${await created.text()}`).toBe(true);
     const parent = await created.json();
     parentId = parent.id;
-    expect(parent.launch).toEqual(selection);
+    expect(parent.launch.selection).toEqual(selection);
 
     await page.goto("/");
     const source = row(page, parentId);
@@ -148,7 +148,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
       const child = await response.json();
       childId = child.id;
       expect(childId).not.toBe(parentId);
-      expect(child.launch).toEqual(selection);
+      expect(child.launch.selection).toEqual(selection);
     } finally {
       page.off("request", countCreates);
     }
@@ -158,12 +158,12 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
     // assertion rather than trusting that reply to have been painted back.
     const detail = await request.get(`/api/sessions/${childId}`);
     expect(detail.ok(), `reading structured successor: ${await detail.text()}`).toBe(true);
-    expect((await detail.json()).launch).toEqual(selection);
+    expect((await detail.json()).launch.selection).toEqual(selection);
     const listed = await request.get("/api/sessions");
     expect(listed.ok(), `listing structured successor: ${await listed.text()}`).toBe(true);
     const live = (await listed.json()).sessions.find((session: any) => session.id === childId);
     expect(live, "the admitted child must be present in the live listing").toBeTruthy();
-    expect(live.launch).toEqual(selection);
+    expect(live.launch.selection).toEqual(selection);
 
     await attachSession(page, childId);
     await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${childId}:1`, 20_000);
@@ -782,7 +782,7 @@ test("clone pre-fills the create form from a typed-command row, and the edited c
     // The wire body itself, not just what the field showed — the two could
     // disagree if the reseed effect wrote the field's display without also
     // writing what submit actually reads.
-    expect(response.request().postDataJSON().invocation).toBe(invocationB);
+    expect(response.request().postDataJSON().command.command).toBe(invocationB);
     const body = await response.json();
     cloneId = body.id as string;
 
@@ -857,6 +857,7 @@ test("each clone restores every field after an intervening draft edit", async ({
     // to an assertion that only checked the fields B's clone changes.
     await form.getByLabel("folder", { exact: true }).fill("/tmp/edited-in-between");
     await form.getByLabel("agent command").fill("sleep 999");
+    await answerYolo(form);
     await fillCloneTitle(form, "edited in between");
 
     // A modal keeps its obscured sidebar inert. Cancel this edited draft
@@ -1120,5 +1121,48 @@ test("a failed catalog read shows a retry and leaves the clone launchable", asyn
     await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
   } finally {
     await clone.done();
+  }
+});
+
+/**
+ * Spec: Clone of a command launch opens the launcher's command mode with the
+ * source's YOLO answer, declared agent type and resume command filled in, not
+ * only its command line.
+ *
+ * Why: SPEC.md has Clone start from the source's launch; a clone that kept
+ * the command but dropped the declared type or resume command would launch a
+ * session that tracks no conversation and cannot restart, and one that
+ * dropped the YOLO answer would leave the form unsubmittable with no hint why.
+ */
+test("Clone of a command launch fills in its YOLO answer, agent type and resume command", async ({ page, request }) => {
+  const title = `clone-command-fields-${Date.now()}`;
+  const resume = `${FAKE_AGENT} --resume {conversation} {farhelm_args}`;
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd: "/tmp",
+      title,
+      command: { command: `${FAKE_AGENT} {farhelm_args}`, yolo: false, agent: "claude", resume },
+    },
+  });
+  expect(response.ok(), `creating ${title}: ${response.status()}`).toBe(true);
+  const source: SessionRow = await response.json();
+  try {
+    await page.goto("/");
+    const sourceRow = row(page, source.id);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-clone").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    await expect(form.getByLabel("agent command")).toHaveValue(`${FAKE_AGENT} {farhelm_args}`);
+    await expect(
+      form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }),
+    ).toBeChecked();
+    await expect(form.locator(".launch-command-agent")).toHaveValue("claude");
+    await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
+    await expect(form.locator(".launch-command-resume")).toHaveValue(resume);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+  } finally {
+    await cleanupSession(request, source.id);
   }
 });

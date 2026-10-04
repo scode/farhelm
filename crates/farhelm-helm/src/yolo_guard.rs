@@ -15,7 +15,6 @@
 //! instructions tell agents to pass only with the user's explicit approval.
 
 use crate::AppState;
-use crate::sessions::CreateMode;
 use crate::store::HostId;
 
 /// A YOLO launch refused because its host asks before YOLO launches and the request did
@@ -35,19 +34,15 @@ pub(crate) struct YoloNeedsConfirmation {
     pub(crate) host_name: String,
 }
 
-/// Whether a create in `mode` is a YOLO launch: a raw command by the shared
-/// command-line classifier, a structured launch by its own selection.
-pub(crate) fn create_is_yolo(mode: &CreateMode) -> bool {
-    match mode {
-        CreateMode::Raw(invocation) => invocation_is_yolo(invocation),
-        CreateMode::Structured(compiled) => {
-            farhelm_proto::yolo::selection_is_yolo(&compiled.selection)
-        }
-    }
+/// Whether a launch is YOLO, as the launch itself says
+/// ([`farhelm_proto::SessionLaunch::yolo`]): an agent launch by its
+/// effective permission, a command launch by the user's assertion. Farhelm
+/// never reads a command line to second-guess either (SPEC.md). A legacy
+/// launch carries no verdict and is never created anew, so it reads as not
+/// YOLO here; nothing that can reach this check holds one.
+pub(crate) fn create_is_yolo(launch: &farhelm_proto::SessionLaunch) -> bool {
+    launch.yolo() == Some(true)
 }
-
-/// The raw classifier lives in proto and is shared with the sidebar.
-pub(crate) use farhelm_proto::yolo::invocation_is_yolo;
 
 /// Refuse a YOLO launch on `host` unless the host allows YOLO without asking or the request
 /// carries the override. Reads the host's setting from the store at the moment of the

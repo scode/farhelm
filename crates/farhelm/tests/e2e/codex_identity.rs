@@ -210,14 +210,21 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &invocation,
+            // The resume command is what makes the row's offer about
+            // capture: without one it would read `NoResumeCommand` whatever
+            // the child reported.
+            declared_command(
+                &format!("{} {{farhelm_args}}", invocation),
+                farhelm_proto::LaunchHarness::Codex,
+                Some(&format!(
+                    "{} resume {{conversation}} {{farhelm_args}}",
+                    invocation
+                )),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Codex),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create the foreground without its startup report");
@@ -349,15 +356,19 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &invocation,
+            declared_command(
+                &format!("{} {{farhelm_args}}", invocation),
+                farhelm_proto::LaunchHarness::Codex,
+                Some(format!(
+                    "{} {{farhelm_args}}",
+                    shell_words::join(&resume_template)
+                ))
+                .as_deref(),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Codex),
-                resume_template: Some(resume_template),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect_err("the launch must stop before publication");

@@ -17,6 +17,7 @@ import {
   openRowMenu,
   SESSION_LISTING,
   stopSession,
+  agentLaunchRow,
 } from "./helpers/fleet";
 import { cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -54,7 +55,16 @@ installTerminalSuiteHooks();
  * "nothing respawns unattended" is a claim about requests, and only a
  * count can show that a decline sent none and a click sent exactly one.
  */
-async function injectInterruptedSession(page: Page, sessionId: string, title: string, offer = "resume") {
+async function injectInterruptedSession(
+  page: Page,
+  sessionId: string,
+  title: string,
+  offer = "resume",
+  // The injected row's launch, when a test is about a particular launch
+  // kind; omitted, the row carries none, which the card treats as an
+  // ordinary session.
+  launch?: Record<string, unknown>,
+) {
   // The replacement a successful Replace answers with. Like the real helm,
   // the listing reports it from then on: the sidebar re-selects when the
   // selected session drops out of a listing, and the helm's change hints
@@ -87,6 +97,7 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
       title,
       cwd: "/tmp",
       invocation: "claude",
+      ...(launch === undefined ? {} : { launch }),
       status: { state: "interrupted" },
       restart_offer: offer,
     });
@@ -259,6 +270,38 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
 });
 
 /**
+ * Spec: an interrupted session from before launch kinds offers Replace with,
+ * not plain Replace, says so in its text, and the button opens the launcher
+ * with the session's command filled in.
+ *
+ * Why: plain Replace refuses a legacy session (SPEC.md's launch-kinds
+ * upgrade), so the card would otherwise offer a button that can only fail;
+ * Replace with is the way forward the spec names for it.
+ */
+test("an interrupted legacy session offers Replace with, prefilled with its command", async ({ page }) => {
+  const sessionId = "11111111-2222-3333-4444-666666666666";
+  const title = `interrupted-legacy-${Date.now()}`;
+  await injectInterruptedSession(page, sessionId, title, "not_captured", {
+    kind: "legacy",
+    invocation: "claude",
+    agent_kind: "claude",
+    resume_template: null,
+  });
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  const notice = page.locator(".interrupted-card");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("choose Replace with");
+  await expect(notice).not.toContainText("replace starts it over");
+  await expect(notice.locator(".replace-from-notice")).toHaveCount(0);
+  await notice.locator(".replace-with-from-notice").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible();
+  await expect(form.getByLabel("agent command")).toHaveValue("claude");
+});
+
+/**
  * The missing-terminal choices stay visually coherent with the compact
  * Farhelm controls, and Replace cannot discard a conversation without a
  * deliberate confirmation. A successful choice must show the new session;
@@ -365,7 +408,7 @@ async function injectYoloReplaceSession(
       title,
       cwd: "/tmp",
       invocation: "codex --yolo",
-      launch: { harness: "codex", model: null, effort: null, permissions: "yolo", workspace_trust: null },
+      launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: "yolo", workspace_trust: null }),
       ...(withHost ? { host: local, host_name: "this machine" } : {}),
       status: { state: "interrupted" },
       restart_offer: "resume",

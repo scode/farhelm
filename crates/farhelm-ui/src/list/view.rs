@@ -2061,7 +2061,7 @@ pub(crate) fn ListView(
                                 .clone()
                                 .unwrap_or_else(|| "this host".to_string()),
                             reason: crate::yolo_confirm::YoloReason::of_launch(
-                                source.launch.as_ref(),
+                                source.agent_selection(),
                             ),
                         };
                         // A new question starts without an earlier one's

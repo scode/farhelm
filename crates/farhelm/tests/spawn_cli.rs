@@ -83,8 +83,7 @@ fn child_session(cwd: String) -> SessionInfo {
         cwd,
         canonical_cwd: None,
         invocation: "agent".to_string(),
-        resume_template: None,
-        launch: None,
+        launch: farhelm_proto::SessionLaunch::plain_command("agent"),
         status: SessionStatus::Running,
         annotation: None,
         restart_offer: RestartOffer::NoConversationReporting,
@@ -274,12 +273,10 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
             req_id,
             parent,
             cwd,
-            invocation,
+            launch,
             inherit_agent,
             title,
             intent_key,
-            agent_kind,
-            resume_template,
             ..
         } = request
         else {
@@ -287,10 +284,8 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         };
         assert_eq!(parent.as_deref(), Some("parent-123"));
         assert_eq!(cwd, expected_cwd);
-        assert_eq!(invocation, None);
+        assert_eq!(launch, None, "inheritance carries no launch of its own");
         assert!(inherit_agent);
-        assert_eq!(agent_kind, None);
-        assert_eq!(resume_template, None);
         assert_eq!(title.as_deref(), Some("scripted child"));
         assert_eq!(intent_key.as_deref(), Some("retry-7"));
         ControlMsg::SessionCreated {

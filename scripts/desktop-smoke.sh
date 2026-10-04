@@ -758,12 +758,12 @@ fi
 echo "== asset handler served $(grep -c 'desktop asset handler: served ' "$X/desktop.log") requests, 0 missing"
 
 echo "== creating two bundle-substrate sessions before the hard restart"
-CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
+CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
 SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
 [ -n "$SID" ] || fail "the pre-restart create returned no session id"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach the supervisor's tmux"
 sleep 1
-NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
+NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
 SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$NEWEST_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the newest pre-restart smoke session"
 [ -n "$SID_NEWEST" ] || fail "the newest pre-restart create returned no session id"
 tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
@@ -941,7 +941,7 @@ assert_no_persisted_credentials "rotation"
 # lines (rather than waiting for a fixed one) is what pins the answer to
 # after the rotation.
 ANSWERED_BEFORE=$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")
-ROTATED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-after-rotation"}))' "$X/work") || fail "encoding the post-rotation session"
+ROTATED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "zzz-after-rotation"}))' "$X/work") || fail "encoding the post-rotation session"
 SID_ROTATED=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$ROTATED_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the post-rotation session"
 NATIVE_ANSWERED=""
 for _ in $(seq 1 30); do

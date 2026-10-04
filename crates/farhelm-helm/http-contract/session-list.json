@@ -16,23 +16,45 @@
       "host_identity": "install-identity",
       "host_name": "buildbox",
       "id": "fh-0123abcd",
-      "invocation": "codex --model gpt-5",
+      "invocation": "codex -m gpt-5 -c 'model_reasoning_effort=high' --yolo -c {codex:trusted-cwd}",
       "last_activity_at": 1700000100,
       "last_work_started_at": 1700000050000,
       "launch": {
-        "effort": "high",
-        "harness": "codex",
-        "model": "gpt-5",
-        "permissions": "smart_approve",
-        "workspace_trust": true
+        "kind": "agent",
+        "resume": [
+          "codex",
+          "-m",
+          "gpt-5",
+          "-c",
+          "model_reasoning_effort=high",
+          "--yolo",
+          "-c",
+          "{codex:trusted-cwd}",
+          "resume",
+          "{conversation}",
+          "{farhelm_args}"
+        ],
+        "selection": {
+          "effort": "high",
+          "harness": "codex",
+          "model": "gpt-5",
+          "permissions": "yolo",
+          "workspace_trust": true
+        },
+        "start": [
+          "codex",
+          "-m",
+          "gpt-5",
+          "-c",
+          "model_reasoning_effort=high",
+          "--yolo",
+          "-c",
+          "{codex:trusted-cwd}",
+          "{farhelm_args}"
+        ]
       },
       "parent": "fh-89abcdef",
       "restart_offer": "resume",
-      "resume_template": [
-        "codex",
-        "resume",
-        "{conversation}"
-      ],
       "seen_activity_at": 1700000090,
       "stale": true,
       "status": {

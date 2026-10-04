@@ -179,6 +179,16 @@ pub struct LaunchSpec {
     /// [`CheckoutPreparation::state_path`].
     #[serde(default)]
     pub preparation: Option<CheckoutPreparation>,
+    /// Settings the agent's own conversation reporter reads, added to the
+    /// agent's environment and to nothing else the shim runs (git and the
+    /// post-clone hook never see them). SPEC.md keeps the environment out
+    /// of turning integration on, because every process the agent starts
+    /// inherits it; what arrives here is only what a reporter that an
+    /// argument already loaded needs, plus Goose's resume switch. Empty
+    /// for a legacy session, whose reporter settings ride in its argv as an
+    /// `env` prefix, and for any spec written before this field existed.
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
 }
 
 /// One session-terminal checkout preparation: clone a repository into the
@@ -948,7 +958,10 @@ fn agent_command(spec: &LaunchSpec) -> std::process::Command {
     command
         .args(&spec.argv[1..])
         .env(SESSION_TOKEN_ENV_VAR, &spec.session_token)
-        .env(SUPERVISOR_SOCK_ENV_VAR, &spec.supervisor_sock);
+        .env(SUPERVISOR_SOCK_ENV_VAR, &spec.supervisor_sock)
+        // After `launch_child_command`'s scrub of inherited reporter
+        // settings, so this launch's own values are the ones that survive.
+        .envs(spec.env.iter().map(|(name, value)| (name, value)));
     command
 }
 
@@ -1819,6 +1832,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
         run_exec_failure_child(&spec_path, "real");
@@ -1927,6 +1941,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -1978,6 +1993,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -2054,6 +2070,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -2087,6 +2104,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
 
@@ -2193,6 +2211,48 @@ mod tests {
         }
     }
 
+    /// Spec: a launch's own environment (`LaunchSpec.env`, the reporter
+    /// settings `{farhelm_args}` expansion produced) reaches the agent and
+    /// wins over the same variable inherited from the supervisor, while
+    /// the preparation children (git, the post-clone hook) never get it.
+    ///
+    /// Why: SPEC.md moved reporter settings for new launches out of the
+    /// command line, so this field is the only way they reach the agent; an
+    /// inherited value from a nested supervisor naming another executable
+    /// must not survive, and a clone or user hook has no use for them.
+    #[farhelm_testtrace::test]
+    fn a_launchs_own_environment_reaches_only_the_agent_and_wins() {
+        let spec = LaunchSpec {
+            argv: vec!["pi".to_string()],
+            status_file: PathBuf::from("/tmp/status"),
+            session_id: "session-7".to_string(),
+            session_token: "private-token".to_string(),
+            supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            preparation: None,
+            env: vec![(
+                PI_REPORTER_EXE_ENV_VAR.to_string(),
+                "/opt/farhelm/bin/farhelm".to_string(),
+            )],
+        };
+        let value_of = |command: &std::process::Command| {
+            command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new(PI_REPORTER_EXE_ENV_VAR))
+                .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+        };
+        assert_eq!(
+            value_of(&agent_command(&spec)),
+            Some(Some("/opt/farhelm/bin/farhelm".to_string())),
+            "set after the scrub, so this launch's value is the one the agent sees"
+        );
+        assert_eq!(
+            value_of(&launch_child_command("git", &spec)),
+            Some(None),
+            "a preparation child gets the variable removed, not this launch's value"
+        );
+    }
+
     /// The final exec receives the session credential and the exact socket
     /// that minted it; neither may depend on a guessed state-directory path.
     #[farhelm_testtrace::test]
@@ -2205,6 +2265,7 @@ mod tests {
             supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
             preparation: None,
+            env: Vec::new(),
         };
         let command = agent_command(&spec);
         let env = command
@@ -2700,6 +2761,7 @@ exec sleep 60
                 supervisor_sock: self.tmp.path().join("supervisor.sock"),
                 farhelm_bin_dir: self.bin_dir(),
                 preparation: Some(self.preparation.clone()),
+                env: Vec::new(),
             };
             std::fs::write(&self.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
             self.spec_path.clone()

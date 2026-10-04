@@ -60,11 +60,13 @@ import {
   setLocalYoloWithoutAsking,
   stopSession,
   stubFeed,
+  agentLaunchRow,
+  commandLaunchRow,
 } from "./helpers/fleet";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, restartIdleAgent, waitForTermText } from "./helpers/term";
+import { attachSession, restartIdleAgent, waitForTermText, answerYolo } from "./helpers/term";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -3319,7 +3321,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "live row",
             cwd: "/srv/live",
             invocation: "codex --yolo",
-            launch: { harness: "codex", model: null, effort: null, permissions: "yolo" },
+            launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: "yolo" }),
             host: 999_991,
             host_name: "remote-build-host",
             status: { state: "running" },
@@ -3330,6 +3332,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: `ended-${"long-title-".repeat(24)}`,
             cwd: "/srv/ended",
             invocation: "/opt/tools/a-very-long-agent-program-name --flag",
+            launch: { kind: "legacy", invocation: "/opt/tools/a-very-long-agent-program-name --flag", agent_kind: "generic", resume_template: null },
             host: local,
             host_name: "this machine",
             status: { state: "exited", exit_code: 17 },
@@ -3341,6 +3344,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "unknown row",
             cwd: "/srv/unknown",
             invocation: "opencode --auto",
+            launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }),
             status: { state: "unknown" },
             last_activity_at: activity,
           },
@@ -3349,6 +3353,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "claude glyph",
             cwd: "/srv/claude",
             invocation: "claude --dangerously-skip-permissions",
+            launch: commandLaunchRow("claude --dangerously-skip-permissions {farhelm_args}", { yolo: true, agent: "claude" }),
             status: { state: "running" },
             last_activity_at: activity,
           },
@@ -3357,6 +3362,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "muse glyph",
             cwd: "/srv/muse",
             invocation: "muse --yolo",
+            launch: commandLaunchRow("muse --yolo {farhelm_args}", { yolo: true, agent: "muse" }),
             status: { state: "running" },
             last_activity_at: activity,
           },
@@ -3365,6 +3371,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "stopped glyph",
             cwd: "/srv/stopped",
             invocation: "claude",
+            launch: commandLaunchRow("claude {farhelm_args}", { agent: "claude" }),
             status: { state: "exited", exit_code: null },
             annotation: "stopped by user",
             last_activity_at: activity,
@@ -3374,6 +3381,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "interrupted glyph",
             cwd: "/srv/interrupted",
             invocation: "muse",
+            launch: commandLaunchRow("muse {farhelm_args}", { agent: "muse" }),
             status: { state: "interrupted" },
             last_activity_at: activity,
           },
@@ -3382,6 +3390,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             title: "error glyph",
             cwd: "/srv/error",
             invocation: "codex",
+            launch: commandLaunchRow("codex {farhelm_args}", { agent: "codex" }),
             status: { state: "error", detail: `spaced detail ${"X".repeat(180)}` },
             last_activity_at: activity,
           },
@@ -3978,6 +3987,7 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
             title: "bidi-invocation",
             cwd: "/tmp",
             invocation,
+            launch: commandLaunchRow(invocation),
           },
         ],
         total: 1,
@@ -3993,7 +4003,10 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   // Escaped to a visible `<U+202E>` form rather than an invisible control
   // character (`display_peer`). The tooltip uses the same safe rendering,
   // so its native UI cannot reinterpret a peer-controlled direction mark.
-  await expect(badge).toHaveAttribute("title", `command: <U+202E>evil-agent — /opt/bin/<U+202E>evil-agent --some-flag`);
+  await expect(badge).toHaveAttribute(
+    "title",
+    `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — /opt/bin/<U+202E>evil-agent --some-flag`,
+  );
 
   // The session menu repeats both the persisted title and the executable
   // basename in its header. Opening it here keeps the existing hostile
@@ -5497,7 +5510,7 @@ test("composer local-home reset takes over a remote clone destination", async ({
     const body = await response.json();
     const source = body.sessions.find((entry: { id: string }) => entry.id === session.id);
     expect(source, "the listed remote source must still exist when its clone snapshot is fabricated").toBeTruthy();
-    source.launch = { harness: "codex", model: null, effort: null, permissions: null };
+    source.launch = agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null });
     const headers = { ...response.headers() };
     delete headers["content-length"];
     await route.fulfill({ status: response.status(), headers, json: body });
@@ -5588,8 +5601,8 @@ test("composer mounted clone generation replaces the prior draft and notice", as
       const secondSource = body.sessions.find((entry: { id: string }) => entry.id === second.id);
       expect(firstSource, "the first owned source must still exist before its clone click").toBeTruthy();
       expect(secondSource, "the second owned source must still exist before its clone click").toBeTruthy();
-      firstSource.launch = { harness: "codex", model: "mounted-old-custom", effort: "high", permissions: "yolo" };
-      secondSource.launch = { harness: "claude", model: "mounted-new-custom", effort: null, permissions: null };
+      firstSource.launch = agentLaunchRow({ harness: "codex", model: "mounted-old-custom", effort: "high", permissions: "yolo" });
+      secondSource.launch = agentLaunchRow({ harness: "claude", model: "mounted-new-custom", effort: null, permissions: null });
       const headers = { ...response.headers() };
       delete headers["content-length"];
       await route.fulfill({ status: response.status(), headers, json: body });
@@ -5949,6 +5962,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
     await expect(recent, "the seeded recent must be visible before its pointer and keyboard contracts are tested").toBeVisible();

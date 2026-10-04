@@ -8,8 +8,9 @@
 //! hatch for a newer vendor ID.
 
 use farhelm_proto::{
-    AgentKind,
+    SessionLaunch,
     launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
+    session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
 };
 use serde::Serialize;
 
@@ -298,22 +299,6 @@ pub(crate) fn catalog() -> &'static [CatalogModel] {
     CATALOG
 }
 
-/// The resolved launch bundle that the existing supervisor create path needs.
-///
-/// `selection` is retained separately because a compiled command alone loses
-/// whether an omitted flag was a harness default or an older catalog's
-/// explicit choice. The supervisor will later persist both values.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CompiledLaunch {
-    pub(crate) invocation: String,
-    pub(crate) agent_kind: AgentKind,
-    /// A copied structured bundle can preserve a source's durable resume
-    /// argv. Fresh catalog compilation leaves this absent and keeps the
-    /// supervisor's established integration-derived default.
-    pub(crate) resume_template: Option<Vec<String>>,
-    pub(crate) selection: LaunchSelection,
-}
-
 /// The durable form of a submitted structured selection: what history,
 /// remembered defaults, and retries record for it.
 ///
@@ -330,14 +315,21 @@ pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelec
     selection
 }
 
-/// Compile an explicit structured choice into one shell-word-safe invocation.
+/// Compose an agent launch from an explicit choice: its start command and,
+/// for an agent type with conversation reporting, its resume command, each
+/// with `{farhelm_args}` where Farhelm's own arguments go (SPEC.md, "Farhelm
+/// composes an agent launch's resume command from the same choices as its
+/// start command").
 ///
-/// The result contains no user-provided shell syntax. A custom model is one
-/// argv element after validation, and `shell_words::join` does the only
-/// quoting at the boundary where the supervisor later splits the invocation.
-/// An absent model adds no provider or model flags, leaving the installed
-/// harness's configured default in charge.
-pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, String> {
+/// The commands are argv vectors with no user-provided shell syntax: a
+/// custom model is one argv element after validation. An absent model adds
+/// no provider or model flags, leaving the installed harness's configured
+/// default in charge. `{farhelm_args}` goes last in both commands, where the
+/// previous release appended Farhelm's arguments, which is also where the
+/// upgrade puts it in a converted session
+/// (`SessionLaunch::from_pre_launch_kinds`), so a new launch and an
+/// upgraded one spawn alike.
+pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, String> {
     let selection = normalize_selection(selection);
     validate_selection(&selection)?;
 
@@ -466,19 +458,54 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
         _ => {}
     }
 
-    Ok(CompiledLaunch {
-        invocation: shell_words::join(argv),
-        agent_kind: selection.harness.agent_kind(),
-        resume_template: (selection.harness == LaunchHarness::Grok).then(|| {
-            let mut template = vec!["grok".to_string(), "--no-leader".to_string()];
-            if selection.permissions == Some(LaunchPermission::Yolo) {
-                template.push("--always-approve".to_string());
-            }
-            template.extend(["--resume".to_string(), "{conversation}".to_string()]);
-            template
-        }),
+    let resume = resume_arguments(selection.harness).map(|suffix| {
+        let mut resume = argv.clone();
+        resume.extend(suffix.iter().map(|element| element.to_string()));
+        resume.push(FARHELM_ARGS_PLACEHOLDER.to_string());
+        resume
+    });
+    argv.push(FARHELM_ARGS_PLACEHOLDER.to_string());
+    Ok(SessionLaunch::Agent {
         selection,
+        start: argv,
+        resume,
     })
+}
+
+/// What an agent type's resume command adds to its start command to select
+/// the captured conversation, or `None` for an agent type Farhelm cannot
+/// resume (no conversation reporting: Muse, Cursor, OpenCode).
+///
+/// Appended after every start-command choice: each agent type reads these
+/// selectors wherever they stand among its options, and the start commands
+/// this module composes carry no positional prompt or `--` they could fall
+/// behind. Goose's `session` subcommand is already in the start command.
+fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
+    match harness {
+        LaunchHarness::Claude => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Codex => Some(&["resume", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Goose => Some(&["--resume", "--session-id", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Pi => Some(&["--session", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+    }
+}
+
+/// An agent launch carrying exactly `selection`, for tests that need a
+/// session or reply holding one without going through the catalog (which
+/// would normalize or refuse the choices under test): the harness's bare
+/// program and `{farhelm_args}`, with no resume command.
+#[cfg(test)]
+pub(crate) fn test_agent_launch(selection: LaunchSelection) -> SessionLaunch {
+    let start = vec![
+        program(selection.harness).to_string(),
+        FARHELM_ARGS_PLACEHOLDER.to_string(),
+    ];
+    SessionLaunch::Agent {
+        selection,
+        start,
+        resume: None,
+    }
 }
 
 fn program(harness: LaunchHarness) -> &'static str {
@@ -610,11 +637,96 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
 
 #[cfg(test)]
 mod tests {
-    use super::{CATALOG, compile, normalize_selection};
+    use super::{CATALOG, normalize_selection};
     use farhelm_proto::{
-        AgentKind,
+        AgentKind, SessionLaunch,
         launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
+        session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
     };
+
+    /// A compiled agent launch, viewed the way these tests assert on it:
+    /// the start command as the text a session displays (Farhelm's
+    /// `{farhelm_args}` left out), the resume command likewise, and the
+    /// launch itself for the tests about its placeholders.
+    #[derive(Debug)]
+    struct Compiled {
+        invocation: String,
+        agent_kind: AgentKind,
+        selection: LaunchSelection,
+        resume_template: Option<Vec<String>>,
+        launch: SessionLaunch,
+    }
+
+    /// [`super::compile`], viewed as a [`Compiled`].
+    fn compile(selection: LaunchSelection) -> Result<Compiled, String> {
+        let launch = super::compile(selection)?;
+        let SessionLaunch::Agent {
+            selection,
+            start: _,
+            resume,
+        } = &launch
+        else {
+            panic!("compile always makes an agent launch");
+        };
+        let without_args = |argv: &[String]| -> Vec<String> {
+            argv.iter()
+                .filter(|element| *element != FARHELM_ARGS_PLACEHOLDER)
+                .cloned()
+                .collect()
+        };
+        Ok(Compiled {
+            invocation: launch.display_command(),
+            agent_kind: launch.agent_kind(),
+            selection: selection.clone(),
+            resume_template: resume.as_deref().map(without_args),
+            launch,
+        })
+    }
+
+    /// Spec: every agent type's composed start command ends in
+    /// `{farhelm_args}`; an agent type with conversation reporting also gets
+    /// a resume command, which is the start command, that type's resume
+    /// selector with `{conversation}`, then `{farhelm_args}`; Muse, Cursor
+    /// and OpenCode get none. Every composed launch passes the launch rules.
+    ///
+    /// Why: SPEC.md has Farhelm compose both commands from the same choices
+    /// and Restart run the resume command as composed. `{farhelm_args}` at
+    /// the end is where the previous release appended Farhelm's arguments,
+    /// and where the upgrade puts it in converted sessions, so a new launch
+    /// and an upgraded one spawn alike.
+    #[farhelm_testtrace::test]
+    fn every_agent_type_composes_start_and_resume_with_farhelm_args() {
+        for harness in LaunchHarness::ALL.iter().copied() {
+            let launch = super::compile(selection(harness)).expect("default compiles");
+            launch
+                .validate_new()
+                .expect("a composed launch passes the rules");
+            let SessionLaunch::Agent { start, resume, .. } = &launch else {
+                panic!("an agent launch");
+            };
+            assert_eq!(
+                start.last().map(String::as_str),
+                Some(FARHELM_ARGS_PLACEHOLDER),
+                "{harness:?}"
+            );
+            let suffix: Option<&[&str]> = match harness {
+                LaunchHarness::Claude => Some(&["--resume"]),
+                LaunchHarness::Codex => Some(&["resume"]),
+                LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
+                LaunchHarness::Pi => Some(&["--session"]),
+                LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
+                LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+            };
+            let expected = suffix.map(|suffix| {
+                let mut resume = start[..start.len() - 1].to_vec();
+                resume.extend(suffix.iter().map(|element| element.to_string()));
+                resume.push(CONVERSATION_PLACEHOLDER.to_string());
+                resume.push(FARHELM_ARGS_PLACEHOLDER.to_string());
+                resume
+            });
+            assert_eq!(resume, &expected, "{harness:?}");
+        }
+    }
 
     fn selection(harness: LaunchHarness) -> LaunchSelection {
         LaunchSelection {
@@ -671,12 +783,8 @@ mod tests {
                 assert_eq!(shell_words::split(&launch.invocation).unwrap(), expected);
                 assert_eq!(launch.selection, input);
                 assert_eq!(launch.agent_kind, AgentKind::Generic);
-                let snapshot = farhelm_supervisor::agent_kind::IntegrationSnapshot::resolve(
-                    &expected,
-                    Some(launch.agent_kind),
-                    launch.resume_template,
-                )
-                .unwrap();
+                let snapshot =
+                    farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&launch.launch);
                 assert!(snapshot.integration().is_none());
                 assert!(snapshot.resume_template.is_none());
                 assert_eq!(

@@ -8,7 +8,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { SESSION_LISTING } from "./helpers/fleet";
+import { agentLaunchRow, SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
 import {
@@ -59,7 +59,12 @@ async function injectSession(page: Page, launch: typeof BASELINE | null, offer: 
       title: TITLE,
       cwd: "/tmp",
       invocation: "codex",
-      launch,
+      // `null` stands for a session from before launch kinds, which the
+      // helm lists with a legacy launch.
+      launch:
+        launch === null
+          ? { kind: "legacy", invocation: "codex", agent_kind: "codex", resume_template: null }
+          : agentLaunchRow(launch),
       status: { state: "interrupted" },
       restart_offer: offer,
     });
@@ -86,7 +91,7 @@ async function acceptYoloRestart(page: Page): Promise<unknown[]> {
         title: TITLE,
         cwd: "/tmp",
         invocation: "codex --yolo",
-        launch: { ...BASELINE, permissions: "yolo" },
+        launch: agentLaunchRow({ ...BASELINE, permissions: "yolo" }),
         status: { state: "unknown" },
         restart_offer: "resume",
         created_at: 0,
@@ -201,7 +206,7 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
         title: TITLE,
         cwd: "/tmp",
         invocation: "codex --yolo",
-        launch: { ...BASELINE, permissions: "yolo" },
+        launch: agentLaunchRow({ ...BASELINE, permissions: "yolo" }),
         status: { state: "unknown" },
         restart_offer: "resume",
         created_at: 0,
@@ -286,7 +291,7 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
         title: TITLE,
         cwd: "/tmp",
         invocation: "codex --yolo",
-        launch: { ...BASELINE, permissions: "yolo" },
+        launch: agentLaunchRow({ ...BASELINE, permissions: "yolo" }),
         status: { state: "unknown" },
         restart_offer: "resume",
         created_at: 0,
@@ -367,7 +372,7 @@ test("unavailable restart with stays visible and inert with a reason", async ({ 
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
   const trigger = page.locator(".restart-with-trigger");
-  const reason = "restart with needs a session launched from structured settings";
+  const reason = "this session was created before launch kinds, so its launch cannot be changed; use replace with";
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
   await trigger.hover();
@@ -395,7 +400,7 @@ test("unavailable restart with stays visible and inert with a reason", async ({ 
 async function presentAsResumable(page: Page, id: string) {
   const resumable = (session: Record<string, unknown>) => ({
     ...session,
-    launch: BASELINE,
+    launch: agentLaunchRow(BASELINE),
     restart_offer: "resume",
   });
   await page.route(SESSION_LISTING, async (route) => {

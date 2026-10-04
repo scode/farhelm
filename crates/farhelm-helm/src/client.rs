@@ -12,7 +12,7 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, TabInfo, TerminalSelector,
+    ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, TabInfo, TerminalSelector,
     UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
@@ -783,19 +783,6 @@ struct UploadProgress {
 pub struct CreateExtras {
     /// See [`SupervisorClient::create_session_with_key`].
     pub intent_key: Option<String>,
-    /// Force (or forbid) an agent integration the invocation's basename
-    /// would not produce on its own; `None` lets the supervisor derive it.
-    pub agent_kind: Option<AgentKind>,
-    /// Override the resume invocation, as an argv vector. An integrated
-    /// kind's template must contain a `{conversation}` element; the
-    /// supervisor refuses the create otherwise.
-    pub resume_template: Option<Vec<String>>,
-    /// Explicit launch-composer choices compiled into the resolved invocation.
-    ///
-    /// Raw callers leave this absent. The supervisor persists
-    /// it beside the immutable resolved bundle rather than recovering it from
-    /// the command later.
-    pub launch: Option<farhelm_proto::LaunchSelection>,
     /// The helm-resolved fresh-checkout payload: repo identity, root, hook,
     /// and the preview binding the create re-verdicts. `None` is every
     /// existing create (Existing destination); `Some` reaches the
@@ -2608,6 +2595,13 @@ impl SupervisorClient {
             .await
     }
 
+    // `create_session` and `create_session_with_key` take a bare command
+    // line and launch it as a plain command launch (no declared agent type,
+    // asserted not YOLO): the helm's own startup create and tests, which
+    // only ever run a command. Anything that needs an agent launch or a
+    // command launch's other fields goes through
+    // `create_session_with_extras`.
+
     /// [`SupervisorClient::create_session`] carrying a client-supplied
     /// idempotency key (PLAN_M3.md item 6).
     ///
@@ -2639,7 +2633,7 @@ impl SupervisorClient {
     ) -> anyhow::Result<SessionInfo> {
         self.create_session_with_extras(
             cwd,
-            invocation,
+            farhelm_proto::SessionLaunch::plain_command(invocation),
             title,
             cols,
             rows,
@@ -2651,16 +2645,16 @@ impl SupervisorClient {
         .await
     }
 
-    /// [`SupervisorClient::create_session`] carrying a fully resolved launch
-    /// bundle as well as PLAN_M3.md item 6's idempotency key.
+    /// [`SupervisorClient::create_session`] carrying a resolved launch as
+    /// well as PLAN_M3.md item 6's idempotency key.
     ///
-    /// Raw creates may let the supervisor infer the agent kind; structured
-    /// creates send the bundle the helm compiled, because the supervisor
-    /// deliberately has no launch catalog of its own.
+    /// An agent launch arrives already composed by this helm
+    /// (`launches::compile`), because the supervisor deliberately has no
+    /// launch catalog of its own.
     pub async fn create_session_with_extras(
         &self,
         cwd: &str,
-        invocation: &str,
+        launch: farhelm_proto::SessionLaunch,
         title: Option<String>,
         cols: u16,
         rows: u16,
@@ -2675,7 +2669,7 @@ impl SupervisorClient {
                     parent: None,
                     inherit_agent: false,
                     cwd: cwd.to_string(),
-                    invocation: Some(invocation.to_string()),
+                    launch: Some(launch),
                     title,
                     cols,
                     rows,
@@ -2683,9 +2677,6 @@ impl SupervisorClient {
                     // The helm checks a YOLO launch itself before sending
                     // (`yolo_guard`); the field is for a spawn's own lookup.
                     confirm_yolo: false,
-                    agent_kind: extras.agent_kind,
-                    resume_template: extras.resume_template,
-                    launch: extras.launch,
                     // The resolved payload is helm-supplied (configuration
                     // plus hook); the supervisor re-verdicts it under
                     // directory admission and allocates the checkout.
@@ -2935,39 +2926,17 @@ impl SupervisorClient {
         self.restart_session_with(id, stop_if_running, None).await
     }
 
-    /// Restart with an optional structured selection compiled by this helm.
-    ///
-    /// `None` preserves the ordinary restart wire shape. Compiling here lets
-    /// REST callers and direct clients use the same catalog and wire path.
+    /// Restart, or Restart with when `with` carries the replacement launch
+    /// (already resolved by the caller: an agent launch composed by this
+    /// helm, or a command launch as the user edited it). `None` is the
+    /// ordinary restart wire shape.
     pub async fn restart_session_with(
         &self,
         id: &str,
         stop_if_running: bool,
-        selection: Option<farhelm_proto::LaunchSelection>,
+        with: Option<farhelm_proto::SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
-        let (invocation, launch, resume_template) = selection
-            .map(crate::launches::compile)
-            .transpose()
-            // The selection is caller input, so a catalog refusal is the
-            // caller's to fix: classify it `InvalidRequest` (a 400) exactly
-            // as structured create does, rather than letting an untyped error
-            // reach the route as a 500.
-            .map_err(|message| {
-                anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::InvalidRequest,
-                    message,
-                })
-            })?
-            .map(|bundle| {
-                (
-                    Some(bundle.invocation),
-                    Some(bundle.selection),
-                    bundle.resume_template,
-                )
-            })
-            .unwrap_or((None, None, None));
         match self
             .request(
                 req_id,
@@ -2975,9 +2944,7 @@ impl SupervisorClient {
                     req_id,
                     session_id: id.to_string(),
                     stop_if_running,
-                    invocation,
-                    launch,
-                    resume_template,
+                    with,
                 },
             )
             .await?
@@ -3986,8 +3953,7 @@ mod tests {
             cwd: format!("/{id}"),
             canonical_cwd: None,
             invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -4373,6 +4339,8 @@ mod tests {
             };
             let mut wrong = session("s1");
             wrong.invocation = "agent --api-key super-secret".to_string();
+            wrong.launch =
+                farhelm_proto::SessionLaunch::plain_command("agent --api-key super-secret");
             wrong.cwd = "/private/secret-project".to_string();
             writer
                 .write_control(&ControlMsg::SessionRenamed {
@@ -4427,6 +4395,8 @@ mod tests {
             };
             let mut wrong = session("s1");
             wrong.invocation = "agent --api-key super-secret".to_string();
+            wrong.launch =
+                farhelm_proto::SessionLaunch::plain_command("agent --api-key super-secret");
             wrong.cwd = "/private/secret-project".to_string();
             writer
                 .write_control(&ControlMsg::SessionRenamed {
@@ -6119,9 +6089,7 @@ mod tests {
                     req_id: 7,
                     session_id: "restarted".to_string(),
                     stop_if_running: false,
-                    invocation: None,
-                    launch: None,
-                    resume_template: None,
+                    with: None,
                 },
             )
             .await
@@ -7921,7 +7889,14 @@ mod tests {
                 farhelm_proto::AgentVerb::Create {
                     host: Some("this machine".to_string()),
                     cwd: "/w".to_string(),
-                    invocation: Some("sh".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "sh".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,

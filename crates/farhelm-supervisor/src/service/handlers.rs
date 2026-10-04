@@ -20,7 +20,7 @@ use super::connection::{
     set_attachment_paused, spawn_admitted,
 };
 use super::core::{
-    CreateInputs, CreateMode, RequestError, SessionEntry, Supervisor, create_fingerprint,
+    CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
     ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
@@ -87,8 +87,8 @@ impl CreateAdmission {
 }
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame, LaunchSelection,
-    MAX_SESSION_ID_BYTES, ResolvedGithubCheckout, SessionInfo, TerminalSelector,
+    AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame, MAX_SESSION_ID_BYTES,
+    ResolvedGithubCheckout, SessionInfo, SessionLaunch, TerminalSelector,
     github_checkout::GithubPreviewRequest,
 };
 use std::collections::HashMap;
@@ -333,115 +333,60 @@ fn sanitized_source(source: &str) -> String {
 /// same field; see the definition for what the number is and why.
 use crate::store::RESUME_TEMPLATE_ELEMENT_CAP;
 
-/// Decide which launch selector a `CreateSession` chose, or say why the
-/// request has no single meaning (PLAN_M7.md item 2).
-///
-/// The two selectors — a resolved launch bundle, or explicit inheritance of
-/// the asking session's stored bundle — are mutually exclusive on the wire
-/// by CONTRACT rather than by construction (see `ControlMsg::CreateSession`'s
-/// own docs), so this is where that contract is enforced — once, before
-/// anything reads a mode's fields, so that no half-interpreted request can
-/// reach a launch. Every ambiguous shape is refused as
-/// `ErrorKind::InvalidRequest`, and the `Err` is the user-facing message
-/// verbatim (SPEC.md's concrete, actionable errors).
-///
-/// The overrides are MOVED into the raw variant rather than passed onward
-/// beside the mode: past this function they are meaningful only for a raw
-/// create, and [`CreateMode`] is where that stops being a convention.
+/// Which launch selector a `CreateSession` chose (PLAN_M7.md item 2): its
+/// own resolved launch, or explicit inheritance of the asking session's.
 enum CreateSelector {
-    Bundle(CreateMode),
-    Derived,
+    Launch(SessionLaunch),
+    Inherited,
 }
 
-/// The wire fields that jointly select one create mode.
+/// Decide which launch selector a `CreateSession` chose, or say why the
+/// request has no single meaning, before any reservation work begins.
 ///
-/// Keeping them together prevents callers from accidentally applying
-/// different exclusivity rules as the selector vocabulary grows.
-struct CreateSelectorFields {
-    invocation: Option<String>,
+/// The two selectors are mutually exclusive on the wire by CONTRACT rather
+/// than by construction (see `ControlMsg::CreateSession`'s own docs), so this
+/// is where that contract is enforced, once, before anything reads a launch.
+/// A launch is also held to its shape rules here
+/// ([`SessionLaunch::validate_new`]), so a malformed one is refused before a
+/// reservation exists and stays correctable under the same key. Every
+/// refusal is `ErrorKind::InvalidRequest`, and the `Err` is the user-facing
+/// message verbatim (SPEC.md's concrete, actionable errors).
+fn create_selector(
+    launch: Option<SessionLaunch>,
     inherit_agent: bool,
-    agent_kind: Option<AgentKind>,
-    resume_template: Option<Vec<String>>,
-    launch: Option<LaunchSelection>,
-}
-
-/// Validate the create selector's wire shape before any reservation work
-/// begins. Explicit inheritance is retained only for the spawn protocol;
-/// every helm create arrives as an invocation bundle.
-fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
-    let CreateSelectorFields {
-        invocation,
-        inherit_agent,
-        agent_kind,
-        resume_template,
-        launch,
-    } = fields;
-    if let Some(selection) = launch {
-        let Some(invocation) = invocation else {
-            return Err("a structured launch must carry its resolved invocation".to_string());
-        };
-        if inherit_agent {
-            return Err("a structured launch cannot also inherit the asking session's".to_string());
+) -> Result<CreateSelector, String> {
+    match (launch, inherit_agent) {
+        (Some(launch), false) => {
+            launch.validate_new()?;
+            Ok(CreateSelector::Launch(launch))
         }
-        let expected_kind = selection.harness.agent_kind();
-        if agent_kind != Some(expected_kind) {
-            return Err("a structured launch's harness and agent_kind disagree".to_string());
+        (None, true) => Ok(CreateSelector::Inherited),
+        (None, false) => Err("a create must carry a launch".to_string()),
+        (Some(_), true) => {
+            Err("a create names exactly one launch or the explicit inheritance choice".to_string())
         }
-        return Ok(CreateSelector::Bundle(CreateMode::Structured {
-            invocation,
-            agent_kind: expected_kind,
-            // The helm owns compilation, but a structured replace or
-            // authenticated inherited spawn must preserve the source's
-            // frozen resume argv. HTTP rejects a user-supplied template;
-            // this trusted supervisor boundary stores the one the helm
-            // forwarded beside the already-resolved structured invocation.
-            resume_template,
-            selection,
-        }));
-    }
-    match (invocation, inherit_agent) {
-        (Some(invocation), false) => Ok(CreateSelector::Bundle(CreateMode::Raw {
-            invocation,
-            agent_kind,
-            resume_template,
-            launch: None,
-        })),
-        (None, true) if agent_kind.is_none() && resume_template.is_none() => {
-            Ok(CreateSelector::Derived)
-        }
-        (None, false) => Err("a create must carry an invocation bundle".to_string()),
-        (None, true) => Err(
-            "a create without an invocation cannot carry agent_kind or resume_template".to_string(),
-        ),
-        (Some(_), true) => Err(
-            "a create names exactly one invocation bundle or explicit inheritance choice"
-                .to_string(),
-        ),
     }
 }
 
-/// Resolves the creation mode, validates the caller-supplied fields against
-/// the reply-size and idempotency-store caps, then hands off to
-/// [`Supervisor::create_session`].
+/// Resolve the launch a create runs, then hand off to
+/// [`Supervisor::create_session`] (through the caller).
 ///
-/// The refusal ORDER is shape, then size and key bounds. Neither claims a
-/// reservation: malformed or oversized requests must remain correctable
-/// under the same key. That is deliberately NOT true of launch preconditions
-/// past this point (such as a working directory that does not exist): those
-/// are durable outcomes replayed under the key, which
-/// is the contract `Supervisor::create_session` states in full.
+/// An inherited spawn copies the authenticated asking session's stored
+/// launch exactly (SPEC.md: `spawn --inherit-agent`). A legacy session has
+/// no launch a new session may start from, so inheriting one is refused
+/// with the remedy SPEC.md names.
 async fn resolve_create_selector(
     sup: &Arc<Supervisor>,
     admission: &CreateAdmission,
     selector: CreateSelector,
-) -> Result<CreateMode, (ErrorKind, String)> {
+) -> Result<SessionLaunch, (ErrorKind, String)> {
     match selector {
-        CreateSelector::Bundle(mode) => Ok(mode),
-        CreateSelector::Derived => {
+        CreateSelector::Launch(launch) => Ok(launch),
+        CreateSelector::Inherited => {
             let CreateAdmission::Spawn { asking_session } = admission else {
                 return Err((
                     ErrorKind::InvalidRequest,
-                    "a create must carry an invocation bundle".to_string(),
+                    "a create must carry a launch".to_string(),
                 ));
             };
             let parent = sup
@@ -451,7 +396,7 @@ async fn resolve_create_selector(
                 .map_err(|error| {
                     (
                         ErrorKind::Internal,
-                        format!("could not read the asking session's agent bundle: {error:#}"),
+                        format!("could not read the asking session's launch: {error:#}"),
                     )
                 })?
                 .ok_or_else(|| {
@@ -460,21 +405,16 @@ async fn resolve_create_selector(
                         "the asking session no longer exists".to_string(),
                     )
                 })?;
-            if let Some(selection) = parent.launch {
-                let agent_kind = selection.harness.agent_kind();
-                return Ok(CreateMode::Structured {
-                    invocation: parent.invocation,
-                    agent_kind,
-                    resume_template: parent.resume_template,
-                    selection,
-                });
+            if let SessionLaunch::Legacy { .. } = parent.launch {
+                return Err((
+                    ErrorKind::InvalidRequest,
+                    "this session was created before launch kinds, so its launch cannot be \
+                     inherited; create the new session with its own launch (`farhelm agent \
+                     create --command`) instead"
+                        .to_string(),
+                ));
             }
-            Ok(CreateMode::Raw {
-                invocation: parent.invocation,
-                agent_kind: Some(parent.agent_kind),
-                resume_template: parent.resume_template,
-                launch: None,
-            })
+            Ok(parent.launch)
         }
     }
 }
@@ -489,20 +429,14 @@ async fn resolve_create_selector(
 struct CreateRequest {
     parent: Option<String>,
     cwd: String,
-    invocation: Option<String>,
+    /// What the new session runs; `None` exactly when `inherit_agent` asks
+    /// for the asking session's launch instead.
+    launch: Option<SessionLaunch>,
     inherit_agent: bool,
     title: Option<String>,
     cols: u16,
     rows: u16,
     intent_key: Option<String>,
-    /// Two consumers, and they must see the SAME values: item 6's
-    /// fingerprint (a retry differing only in an override is a different
-    /// request and is refused as a key reuse) and item 7's snapshot
-    /// resolution, which is what makes the overrides shape the session
-    /// itself. Likewise `resume_template`.
-    agent_kind: Option<AgentKind>,
-    resume_template: Option<Vec<String>>,
-    launch: Option<LaunchSelection>,
     /// The helm-resolved fresh-checkout intent (protocol 24). Passed through
     /// to the create path untouched: validation, fingerprinting, and
     /// allocation all happen in the create path (Design C), never in the
@@ -521,15 +455,12 @@ async fn handle_create_session(
     let CreateRequest {
         parent,
         cwd,
-        invocation,
+        launch,
         inherit_agent,
         title,
         cols,
         rows,
         intent_key,
-        agent_kind,
-        resume_template,
-        launch,
         github_checkout,
     } = request;
     let checkout_bytes = match github_checkout
@@ -543,13 +474,7 @@ async fn handle_create_session(
             return;
         }
     };
-    let selector = match create_mode(CreateSelectorFields {
-        invocation,
-        inherit_agent,
-        agent_kind,
-        resume_template,
-        launch,
-    }) {
+    let selector = match create_selector(launch, inherit_agent) {
         Ok(selector) => selector,
         Err(message) => {
             reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
@@ -580,7 +505,7 @@ async fn handle_create_session(
     // credential and lifecycle are protected by the same guards that will
     // cover fingerprint construction and the create itself; a bundle needs
     // no resolution at all.
-    let mode_before_admission = if matches!(selector, CreateSelector::Derived) {
+    let mode_before_admission = if matches!(selector, CreateSelector::Inherited) {
         None
     } else {
         Some(resolve_create_selector(sup, &admission, selector).await)
@@ -597,7 +522,7 @@ async fn handle_create_session(
     };
     let mode = match mode_before_admission {
         Some(mode) => mode,
-        None => resolve_create_selector(sup, &admission, CreateSelector::Derived).await,
+        None => resolve_create_selector(sup, &admission, CreateSelector::Inherited).await,
     };
     // Every refusal from here on releases `guards` before replying:
     // `send_reply` may wait on a full writer queue, and the guards include
@@ -614,52 +539,19 @@ async fn handle_create_session(
     };
     // One accounting for every caller-supplied field the supervisor can
     // copy into a durable fingerprint. Interactive rows are permanent, so
-    // omitting parent or a raw override would leave an
-    // unbounded write path through a cap the other modes cannot dodge.
-    let (mode_bytes, template_elements) = match &mode {
-        CreateMode::Raw {
-            invocation,
-            resume_template,
-            ..
-        } => (
-            invocation.len()
-                + resume_template
-                    .iter()
-                    .flatten()
-                    .map(|element| element.len())
-                    .sum::<usize>(),
-            resume_template.as_ref().map_or(0, Vec::len),
-        ),
-        CreateMode::Structured {
-            invocation,
-            resume_template,
-            selection,
-            ..
-        } => (
-            invocation.len()
-                + resume_template
-                    .iter()
-                    .flatten()
-                    .map(|element| element.len())
-                    .sum::<usize>()
-                + serde_json::to_string(selection)
-                    .expect("launch selection is always serializable")
-                    .len(),
-            resume_template.as_ref().map_or(0, Vec::len),
-        ),
-    };
-    // Fresh fingerprints retain the whole resolved mode, including launch
-    // provenance on raw launches. Charge its serialized form along
-    // with the checkout snapshot; counting only displayed strings would omit
-    // durable fields and JSON escaping. Existing requests keep their original
-    // byte allowance and fingerprint contract.
-    let mode_bytes = if github_checkout.is_some() {
-        serde_json::to_vec(&mode)
-            .expect("create mode is always serializable")
-            .len()
-    } else {
-        mode_bytes
-    };
+    // omitting parent or any part of the launch would leave an
+    // unbounded write path through a cap the other fields cannot dodge.
+    // SPEC.md's 64 KiB create bound counts the whole launch (command,
+    // resume command, and the rest), as the JSON it is stored and
+    // fingerprinted as. The resume command's element count is bounded
+    // separately: ten thousand EMPTY elements cost almost no bytes and are
+    // still nothing a resume command could legitimately be.
+    let mode_bytes = mode.field_bytes();
+    let template_elements = mode
+        .resume_argv()
+        .ok()
+        .flatten()
+        .map_or(0, |resume| resume.len());
     let field_len = parent.as_deref().map_or(0, str::len)
         + cwd.len()
         + mode_bytes
@@ -667,8 +559,8 @@ async fn handle_create_session(
         + title.as_deref().map_or(0, str::len);
     let refusal = if field_len > CREATE_FIELD_CAP {
         Some(format!(
-            "parent, cwd, launch fields, title, resume template, and checkout fields together are \
-             {field_len} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit"
+            "parent, cwd, launch, title, and checkout fields together are {field_len} bytes, \
+             exceeding the {CREATE_FIELD_CAP}-byte limit"
         ))
     } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
         // Bounded separately from the byte total because the two
@@ -676,7 +568,7 @@ async fn handle_create_session(
         // elements costs almost no bytes and is still nothing a
         // resume invocation could legitimately be.
         Some(format!(
-            "resume template has {template_elements} elements, exceeding the \
+            "resume command has {template_elements} elements, exceeding the \
              {RESUME_TEMPLATE_ELEMENT_CAP}-element limit"
         ))
     } else {
@@ -691,7 +583,7 @@ async fn handle_create_session(
     // launch something different changes the fingerprint instead of
     // replaying a launch shaped by stale data. A fresh-checkout create binds
     // the helm's resolved checkout intent beside it (R1.4's versioned
-    // discriminant; the frozen encodings are untouched).
+    // discriminant, now `github_checkout_v4`).
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
         fingerprint: create_fingerprint(
@@ -709,7 +601,7 @@ async fn handle_create_session(
                 cwd: &cwd,
                 parent,
                 github_checkout,
-                mode,
+                launch: mode,
                 title,
                 cols,
                 rows,
@@ -2200,9 +2092,8 @@ struct RestartSessionRequest {
     req_id: u64,
     session_id: String,
     stop_if_running: bool,
-    invocation: Option<String>,
-    launch: Option<farhelm_proto::LaunchSelection>,
-    resume_template: Option<Vec<String>>,
+    /// Restart with's replacement launch; `None` is a plain Restart.
+    with: Option<SessionLaunch>,
 }
 
 /// Spawned for the same reason `StopSession` is: a restart that
@@ -2253,18 +2144,10 @@ async fn handle_restart_session(
             req_id,
             session_id,
             stop_if_running,
-            invocation,
-            launch,
-            resume_template,
+            with,
         } = request;
         match sup
-            .restart_session(
-                &session_id,
-                stop_if_running,
-                invocation,
-                launch,
-                resume_template,
-            )
+            .restart_session(&session_id, stop_if_running, with)
             .await
         {
             Ok(session) => {
@@ -2715,7 +2598,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             req_id,
             parent,
             cwd,
-            invocation,
+            launch,
             inherit_agent,
             title,
             cols,
@@ -2724,9 +2607,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // Unused since profiles were removed (protocol 38): no spawn
             // form resolves a launch through the helm any more.
             confirm_yolo: _,
-            agent_kind,
-            resume_template,
-            launch,
             github_checkout,
         } => {
             // The fresh-checkout payload flows straight through to the
@@ -2742,15 +2622,12 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             let request = CreateRequest {
                 parent,
                 cwd,
-                invocation,
+                launch,
                 inherit_agent,
                 title,
                 cols,
                 rows,
                 intent_key,
-                agent_kind,
-                resume_template,
-                launch,
                 github_checkout,
             };
             handle_create_session(
@@ -2961,9 +2838,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             req_id,
             session_id,
             stop_if_running,
-            invocation,
-            launch,
-            resume_template,
+            with,
         } => {
             handle_restart_session(
                 sup,
@@ -2973,9 +2848,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                     req_id,
                     session_id,
                     stop_if_running,
-                    invocation,
-                    launch,
-                    resume_template,
+                    with,
                 },
             )
             .await
@@ -3109,7 +2982,7 @@ pub(crate) async fn handle_restricted_control(
             req_id,
             parent,
             cwd,
-            invocation,
+            launch,
             inherit_agent,
             title,
             cols,
@@ -3118,9 +2991,6 @@ pub(crate) async fn handle_restricted_control(
             // Unused since profiles were removed (protocol 38): no spawn
             // form resolves a launch through the helm any more.
             confirm_yolo: _,
-            agent_kind,
-            resume_template,
-            launch,
             github_checkout,
         } => {
             // Refused BEFORE the credential check, at the very top of
@@ -3171,7 +3041,7 @@ pub(crate) async fn handle_restricted_control(
             // The only launch a session-authenticated create may name is
             // its own, by explicit inheritance; profiles, which it could
             // also select by name or id, were removed (protocol 38).
-            if invocation.is_some() || !inherit_agent {
+            if launch.is_some() || !inherit_agent {
                 reply_error(
                     tx,
                     req_id,
@@ -3217,15 +3087,12 @@ pub(crate) async fn handle_restricted_control(
             let request = CreateRequest {
                 parent,
                 cwd,
-                invocation,
+                launch,
                 inherit_agent,
                 title,
                 cols,
                 rows,
                 intent_key,
-                agent_kind,
-                resume_template,
-                launch,
                 // Unreachable as `Some` — the arm above refuses a
                 // restricted create that carries the payload before this
                 // call is reached.
@@ -3306,7 +3173,7 @@ pub(crate) async fn handle_restricted_control(
                     .await
                     .ok()
                     .flatten()
-                    .map(|row| row.agent_kind),
+                    .map(|row| row.agent_kind()),
             };
             if doorway_kind.is_some_and(|kind| kind != expected_kind) {
                 warn!(
@@ -3709,7 +3576,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         AgentVerb::Create {
             host,
             cwd,
-            invocation,
+            launch,
             title,
             intent_key,
             confirm_yolo: _,
@@ -3717,13 +3584,30 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             if cwd.is_empty() {
                 return Err("--cwd must not be empty".to_string());
             }
-            let Some(command) = invocation.as_deref().filter(|value| !value.is_empty()) else {
-                return Err("create requires a non-empty --invocation".to_string());
+            let Some(launch) = launch else {
+                return Err(
+                    "create requires a launch; pass --command with --yolo or --no-yolo".to_string(),
+                );
+            };
+            // The command launch's own rules are checked here, at the
+            // asking session's doorway, so a mistake is answered before the
+            // request reaches the helm; an agent launch is composed by the
+            // helm, which checks its choices against the catalog.
+            let launch_bytes = match launch {
+                farhelm_proto::LaunchRequest::Command(command) => {
+                    command.validate()?;
+                    command.command.len() + command.resume.as_deref().map_or(0, str::len)
+                }
+                // A free-text model id is the one unbounded choice; count
+                // the selection as the JSON it travels as.
+                farhelm_proto::LaunchRequest::Agent { selection } => {
+                    serde_json::to_string(selection).map_or(usize::MAX, |json| json.len())
+                }
             };
             validate_create_fields(
                 host.as_deref(),
                 cwd,
-                &[Some(command)],
+                launch_bytes,
                 title.as_deref(),
                 intent_key.as_deref(),
             )
@@ -3754,7 +3638,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             validate_create_fields(
                 host.as_deref(),
                 cwd.as_deref().unwrap_or_default(),
-                &[],
+                0,
                 title.as_deref(),
                 intent_key.as_deref(),
             )
@@ -3790,9 +3674,10 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 ///
 /// Control characters are refused in the host name alone — the one field of
 /// these that this process's own downstream (the helm's not-found refusal)
-/// echoes back as free text. `cwd`, `invocation` and `title` are the TARGET
-/// supervisor's to judge, with rules this one has no business duplicating;
-/// what happens to them here is a size bound and nothing else.
+/// echoes back as free text. `cwd`, the launch's command text
+/// (`launch_bytes`) and `title` are the TARGET supervisor's to judge, with
+/// rules this one has no business duplicating beyond the command launch's
+/// shape; what happens to them here is a size bound.
 ///
 /// `cwd` arrives as `""` for a `Clone` that named none, and that is the
 /// wire's `None` rather than an empty directory (an explicitly empty clone
@@ -3804,7 +3689,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 fn validate_create_fields(
     host: Option<&str>,
     cwd: &str,
-    selectors: &[Option<&str>],
+    launch_bytes: usize,
     title: Option<&str>,
     intent_key: Option<&str>,
 ) -> Result<(), String> {
@@ -3825,18 +3710,11 @@ fn validate_create_fields(
             ));
         }
     }
-    let field_len = cwd.len()
-        + selectors
-            .iter()
-            .copied()
-            .flatten()
-            .map(str::len)
-            .sum::<usize>()
-        + title.map_or(0, str::len);
+    let field_len = cwd.len() + launch_bytes + title.map_or(0, str::len);
     if field_len > CREATE_FIELD_CAP {
         return Err(format!(
-            "cwd, invocation, and title together are {field_len} bytes, exceeding the \
-             {CREATE_FIELD_CAP}-byte limit"
+            "cwd, command, resume command, and title together are {field_len} bytes, exceeding \
+             the {CREATE_FIELD_CAP}-byte limit"
         ));
     }
     match intent_key {
@@ -3869,16 +3747,18 @@ const AGENT_HOST_NAME_CAP: usize = MAX_SESSION_ID_BYTES;
 mod tests {
     use super::super::capture::CaptureState;
     use super::super::connection::CONNECTION_WRITER_QUEUE;
-    use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
+    use super::super::core::tests::{
+        StateDir, declared_command, dummy_exe, entry_with, no_uploads,
+    };
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
-    use farhelm_proto::AgentOutcome;
     use farhelm_proto::LaunchHarness;
     use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
+    use farhelm_proto::{AgentKind, AgentOutcome, LaunchSelection};
     use farhelm_proto::{Frame, FrameKind};
     use farhelm_proto::{ReportVendor, RestartOffer, SessionStatus};
     use std::sync::atomic::AtomicBool;
@@ -4025,9 +3905,7 @@ mod tests {
                 req_id: 72,
                 session_id,
                 stop_if_running: false,
-                invocation: None,
-                launch: None,
-                resume_template: None,
+                with: None,
             },
         )
         .await;
@@ -4052,12 +3930,33 @@ mod tests {
         assert!(message.contains("unknown whether the old agent was stopped or a new one started"));
     }
 
+    /// The command launch [`authenticated_parent`] seeds: a declared Codex
+    /// command with its own resume command, so an inherited child has a
+    /// whole launch to copy.
+    fn parent_launch() -> SessionLaunch {
+        declared_command(
+            "/fixture/parent-agent --flag {farhelm_args}",
+            LaunchHarness::Codex,
+            Some("/fixture/parent-agent resume {conversation} {farhelm_args}"),
+        )
+    }
+
     /// Seed the durable half of a parent, which is the authority source a
     /// restricted connection must revalidate before every create.
     async fn authenticated_parent(
         sup: &Supervisor,
         cwd: &std::path::Path,
         id: &str,
+    ) -> farhelm_proto::SessionAuth {
+        authenticated_parent_with(sup, cwd, id, parent_launch()).await
+    }
+
+    /// [`authenticated_parent`] with the parent's launch chosen by the test.
+    async fn authenticated_parent_with(
+        sup: &Supervisor,
+        cwd: &std::path::Path,
+        id: &str,
+        launch: SessionLaunch,
     ) -> farhelm_proto::SessionAuth {
         let claimed = sup
             .store
@@ -4075,17 +3974,10 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.to_string_lossy().into_owned(),
-                    invocation: "/fixture/parent-agent --flag".to_string(),
-                    launch: None,
+                    launch,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: AgentKind::Codex,
-                    resume_template: Some(vec![
-                        "/fixture/parent-agent".to_string(),
-                        "resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -4104,133 +3996,80 @@ mod tests {
         }
     }
 
-    /// Seed a structured parent without involving the helm. Restricted
-    /// creates must inherit this already-durable selection while remaining
+    /// The agent launch [`authenticated_structured_parent`] seeds, as a
+    /// structured Codex session from before launch kinds converts to one.
+    fn structured_parent_launch() -> SessionLaunch {
+        SessionLaunch::from_pre_launch_kinds(
+            "codex -m gpt-6-astra -c model_reasoning_effort=high --yolo",
+            AgentKind::Codex,
+            Some(vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+            Some(LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: Some("gpt-6-astra".to_string()),
+                effort: Some(farhelm_proto::LaunchEffort::High),
+                permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                workspace_trust: None,
+            }),
+        )
+    }
+
+    /// Seed an agent-launch parent without involving the helm. Restricted
+    /// creates must inherit this already-durable launch while remaining
     /// unable to claim a new one as their own authority.
     async fn authenticated_structured_parent(
         sup: &Supervisor,
         cwd: &std::path::Path,
         id: &str,
     ) -> farhelm_proto::SessionAuth {
-        let selection = LaunchSelection {
-            harness: LaunchHarness::Codex,
-            model: Some("gpt-6-astra".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
-            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
-            workspace_trust: None,
-        };
-        let claimed = sup
-            .store
-            .insert_session(
-                crate::store::StoredSession {
-                    conversation_source: None,
-                    capture_ownership_version: 0,
-                    omp_reporter_asset: None,
-                    omp_launch_program: None,
-                    id: id.to_string(),
-                    parent: None,
-                    title: id.to_string(),
-                    created_at: crate::store::now_unix(),
-                    last_activity_at: crate::store::now_unix(),
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: cwd.to_string_lossy().into_owned(),
-                    invocation: "codex -m gpt-6-astra -c model_reasoning_effort=high --yolo"
-                        .to_string(),
-                    launch: Some(selection),
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
-                    outcome: LastOutcome::Launching,
-                    agent_kind: AgentKind::Codex,
-                    resume_template: Some(vec![
-                        "codex".to_string(),
-                        "resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
-                    canonical_cwd: None,
-                    captured_conversation: None,
-                    generation: 0,
-                    launch_scoped: false,
-                },
-                None,
-            )
-            .await
-            .expect("seed structured authenticated parent");
-        let crate::store::Claimed::Ours { session_token, .. } = claimed else {
-            panic!("an unkeyed parent insert cannot be taken");
-        };
-        farhelm_proto::SessionAuth {
-            session_id: id.to_string(),
-            token: session_token,
-        }
+        authenticated_parent_with(sup, cwd, id, structured_parent_launch()).await
     }
 
-    /// Structured bundles are a third wire concern beside raw invocation
-    /// and explicit inheritance. This keeps
-    /// their shape rules at the admission boundary, before any reservation
-    /// can make a malformed request permanently uncorrectable.
+    /// The create selector's shape rules, at the admission boundary before
+    /// any reservation can make a malformed request permanently
+    /// uncorrectable: exactly one of a launch or the inheritance choice, and
+    /// a launch that passes its own rules (a legacy launch never does).
     #[test]
-    fn structured_create_selector_rejects_ambiguous_or_inconsistent_bundles() {
-        let selection = LaunchSelection {
-            harness: LaunchHarness::Codex,
-            model: None,
-            effort: None,
-            permissions: None,
-            workspace_trust: None,
-        };
-        for (invocation, agent_kind, resume_template, expected) in [
-            (None, Some(AgentKind::Codex), None, "resolved invocation"),
+    fn create_selector_refuses_ambiguous_shapes_and_invalid_launches() {
+        let valid = SessionLaunch::plain_command("agent");
+        for (launch, inherit, expected) in [
+            (Some(valid.clone()), true, "exactly one"),
+            (None, false, "must carry a launch"),
             (
-                Some("codex".to_string()),
-                Some(AgentKind::Claude),
-                None,
-                "harness and agent_kind disagree",
+                Some(SessionLaunch::Legacy {
+                    invocation: "agent".to_string(),
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                }),
+                false,
+                "before launch kinds",
+            ),
+            (
+                Some(SessionLaunch::plain_command("agent {farhelm_args}")),
+                false,
+                "needs a declared agent type",
             ),
         ] {
-            let error = match create_mode(CreateSelectorFields {
-                invocation,
-                inherit_agent: false,
-                agent_kind,
-                resume_template,
-                launch: Some(selection.clone()),
-            }) {
-                Ok(_) => panic!("an ambiguous structured bundle must be refused"),
+            let error = match create_selector(launch, inherit) {
+                Ok(_) => panic!("{expected}: the selector must be refused"),
                 Err(error) => error,
             };
             assert!(
                 error.contains(expected),
-                "expected {expected:?} in structured-create refusal {error:?}"
+                "expected {expected:?} in {error:?}"
             );
         }
-
-        // A valid structured bundle cannot silently override the explicit
-        // inheritance selector. Admission precedes durable reservations.
-        assert!(
-            create_mode(CreateSelectorFields {
-                invocation: Some("codex".to_string()),
-                inherit_agent: true,
-                agent_kind: Some(AgentKind::Codex),
-                resume_template: None,
-                launch: Some(selection.clone()),
-            })
-            .is_err()
-        );
-
-        let template = vec!["codex".to_string(), "resume".to_string()];
-        let CreateSelector::Bundle(CreateMode::Structured {
-            resume_template, ..
-        }) = create_mode(CreateSelectorFields {
-            invocation: Some("codex".to_string()),
-            inherit_agent: false,
-            agent_kind: Some(AgentKind::Codex),
-            resume_template: Some(template.clone()),
-            launch: Some(selection),
-        })
-        .expect("the trusted structured path may preserve a frozen resume template")
-        else {
-            panic!("expected a structured bundle");
-        };
-        assert_eq!(resume_template, Some(template));
+        assert!(matches!(
+            create_selector(Some(valid.clone()), false),
+            Ok(CreateSelector::Launch(launch)) if launch == valid
+        ));
+        assert!(matches!(
+            create_selector(None, true),
+            Ok(CreateSelector::Inherited)
+        ));
     }
 
     /// An explicitly inherited spawn copies the authenticated parent's
@@ -4252,16 +4091,13 @@ mod tests {
                 req_id: 2,
                 parent: Some("parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: true,
                 title: Some("child".to_string()),
                 cols: 80,
                 rows: 24,
                 intent_key: Some("spawn-copy".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             },
             &tx,
@@ -4281,16 +4117,65 @@ mod tests {
             .expect("read child")
             .expect("child exists");
         assert_eq!(stored.parent.as_deref(), Some("parent"));
-        assert_eq!(stored.invocation, "/fixture/parent-agent --flag");
-        assert_eq!(stored.agent_kind, AgentKind::Codex);
-        assert_eq!(
-            stored.resume_template,
-            Some(vec![
-                "/fixture/parent-agent".to_string(),
-                "resume".to_string(),
-                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-            ])
+        assert_eq!(stored.launch, parent_launch());
+    }
+
+    /// Inheriting a legacy parent's launch is refused, naming the remedy,
+    /// and creates nothing.
+    ///
+    /// Why: SPEC.md has `farhelm spawn --inherit-agent` refuse a session
+    /// from before launch kinds; its stored command was never classified,
+    /// so copying it would start a new session nothing has asserted
+    /// anything about.
+    #[farhelm_testtrace::test]
+    async fn inherited_spawn_refuses_a_legacy_parent() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let auth = authenticated_parent_with(
+            &sup,
+            state.path(),
+            "parent",
+            SessionLaunch::Legacy {
+                invocation: "agent".to_string(),
+                agent_kind: AgentKind::Generic,
+                resume_template: None,
+            },
+        )
+        .await;
+        handle_restricted_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 2,
+                parent: Some("parent".to_string()),
+                cwd: state.path().to_string_lossy().into_owned(),
+                launch: None,
+                inherit_agent: true,
+                title: Some("child".to_string()),
+                cols: 80,
+                rows: 24,
+                intent_key: None,
+                confirm_yolo: false,
+                github_checkout: None,
+            },
+            &tx,
+            &auth,
+            None,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
+        let ControlMsg::Error { kind, message, .. } = reply else {
+            panic!("inheriting a legacy launch must be refused: {reply:?}");
+        };
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains("before launch kinds") && message.contains("--command"),
+            "{message}"
         );
+        assert_eq!(sup.store.load_all().await.expect("load").len(), 1);
     }
 
     /// A structured parent may spawn without a helm because its resolved
@@ -4309,16 +4194,13 @@ mod tests {
                 req_id: 2,
                 parent: Some("parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: true,
                 title: Some("child".to_string()),
                 cols: 80,
                 rows: 24,
                 intent_key: Some("structured-spawn-copy".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             },
             &tx,
@@ -4331,30 +4213,19 @@ mod tests {
         let ControlMsg::SessionCreated { session, .. } = reply else {
             panic!("explicit inherited structured spawn must succeed: {reply:?}");
         };
-        let expected = LaunchSelection {
-            harness: LaunchHarness::Codex,
-            model: Some("gpt-6-astra".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
-            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
-            workspace_trust: None,
-        };
-        assert_eq!(session.launch, Some(expected.clone()));
+        let expected = structured_parent_launch();
+        assert!(matches!(expected, SessionLaunch::Agent { .. }));
+        assert_eq!(session.launch, expected);
         let stored = sup
             .store
             .session(&session.id)
             .await
             .expect("read child")
             .expect("child exists");
-        assert_eq!(stored.launch, Some(expected));
         assert_eq!(
-            stored.resume_template,
-            Some(vec![
-                "codex".to_string(),
-                "resume".to_string(),
-                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-            ]),
-            "a structured child must inherit the parent bundle, rather than deriving a new \
-             resume template from its current harness"
+            stored.launch, expected,
+            "a child inherits the parent's composed commands as stored, never recomposed from \
+             its selection through today's catalog"
         );
     }
 
@@ -4379,16 +4250,13 @@ mod tests {
                 req_id: 3,
                 parent: Some("parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: false,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             },
             &tx,
@@ -4442,22 +4310,27 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
-        for (req_id, invocation, inherit_agent, agent_kind, resume_template) in [
+        for (req_id, launch, inherit_agent) in [
             // Neither selector.
-            (1u64, None, false, None, None),
+            (1u64, None, false),
             // Both selectors.
-            (2, Some("agent".to_string()), true, None, None),
-            // Inheritance with bundle fields it cannot carry.
-            (3, None, true, Some(AgentKind::Claude), None),
+            (2, Some(SessionLaunch::plain_command("agent")), true),
+            // A launch that breaks its own rules.
+            (
+                3,
+                Some(SessionLaunch::plain_command("agent {farhelm_args}")),
+                false,
+            ),
+            // A legacy launch, which nothing creates.
             (
                 4,
-                None,
-                true,
-                None,
-                Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+                Some(SessionLaunch::Legacy {
+                    invocation: "agent".to_string(),
+                    agent_kind: AgentKind::Claude,
+                    resume_template: None,
+                }),
+                false,
             ),
-            // Bundle fields with no invocation to carry them.
-            (5, None, false, Some(AgentKind::Claude), None),
         ] {
             handle_control(
                 &sup,
@@ -4469,15 +4342,12 @@ mod tests {
                     // refusal can be attributed to the cwd check further
                     // in — the mode is what is under test.
                     cwd: state.path().to_string_lossy().to_string(),
-                    invocation,
+                    launch,
                     title: None,
                     cols: 80,
                     rows: 24,
                     intent_key: Some(format!("ambiguous-{req_id}")),
                     confirm_yolo: false,
-                    agent_kind,
-                    resume_template,
-                    launch: None,
                     github_checkout: None,
                 },
                 ConnectionCtx {
@@ -4568,13 +4438,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{session_id}"),
                     pane: String::new(),
                     outcome: exited.clone(),
-                    agent_kind: AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -4661,13 +4532,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -4806,19 +4678,20 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: AgentKind::Goose,
+                        resume_template: Some(vec![
+                            "agent".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                    },
                     tmux_name: format!("fh-{session_id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
                     // Restart only resumes, so the row can resume: a reported
                     // conversation and a resume command to enter it.
-                    agent_kind: AgentKind::Goose,
-                    resume_template: Some(vec![
-                        "agent".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: None,
                     captured_conversation: Some("conv-test".to_string()),
                     generation: 0,
@@ -4842,9 +4715,7 @@ mod tests {
                 req_id: 53,
                 session_id: session_id.to_string(),
                 stop_if_running: true,
-                invocation: None,
-                launch: None,
-                resume_template: None,
+                with: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -5820,7 +5691,14 @@ mod tests {
             confirm_yolo: false,
             host: host.map(str::to_string),
             cwd: cwd.to_string(),
-            invocation: invocation.map(str::to_string),
+            launch: invocation.map(|command| {
+                farhelm_proto::LaunchRequest::Command(farhelm_proto::CommandLaunch {
+                    command: command.to_string(),
+                    yolo: false,
+                    agent: None,
+                    resume: None,
+                })
+            }),
             title: title.map(str::to_string),
             intent_key: intent_key.map(str::to_string),
         };
@@ -5945,7 +5823,7 @@ mod tests {
                 ),
             ),
             (
-                "invocation",
+                "command",
                 full(
                     Some("h"),
                     "/w",
@@ -6277,16 +6155,13 @@ mod tests {
                 req_id: 42,
                 parent: Some("forged-parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: true,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("forged-key".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             },
             &tx,
@@ -6436,16 +6311,13 @@ mod tests {
                 req_id: 63,
                 parent: Some("checkout-parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: true,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("checkout-key".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: Some(ResolvedGithubCheckout {
                     client_identity: "fixture-request".into(),
                     repo: repo.clone(),
@@ -6556,16 +6428,15 @@ mod tests {
                 // Fresh creates must NOT choose a cwd: the supervisor
                 // allocates the directory under the configured root.
                 cwd: String::new(),
-                invocation: Some("claude".to_string()),
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "claude".to_string(),
+                )),
                 inherit_agent: false,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("ordinary-checkout-key".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: Some(ResolvedGithubCheckout {
                     client_identity: "fixture-request".into(),
                     repo: repo.clone(),
@@ -6620,7 +6491,7 @@ mod tests {
             .expect("a validation-failed fresh create settles its reservation");
         let fingerprint: serde_json::Value =
             serde_json::from_str(&reservation.fingerprint).unwrap();
-        assert_eq!(fingerprint["kind"], "github_checkout_v3");
+        assert_eq!(fingerprint["kind"], "github_checkout_v4");
         assert_eq!(
             fingerprint["checkout"]["client_identity"],
             "fixture-request"
@@ -6655,16 +6526,13 @@ mod tests {
                 req_id: 43,
                 parent: None,
                 cwd: state.path().to_string_lossy().into_owned(),
-                invocation: None,
+                launch: None,
                 inherit_agent: true,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("revoked-key".to_string()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             },
             &tx,
@@ -6722,16 +6590,13 @@ mod tests {
             req_id: 44,
             parent: None,
             cwd: state.path().to_string_lossy().into_owned(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: None,
             cols: 80,
             rows: 24,
             intent_key: Some("waiting-revoked-key".into()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
         // Keep the request future owned by this test: a timeout drops it,
@@ -6856,13 +6721,10 @@ mod tests {
         entry.info.id = row.id.clone();
         entry.info.cwd = row.cwd.clone();
         entry.info.canonical_cwd = row.canonical_cwd.clone();
-        entry.info.invocation = row.invocation.clone();
-        entry.info.resume_template = row.resume_template.clone();
+        entry.info.invocation = row.launch.display_command();
+        entry.info.agent_kind = row.agent_kind();
         entry.info.launch = row.launch.clone();
-        entry.snapshot = IntegrationSnapshot {
-            kind: row.agent_kind,
-            resume_template: row.resume_template.clone(),
-        };
+        entry.snapshot = IntegrationSnapshot::of(&row.launch);
         sup.sessions
             .lock()
             .await
@@ -6870,9 +6732,8 @@ mod tests {
         {
             let sessions = sup.sessions.lock().await;
             let entry = sessions.get(&row.id).unwrap();
-            assert_eq!(entry.info.invocation, row.invocation);
-            assert_eq!(entry.info.resume_template, row.resume_template);
-            assert_eq!(entry.snapshot.kind, row.agent_kind);
+            assert_eq!(entry.info.launch, row.launch);
+            assert_eq!(entry.snapshot.kind, row.agent_kind());
         }
         assert!(
             sup.store
@@ -6893,9 +6754,7 @@ mod tests {
                     req_id: 45,
                     session_id: auth.session_id.clone(),
                     stop_if_running: true,
-                    invocation: None,
-                    launch: None,
-                    resume_template: None,
+                    with: None,
                 }
             } else {
                 ControlMsg::DeleteSession {
@@ -6923,16 +6782,13 @@ mod tests {
             req_id: 46,
             parent: Some(auth.session_id.clone()),
             cwd: state.path().to_string_lossy().into_owned(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: None,
             cols: 80,
             rows: 24,
             intent_key: Some("mutation-wins-key".into()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
         let create = handle_restricted_control(&sup, request, &tx, &auth, None);
@@ -6983,8 +6839,7 @@ mod tests {
             assert_eq!(child.invocation, parent.invocation);
             let child_row = sup.store.session(&child.id).await.unwrap().unwrap();
             let parent_row = sup.store.session(&parent.id).await.unwrap().unwrap();
-            assert_eq!(child_row.agent_kind, parent_row.agent_kind);
-            assert_eq!(child.resume_template, parent.resume_template);
+            assert_eq!(child_row.launch, parent_row.launch);
             assert_eq!(child.launch, parent.launch);
             assert!(
                 sup.store
@@ -7053,9 +6908,11 @@ mod tests {
     }
 
     /// [`reporting_session`] with the durable and in-memory kind chosen by
-    /// the caller. The invocation and resume template stay `claude`-spelled
-    /// for every kind: nothing on the report path reads them beyond the
-    /// template's placeholder slot.
+    /// the caller, as a command launch declaring the first agent type that
+    /// runs under `kind`. The command and resume command stay
+    /// `claude`-spelled for every kind: nothing on the report path reads
+    /// them beyond the resume command's placeholder slot. A command launch
+    /// rather than a legacy one so a child may inherit it.
     async fn reporting_session_of(
         sup: &Arc<Supervisor>,
         id: &str,
@@ -7077,17 +6934,18 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "claude".to_string(),
-                    launch: None,
+                    launch: declared_command(
+                        "claude {farhelm_args}",
+                        LaunchHarness::ALL
+                            .iter()
+                            .copied()
+                            .find(|harness| harness.agent_kind() == kind)
+                            .expect("every agent kind has an agent type"),
+                        Some("claude --resume {conversation} {farhelm_args}"),
+                    ),
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: kind,
-                    resume_template: Some(vec![
-                        "claude".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
                     canonical_cwd: Some("/tmp".to_string()),
                     captured_conversation: None,
                     generation: 0,
@@ -8273,16 +8131,13 @@ mod tests {
             req_id,
             parent: None,
             cwd: state.path().to_string_lossy().into_owned(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: None,
             cols: 80,
             rows: 24,
             intent_key: Some("self-replay-key".to_string()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
 
@@ -8335,16 +8190,13 @@ mod tests {
             req_id,
             parent: parent.map(str::to_string),
             cwd: state.path().to_string_lossy().into_owned(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: Some("spawned child".to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("spawn-key".to_string()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
         let mut send = async |msg| {
@@ -8442,9 +8294,7 @@ mod tests {
                 req_id: 5,
                 session_id: "no-such-session".to_string(),
                 stop_if_running: false,
-                invocation: None,
-                launch: None,
-                resume_template: None,
+                with: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -8673,15 +8523,12 @@ mod tests {
                 parent: None,
                 inherit_agent: false,
                 cwd: String::new(),
-                invocation: Some(invocation),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(invocation)),
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("oversized-checkout".into()),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: Some(checkout),
             },
             ConnectionCtx {
@@ -8734,15 +8581,14 @@ mod tests {
                 parent: None,
                 inherit_agent: false,
                 cwd: "x".repeat(CREATE_FIELD_CAP),
-                invocation: Some("agent".to_string()),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "agent".to_string(),
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
             },
             ConnectionCtx {
@@ -8821,15 +8667,14 @@ mod tests {
                     parent: None,
                     inherit_agent: false,
                     cwd: "/".to_string(),
-                    invocation: Some("agent".to_string()),
-                    launch: None,
+                    launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                        "agent".to_string(),
+                    )),
                     title: None,
                     cols: 80,
                     rows: 24,
                     intent_key: Some(key),
                     confirm_yolo: false,
-                    agent_kind: None,
-                    resume_template: None,
                     github_checkout: None,
                 },
                 ConnectionCtx {
@@ -8875,15 +8720,14 @@ mod tests {
                 parent: None,
                 inherit_agent: false,
                 cwd: "/nonexistent/definitely/not/here".to_string(),
-                invocation: Some("agent".to_string()),
-                launch: None,
+                launch: Some(farhelm_proto::SessionLaunch::plain_command(
+                    "agent".to_string(),
+                )),
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: Some("k".repeat(INTENT_KEY_CAP)),
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
             },
             ConnectionCtx {
@@ -8907,17 +8751,17 @@ mod tests {
         );
     }
 
-    /// The resume-template override is bounded on BOTH axes, before it can
-    /// reach the never-pruned reservation row that stores a copy of it.
+    /// A command launch's resume command is bounded on BOTH axes, before it
+    /// can reach the never-pruned reservation row that stores a copy of it.
     ///
-    /// Two independent limits because they fail independently: a template
-    /// of a few enormous elements is caught by the shared byte cap (which
-    /// it now counts against, alongside cwd/invocation/title), while a
-    /// template of very many tiny ones costs almost no bytes and is caught
-    /// by the element cap. Either shape unbounded is a permanent write
-    /// sized by the request.
+    /// Two independent limits because they fail independently: a resume
+    /// command of a few enormous arguments is caught by the shared byte cap
+    /// (which the whole launch counts against, alongside cwd and title),
+    /// while one of very many tiny arguments costs almost no bytes and is
+    /// caught by the element cap. Either shape unbounded is a permanent
+    /// write sized by the request.
     #[farhelm_testtrace::test]
-    async fn an_oversized_resume_template_is_refused_before_anything_is_stored() {
+    async fn an_oversized_resume_command_is_refused_before_anything_is_stored() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -8926,14 +8770,11 @@ mod tests {
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
 
-        for (req_id, template, expected) in [
-            (1u64, vec!["x".repeat(CREATE_FIELD_CAP)], "exceeding the"),
-            (
-                2,
-                vec![String::new(); RESUME_TEMPLATE_ELEMENT_CAP + 1],
-                "element limit",
-            ),
+        for (req_id, filler, expected) in [
+            (1u64, "x".repeat(CREATE_FIELD_CAP), "exceeding the"),
+            (2, "x ".repeat(RESUME_TEMPLATE_ELEMENT_CAP), "element limit"),
         ] {
+            let resume = format!("claude {filler} {{conversation}} {{farhelm_args}}");
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
@@ -8941,15 +8782,17 @@ mod tests {
                     parent: None,
                     inherit_agent: false,
                     cwd: "/".to_string(),
-                    invocation: Some("agent".to_string()),
-                    launch: None,
+                    launch: Some(SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                        command: "claude {farhelm_args}".to_string(),
+                        yolo: false,
+                        agent: Some(LaunchHarness::Claude),
+                        resume: Some(resume),
+                    })),
                     title: None,
                     cols: 80,
                     rows: 24,
                     intent_key: Some("key".to_string()),
                     confirm_yolo: false,
-                    agent_kind: None,
-                    resume_template: Some(template),
                     github_checkout: None,
                 },
                 ConnectionCtx {
@@ -9024,8 +8867,7 @@ mod tests {
                     cwd: "/tmp".to_string(),
                     canonical_cwd: None,
                     invocation: "agent".to_string(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
@@ -9208,8 +9050,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -9401,8 +9242,7 @@ mod tests {
                     cwd: "/tmp".to_string(),
                     canonical_cwd: None,
                     invocation: "agent".to_string(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
@@ -9843,9 +9683,7 @@ mod tests {
             req_id: 2,
             session_id: "another-session".to_string(),
             stop_if_running: true,
-            invocation: None,
-            launch: None,
-            resume_template: None,
+            with: None,
         })
         .await;
         host.type_and_see_echo("typed-after-the-restart").await;

@@ -358,7 +358,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
         &format!("{}/api/sessions", helm.base),
         serde_json::json!({
             "cwd": work.path().to_string_lossy(),
-            "invocation": fixture_cmd("fake-agent --script basic"),
+            "command": {"command": fixture_cmd("fake-agent --script basic"), "yolo": false},
             "title": "the-asking-session",
         }),
     )
@@ -487,7 +487,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
                 &format!("{base}/api/sessions"),
                 serde_json::json!({
                     "cwd": cwd,
-                    "invocation": fixture_cmd("fake-agent --script basic"),
+                    "command": {"command": fixture_cmd("fake-agent --script basic"), "yolo": false},
                     "title": title,
                 }),
             )
@@ -654,8 +654,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         &format!("{}/api/sessions", helm.base),
         serde_json::json!({
             "cwd": cwd,
-            "invocation": invocation,
-            "agent_kind": "generic",
+            "command": {"command": invocation, "yolo": false},
             "title": "the-asking-session",
         }),
     )
@@ -683,8 +682,9 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
             "this machine",
             "--cwd",
             &created_cwd,
-            "--invocation",
+            "--command",
             &invocation,
+            "--no-yolo",
             "--title",
             "made-by-the-agent",
         ],
@@ -720,7 +720,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     assert_eq!(created["title"], "made-by-the-agent");
     assert_eq!(created["cwd"], created_cwd);
     assert_eq!(
-        created["invocation"], invocation,
+        created["launch"]["command"], invocation,
         "the created session runs the command line it was given: {created}"
     );
 
@@ -756,7 +756,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     );
     assert_eq!(cloned["cwd"], cwd, "a clone copies the source's directory");
     assert_eq!(
-        cloned["invocation"], invocation,
+        cloned["launch"]["command"], invocation,
         "a same-host clone runs the source's command line: {cloned}"
     );
 
@@ -852,7 +852,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         "creating structured parent failed: {body}"
     );
     let parent: SessionInfo = serde_json::from_str(&body).expect("structured create JSON");
-    assert_eq!(parent.launch, Some(selection.clone()));
+    assert_eq!(parent.launch.agent_selection(), Some(&selection.clone()));
     let parent_argv = observed_argv_in_state(supervisor.state.path(), &parent.id, 1).await;
     assert!(
         parent_argv.contains("gpt-6-astra"),
@@ -891,7 +891,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         .to_string();
     assert_ne!(child_id, parent.id, "clone must create a new session");
     let child = get_json(&client, &format!("{}/api/sessions/{child_id}", helm.base)).await;
-    assert_eq!(child["launch"], serde_json::json!(selection));
+    assert_eq!(child["launch"]["kind"], "agent");
+    assert_eq!(child["launch"]["selection"], serde_json::json!(selection));
     let argv = observed_argv_in_state(supervisor.state.path(), &child_id, 2).await;
     assert!(
         argv.contains("gpt-6-astra"),
@@ -912,7 +913,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         .await
         .expect("read structured child")
         .expect("agent clone remains stored");
-    assert_eq!(stored.launch, Some(selection));
+    assert_eq!(stored.launch.agent_selection(), Some(&selection));
 
     // Replace is not restart: the helm derives a fresh session from the
     // child's frozen structured bundle and only then removes that child.

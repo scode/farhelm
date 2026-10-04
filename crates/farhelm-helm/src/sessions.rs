@@ -54,7 +54,7 @@ use crate::{
 use anyhow::Context;
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
-use farhelm_proto::ErrorKind;
+use farhelm_proto::{ErrorKind, LaunchRequest, SessionLaunch};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
@@ -876,17 +876,61 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
     )
 }
 
+/// The create-body fields launch kinds retired, decoded only to refuse them
+/// by name (the compatibility rule in SPEC_impl.md's "What running sessions
+/// hold across versions": a retired spelling is refused with its
+/// replacement named, never silently ignored).
+#[derive(Deserialize, Default)]
+pub(crate) struct RetiredCreateFields {
+    #[serde(default)]
+    invocation: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    agent_kind: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    resume_template: Option<serde::de::IgnoredAny>,
+}
+
+impl RetiredCreateFields {
+    /// The refusal for the first retired field present, if any.
+    fn refusal(&self) -> Option<&'static str> {
+        if self.invocation.is_some() {
+            Some(
+                "invocation was replaced by command: send command with the command line, yolo \
+                 with whether it runs without approval prompts, and optionally agent and resume",
+            )
+        } else if self.agent_kind.is_some() {
+            Some(
+                "agent_kind was replaced by command.agent, the command launch's declared agent type",
+            )
+        } else if self.resume_template.is_some() {
+            Some(
+                "resume_template was replaced by command.resume, the command launch's resume command",
+            )
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct CreateReq {
     cwd: String,
-    /// A complete raw command, mutually exclusive with structured
-    /// selection. Exactly one of `invocation` or `launch` must be present;
-    /// the helm never guesses which complete launch choice should win.
-    invocation: Option<String>,
-    /// Explicit launch-composer intent. The helm compiles this into the
-    /// existing resolved invocation before contacting a supervisor, so the
-    /// supervisor never needs a vendor catalog or a command parser.
+    /// An agent launch: an agent type and its choices. The helm composes
+    /// its start and resume commands before contacting a supervisor, so the
+    /// supervisor never needs a vendor catalog. Exactly one of `launch` or
+    /// `command` must be present; the helm never guesses which should win.
     launch: Option<farhelm_proto::LaunchSelection>,
+    /// A command launch: the user's command, YOLO assertion, optional
+    /// declared agent type and resume command, checked by SPEC.md's
+    /// command-launch rules and otherwise sent as written.
+    command: Option<farhelm_proto::CommandLaunch>,
+    /// Fields retired with launch kinds (protocol 39), accepted by the
+    /// decoder only so a body that still sends one (a page loaded before
+    /// the upgrade, an old script) is refused with a message naming what
+    /// replaced it rather than launching something else. See
+    /// [`RetiredCreateFields::refusal`].
+    #[serde(flatten)]
+    retired: RetiredCreateFields,
     /// Start a YOLO launch even though its host asks before YOLO launches. The browser sets
     /// it only after the user confirms the refusal it got without it
     /// (`farhelm_proto::http::YOLO_CONFIRMATION_HEADER`).
@@ -915,28 +959,6 @@ pub(crate) struct CreateReq {
     /// older UI build, the CLI's startup create) keeps working unchanged,
     /// with each request its own create.
     intent_key: Option<String>,
-    /// Override of the integrated-agent kind (PLAN_M3.md item 7), forwarded
-    /// verbatim to `ControlMsg::CreateSession::agent_kind` — see that
-    /// field's doc comment (farhelm-proto's `lib.rs`) for the full
-    /// three-state semantics. Absent, like `intent_key`, decodes as `None`
-    /// and preserves pre-M3 behavior: the supervisor derives the kind from
-    /// `invocation`'s basename. On the wire a present value is one of the
-    /// snake_case strings `"claude"`, `"codex"`, `"generic"` — the same
-    /// representation `AgentKind`'s `#[serde(rename_all = "snake_case")]`
-    /// produces on the supervisor protocol, so a JSON body needs no
-    /// translation between the two.
-    agent_kind: Option<farhelm_proto::AgentKind>,
-    /// Override of the resume invocation template (PLAN_M3.md item 7),
-    /// forwarded verbatim to `ControlMsg::CreateSession::resume_template` —
-    /// see that field's doc comment for the placeholder-placement rule and
-    /// the integrated/non-integrated distinction it enforces. Absent
-    /// decodes as `None`, same posture as `intent_key`: for a session
-    /// whose EFFECTIVE kind (after any `agent_kind` override) is
-    /// integrated (claude/codex), the supervisor derives the template
-    /// from `invocation`'s first token instead; a generic-kind session
-    /// derives none — only this explicit override can give one a
-    /// (verbatim, placeholder-free) resume invocation.
-    resume_template: Option<Vec<String>>,
     /// Which CONNECTION the caller prepared this create against — a
     /// `HostView::incarnation` read from `GET /api/hosts`.
     ///
@@ -974,21 +996,21 @@ pub(crate) struct CreateReq {
 /// selectors or normalizes titles. Dimensions and the lookup key do not shape
 /// the durable create. Replacement wraps this encoding with its source id so
 /// the same key cannot accidentally reconcile another replacement operation.
+///
+/// Version 2 since launch kinds (protocol 39), whose body carries `command`
+/// where version 1 carried `invocation`, `agent_kind` and
+/// `resume_template`. A fresh-checkout retry crossing that upgrade presents
+/// a version 2 identity against its version 1 reservation and is refused as
+/// a different request, never launched twice (SPEC_impl.md, "Launch-kinds
+/// reservations").
 fn fresh_create_request_identity(req: &CreateReq) -> String {
     serde_json::to_string(&(
-        "github_create_request_v1",
+        "github_create_request_v2",
         &req.cwd,
-        &req.invocation,
-        // The slot the removed `profile_id` selector held. Always null now,
-        // which is what it already was for every create that survives the
-        // removal, so their encoding (and a keyed retry across the upgrade)
-        // is unchanged.
-        None::<String>,
         &req.launch,
+        &req.command,
         &req.title,
         &req.host,
-        &req.agent_kind,
-        &req.resume_template,
         &req.expected_incarnation,
         &req.github_checkout,
     ))
@@ -1475,8 +1497,6 @@ pub(crate) async fn create_session(
                 cols: req.cols,
                 rows: req.rows,
                 intent_key: req.intent_key,
-                agent_kind: req.agent_kind,
-                resume_template: req.resume_template,
                 origin: CreateOrigin::User,
                 // A REST create takes whatever session the target answers with,
                 // replays included: the client asked for a session on that host
@@ -1550,8 +1570,6 @@ pub(crate) async fn do_create_session(
         cols,
         rows,
         intent_key,
-        agent_kind,
-        resume_template,
         origin,
         accept_result,
         github_checkout,
@@ -1566,54 +1584,29 @@ pub(crate) async fn do_create_session(
     // comes exclusively from the resolved binding; its ordinary cwd input
     // must remain empty. Keep the original spelling for history bookkeeping.
     let supervisor_cwd = if github_checkout.is_some() { "" } else { &cwd };
-    let session = match &mode {
-        CreateMode::Raw(invocation) => {
-            client
-                .create_session_with_extras(
-                    supervisor_cwd,
-                    invocation,
-                    title,
-                    cols,
-                    rows,
-                    CreateExtras {
-                        intent_key,
-                        agent_kind,
-                        resume_template,
-                        launch: None,
-                        github_checkout: github_checkout.clone(),
-                    },
-                )
-                .await?
-        }
-        CreateMode::Structured(compiled) => {
-            client
-                .create_session_with_extras(
-                    supervisor_cwd,
-                    &compiled.invocation,
-                    title,
-                    cols,
-                    rows,
-                    CreateExtras {
-                        intent_key,
-                        agent_kind: Some(compiled.agent_kind),
-                        resume_template: compiled.resume_template.clone(),
-                        launch: Some(compiled.selection.clone()),
-                        github_checkout: github_checkout.clone(),
-                    },
-                )
-                .await?
-        }
-    };
     // The selection the user explicitly chose in the GUI, which is what
     // remembered defaults and the recent-setups history record. Only a
-    // user-initiated structured create has one; an agent's create does not
-    // speak for the user.
+    // user-initiated agent launch has one; an agent's create does not speak
+    // for the user, and a command launch has no selection.
     let explicit_selection = match (&mode, origin) {
-        (CreateMode::Structured(compiled), CreateOrigin::User) if !settings_from_source => {
-            Some(compiled.selection.clone())
+        (SessionLaunch::Agent { selection, .. }, CreateOrigin::User) if !settings_from_source => {
+            Some(selection.clone())
         }
         _ => None,
     };
+    let session = client
+        .create_session_with_extras(
+            supervisor_cwd,
+            mode,
+            title,
+            cols,
+            rows,
+            CreateExtras {
+                intent_key,
+                github_checkout: github_checkout.clone(),
+            },
+        )
+        .await?;
     accept_created_session(
         state,
         claim,
@@ -1722,28 +1715,25 @@ async fn accept_created_session(
     Ok(session)
 }
 
-/// Everything one create carries once its host is chosen and its two
-/// mutually exclusive selectors have collapsed into a [`CreateMode`].
+/// Everything one create carries once its host is chosen and its launch is
+/// resolved.
 ///
 /// A struct rather than nine positional parameters because two of the
 /// fields are `Option<String>` and two more are `u16`: a call site that
 /// transposed `title` and `intent_key`, or `cols` and `rows`, would compile
 /// and be wrong in a way no type could catch.
 ///
-/// The integration overrides (`agent_kind`, `resume_template`) and dimensions
-/// are carried even though the agent relay normally passes the defaults for
-/// them. Giving the agent path a narrower struct of its own would be a second
-/// shape to keep in step with the supervisor's create message, which is the
-/// drift this function exists to prevent.
+/// The dimensions are carried even though the agent relay normally passes
+/// the defaults for them. Giving the agent path a narrower struct of its own
+/// would be a second shape to keep in step with the supervisor's create
+/// message, which is the drift this function exists to prevent.
 pub(crate) struct CreateSpec {
     pub(crate) cwd: String,
-    pub(crate) mode: CreateMode,
+    pub(crate) mode: SessionLaunch,
     pub(crate) title: Option<String>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
     pub(crate) intent_key: Option<String>,
-    pub(crate) agent_kind: Option<farhelm_proto::AgentKind>,
-    pub(crate) resume_template: Option<Vec<String>>,
     /// Identifies whether this create expresses the user's dialog choice or
     /// an agent's request. Only the former may update the helm-wide default:
     /// an agent creating work must not silently move the user's next-dialog
@@ -1805,47 +1795,27 @@ pub(crate) enum CreateOrigin {
 pub(crate) type CreatedSessionCheck =
     Box<dyn Fn(&farhelm_proto::SessionInfo) -> anyhow::Result<()> + Send>;
 
-/// Which creation mode a caller selected — the choice PLAN_M6_75.md item 3
-/// made mutually exclusive on the wire, resolved once before
-/// [`do_create_session`] runs.
-///
-/// Owned rather than borrowed from the body, because the mode outlives the
-/// request that produced it: it decides which call to make, and is consulted
-/// AGAIN after the reply lands (only a user-originated structured create
-/// records its selection as the user's explicit choice), by which point the
-/// body's other fields have been moved into the call. Taken out of the body
-/// rather than cloned — nothing else reads them afterwards.
-pub(crate) enum CreateMode {
-    Raw(String),
-    /// A release-catalog-validated launch composer selection. This stays
-    /// distinct from raw mode until the resolved bundle and user intent have
-    /// both crossed the supervisor boundary.
-    Structured(crate::launches::CompiledLaunch),
-}
-
-/// Derive a create's [`CreateMode`] from an existing session's row, the way
-/// both `clone_for_agent` and `replace` need to: a source made from
-/// structured choices keeps its frozen bundle, and every other source is
-/// re-created from its raw invocation.
+/// The launch a copy of `source` runs, for the two copies SPEC.md defines
+/// as exact: plain Replace and `farhelm agent clone`. An agent or command
+/// launch is copied as stored (its composed commands are not recompiled
+/// through today's catalog, which could change an older choice nobody has
+/// reviewed again). A legacy session is refused: SPEC.md has these copies
+/// refuse it with a remedy, which `remedy` names for the caller's surface.
 ///
 /// `source` must come from a LIVE read of the owning host's session list
 /// (`manager::drain_sessions`), never from the helm's cache: a cached row
-/// can describe a title or directory the session no longer has, and a
-/// derived mode built from stale data would carry that staleness into a
-/// brand-new session.
-pub(crate) fn mode_from_source(source: &farhelm_proto::SessionInfo) -> CreateMode {
-    if let Some(selection) = source.launch.clone() {
-        // Clone/replace retain the source's frozen bundle. Recompiling it
-        // through today's catalog could change an older selection before a
-        // person has reviewed and submitted it again.
-        return CreateMode::Structured(crate::launches::CompiledLaunch {
-            invocation: source.invocation.clone(),
-            agent_kind: selection.harness.agent_kind(),
-            resume_template: source.resume_template.clone(),
-            selection,
-        });
+/// can describe a launch the session no longer has.
+pub(crate) fn mode_from_source(
+    source: &farhelm_proto::SessionInfo,
+    remedy: &str,
+) -> anyhow::Result<SessionLaunch> {
+    match &source.launch {
+        SessionLaunch::Agent { .. } | SessionLaunch::Command(_) => Ok(source.launch.clone()),
+        SessionLaunch::Legacy { .. } => Err(invalid_request(format!(
+            "this session was created before launch kinds, so its launch cannot be copied as \
+             it is; {remedy}"
+        ))),
     }
-    CreateMode::Raw(source.invocation.clone())
 }
 
 /// Create and replacement share the same fresh-intent admission protocol.
@@ -1944,8 +1914,6 @@ async fn create_fresh_session(
             cols: req.cols,
             rows: req.rows,
             intent_key,
-            agent_kind: req.agent_kind,
-            resume_template: req.resume_template,
             github_checkout,
             origin: CreateOrigin::User,
             accept_result: acceptance.accept_result,
@@ -1956,52 +1924,56 @@ async fn create_fresh_session(
     .await
 }
 
-/// Resolve a raw or structured body into its [`CreateMode`].
+/// Resolve a create body into the launch it runs.
 ///
-/// Both refusals are `InvalidRequest` — a 400 — and both are worth making
-/// loudly rather than picking a winner. A body naming BOTH has no honest
-/// reading (does the composer's bundle win, or the caller's command?); a
-/// body naming NEITHER says nothing about what to run at all. Silently
-/// preferring one, or defaulting to some shell, would launch something the
-/// caller never asked for.
-fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
-    match (req.invocation.take(), req.launch.take()) {
-        (Some(_), Some(_)) => Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "a create names exactly one of invocation or launch: each is a complete \
-                      selector and there is no honest way to merge the two"
+/// Both refusals of the selector's shape are `InvalidRequest` — a 400 — and
+/// both are worth making loudly rather than picking a winner. A body naming
+/// BOTH an agent launch and a command launch has no honest reading; a body
+/// naming NEITHER says nothing about what to run at all.
+fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
+    if let Some(message) = req.retired.refusal() {
+        return Err(invalid_request(message.to_string()));
+    }
+    match (req.launch.take(), req.command.take()) {
+        (Some(_), Some(_)) => Err(invalid_request(
+            "a create names exactly one of launch or command: each is a complete launch and \
+             there is no honest way to merge the two"
                 .to_string(),
-        })),
-        (None, None) => Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "a create must name an invocation or launch; this body names neither, so \
-                      there is nothing to launch"
+        )),
+        (None, None) => Err(invalid_request(
+            "a create must name a launch (an agent type and its choices) or a command; this \
+             body names neither, so there is nothing to launch"
                 .to_string(),
-        })),
-        (Some(invocation), None) => Ok(CreateMode::Raw(invocation)),
-        (None, Some(selection)) => {
-            if req.agent_kind.is_some() || req.resume_template.is_some() {
-                return Err(anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::InvalidRequest,
-                    message: "a structured launch cannot also send agent_kind or resume_template: \
-                              the composer owns its resolved bundle"
-                        .to_string(),
-                }));
-            }
-            crate::launches::compile(selection)
-                .map(CreateMode::Structured)
-                .map_err(|message| {
-                    anyhow::Error::new(SupervisorError {
-                        origin: crate::client::ErrorOrigin::Helm,
-                        kind: ErrorKind::InvalidRequest,
-                        message,
-                    })
-                })
+        )),
+        (Some(selection), None) => resolve_launch_request(LaunchRequest::Agent { selection }),
+        (None, Some(command)) => resolve_launch_request(LaunchRequest::Command(command)),
+    }
+}
+
+/// Resolve what a caller asked to launch into the launch a supervisor
+/// runs: an agent type and its choices composed by this helm's catalog
+/// (`launches::compile`), or a command launch checked by SPEC.md's
+/// command-launch rules. Both refusals are the caller's to fix, so both are
+/// `InvalidRequest`.
+pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<SessionLaunch> {
+    match request {
+        LaunchRequest::Agent { selection } => {
+            crate::launches::compile(selection).map_err(invalid_request)
+        }
+        LaunchRequest::Command(command) => {
+            command.validate().map_err(invalid_request)?;
+            Ok(SessionLaunch::Command(command))
         }
     }
+}
+
+/// A helm-originated `InvalidRequest`, the 400 every create-body refusal is.
+fn invalid_request(message: String) -> anyhow::Error {
+    anyhow::Error::new(SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::InvalidRequest,
+        message,
+    })
 }
 
 /// Route to `id`'s owning host and kill its agent's process tree, leaving
@@ -2195,8 +2167,14 @@ pub(crate) async fn get_session(
 pub(crate) struct RestartReq {
     #[serde(default)]
     stop_if_running: bool,
+    /// Restart with an agent launch's changed choices; the helm composes
+    /// the new commands. Exclusive with `with_command`.
     #[serde(default)]
     with: Option<farhelm_proto::LaunchSelection>,
+    /// Restart with a command launch's changed command, resume command,
+    /// and YOLO assertion. Exclusive with `with`.
+    #[serde(default)]
+    with_command: Option<farhelm_proto::CommandLaunch>,
     /// Restart with a YOLO selection even though the host asks before YOLO launches; see
     /// [`CreateReq`]'s field of the same name.
     #[serde(default)]
@@ -2224,8 +2202,17 @@ pub(crate) async fn restart_session(
     // Helm-owned for the reason `create_session` is: the relaunch is
     // followed by recording the session's new state.
     crate::run_owned(async move {
-        match do_restart_session(&state, &id, req.stop_if_running, req.with, req.confirm_yolo).await
-        {
+        let with = match (req.with, req.with_command) {
+            (None, None) => None,
+            (Some(selection), None) => Some(LaunchRequest::Agent { selection }),
+            (None, Some(command)) => Some(LaunchRequest::Command(command)),
+            (Some(_), Some(_)) => {
+                return http_error(invalid_request(
+                    "a restart names at most one of with or with_command".to_string(),
+                ));
+            }
+        };
+        match do_restart_session(&state, &id, req.stop_if_running, with, req.confirm_yolo).await {
             Ok((_claim, session)) => axum::Json(session).into_response(),
             Err(e) => http_error(e),
         }
@@ -2244,16 +2231,17 @@ pub(crate) async fn do_restart_session(
     state: &AppState,
     id: &str,
     stop_if_running: bool,
-    with: Option<farhelm_proto::LaunchSelection>,
+    with: Option<LaunchRequest>,
     confirm_yolo: bool,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    // Resolved before routing: a malformed edit is the caller's to fix
+    // wherever the session lives.
+    let with = with.map(resolve_launch_request).transpose()?;
     let (claim, client) = route_session(state, id).await?;
-    // Restart WITH a new selection is a new launch choice, so it gets the
+    // Restart WITH a new launch is a new launch choice, so it gets the
     // same YOLO check a create does; a plain restart relaunches a choice
     // already made and does not (see `yolo_guard`).
-    let is_yolo = with
-        .as_ref()
-        .is_some_and(farhelm_proto::yolo::selection_is_yolo);
+    let is_yolo = with.as_ref().is_some_and(crate::yolo_guard::create_is_yolo);
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let session = client
         .restart_session_with(id, stop_if_running, with)
@@ -2542,13 +2530,14 @@ pub(crate) struct ReplaceReq {
     /// than inventing a parallel override type: a replace-with body IS an
     /// ordinary create body in every field that matters to a create, and a
     /// second type would only be one more place for the two to drift apart.
-    /// `None` means today's plain replace — the source's own cwd, title, and
-    /// agent, read live and carried forward unchanged (see
-    /// [`do_replace_session`]'s doc for that path).
+    /// `None` means plain replace — the source's own cwd, title, and
+    /// launch, read live and carried forward unchanged (see
+    /// [`do_replace_session`]'s doc for that path; a legacy source is
+    /// refused there).
     ///
-    /// Present, this field's `cwd`/`title`/`cols`/`rows`/`agent_kind`/
-    /// `resume_template`/mode selector (`invocation`/`launch`)
-    /// are resolved exactly as an ordinary `POST /api/sessions` body's are —
+    /// Present, this field's `cwd`/`title`/`cols`/`rows` and launch selector
+    /// (`command`/`launch`) are resolved exactly as an ordinary
+    /// `POST /api/sessions` body's are —
     /// including its own mutual-exclusivity and compatibility refusals
     /// (`create_mode`) — and used in place of the source's live row. Two
     /// fields on it mean something DIFFERENT here than on an ordinary
@@ -2670,7 +2659,7 @@ pub(crate) async fn do_replace_session(
     // refusals (`create_mode`) get ahead of routing in `create_session`.
     // Resolving the override's MODE here, and not down where the source's
     // live row is read, is what makes that true for `with`: a body naming
-    // both or neither of invocation/launch is a 400 whether or not
+    // both or neither of command/launch is a 400 whether or not
     // the source's host is reachable or the source id even exists, exactly
     // as an ordinary create answers, and it never pays for a supervisor
     // round trip first. Two keys naming one intended create is the other
@@ -2791,26 +2780,21 @@ pub(crate) async fn do_replace_session(
     // exactly as plain replace has always done. Building `with`'s mode
     // through the SAME `create_mode` an ordinary create uses is what gives
     // "replace with" every one of a create's own body-shape refusals (naming both or
-    // neither of invocation/launch, a launch body also naming
-    // agent_kind/resume_template) for free, rather than a second copy of
-    // them to keep in sync.
+    // neither of command/launch, a body still naming a retired field such as
+    // invocation) for free, rather than a second copy of them to keep in
+    // sync.
     // A plain Replace copies the source's listed settings; only a "replace
     // with" body is the user's own choice of them.
     let settings_from_source = with.is_none();
-    let (mode, cwd, title, cols, rows, agent_kind, resume_template) = match (with, with_mode) {
-        (Some(with), Some(mode)) => (
-            mode,
-            with.cwd,
-            with.title,
-            with.cols,
-            with.rows,
-            with.agent_kind,
-            with.resume_template,
-        ),
+    let (mode, cwd, title, cols, rows) = match (with, with_mode) {
+        (Some(with), Some(mode)) => (mode, with.cwd, with.title, with.cols, with.rows),
         // The two halves travel together: `with_mode` is `Some` exactly
         // when `with` is, since both come from the same `Option` above.
         (_, _) => {
-            let mode = mode_from_source(&source);
+            let mode = mode_from_source(
+                &source,
+                "use Replace with to start it over with a launch of your choosing",
+            )?;
             (
                 mode,
                 source.cwd,
@@ -2822,13 +2806,6 @@ pub(crate) async fn do_replace_session(
                 Some(source.title),
                 default_cols(),
                 default_rows(),
-                // Raw compatibility overrides still have no durable
-                // projection on `SessionInfo`. A structured source is
-                // different: `mode_from_source` carries its recorded
-                // template inside the structured mode, where
-                // `do_create_session` forwards it.
-                None,
-                None,
             )
         }
     };
@@ -2843,15 +2820,13 @@ pub(crate) async fn do_replace_session(
             cols,
             rows,
             intent_key,
-            agent_kind,
-            resume_template,
             github_checkout: None,
             origin: CreateOrigin::User,
             // Unlike an ordinary REST create, replace DOES have a session an
             // idempotency replay can collide with: the SOURCE itself. A
             // same-host replace with no field overrides reconstructs the
             // exact fingerprint that created the source in the first place
-            // (same cwd, title, invocation, default
+            // (same cwd, title, launch, default
             // dimensions, no parent), so a caller that reuses the source's
             // own creation key hits a legitimate reservation REPLAY at the
             // target, which answers with the SOURCE row rather than a new
