@@ -44,6 +44,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
+  until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
+  inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
+  deployment assumptions, then deploy the website. Test end to end from the macOS app through the helm and live endpoint
+  to a private inbox issue, checking the message, contact and metadata, plus success and failure behavior. Follow-up to
+  PRs #1566, #1567, #1569 and #1570.
+
 - **Refuse symlinked program directories during remote uninstall.** If a remote host's `~/.local/lib/farhelm` is a
   symlink, uninstall currently removes the link, reports success and forgets the host, while the target directory and
   Farhelm binary remain. Refuse that layout before changing the host, with a message naming the symlink target; keep the
