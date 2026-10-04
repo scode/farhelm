@@ -54,15 +54,17 @@ async function installVisualFixture(page: Page) {
   }));
 }
 
-/** The recent-setup row whose title mentions `ending`.
+/** The recent-setup row whose accessible name mentions `ending`.
  *
- * Scoped to the recent rows on purpose. A row's title is its complete
- * description, which starts with its folder, and the recent-folder links
- * below carry their folder as a title too (a grid cell ellipsizes a long
- * path at its end, the part that tells these fixtures apart). An unscoped
- * title lookup matches both and fails strict mode. */
+ * Found by name rather than hover text: the row's hover text lives in
+ * Farhelm's own tooltip (`data-tooltip`), which Playwright's title lookup
+ * cannot see, and its accessible name carries the same complete description.
+ * Scoped to the recent rows on purpose. That description starts with the
+ * row's folder, and the recent-folder links below name their folder too (a
+ * grid cell ellipsizes a long path at its end, the part that tells these
+ * fixtures apart). An unscoped lookup matches both and fails strict mode. */
 function recentRow(form: Locator, ending: string): Locator {
-  return form.locator(".launch-composer-recent-slots").getByTitle(new RegExp(ending));
+  return form.locator(".launch-composer-recent-slots").getByRole("button", { name: new RegExp(ending) });
 }
 
 /** Reopen a fresh form so each image has one named, reproducible precondition. */

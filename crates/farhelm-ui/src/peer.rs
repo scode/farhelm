@@ -178,7 +178,8 @@ pub(crate) fn detail_text(parts: &[DetailPart]) -> String {
 /// property stops the run participating in the surrounding paragraph's
 /// bidirectional resolution at all. Existing callers keep their prior markup
 /// unless `peer_tooltips` is enabled for a surface that needs per-value
-/// hover text.
+/// hover text, which goes through Farhelm's own tooltip (`data-tooltip`, see
+/// `assets/tooltip.js`) rather than a native `title`.
 #[component]
 pub(crate) fn PeerLine(
     class: String,
@@ -197,7 +198,7 @@ pub(crate) fn PeerLine(
                             key: "{index}",
                             class: "peer-value",
                             dir: "ltr",
-                            title: if peer_tooltips { display_peer(value) },
+                            "data-tooltip": if peer_tooltips { display_peer(value) },
                             "{display_peer(value)}"
                         }
                     },

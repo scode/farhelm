@@ -225,7 +225,7 @@ fn HelpMenu(layout_epoch: ReadSignal<u64>, on_send_feedback: EventHandler<()>) -
                 r#type: "button",
                 class: "btn btn-neutral app-help-toggle",
                 aria_label: "help",
-                title: "help",
+                "data-tooltip": "help: send feedback or open the documentation",
                 aria_haspopup: "menu",
                 aria_expanded: open(),
                 onkeydown: move |evt| {
@@ -367,14 +367,14 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             span {
                 class: "app-version peer-value",
                 dir: "ltr",
-                title: "this client was built as farhelm {skew::CLIENT_BUILD}",
+                "data-tooltip": "this client was built as farhelm {skew::CLIENT_BUILD}",
                 "{version}"
             }
             button {
                 r#type: "button",
                 class: "btn btn-neutral app-settings-toggle",
                 aria_label: "settings",
-                title: "settings",
+                "data-tooltip": "settings: choices that apply to every host on this helm",
                 aria_haspopup: "dialog",
                 onclick: move |_| settings_open.set(true),
                 crate::icons::SettingsIcon {}

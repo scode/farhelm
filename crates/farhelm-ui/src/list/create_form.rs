@@ -4435,7 +4435,7 @@ pub(super) fn CreateSessionForm(
                                                     class: if matches!(result, crate::launch_composer::ComposerSearchResult::Recent(_)) {
                                                         if composer_active_index == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
                                                     } else if composer_active_index == index { "selected" } else { "" },
-                                                    title: match &result {
+                                                    "data-tooltip": match &result {
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
                                                             "{} · {} · {}",
                                                                 display_peer(&crate::launch_composer::recent_destination_label(entry)), selected_host_label,
@@ -4586,9 +4586,9 @@ pub(super) fn CreateSessionForm(
                                     r#type: "button",
                                     dir: "ltr",
                                     disabled: busy,
-                                    title: "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
+                                    "data-tooltip": "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
                                     // The visible row makes scanning cheaper, but
-                                    // its title and accessible name retain every
+                                    // its tooltip and accessible name retain every
                                     // saved value that the one-line layout may
                                     // truncate. The punctuated string also keeps
                                     // adjacent spans from running together for
@@ -4837,7 +4837,7 @@ pub(super) fn CreateSessionForm(
                                         // sibling checkouts apart, so the whole
                                         // path has to be reachable without
                                         // picking the link to find out.
-                                        title: "{display_peer(&folder.display_cwd)}",
+                                        "data-tooltip": "{display_peer(&folder.display_cwd)}",
                                         disabled: busy,
                                         onclick: {
                                             let folder = folder.display_cwd.clone();

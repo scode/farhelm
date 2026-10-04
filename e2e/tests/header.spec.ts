@@ -146,7 +146,7 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
 }) => {
   const marker = `header-overflow-${Date.now()}`;
   // Distinct oversized values for the title and the two copy buttons, so a
-  // bug that swapped the two `title` attributes
+  // bug that swapped the two tooltips (`data-tooltip` attributes)
   // (or truncated one to the other's length) would show up as a mismatch
   // rather than passing by coincidence.
   const title = `${marker}-title-${"a".repeat(250)}`;
@@ -164,9 +164,16 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
     await sessionRow.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".titlebar .title")).toHaveAttribute("title", title);
-    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAttribute("title", /\/tmp/);
-    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("title", `${invocation} — click to copy`);
+    await expect(page.locator(".titlebar .title")).toHaveAttribute("data-tooltip", title);
+    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAttribute("data-tooltip", /\/tmp/);
+    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("data-tooltip", `${invocation} — click to copy`);
+    // The tooltip is not in the accessibility tree, so the full value and
+    // the copy action reach assistive technology through each button's
+    // accessible description, as the `title` it replaced once provided.
+    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAccessibleDescription("/tmp — click to copy");
+    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAccessibleDescription(
+      `${invocation} — click to copy`,
+    );
 
     // `scrollWidth > clientWidth` is the DOM's own proof of a truncated
     // single-line box (`white-space: nowrap; overflow: hidden` on both
@@ -216,7 +223,7 @@ test("copy fields use the header's free width before truncating", async ({ page,
     await sessionRow.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
     await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute(
-      "title",
+      "data-tooltip",
       `${invocation} — click to copy`,
     );
     const clipped = (selector: string, index = 0) =>
@@ -355,7 +362,7 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
     await expect(shown).toHaveAttribute("dir", "ltr");
     await expect(shown).toContainText("<U+202E>abc<U+000A># tail");
     expect(await shown.textContent(), "no raw override reaches the page").not.toContain("\u202E");
-    await expect(command).toHaveAttribute("title", /<U\+202E>abc<U\+000A># tail — click to copy$/);
+    await expect(command).toHaveAttribute("data-tooltip", /<U\+202E>abc<U\+000A># tail — click to copy$/);
     expect(
       await command.evaluate((el) => el.scrollWidth > el.clientWidth),
       "premise: the crowded header has shrunk the command button",

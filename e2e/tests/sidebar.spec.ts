@@ -141,7 +141,7 @@ test("the sidebar app bar shows the helm build and client tooltip", async ({ pag
   await page.goto("/");
   const version = page.locator(".app-version");
   await expect(version).toHaveText(forced);
-  await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
+  await expect(version).toHaveAttribute("data-tooltip", `this client was built as farhelm ${stamp}`);
 
   // Mounting host rows can leave provisioning reads inside route.fetch even
   // after the version is visible. Drain those handlers before removing the
@@ -149,7 +149,7 @@ test("the sidebar app bar shows the helm build and client tooltip", async ({ pag
   await page.unrouteAll({ behavior: "wait" });
   await page.goto("/");
   await expect(version).toHaveText(stamp);
-  await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
+  await expect(version).toHaveAttribute("data-tooltip", `this client was built as farhelm ${stamp}`);
 });
 
 /**
@@ -2686,7 +2686,7 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(compact).toBeChecked();
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
-    await expect(target.locator(".session-row-open")).toHaveAttribute("title", session.cwd);
+    await expect(target.locator(".session-row-open")).toHaveAttribute("data-tooltip", session.cwd);
     // Compact mode keeps the first-line local-execution cue visible.
     await expect(target.locator(".host-kind-icon[data-glyph='local']")).toBeVisible();
     await expect(target.locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");
@@ -3223,7 +3223,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   // proving the same floors hold when the host is ALSO an aggressor rather
   // than a passive short string. This is also F11's "long-host case": the
   // raw name embeds a directional override, so the same fixture proves the
-  // `title` tooltip carries the escaped value `display_peer` produces, not
+  // tooltip carries the escaped value `display_peer` produces, not
   // the raw peer-controlled string.
   const rawLongHost = `deploy@${rlo}${"build-fleet-".repeat(8)}internal.example.com`;
   const escapedLongHost = `deploy@<U+202E>${"build-fleet-".repeat(8)}internal.example.com`;
@@ -3231,10 +3231,10 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
     title: `width-contention-${rlo}${"t".repeat(150)}`,
     host_name: rawLongHost,
   });
-  // The new native title tooltip is a separate display surface: directional
-  // controls must be legible there instead of rearranging the tooltip text.
+  // The title's tooltip is a separate display surface: directional controls
+  // must be legible there instead of rearranging the tooltip text.
   await expect(hostDominant.locator(".session-title")).toHaveAttribute(
-    "title",
+    "data-tooltip",
     `width-contention-<U+202E>${"t".repeat(150)}`,
   );
   const underdog = await measure(hostDominant);
@@ -3252,7 +3252,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   // existing bidi-fixture pattern (see "a bidi override in the invocation
   // basename renders escaped and isolated" below) for the host name.
   await expect(hostDominant.locator(".session-host")).toHaveText(escapedLongHost);
-  await expect(hostDominant.locator(".session-host")).toHaveAttribute("title", escapedLongHost);
+  await expect(hostDominant.locator(".session-host")).toHaveAttribute("data-tooltip", escapedLongHost);
 
   // Every field ellipsizes inside the sidebar rather than forcing the row —
   // or the line — wider than the column, in both cases.
@@ -3518,9 +3518,9 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[1].locator(".session-row-detail")).toHaveCount(0);
   await expect(rows[1].locator(".session-row-meta")).toHaveCount(0);
   await expect(rows[1].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "exited");
-  await expect(rows[1].locator(".compact-ended-status")).toHaveAttribute("title", "exited (code 17)");
+  await expect(rows[1].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "exited (code 17)");
   await expect(rows[5].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "stopped");
-  await expect(rows[5].locator(".compact-ended-status")).toHaveAttribute("title", "exited (code unknown) — stopped by user");
+  await expect(rows[5].locator(".compact-ended-status")).toHaveAttribute("data-tooltip", "exited (code unknown) — stopped by user");
   await expect(rows[6].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "interrupted");
   await expect(rows[7].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "error");
   await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='stale']")).toHaveCount(1);
@@ -3902,7 +3902,7 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
 });
 
 /**
- * A `/home/<user>` cwd shows the FOLDED `~` form while the row's `title`
+ * A `/home/<user>` cwd shows the FOLDED `~` form while the row's tooltip
  * carries the exact, unabbreviated path — the untouched value is one
  * hover away no matter how the visible text was shortened
  * (`row::abbreviate_home`).
@@ -3945,7 +3945,7 @@ test("a /home/<user> cwd shows the folded form with the exact path on title", as
   const target = row(page, "tilde-fold-session");
   await expect(target).toBeVisible({ timeout: 20_000 });
   await expect(target.locator(".session-cwd-text")).toHaveText("~/src/api");
-  await expect(target.locator(".session-cwd")).toHaveAttribute("title", cwd);
+  await expect(target.locator(".session-cwd")).toHaveAttribute("data-tooltip", cwd);
 });
 
 /**
@@ -4002,9 +4002,9 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   const badge = target.locator(".session-agent");
   // Escaped to a visible `<U+202E>` form rather than an invisible control
   // character (`display_peer`). The tooltip uses the same safe rendering,
-  // so its native UI cannot reinterpret a peer-controlled direction mark.
+  // so a peer-controlled direction mark cannot reorder its text.
   await expect(badge).toHaveAttribute(
-    "title",
+    "data-tooltip",
     `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — /opt/bin/<U+202E>evil-agent --some-flag`,
   );
 
@@ -4014,7 +4014,7 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   // the same escaped, direction-isolated peer runs as the row.
   await openRowMenu(target);
   const menuTitle = target.locator(".session-row-menu-title");
-  await expect(menuTitle).toHaveAttribute("title", "bidi-invocation");
+  await expect(menuTitle).toHaveAttribute("data-tooltip", "bidi-invocation");
   const titlePeer = menuTitle.locator("span.peer-value");
   await expect(titlePeer).toHaveText("bidi-invocation");
   await expect(titlePeer).toHaveAttribute("dir", "ltr");
@@ -4023,8 +4023,8 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   const summary = target.locator(".session-row-menu-summary");
   const summaryPeer = summary.locator("span.peer-value");
   await expect(summaryPeer).toHaveText("<U+202E>evil-agent");
-  await expect(summaryPeer).toHaveAttribute("title", "<U+202E>evil-agent");
-  await expect(summary).toHaveAttribute("title", "<U+202E>evil-agent");
+  await expect(summaryPeer).toHaveAttribute("data-tooltip", "<U+202E>evil-agent");
+  await expect(summary).toHaveAttribute("data-tooltip", "<U+202E>evil-agent");
   await expect(summaryPeer).toHaveAttribute("dir", "ltr");
   expect(await summaryPeer.evaluate((element) => getComputedStyle(element).unicodeBidi)).toContain("isolate");
 });
@@ -4961,7 +4961,7 @@ test("composer holds offered history steady until destination and search promoti
     await search.fill("offered-history");
     const rows = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
     await expect(rows, "the initial controlled history must be rendered before the peer create").toHaveCount(1);
-    const initialRow = await rows.first().getAttribute("title");
+    const initialRow = await rows.first().getAttribute("data-tooltip");
     const initialActive = await search.getAttribute("aria-activedescendant");
     const draft = await form.locator(".launch-composer-summary").innerText();
     const initialFolders = await form.locator(".launch-composer-folder-links button").allTextContents();
@@ -5008,7 +5008,7 @@ test("composer holds offered history steady until destination and search promoti
       { message: "the mounted component must consume the released fresh reply before stability is measured" },
     ).toBeGreaterThan(initialFetchedRevision);
     await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toHaveAttribute("title", initialRow ?? "");
+    await expect(rows.first()).toHaveAttribute("data-tooltip", initialRow ?? "");
     await expect(search).toHaveAttribute("aria-activedescendant", initialActive ?? "");
     await expect(form.locator(".launch-composer-summary")).toHaveText(draft);
     await expect(form.locator(".launch-composer-folder-links button")).toHaveText(initialFolders);
@@ -5877,7 +5877,7 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     const permission = entry.selection.permissions ?? "default";
     const harness = entry.selection.harness === "claude" ? "Claude" : "Codex";
     const expected = `${entry.cwd} · local (this machine) · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
-    await expect(row).toHaveAttribute("title", expected);
+    await expect(row).toHaveAttribute("data-tooltip", expected);
     await expect(row).toHaveAccessibleName(expected);
     await expect(row.locator(".launch-composer-recent-harness")).toHaveText(harness);
   }
@@ -6069,7 +6069,7 @@ test("composer recent rows list only explicit choices, in aligned columns", asyn
 
   // The complete description survives where it always was.
   await expect(rows.nth(1)).toHaveAttribute(
-    "title",
+    "data-tooltip",
     `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: default`,
   );
   await expect(rows.nth(1)).toHaveAccessibleName(
@@ -6158,12 +6158,12 @@ test("composer search recents keep complete 44px two-line rows", async ({ page, 
   for (let index = 0; index < 2; index += 1) {
     await expect(recents.nth(index)).toBeVisible();
     expect((await recents.nth(index).boundingBox())?.height).toBe(44);
-    await expect(recents.nth(index)).toHaveAttribute("title", new RegExp(`search-recent.*model-${index ? "two" : "one"}.*high.*Yolo`, "i"));
+    await expect(recents.nth(index)).toHaveAttribute("data-tooltip", new RegExp(`search-recent.*model-${index ? "two" : "one"}.*high.*Yolo`, "i"));
     await expect(recents.nth(index).locator(".launch-composer-search-recent-destination")).toHaveCSS("display", "block");
     await expect(recents.nth(index).locator(".launch-composer-search-recent-selection")).toHaveCSS("display", "block");
     const suffix = index ? "two" : "one";
     const expected = `${cwd}${suffix} · local (this machine) · Codex · model: model-${suffix} · effort: High · permissions: yolo`;
-    await expect(recents.nth(index)).toHaveAttribute("title", expected);
+    await expect(recents.nth(index)).toHaveAttribute("data-tooltip", expected);
     await expect(recents.nth(index)).toHaveAccessibleName(`Recent setup: ${expected}`);
   }
   const first = await recents.first().boundingBox(); const second = await recents.nth(1).boundingBox();
@@ -6232,10 +6232,10 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   const custom = form.getByRole("combobox", { name: "model", exact: true });
   const recentSlots = form.locator(".launch-composer-recent-slots > button");
   const allConflictRecent = recentSlots.filter({ hasText: "fixture-codex-all-conflict" });
-  const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: High · permissions: yolo",
-    { exact: true },
-  );
+  const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByRole("button", {
+    name: "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: High · permissions: yolo",
+    exact: true,
+  });
   // With only the harness selected, remembered explicit values are candidates.
   // Once the complete custom/High/YOLO draft is active, this same row conflicts
   // with every explicit filter field and must disappear before ranking.
@@ -6263,10 +6263,10 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status, "the low-only Codex model must genuinely clear high effort").toContainText("the selected effort is not in Farhelm's offering for that model, so it was cleared");
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveCount(0);
-  const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: Low · permissions: yolo",
-    { exact: true },
-  );
+  const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByRole("button", {
+    name: "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: Low · permissions: yolo",
+    exact: true,
+  });
   await expect(ordinaryRecent, "the Codex recent remains available while its notice is visible").toBeVisible();
   await expect(savedHighEffortRecent, "an absent effort filter still permits a saved explicit High effort").toBeVisible();
   await expect(status, "the old-draft notice must still exist immediately before ordinary restoration").toBeVisible();
@@ -7794,7 +7794,7 @@ test("the dot click marks a different row read without moving the selection", as
       await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
         timeout: 45_000,
       });
-      await expect(rowB.locator(".status-dot")).toHaveAttribute("title", "idle — new output — mark read");
+      await expect(rowB.locator(".status-dot")).toHaveAttribute("data-tooltip", "idle — new output — mark read");
 
       await rowB.locator(".status-dot").click();
       await expect(rowA).toHaveAttribute("data-session-selected", "true");

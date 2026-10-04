@@ -215,7 +215,7 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
   // The row now reduces the invocation to a glyph track. The fixture's
   // quoted absolute path therefore gets the neutral terminal glyph; its
-  // complete invocation stays in accessible text and the native tooltip.
+  // complete invocation stays in accessible text and the hover tooltip.
   // That still proves the row belongs to this session rather than a
   // neighbour, which is the property the old exact-text assertion guarded.
   await expect(row.locator(".session-agent .harness-glyph")).toHaveAttribute("data-glyph", "terminal");
@@ -2414,14 +2414,14 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     // The marker is a single bare token with no path and no flags, so the
     // row's compact rendering (the 2026-08 UI refresh) leaves it exactly as
     // it is — deliberately, so this test keeps naming the one string it
-    // armed. The `title` is asserted alongside it because that is the
+    // armed. The tooltip is asserted alongside it because that is the
     // attribute carrying the invocation verbatim whatever the compaction
     // rules become.
     await expect(row.locator(".session-agent")).toContainText(marker, {
       timeout: 10_000,
     });
     await expect(row.locator(".session-agent")).toHaveAttribute(
-      "title",
+      "data-tooltip",
       `command — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — ${marker}`,
     );
 
@@ -3845,7 +3845,7 @@ test("a long error detail wraps completely and compact ended rows stay one line"
   await page.getByRole("checkbox", { name: "compact", exact: true }).check();
   await expect(row.locator(".session-row-detail")).toHaveCount(0);
   await expect(row.locator('.ended-status-glyph[data-glyph="error"]')).toBeVisible();
-  await expect(row.locator(".compact-ended-status")).toHaveAttribute("title", `error — ${detail}`);
+  await expect(row.locator(".compact-ended-status")).toHaveAttribute("data-tooltip", `error — ${detail}`);
   expect((await row.boundingBox())!.height).toBeLessThan(40);
   } finally {
     await patchPreferences(request, { compact: preferences.compact ?? null });
@@ -3885,11 +3885,11 @@ test("compact rows retain distinct ended and harness glyphs within two character
     for (const item of cases) {
       const row = page.locator(`[data-session-id="${item.id}"]`);
       await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
-      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("title", / — /);
-      await expect(row.locator(".session-agent")).toHaveAttribute("title", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("data-tooltip", / — /);
+      await expect(row.locator(".session-agent")).toHaveAttribute("data-tooltip", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
       await expect(row.locator(".permission-glyph")).toHaveCount(1);
       await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
-      await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("title", item.description);
+      await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
       await expect(row.locator(".session-agent .visually-hidden")).toContainText(item.description);
       // Let the browser resolve the token, including future non-hex palettes.
       // This catches later CSS rules that override the intended mark color.
@@ -4000,11 +4000,11 @@ function liveDotListing(extra: Record<string, unknown> = {}) {
 // the readable half, painted geometry for the visible half — and then proves
 // the accessibility assertion actually bites by breaking the word on purpose.
 //
-// The accessible name is read off the ROW, not off the badge or dot: both
-// carry `title="running"`, and a `title` is the accname algorithm's last
-// resort, so a badge whose word had gone `display: none` would still answer
-// "running" for itself. The row button has no such fallback — its name comes
-// from its contents, and hidden contents drop out of it.
+// The accessible name is read off the ROW, the control a screen reader
+// names the session by. Its name comes from its contents, and hidden
+// contents drop out of it, so a word gone `display: none` shows up there.
+// (The badge and dot carry their hover text in `data-tooltip`, which is not
+// an accessible-name source, unlike the `title` attributes they once had.)
 test("a live session draws a dot with a hidden word and a relative age", async ({
   page,
 }) => {
@@ -4032,7 +4032,7 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   // painted, and round rather than a stray square.
   const dot = badge.locator(".status-dot");
   await expect(dot).toHaveCount(1);
-  await expect(dot, "the pointer's own tooltip must name the dot's status").toHaveAttribute("title", "running");
+  await expect(dot, "the pointer's own tooltip must name the dot's status").toHaveAttribute("data-tooltip", "running");
   const dotBox = (await dot.boundingBox())!;
   expect(dotBox).not.toBeNull();
   expect(dotBox.width).toBeGreaterThan(0);
@@ -4073,7 +4073,7 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   const age = row.locator(".status-time");
   await expect(age).toHaveText("2m");
   await expect(age).toHaveAttribute(
-    "title",
+    "data-tooltip",
     /^last activity \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/,
   );
   const titleBox = (await row.locator(".session-title").boundingBox())!;

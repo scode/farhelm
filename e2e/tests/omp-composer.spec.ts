@@ -148,7 +148,7 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
     approveRow.locator(".session-agent svg.permission-glyph[data-glyph='shielded']"),
   ).toBeVisible();
 
-  await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("title", "approve permission mode");
+  await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", "approve permission mode");
   await expect(approveRow.locator(".session-agent .visually-hidden")).toContainText("approve permission mode");
 
   // Old snapshots with no permission use the same YOLO default as a new
