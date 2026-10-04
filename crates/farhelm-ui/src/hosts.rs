@@ -283,11 +283,54 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
 ///
 /// A missing menu offer is not permission to start. The live provisioning busy
 /// flag closes the render gap before a panel withdraws its published offer.
+///
+/// The kind guards matter for the local row: its menu still carries an
+/// Update offer (shown disabled, see [`update_menu_item`]), so the offer
+/// alone would let `update all` and the inline button send the update the
+/// helm refuses for its own machine. `updates_from_panel` is what excludes
+/// it; `updates_automatically` is also required because both paths start
+/// the update without the confirmation step.
 fn remote_update_available(host: &Host, menu: Option<&ProvisioningMenuState>, busy: bool) -> bool {
-    host.kind.updates_automatically()
+    host.kind.updates_from_panel()
+        && host.kind.updates_automatically()
         && !runs_newer_version(&host.state)
         && !busy
         && menu.is_some_and(|state| state.update)
+}
+
+/// How the row menu's Update item renders: whether it is disabled, and the
+/// description line under its label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UpdateMenuItem {
+    disabled: bool,
+    description: &'static str,
+}
+
+/// The Update item for a row of this kind, while the menu's provisioning
+/// state is or is not planning.
+///
+/// A row the panel cannot update (the helm's own machine) still shows the
+/// item, greyed out, with the way it IS updated in its place: the helm
+/// refuses that update, and the refusal used to stick under the row with no
+/// way to dismiss it. The item appears whenever the menu offers Update,
+/// which includes a local row that is already up to date, so its description
+/// says how this machine is updated rather than implying an update waits.
+/// It names only the installer: Farhelm targets the Mac for now, and a
+/// Linux helm machine, which the installer refuses, is out of scope for this
+/// text. An unrecognized kind takes the same branch, but its menu offers no
+/// provisioning actions at all, so the item never renders for it.
+fn update_menu_item(kind: HostKind, planning: bool) -> UpdateMenuItem {
+    if kind.updates_from_panel() {
+        UpdateMenuItem {
+            disabled: planning,
+            description: "install the newer Farhelm version",
+        }
+    } else {
+        UpdateMenuItem {
+            disabled: true,
+            description: "run the installer again to update this machine",
+        }
+    }
 }
 
 /// The CSS modifier the row status carries, grouping the phases by what a
@@ -2523,11 +2566,15 @@ fn HostRow(
     // Setup still refuses behind the page lock, so its items stay disabled
     // while another operation holds it. Update planning mutates nothing and
     // its submission claim retries reactively, so the update item answers
-    // while busy and only a live provisioning lifecycle disables it.
+    // while busy and only a live provisioning lifecycle disables it — or the
+    // row being one the panel cannot update at all (`update_menu_item`).
     let setup_disabled = busy || provisioning_menu.planning;
-    let update_disabled = provisioning_menu.planning;
+    let update_item = update_menu_item(host.kind, provisioning_menu.planning);
+    let update_disabled = update_item.disabled;
     // A failed UPDATE reruns down the automatic path, so it answers while
     // busy like a fresh update; a failed ADD keeps setup's lock discipline.
+    // On a row the panel cannot update, a failed UPDATE's rerun is disabled
+    // with the item itself, since the helm refuses it the same way.
     let rerun_disabled = provisioning_menu
         .rerun
         .is_some_and(|operation| match operation {
@@ -3092,7 +3139,7 @@ fn HostRow(
                                         HostMenuActionIcon { action: HostMenuAction::Update }
                                         span { class: "session-row-menu-copy",
                                             span { class: "session-row-menu-label", if provisioning_menu.planning { "planning…" } else { "update" } }
-                                            span { id: "host-menu-update-description", class: "session-row-menu-description", "install the newer Farhelm version" }
+                                            span { id: "host-menu-update-description", class: "session-row-menu-description", "{update_item.description}" }
                                         }
                                     }
                                 }
@@ -4629,6 +4676,39 @@ mod tests {
                     false
                 ));
             }
+        }
+    }
+
+    /// The menu's Update item is disabled on the helm's own machine and says
+    /// to run the installer again, whether or not provisioning is planning;
+    /// on an ssh row it stays the live update item, disabled only while
+    /// planning.
+    ///
+    /// The helm refuses an update of its own machine, and that refusal used
+    /// to stick under the local row with no way to dismiss it. The item stays
+    /// visible (greyed out, not hidden) so the menu still says how this
+    /// machine is updated. The click handler's early return on a disabled
+    /// item is what keeps the request from being sent, so `disabled` is the
+    /// whole contract here; the browser suite exercises the click itself.
+    #[farhelm_testtrace::test]
+    fn update_menu_item_is_disabled_on_the_local_row_and_points_at_the_installer() {
+        for planning in [false, true] {
+            assert_eq!(
+                update_menu_item(HostKind::Local, planning),
+                UpdateMenuItem {
+                    disabled: true,
+                    description: "run the installer again to update this machine",
+                },
+                "local, planning {planning}"
+            );
+            assert_eq!(
+                update_menu_item(HostKind::Ssh, planning),
+                UpdateMenuItem {
+                    disabled: planning,
+                    description: "install the newer Farhelm version",
+                },
+                "ssh, planning {planning}"
+            );
         }
     }
 

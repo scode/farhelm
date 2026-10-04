@@ -100,13 +100,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
   once Farhelm's own installation there is complete.
 
-- **No update for this machine.** Choosing update on the local host ("this machine") is not a supported flow: the helm
-  refuses with "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel"
-  (`crates/farhelm-helm/src/provisioning.rs`), and that error then sticks under the host's row with no way to dismiss
-  it. The message is also wrong for the case. The update action should be greyed out for this machine, in the host's
-  pop-up menu and in the inline update button on host rows, so the refusal is never reached. Plan:
-  `plans/queue/local-update-disabled.md`.
-
 - **Notification system.** A way for Farhelm to tell the user about things that need their attention, instead of writing
   them only to a log nobody reads. The first thing to go into it is the session-tracking warnings, starting with the
   supervisor's warning that a session launched with Farhelm's conversation hook (Claude, Codex) has had input for a

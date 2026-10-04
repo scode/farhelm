@@ -14,6 +14,10 @@ update is optional; red means it is required before the host can connect. Hover 
 what clicking will do. Clicking updates the host to your [helm's](/docs/how-it-works/the-pieces/) version without
 another confirmation, and progress takes the button's place. **Update** remains available in the host's menu too.
 
+The Mac running Farhelm is the exception: its row is labeled **local (this machine)** unless you renamed it, and Farhelm
+does not update it from the list. Its menu shows **update** greyed out, and you update it by running the installer
+again, as described in [Install Farhelm](/docs/get-started/install/).
+
 Removing a host only makes Farhelm forget the entry. The supervisor and its sessions keep running, and adding the same
 destination again finds them. Farhelm asks before removing a host in a dialog; choose **remove, and don't ask again** if
 you want future removals from this helm to happen immediately. The choice is shared by every client after it reloads its
