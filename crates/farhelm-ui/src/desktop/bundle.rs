@@ -259,6 +259,31 @@ mod tests {
         assert_eq!(chosen, macos.join("farhelm"));
     }
 
+    /// The installer refuses releases from before the side-by-side layout
+    /// by looking for a fixed piece of this refusal's text in the desktop
+    /// program it downloaded (scripts/install.sh, step 6). Changing the text
+    /// without the installer would make it refuse every new release, so the
+    /// two are pinned together here: the refusal still contains the marker,
+    /// and the installer still checks for exactly it.
+    #[farhelm_testtrace::test]
+    fn the_installers_release_marker_is_in_this_refusal() {
+        const MARKER: &str = "needs its own version of the farhelm binary at";
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let error = resolve_supervisor_farhelm(
+            &contents.join("MacOS").join("farhelm-desktop"),
+            None,
+            "1.2.3",
+        )
+        .expect_err("no version folder");
+        assert!(format!("{error}").contains(MARKER), "{error}");
+        let installer = include_str!("../../../../scripts/install.sh");
+        assert!(
+            installer.contains(&format!("grep -qF '{MARKER}'")),
+            "scripts/install.sh no longer checks for the marker"
+        );
+    }
+
     /// A `MacOS` folder outside an app bundle is not the layout, even with a
     /// `Versions` folder beside it: the sibling still wins there, so an
     /// installation that merely looks similar is not changed.

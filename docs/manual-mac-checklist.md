@@ -66,9 +66,9 @@ Run these eight steps against the same release candidate and record failures wit
 version, and remote Ubuntu version. A pass here is evidence about that exact candidate, not a substitute for the Linux
 and browser CI gates.
 
-The release is two bare binaries in `~/.local/bin` (D6), and every step below starts `farhelm-desktop` from a terminal —
-stderr assertions need a terminal, and the terminal path must keep working regardless of the bundle. But the installer
-now also assembles `~/Applications/Farhelm.app`, so the launcher path needs its own close-out:
+The installer puts everything in `~/Applications/Farhelm.app`, and every step below starts the app's main program,
+`~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop`, from a terminal — stderr assertions need a terminal. The
+launcher path needs its own close-out:
 
 - After `install.sh`, `Farhelm.app` exists, Spotlight and (if installed) Alfred find "Farhelm" by name, and launching
   from there opens the window with the Farhelm icon in the Dock and "Farhelm" in Cmd-Tab.
@@ -104,7 +104,7 @@ happens" from an older build or a non-macOS launch means "run
    (a) With Homebrew tmux installed and no override, the app starts and a local session runs:
 
    ```
-   unset FARHELM_TMUX; ~/.local/bin/farhelm-desktop
+   unset FARHELM_TMUX; ~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop
    ```
 
    (b) Below the floor. Point the override at a distro or older Homebrew build and confirm `farhelm-desktop` itself
@@ -122,13 +122,13 @@ happens" from an older build or a non-macOS launch means "run
    ```
 
    ```
-   FARHELM_TMUX=/path/to/old/tmux ~/.local/bin/farhelm-desktop
+   FARHELM_TMUX=/path/to/old/tmux ~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop
    ```
 
    (c) The configured tmux is missing. Name a path that does not exist:
 
    ```
-   FARHELM_TMUX=/nonexistent/tmux ~/.local/bin/farhelm-desktop
+   FARHELM_TMUX=/nonexistent/tmux ~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop
    ```
 
    A nonempty override is what makes this case reachable at all. Shortening `PATH` does not: with no override the app
@@ -198,9 +198,9 @@ Close-out result: not run
 
 ## Clipboard file names
 
-- Create a test image with a deliberately non-sensitive name and timestamp, then start `~/.local/bin/farhelm-desktop`,
-  open a local or remote terminal, and copy that file in Finder. Do not use an ordinary work or personal file for this
-  check.
+- Create a test image with a deliberately non-sensitive name and timestamp, then start
+  `~/Applications/Farhelm.app/Contents/MacOS/farhelm-desktop`, open a local or remote terminal, and copy that file in
+  Finder. Do not use an ordinary work or personal file for this check.
 - Paste it into the terminal. Before navigating away, evaluate
   `JSON.stringify(window.farhelmLastClipboardFacts, null, 2)` in Web Inspector's console and copy the result here. The
   page keeps only the latest paste's facts and never draws them. NOTE: the released app has no Web Inspector; only a

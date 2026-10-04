@@ -244,16 +244,20 @@ The standalone installer temporarily supports only a Mac installing the desktop 
 Rosetta). This limits only the installer: Linux remains supported for running a helm and session hosts, which the helm
 provisions over SSH itself. Other operating systems are refused before any download or filesystem change.
 
-The installer runs as the current user without root. It always installs `farhelm` and `farhelm-desktop` in
-`~/.local/bin` and assembles `~/Applications/Farhelm.app`, including copies of both executables. There is no custom
-install-directory or app-bundle opt-out. Releases without the app resources (before 0.2.1) are refused before any
-installed file is replaced; staging may create the executable directory, but installs nothing. Installation does not
-create or start services. The desktop app manages its own helm and local supervisor, as described in
-[Topology](#topology).
+The installer runs as the current user without root. On the Mac, `~/Applications/Farhelm.app` is the whole installation
+and, for now, the only user-facing way to launch Farhelm; `~/.local/bin/farhelm` is only a link into it, for using
+`farhelm` from a terminal. There is no custom install directory. Releases that cannot be updated while running, and
+releases without the app resources, are refused before anything installed changes; staging may create the executable
+directory, but installs nothing. Installation does not create or start services. The desktop app manages its own helm
+and local supervisor, as described in [Topology](#topology).
 
 Re-running the installer updates the installation. Its default is the latest stable release; `FARHELM_VERSION` selects a
-specific release, including a prerelease. Updating the software preserves user data. Automatic updates are outside this
-initial uninstall scope, as are package-manager installations and changes to the packaging layout.
+specific release, including a prerelease. Updating the software preserves user data. Updating while Farhelm runs is
+supported on the Mac: the running Farhelm keeps working on the version it started with, its sessions keep running, new
+sessions start, and agents' `farhelm` commands and conversation tracking keep working; quitting and reopening Farhelm
+finishes the update, after which sessions started before it use the new version too. An update of an installation
+already in this layout, stopped at any point, leaves an app that launches either the old version or the new one.
+Automatic updates are outside this initial scope, as are package-manager installations.
 
 The installer intentionally trusts GitHub over TLS and the upstream repository: it downloads release archives and their
 `SHA256SUMS` from the project's GitHub releases over HTTPS only (no plain-HTTP redirects) and checks archives against
@@ -262,11 +266,12 @@ fresh machine has no pinned key or verifier to check it with. The helm's release
 (`FARHELM_RELEASE_BASE_URL`) has no effect on the installer; a mirror that is safe for the helm, which verifies
 signatures, would not be safe for a download that does not.
 
-Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches an
-executable the installer writes. The installer replaces an existing `farhelm` or `farhelm-desktop` outright only when
-its checksum matches what the executable-directory ownership record says the installer last put there. Anything else at
-that name, whether the user's own file or a Farhelm from before the record existed, is kept under a visible name and
-reported, and the install proceeds; no crash or interruption point may lose it.
+Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches
+something the installer writes. The installer changes `Farhelm.app` only when it can show it built it, and replaces
+copies of `farhelm` and `farhelm-desktop` that an earlier layout put in `~/.local/bin` only when their checksums match
+what that layout's ownership record says it put there. Anything else at `~/.local/bin/farhelm`, whether the user's own
+file or a Farhelm from before the record existed, is kept under a visible name and reported, and the install proceeds;
+no crash or interruption point may lose it.
 
 An installation must have an equally discoverable removal path. The installation instructions document
 `farhelm uninstall` alongside installation, and a successful installer run prints that command. Users of releases
@@ -276,22 +281,23 @@ required initially.
 
 ### Uninstall scope and interaction
 
-`farhelm uninstall` removes the selected local standalone installation for the current user. It supports the default
-installation directory and custom directories used by earlier installers. It must identify the installation being
-removed rather than assume that whichever files happen to be in the default directory are the intended targets.
-Ambiguous ownership or an unsupported installation must produce an actionable refusal before changes begin.
+`farhelm uninstall` removes the selected local standalone installation for the current user: on the Mac the app with
+every version kept in it and the terminal link, and on Linux an installation an earlier installer made, in the default
+installation directory or a custom one. It must identify the installation being removed rather than assume that
+whichever files happen to be in the default directory are the intended targets. Ambiguous ownership or an unsupported
+installation must produce an actionable refusal before changes begin.
 
 The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
 `--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
 `--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions and any blockers without changing
 files, stopping processes, or disabling services.
 
-Removal covers the installed CLI and desktop executable where present, the recognized installer-created macOS app
-bundle, and Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the
-existing setup marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. Those
-services are stopped and disabled before their executables are removed. Operator-authored services and service drop-ins
-are not deleted; retained integration files are reported. The user must stop services outside Farhelm's removal
-authority. Basic uninstall does not analyze effective service overrides or inspect their processes.
+Removal covers the recognized installer-created macOS app bundle and its terminal link, the installed CLI on Linux, and
+Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the existing setup
+marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. Those services are
+stopped and disabled before their executables are removed. Operator-authored services and service drop-ins are not
+deleted; retained integration files are reported. The user must stop services outside Farhelm's removal authority. Basic
+uninstall does not analyze effective service overrides or inspect their processes.
 
 Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
 logs, and cached payloads. Completion names the retained data locations; retaining data must not be presented as erasing
@@ -332,8 +338,8 @@ invocable.
 
 Uninstall running at the same time as installation, updates, setup, desktop startup, or session creation falls under
 [Concurrent and interrupted runs](#concurrent-and-interrupted-runs) like any other overlap: the outcome must be correct,
-and refusing is acceptable. Uninstall takes the locks those operations already use (the installer's install-directory
-lock; on macOS the installer's app-bundle lock and the supervisor's and helm's state-directory locks; on Linux setup's
+and refusing is acceptable. Uninstall takes the locks those operations already use (on macOS the installer's app-bundle
+lock and the supervisor's and helm's state-directory locks; on Linux the installer's install-directory lock, and setup's
 unit-directory lock when setup's services or unit directory exist) without waiting, after confirmation, and then
 re-checks what it is about to remove under them; a lock already held, or a plan that changed since confirmation, refuses
 with nothing removed. An install or update that starts while uninstall holds the locks refuses in its own way, and so

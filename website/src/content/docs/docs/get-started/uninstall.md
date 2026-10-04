@@ -13,10 +13,11 @@ Quit Farhelm first, and stop any sessions you do not want left running: uninstal
 ~/.local/bin/farhelm uninstall
 ```
 
-It lists what it will remove and asks before removing anything. It removes the Farhelm app from `~/Applications` and the
-`farhelm` and `farhelm-desktop` commands from `~/.local/bin`. It keeps your data under `~/.local/state/farhelm`: your
-list of hosts, preferences, session history, and logs. Your projects, your agents, and tmux are not touched. To see the
-list without changing anything, add `--dry-run`. If Farhelm is still open, it refuses and asks you to quit it first.
+It lists what it will remove and asks before removing anything. It removes the Farhelm app from `~/Applications`, with
+every version kept inside it, and the `farhelm` command from `~/.local/bin`. It keeps your data under
+`~/.local/state/farhelm`: your list of hosts, preferences, session history, and logs. Your projects, your agents, and
+tmux are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still open, it refuses
+and asks you to quit it first.
 
 To remove your data as well, delete `~/.local/state/farhelm` once the uninstall is done.
 

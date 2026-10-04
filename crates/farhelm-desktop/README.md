@@ -2,12 +2,13 @@
 
 The native window: a webview showing the Farhelm UI, with an internal helm running in the same process. The embedded
 helm serves the window's API over a fresh loopback port and does not serve a browser page or token exchange. Released as
-a bare binary that installs next to `farhelm` in `~/.local/bin` (D6 in the distribution plan).
+a bare binary (D6 in the distribution plan), which the installer puts in `~/Applications/Farhelm.app` as the app's main
+program.
 
 The local supervisor is not in this process. On startup the app probes for one that is already answering and reuses it
-untouched; only if none answers does it start `farhelm supervisor run` from the sibling binary, as a separate child
-whose lifetime it then owns. A supervisor it found rather than started is somebody else's, and the app neither tethers
-to nor stops it.
+untouched; only if none answers does it start `farhelm supervisor run` from its own version of the CLI (its sibling, or
+in the installed app `Contents/Versions/<version>/farhelm`), as a separate child whose lifetime it then owns. A
+supervisor it found rather than started is somebody else's, and the app neither tethers to nor stops it.
 
 NOTE: this crate is a shell and holds no logic of its own. `main` calls `farhelm_ui::desktop::run()` and that is the
 whole file. Read `crates/farhelm-ui/src/desktop.rs` for what actually happens.

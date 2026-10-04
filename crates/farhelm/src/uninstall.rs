@@ -1,7 +1,10 @@
 //! Remove the selected standalone installation while preserving user data.
 //!
-//! File ownership is established before confirmation and re-checked after it,
-//! under the locks install, setup and (on macOS) the runtime use; see `locks`.
+//! On macOS the installation is the app bundle with its side-by-side versions
+//! (see `app`); on Linux it is a standalone bin directory an earlier installer
+//! left (see `ownership`). File ownership is established before confirmation
+//! and re-checked after it, under the locks install, setup and (on macOS) the
+//! runtime use; see `locks`.
 //! Runtime shutdown is an operator prerequisite; this command does not inspect
 //! processes or sessions. Setup-owned services are the sole automatic shutdown
 //! operation.
@@ -14,6 +17,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod app;
 mod locks;
 pub(crate) mod ownership;
 mod removal;
@@ -82,15 +86,17 @@ fn run_with_inputs(
         "HOME is not set; cannot determine the app bundle, service or retained data locations",
     )?;
     let plan = ownership::inspect(&inputs.ownership)?;
-    let services = if inputs.ownership.platform == ownership::PlatformArtifacts::Linux {
-        let directory = farhelm_helm::units::user_unit_dir(inputs.xdg_config_home.as_deref(), home);
-        Some(crate::setup::preflight_selected_services(
-            std::slice::from_ref(&plan.flat.cli),
-            &directory,
-            manager,
-        )?)
-    } else {
-        None
+    let services = match &plan {
+        ownership::OwnershipPlan::Flat(flat) => {
+            let directory =
+                farhelm_helm::units::user_unit_dir(inputs.xdg_config_home.as_deref(), home);
+            Some(crate::setup::preflight_selected_services(
+                std::slice::from_ref(&flat.cli),
+                &directory,
+                manager,
+            )?)
+        }
+        ownership::OwnershipPlan::App(_) => None,
     };
     let mut preview = String::from(
         "Stop local sessions and additional terminals, quit Farhelm Desktop, and stop manually started Farhelm processes before continuing. Uninstall does not check whether sessions or manually started processes are running.\n\n",
@@ -111,32 +117,36 @@ fn run_with_inputs(
             preview.push_str("No user service manager was available; no known service files were found in the selected configuration directory.\n");
         }
     }
-    if let ownership::BundleInspection::Recognized(bundle) = &plan.bundle {
-        writeln!(
-            preview,
-            "remove installer-owned app bundle {}",
-            path_text(&bundle.root)
-        )?;
+    match &plan {
+        ownership::OwnershipPlan::Flat(flat) => {
+            if let Some(path) = &flat.desktop {
+                writeln!(preview, "remove {}", path_text(path))?;
+            }
+            if let Some(path) = &flat.retained_foreign_desktop {
+                writeln!(preview, "retain unrelated file {}", path_text(path))?;
+            }
+            writeln!(preview, "remove {} last", path_text(&flat.cli))?;
+            writeln!(preview, "retain shared directory {}", path_text(&flat.root))?;
+        }
+        ownership::OwnershipPlan::App(app) => {
+            writeln!(
+                preview,
+                "remove the app {}, with every Farhelm version kept inside it",
+                path_text(&app.root)
+            )?;
+            match &app.link {
+                app::LinkPlan::Remove(link) => {
+                    writeln!(preview, "remove the Terminal link {} last", path_text(link))?;
+                }
+                app::LinkPlan::Absent(_) => {}
+                app::LinkPlan::Retain(link) => writeln!(
+                    preview,
+                    "retain {}: it is no longer a link to this installation's app",
+                    path_text(link)
+                )?,
+            }
+        }
     }
-    if let ownership::BundleInspection::RetainedWithoutReceipt(root) = &plan.bundle {
-        writeln!(
-            preview,
-            "retain app bundle {}: it has no Farhelm installer receipt, so nothing shows this installation made it",
-            path_text(root)
-        )?;
-    }
-    if let Some(path) = &plan.flat.desktop {
-        writeln!(preview, "remove {}", path_text(path))?;
-    }
-    if let Some(path) = &plan.flat.retained_foreign_desktop {
-        writeln!(preview, "retain unrelated file {}", path_text(path))?;
-    }
-    writeln!(preview, "remove {} last", path_text(&plan.flat.cli))?;
-    writeln!(
-        preview,
-        "retain shared directory {}",
-        path_text(&plan.flat.root)
-    )?;
     let state = farhelm_supervisor::default_state_dir_for(inputs.xdg_state_home.as_deref(), home);
     writeln!(preview, "retain data under {}", path_text(&state))?;
     preview.push_str("Other custom data locations, projects, agent tools and dependencies are untouched.\nAn install or upgrade running now makes uninstall refuse, and one started during it refuses instead.\n");
@@ -173,15 +183,22 @@ fn run_with_inputs(
         if let Some(services) = &services {
             crate::setup::remove_selected_services_locked(services, false, manager, &mut report)?;
         }
-        removal::remove(&plan, &mut report)
+        removal::remove(&plan, &held.running_records, &mut report)
     })();
     drop(held);
     if result.is_err() {
-        writeln!(
-            report,
-            "Uninstall is incomplete. The CLI remains at {}; resolve the reported failure and rerun uninstall.",
-            path_text(&plan.flat.cli)
-        )?;
+        match &plan {
+            ownership::OwnershipPlan::Flat(flat) => writeln!(
+                report,
+                "Uninstall is incomplete. The CLI remains at {}; resolve the reported failure and rerun uninstall.",
+                path_text(&flat.cli)
+            )?,
+            ownership::OwnershipPlan::App(app) => writeln!(
+                report,
+                "Uninstall is incomplete. Resolve the reported failure and rerun `~/.local/bin/farhelm uninstall`; if that command is gone too, what remains of {} holds no data and can be moved to the Trash.",
+                path_text(&app.root)
+            )?,
+        }
     } else {
         report.push_str("Farhelm uninstalled. User data was retained.\n");
     }
@@ -200,10 +217,14 @@ fn run_with_inputs(
 /// release of the install lock and that of the app lock and commit
 /// binaries only to refuse at its app step.
 struct HeldLocks {
+    /// The Running records of the state directories whose runtime locks are
+    /// held, for removal: with those locks held no supervisor can be
+    /// running from them.
+    running_records: Vec<PathBuf>,
     _runtime: Option<locks::RuntimeLocks>,
     _setup: Option<crate::setup::SetupLock>,
     _bundle: Option<locks::BundleLock>,
-    _install: locks::InstallLock,
+    _install: Option<locks::InstallLock>,
 }
 
 /// Take the locks the other lifecycle operations use, without waiting, and
@@ -224,7 +245,12 @@ fn lock_and_recheck(
     manager: &mut dyn crate::setup::UnitManager,
 ) -> Result<HeldLocks> {
     let macos = inputs.ownership.platform == ownership::PlatformArtifacts::Macos;
-    let install = locks::InstallLock::acquire(&plan.flat.root)?;
+    // The installer's bin-directory lock exists only for the flat layout;
+    // the app layout's installer takes only the lock beside the bundle.
+    let install = match plan {
+        ownership::OwnershipPlan::Flat(flat) => Some(locks::InstallLock::acquire(&flat.root)?),
+        ownership::OwnershipPlan::App(_) => None,
+    };
     let bundle = if macos {
         locks::BundleLock::acquire(&home.join("Applications"))?
     } else {
@@ -237,12 +263,17 @@ fn lock_and_recheck(
     // The desktop app, opened from Finder or the Dock, does not see a
     // shell's `XDG_STATE_HOME`, so its supervisor and helm use the default
     // location even when this shell names another; both are checked.
+    let mut running_records = Vec::new();
     let runtime = if macos {
         let mut state_dirs = vec![state.to_path_buf()];
         let default = farhelm_supervisor::default_state_dir_for(None, home);
         if default != state {
             state_dirs.push(default);
         }
+        running_records = state_dirs
+            .iter()
+            .map(|dir| dir.join(farhelm_supervisor::app_bundle::RUNNING_RECORD))
+            .collect();
         Some(locks::RuntimeLocks::acquire(&state_dirs)?)
     } else {
         None
@@ -256,15 +287,19 @@ fn lock_and_recheck(
     let fresh = ownership::inspect(&inputs.ownership)
         .context("re-checking the installation after confirmation; nothing was removed")?;
     if fresh != *plan {
+        let root = match plan {
+            ownership::OwnershipPlan::Flat(flat) => &flat.root,
+            ownership::OwnershipPlan::App(app) => &app.root,
+        };
         return Err(changed(&format!(
             "the installed files under {}",
-            path_text(&plan.flat.root)
+            path_text(root)
         )));
     }
-    if let Some(services) = services {
+    if let (Some(services), ownership::OwnershipPlan::Flat(flat)) = (services, plan) {
         let directory = farhelm_helm::units::user_unit_dir(inputs.xdg_config_home.as_deref(), home);
         let fresh = crate::setup::preflight_selected_services(
-            std::slice::from_ref(&plan.flat.cli),
+            std::slice::from_ref(&flat.cli),
             &directory,
             manager,
         )
@@ -274,6 +309,7 @@ fn lock_and_recheck(
         }
     }
     Ok(HeldLocks {
+        running_records,
         _install: install,
         _bundle: bundle,
         _setup: setup,
@@ -289,6 +325,7 @@ fn path_text(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use app::tests::AppFixture;
     use ownership::{PlatformArtifacts, tests::Fixture};
 
     /// A unit manager for the macOS path, which never consults one.
@@ -330,10 +367,10 @@ mod tests {
     /// at `state`. The supervisor's state directory is `state/farhelm`,
     /// created here so the runtime-lock step is really reached rather than
     /// skipped for a missing directory.
-    fn inputs(fixture: &Fixture, state: &Path) -> Inputs {
+    fn inputs(fixture: &AppFixture, state: &Path) -> Inputs {
         std::fs::create_dir_all(state.join("farhelm")).expect("state directory");
         Inputs {
-            ownership: fixture.inputs(PlatformArtifacts::Macos),
+            ownership: fixture.inputs(),
             xdg_config_home: None,
             xdg_state_home: Some(state.as_os_str().to_os_string()),
             interactive: true,
@@ -354,10 +391,9 @@ mod tests {
     /// file is still there, and no lock is left behind.
     #[test]
     fn a_plan_that_changed_after_confirmation_refuses_without_removing() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
+        let fixture = AppFixture::new();
         let state = tempfile::tempdir().expect("state");
-        let desktop = fixture.install.join("farhelm-desktop");
+        let desktop = fixture.app.join("Contents/MacOS/farhelm-desktop");
         let mut input = ConfirmWhile {
             answer: std::io::Cursor::new(b"y\n".to_vec()),
             meanwhile: Some(|| fs_remove(&desktop)),
@@ -378,34 +414,49 @@ mod tests {
             "{error:#}"
         );
         assert!(
-            fixture.install.join("farhelm").exists(),
+            fixture.app.join("Contents/Versions/1.2.4/farhelm").exists(),
             "the CLI was not removed"
         );
-        assert!(!fixture.install.join(".farhelm-install.lock").exists());
+        assert!(!fixture.home.join("Applications/.farhelm-app.lock").exists());
     }
 
-    /// A held install lock refuses the uninstall before anything is removed.
+    /// A user unit manager that is not there, for the Linux path: with no
+    /// known service files, uninstall plans no services.
+    struct NoUserManager;
+    impl crate::setup::UnitManager for NoUserManager {
+        fn run(&mut self, _args: &[&str]) -> Result<crate::setup::UnitCommand> {
+            anyhow::bail!("no user service manager in this test")
+        }
+    }
+
+    /// A held install lock refuses a Linux uninstall before anything is
+    /// removed.
     ///
-    /// Why: the installer holds this lock while it replaces binaries and
-    /// their ownership record; removing them meanwhile could delete what it
-    /// just installed or leave the record and binaries disagreeing, which
+    /// Why: an earlier installer holds this lock while it replaces binaries
+    /// and their ownership record; removing them meanwhile could delete what
+    /// it just installed or leave the record and binaries disagreeing, which
     /// SPEC.md forbids. Spec: with the lock present at confirmation time,
     /// uninstall refuses naming it, removes nothing, and leaves the lock.
     #[test]
     fn a_held_install_lock_refuses_without_removing() {
         let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let state = tempfile::tempdir().expect("state");
+        fixture.flat(None);
+        let config = tempfile::tempdir().expect("config");
         let lock = fixture.install.join(".farhelm-install.lock");
         std::fs::create_dir(&lock).expect("installer lock");
         std::fs::write(lock.join("pid"), "1\n").expect("installer pid");
         let error = run_with_inputs(
-            &inputs(&fixture, state.path()),
+            &Inputs {
+                ownership: fixture.inputs(PlatformArtifacts::Linux),
+                xdg_config_home: Some(config.path().as_os_str().to_os_string()),
+                xdg_state_home: None,
+                interactive: true,
+            },
             &Options {
                 dry_run: false,
                 yes: true,
             },
-            &mut NoUnits,
+            &mut NoUserManager,
             &mut std::io::Cursor::new(Vec::new()),
             &mut Vec::new(),
         )
@@ -415,7 +466,6 @@ mod tests {
             "{error:#}"
         );
         assert!(fixture.install.join("farhelm").exists());
-        assert!(fixture.install.join("farhelm-desktop").exists());
         assert!(
             lock.join("pid").exists(),
             "another process's lock is left alone"
@@ -425,28 +475,52 @@ mod tests {
     /// The ordinary case still removes the installation and leaves no lock.
     ///
     /// Why: the locks must never outlive the uninstall that took them, or the
-    /// next install would find a stale lock. Spec: with nothing else holding
-    /// a lock, uninstall removes the CLI and leaves neither lock behind.
+    /// next install would find a stale lock; and the Running records would
+    /// otherwise name a version that no longer exists. Spec: with nothing
+    /// else holding a lock, uninstall removes the app, the Terminal link and
+    /// the Running records of both state directories it checked, and leaves
+    /// no lock behind.
     #[test]
     fn an_uncontended_uninstall_removes_and_releases_its_locks() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        std::fs::create_dir(fixture.home.join("Applications")).expect("applications");
+        let fixture = AppFixture::new();
         let state = tempfile::tempdir().expect("state");
+        let default = fixture.home.join(".local/state/farhelm");
+        std::fs::create_dir_all(&default).expect("default state");
+        let inputs = inputs(&fixture, state.path());
+        let records = [
+            state.path().join("farhelm/running-version"),
+            default.join("running-version"),
+        ];
+        for record in &records {
+            std::fs::write(record, "1.2.4\n").expect("running record");
+        }
+        let mut output = Vec::new();
         run_with_inputs(
-            &inputs(&fixture, state.path()),
+            &inputs,
             &Options {
                 dry_run: false,
                 yes: true,
             },
             &mut NoUnits,
             &mut std::io::Cursor::new(Vec::new()),
-            &mut Vec::new(),
+            &mut output,
         )
         .expect("uninstall");
-        assert!(!fixture.install.join("farhelm").exists());
-        assert!(!fixture.install.join(".farhelm-install.lock").exists());
+        assert!(
+            !fixture.app.exists(),
+            "{}",
+            String::from_utf8_lossy(&output)
+        );
+        assert!(std::fs::symlink_metadata(&fixture.link).is_err());
+        for record in &records {
+            assert!(!record.exists(), "{}", record.display());
+        }
         assert!(!fixture.home.join("Applications/.farhelm-app.lock").exists());
+        assert!(
+            String::from_utf8_lossy(&output).contains("Farhelm uninstalled."),
+            "{}",
+            String::from_utf8_lossy(&output)
+        );
     }
 
     /// A held supervisor lock (the open desktop app's) refuses the
@@ -460,8 +534,7 @@ mod tests {
     /// nothing, and leaves no install lock behind.
     #[test]
     fn a_held_supervisor_lock_refuses_without_removing() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
+        let fixture = AppFixture::new();
         let state = tempfile::tempdir().expect("state");
         let inputs = inputs(&fixture, state.path());
         let holder = std::fs::OpenOptions::new()
@@ -485,9 +558,9 @@ mod tests {
         )
         .expect_err("a held supervisor lock refuses");
         assert!(error.to_string().contains("supervisor.lock"), "{error:#}");
-        assert!(fixture.install.join("farhelm").exists());
-        assert!(fixture.install.join("farhelm-desktop").exists());
-        assert!(!fixture.install.join(".farhelm-install.lock").exists());
+        assert!(fixture.app.join("Contents/Versions/1.2.4/farhelm").exists());
+        assert!(fixture.app.join("Contents/MacOS/farhelm-desktop").exists());
+        assert!(!fixture.home.join("Applications/.farhelm-app.lock").exists());
     }
 
     /// A held app lock (the installer rebuilding the app) refuses the
@@ -499,8 +572,7 @@ mod tests {
     /// uninstall refuses naming it and removes nothing.
     #[test]
     fn a_held_app_lock_refuses_without_removing() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
+        let fixture = AppFixture::new();
         let applications = fixture.home.join("Applications");
         std::fs::create_dir_all(applications.join(".farhelm-app.lock"))
             .expect("installer app lock");
@@ -517,7 +589,7 @@ mod tests {
         )
         .expect_err("a held app lock refuses");
         assert!(error.to_string().contains(".farhelm-app.lock"), "{error:#}");
-        assert!(fixture.install.join("farhelm").exists());
+        assert!(fixture.app.join("Contents/Versions/1.2.4/farhelm").exists());
         assert!(
             applications.join(".farhelm-app.lock").exists(),
             "the installer's lock is left alone"
@@ -535,8 +607,7 @@ mod tests {
     /// uninstall refuses naming it and removes nothing.
     #[test]
     fn a_lock_held_in_the_default_state_dir_refuses_despite_xdg() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
+        let fixture = AppFixture::new();
         let state = tempfile::tempdir().expect("xdg state");
         let inputs = inputs(&fixture, state.path());
         let default = fixture.home.join(".local/state/farhelm");
@@ -560,7 +631,7 @@ mod tests {
         )
         .expect_err("a held default-dir lock refuses");
         assert!(error.to_string().contains("helm-token.lock"), "{error:#}");
-        assert!(fixture.install.join("farhelm").exists());
+        assert!(fixture.app.join("Contents/Versions/1.2.4/farhelm").exists());
     }
 
     fn fs_remove(path: &Path) {
