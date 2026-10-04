@@ -433,7 +433,7 @@ pub struct CheckoutPreviewBinding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedGithubCheckout {
     /// Canonical encoding of the original client-controlled launch request,
-    /// captured before profile/structured/configuration resolution. Replays
+    /// captured before structured/configuration resolution. Replays
     /// compare this identity before using the durable resolved snapshot.
     /// Only the authenticated helm constructs it; it is not a credential.
     pub client_identity: String,

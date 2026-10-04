@@ -77,14 +77,31 @@ enum Cmd {
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
         title: Option<String>,
-        /// Exact agent profile name, resolved by the attached helm.
-        #[arg(long, conflicts_with_all = ["profile_id", "inherit_agent"], required_unless_present_any = ["profile_id", "inherit_agent"])]
+        /// Removed with agent profiles, whose names it took. Kept, hidden,
+        /// only so a caller still following older instructions gets a
+        /// refusal naming what to do instead rather than clap's generic
+        /// "unexpected argument". Its parser refuses every value, so a
+        /// parsed command never carries one.
+        #[arg(
+            long,
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_spawn_agent,
+        )]
         agent: Option<String>,
-        /// Exact profile id from `farhelm agent profiles`.
-        #[arg(long, conflicts_with_all = ["agent", "inherit_agent"], required_unless_present_any = ["agent", "inherit_agent"])]
+        /// Removed with agent profiles; refused the way `--agent` is.
+        #[arg(
+            long,
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_profile_id,
+        )]
         profile_id: Option<String>,
-        /// Deliberately copy this session's stored agent bundle.
-        #[arg(long, conflicts_with_all = ["agent", "profile_id"], required_unless_present_any = ["agent", "profile_id"])]
+        /// Copy this session's stored agent bundle into the child. Required:
+        /// it is how a spawn says what the child runs.
+        #[arg(long, required = true)]
         inherit_agent: bool,
         /// Organizational parent id. Never defaults to this session.
         #[arg(long)]
@@ -92,9 +109,10 @@ enum Cmd {
         /// Retry key, valid only for the child session's lifetime.
         #[arg(long)]
         idempotency_key: Option<String>,
-        /// Start the child even if its profile is a YOLO launch and this
-        /// host asks before YOLO launches; without it the helm refuses. Only
-        /// with the user's explicit approval for this launch.
+        /// Accepted, and currently without effect: a spawn copies this
+        /// session's own launch, which nothing asks about. Kept so spawn's
+        /// launch flags can use it again, and only with the user's explicit
+        /// approval for a YOLO launch.
         #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
         confirm_yolo: bool,
     },
@@ -146,10 +164,10 @@ enum Cmd {
 ///
 /// Every value-taking option on the CREATING verbs carries
 /// `allow_hyphen_values`, and that is a rule about where the values are
-/// judged rather than a per-flag convenience. A host name, a directory, a
-/// profile name, an invocation, a title and an idempotency key are all
-/// plain strings that something DOWNSTREAM decides the legality of — the
-/// helm's registry and profile catalog, the target supervisor's filesystem,
+/// judged rather than a per-flag convenience. A host name, a directory, an
+/// invocation, a title and an idempotency key are all plain strings that
+/// something DOWNSTREAM decides the legality of — the helm's registry, the
+/// target supervisor's filesystem,
 /// and the relay's own byte caps. Every one of them may legally begin with `-`, and
 /// without the allowance clap refuses such a value here as an unrecognized
 /// option, which turns "the target will tell you why that name is wrong"
@@ -176,10 +194,13 @@ enum AgentCmd {
         #[arg(long)]
         json: bool,
     },
-    /// List the helm-wide profile catalog without private launch data.
+    /// Removed with agent profiles. Kept, hidden, only so an agent still
+    /// following older instructions gets a refusal saying so rather than
+    /// clap's "unrecognized subcommand"; [`run_agent`] refuses it before
+    /// anything is dialed. `--json` is accepted for the same reason.
+    #[command(hide = true)]
     Profiles {
-        /// Print the versioned machine-readable discovery envelope.
-        #[arg(long)]
+        #[arg(long, hide = true)]
         json: bool,
     },
     /// Rename an explicitly named session if its title is unchanged.
@@ -256,21 +277,29 @@ enum AgentCmd {
         /// Host to create on, by the name `farhelm agent hosts` shows.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         host: String,
-        /// Agent profile name, resolved in the helm-wide catalog.
+        /// Removed with agent profiles. Kept, hidden, only so an agent still
+        /// following older instructions gets a refusal naming what to do
+        /// instead; its parser refuses every value.
         #[arg(
             long,
-            value_name = "NAME",
-            conflicts_with_all = ["profile_id", "invocation"],
-            required_unless_present_any = ["profile_id", "invocation"],
-            allow_hyphen_values = true
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_create_profile,
         )]
         profile: Option<String>,
-        /// Exact profile id from `farhelm agent profiles`.
-        #[arg(long, value_name = "ID", conflicts_with_all = ["profile", "invocation"], required_unless_present_any = ["profile", "invocation"], allow_hyphen_values = true)]
+        /// Removed with agent profiles; refused the way `--profile` is.
+        #[arg(
+            long,
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_profile_id,
+        )]
         profile_id: Option<String>,
-        /// Command line to run instead of a profile.
-        #[arg(long, value_name = "CMD", conflicts_with_all = ["profile", "profile_id"], required_unless_present_any = ["profile", "profile_id"], allow_hyphen_values = true)]
-        invocation: Option<String>,
+        /// Command line to run on the target host.
+        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+        invocation: String,
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
         title: Option<String>,
@@ -327,7 +356,9 @@ impl AgentCmd {
         match self {
             AgentCmd::Hosts { .. } => Some(farhelm_proto::AgentVerb::Hosts {}),
             AgentCmd::Sessions { .. } => Some(farhelm_proto::AgentVerb::Sessions {}),
-            AgentCmd::Profiles { .. } => Some(farhelm_proto::AgentVerb::Profiles {}),
+            // Refused in `run_agent` before this is asked; answering
+            // `None` here would print the instructions instead.
+            AgentCmd::Profiles { .. } => unreachable!("run_agent refuses agent profiles first"),
             AgentCmd::Rename {
                 title,
                 session,
@@ -351,22 +382,15 @@ impl AgentCmd {
             AgentCmd::Create {
                 cwd,
                 host,
-                profile,
-                profile_id,
                 invocation,
                 title,
                 idempotency_key,
                 confirm_yolo,
+                ..
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
-                // `--profile` on the command line, `profile_name` on the
-                // wire: the flag is what a user types and the field says
-                // what it IS: the helm resolves this human-facing selector
-                // into the bundle sent to the target supervisor.
-                profile_name: profile.clone(),
-                profile_id: profile_id.clone(),
-                invocation: invocation.clone(),
+                invocation: Some(invocation.clone()),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: *confirm_yolo,
@@ -406,6 +430,46 @@ fn refuse_restart_mode(_value: &str) -> Result<String, String> {
             .to_string(),
     )
 }
+
+/// The refusal for `farhelm spawn --agent`, whatever value it was given.
+///
+/// Earlier releases resolved the value as an agent profile name. Profiles
+/// were removed outright (SPEC.md, the launch-kinds upgrade paragraph), so
+/// the message says what a spawn can still do rather than letting clap call
+/// the flag unknown.
+fn refuse_spawn_agent(_value: &str) -> Result<String, String> {
+    Err(
+        "farhelm spawn no longer takes --agent: agent profiles were removed. Pass \
+         --inherit-agent to start a child running this session's own agent, or use \
+         farhelm agent create --invocation <CMD> to run another command"
+            .to_string(),
+    )
+}
+
+/// The refusal for `--profile-id` on `farhelm spawn` and `farhelm agent
+/// create`, whatever value it was given; see [`refuse_spawn_agent`].
+fn refuse_profile_id(_value: &str) -> Result<String, String> {
+    Err(
+        "--profile-id is no longer accepted: agent profiles were removed. Use \
+         farhelm agent create --invocation <CMD> to run a command, or farhelm spawn \
+         --inherit-agent to start a child running this session's own agent"
+            .to_string(),
+    )
+}
+
+/// The refusal for `farhelm agent create --profile`, whatever value it was
+/// given; see [`refuse_spawn_agent`].
+fn refuse_create_profile(_value: &str) -> Result<String, String> {
+    Err(
+        "farhelm agent create no longer takes --profile: agent profiles were removed. Pass \
+         the command line to run with --invocation <CMD>"
+            .to_string(),
+    )
+}
+
+/// The refusal for the removed `farhelm agent profiles` listing.
+const AGENT_PROFILES_REMOVED: &str = "farhelm agent profiles was removed with agent profiles: \
+     there is no catalog to list. Create a session with farhelm agent create --invocation <CMD>";
 
 #[derive(Subcommand)]
 enum HelmCmd {
@@ -644,20 +708,17 @@ fn main() -> anyhow::Result<()> {
         Cmd::Spawn {
             cwd,
             title,
-            agent,
-            profile_id,
             inherit_agent,
             parent,
             idempotency_key,
             confirm_yolo,
+            ..
         } => {
             let child = runtime()?.block_on(spawn_session(
                 &SessionEnv::from_env(),
                 SpawnArgs {
                     cwd,
                     title,
-                    agent,
-                    profile_id,
                     inherit_agent,
                     parent,
                     idempotency_key,
@@ -1005,17 +1066,18 @@ async fn run_supervisor(
 /// supervisor, no credential, and no helm anywhere in sight (see its
 /// own docs).
 fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
+    if let AgentCmd::Profiles { .. } = command {
+        anyhow::bail!(AGENT_PROFILES_REMOVED);
+    }
     let Some(verb) = command.verb() else {
         print!("{}", agent_instructions::text());
         return Ok(());
     };
-    // The three listings hand off entirely to `print_agent_listing`,
+    // The two listings hand off entirely to `print_agent_listing`,
     // which makes its own `agent_request` call and returns — there
     // is nothing left for this arm to do with their reply, unlike
     // the four lifecycle verbs below.
-    if let AgentCmd::Hosts { json } | AgentCmd::Sessions { json } | AgentCmd::Profiles { json } =
-        &command
-    {
+    if let AgentCmd::Hosts { json } | AgentCmd::Sessions { json } = &command {
         return print_agent_listing(verb, *json);
     }
     // The lifecycle and creating verbs share one `agent_request`
@@ -1164,16 +1226,17 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
     if json {
         let caller_host_id = match &reply {
             AgentReply::Hosts { caller_host_id, .. }
-            | AgentReply::Sessions { caller_host_id, .. }
-            | AgentReply::Profiles { caller_host_id, .. } => caller_host_id,
+            | AgentReply::Sessions { caller_host_id, .. } => caller_host_id,
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
         // Bumped whenever a value an agent reads changes meaning or
         // disappears. 3: `restart_offer` lost `fresh_only` and
         // `fallback_template` when restart came to mean resume only; `resume`
-        // kept its spelling and meaning.
+        // kept its spelling and meaning. 4: a session's `agent` is always its
+        // agent type's word or `custom`, never a profile name, and the
+        // profiles listing is gone.
         let envelope = serde_json::json!({
-            "schema_version": 3,
+            "schema_version": 4,
             "caller": {
                 "session_id": asking,
                 "host_id": caller_host_id,
@@ -1535,7 +1598,7 @@ mod tests {
     fn the_yolo_override_parses_under_its_new_and_old_names() {
         for flag in ["--confirm-yolo", "--allow-yolo-on-sensitive-host"] {
             let cli =
-                Cli::try_parse_from(["farhelm", "spawn", "--cwd", "/w", "--agent", "a", flag])
+                Cli::try_parse_from(["farhelm", "spawn", "--cwd", "/w", "--inherit-agent", flag])
                     .unwrap();
             assert!(
                 matches!(
@@ -1555,7 +1618,7 @@ mod tests {
                 "h",
                 "--cwd",
                 "/w",
-                "--profile",
+                "--invocation",
                 "p",
                 flag,
             ])
@@ -1657,6 +1720,70 @@ mod tests {
             };
             assert!(
                 error.contains("no longer takes --mode") && error.contains("drop --mode"),
+                "{args:?}: {error}"
+            );
+        }
+    }
+
+    /// Spec: the profile selectors removed with agent profiles —
+    /// `farhelm spawn --agent <name>` and `--profile-id`, and `farhelm agent
+    /// create --profile` and `--profile-id` — are refused at parse with a
+    /// message saying profiles were removed and naming what to pass instead.
+    ///
+    /// Why: agents in sessions started before the upgrade may still follow
+    /// instructions that used these flags (SPEC_impl.md, "What running
+    /// sessions hold across versions"). SPEC.md decides the retirement and
+    /// requires the refusal to name the replacement, so an agent recovers
+    /// from the message alone instead of meeting clap's "unexpected
+    /// argument". A bare flag with no value is refused the same way.
+    #[farhelm_testtrace::test]
+    fn removed_profile_selectors_are_refused_by_name() {
+        let spawn = ["farhelm", "spawn", "--cwd", "/w"];
+        let create = ["farhelm", "agent", "create", "--host", "h", "--cwd", "/w"];
+        let cases: [(&[&str], &[&str], &str); 6] = [
+            (&spawn, &["--agent", "claude"], "--inherit-agent"),
+            (&spawn, &["--agent"], "--inherit-agent"),
+            (&spawn, &["--profile-id", "builtin-claude"], "--invocation"),
+            (&create, &["--profile", "claude"], "--invocation"),
+            (&create, &["--profile"], "--invocation"),
+            (&create, &["--profile-id", "builtin-claude"], "--invocation"),
+        ];
+        for (base, extra, replacement) in cases {
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            let error = match Cli::try_parse_from(&args) {
+                Ok(_) => panic!("{args:?} must be refused"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.contains("agent profiles were removed") && error.contains(replacement),
+                "{args:?}: {error}"
+            );
+        }
+    }
+
+    /// Spec: `farhelm agent profiles` still parses, with or without
+    /// `--json`, and running it is refused with a message saying profiles
+    /// were removed, before any supervisor is dialed.
+    ///
+    /// Why: the same compatibility reason as the selector refusals above.
+    /// The refusal happens in `run_agent` rather than at parse because a
+    /// subcommand has no value parser to refuse with; checking it here
+    /// keeps a later refactor from turning the hidden verb back into
+    /// clap's "unrecognized subcommand" or, worse, into the instructions
+    /// text that `verb() == None` prints.
+    #[farhelm_testtrace::test]
+    fn agent_profiles_is_refused_before_dialing() {
+        for args in [
+            &["farhelm", "agent", "profiles"][..],
+            &["farhelm", "agent", "profiles", "--json"][..],
+        ] {
+            let Cmd::Agent { command } = Cli::try_parse_from(args).expect("still parses").command
+            else {
+                panic!("{args:?} parses as an agent command");
+            };
+            let error = run_agent(command).expect_err("refused").to_string();
+            assert!(
+                error.contains("farhelm agent profiles was removed"),
                 "{args:?}: {error}"
             );
         }

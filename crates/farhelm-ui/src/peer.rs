@@ -341,17 +341,17 @@ mod tests {
     }
 
     /// A placeholder refusal reaches the user through this renderer — the
-    /// profile editor's error line, and the create dialog's for a raw
-    /// invocation, both show a `display_peer`d supervisor string, not this
-    /// crate's own words — so nothing here may treat `{cwd}` or
+    /// create dialog's error line for a raw invocation shows a
+    /// `display_peer`d supervisor string, not this crate's own words — so
+    /// nothing here may treat `{cwd}` or
     /// `{conversation}` as template syntax to fill in. `is_presentation_unsafe`
     /// only matches control and bidi/invisible characters (see its docs);
     /// braces are ordinary visible text to it, so a renderer that somehow
-    /// mangled them would make the refusal the wrapper-profile docs promise
+    /// mangled them would make the refusal the wrapper docs promise
     /// unreadable, and this pins that it does not.
     #[farhelm_testtrace::test]
     fn placeholder_braces_in_a_supervisor_error_render_unchanged() {
-        let refusal = "profile invocation's first element is {cwd}, so \
+        let refusal = "agent invocation's first element is {cwd}, so \
              substituting the working directory would make it the PROGRAM \
              this session tries to run; the placeholder belongs in an \
              argument slot";

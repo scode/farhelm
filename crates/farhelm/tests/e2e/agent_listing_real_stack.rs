@@ -594,9 +594,9 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 
 /// Spec: the shipped `farhelm agent create` and `farhelm agent clone`, run
 /// against the real stack, produce real sessions the helm's own REST
-/// DETAIL route reports — the created one from a profile resolved BY NAME
-/// on the target host, and the cloned one carrying the source's directory,
-/// title and profile.
+/// DETAIL route reports — the created one running the command line it was
+/// given, and the cloned one carrying the source's directory, title and
+/// command line.
 ///
 /// The detail route (`GET /api/sessions/{id}`) rather than the listing, and
 /// the choice is the assertion's whole strength: for a connected host that
@@ -610,12 +610,12 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 /// `farhelm-helm`'s `agent_requests` tests drive the handler directly with
 /// a scripted supervisor on the far end; `tests/agent_cli.rs` drives the
 /// built CLI against a mock that answers whatever frame arrived. Neither
-/// one runs the shipped create path: the profile catalog is the real helm's,
-/// the resolved bundle goes over a real supervisor connection, the create is
-/// a real launch, and `record_session` writes into a real helm.db. A
-/// regression in the wiring between those — the handler resolving a name
-/// from the wrong catalog or a created session that is not routable until
-/// the next refresh — is invisible everywhere else and fails here loudly.
+/// one runs the shipped create path: the request goes over a real
+/// supervisor connection, the create is a real launch, and `record_session`
+/// writes into a real helm.db. A regression in the wiring between those —
+/// a host name resolved against the wrong registry, or a created session
+/// that is not routable until the next refresh — is invisible everywhere
+/// else and fails here loudly.
 ///
 /// ## Same host only, and why
 ///
@@ -646,22 +646,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
 
-    // The shipped agent and UI share the helm catalog. Creating the fixture
-    // through its sole endpoint pins the same resolution path the verb uses.
-    let (status, body) = post(
-        &client,
-        &format!("{}/api/profiles", helm.base),
-        serde_json::json!({
-            "name": "Relay Fixture",
-            "invocation": fixture_cmd("fake-agent --script basic"),
-            "agent_kind": "generic",
-        }),
-    )
-    .await;
-    assert!(status.is_success(), "creating the profile failed: {body}");
-    let profile: serde_json::Value = serde_json::from_str(&body).expect("profile JSON");
-    let profile_id = profile["id"].as_str().expect("profile id").to_string();
-
+    let invocation = fixture_cmd("fake-agent --script basic");
     let work = farhelm_teststate::tempdir().expect("work dir");
     let cwd = work.path().to_string_lossy().into_owned();
     let (status, body) = post(
@@ -669,7 +654,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         &format!("{}/api/sessions", helm.base),
         serde_json::json!({
             "cwd": cwd,
-            "profile_id": profile_id,
+            "invocation": invocation,
+            "agent_kind": "generic",
             "title": "the-asking-session",
         }),
     )
@@ -686,8 +672,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     hosts_until_attached(&asker_id, &token, &socket).await;
 
     // `create`, naming the host by the DISPLAY NAME the hosts listing
-    // reports and the profile by the NAME its catalog reports — the two
-    // values an agent can actually have read.
+    // reports — the value an agent can actually have read.
     let created_cwd = work.path().join("created");
     std::fs::create_dir(&created_cwd).expect("the create's target directory");
     let created_cwd = created_cwd.to_string_lossy().into_owned();
@@ -698,8 +683,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
             "this machine",
             "--cwd",
             &created_cwd,
-            "--profile",
-            "Relay Fixture",
+            "--invocation",
+            &invocation,
             "--title",
             "made-by-the-agent",
         ],
@@ -735,8 +720,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     assert_eq!(created["title"], "made-by-the-agent");
     assert_eq!(created["cwd"], created_cwd);
     assert_eq!(
-        created["source_profile"]["id"], profile_id,
-        "the profile NAME must have resolved through the helm catalog: {created}"
+        created["invocation"], invocation,
+        "the created session runs the command line it was given: {created}"
     );
 
     // Clone names its source and destination explicitly; the directory,
@@ -771,8 +756,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     );
     assert_eq!(cloned["cwd"], cwd, "a clone copies the source's directory");
     assert_eq!(
-        cloned["source_profile"]["id"], profile_id,
-        "a same-host clone follows the source's profile id: {cloned}"
+        cloned["invocation"], invocation,
+        "a same-host clone runs the source's command line: {cloned}"
     );
 
     // A directory that does not exist is the TARGET supervisor's own
@@ -810,30 +795,6 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
             absent.display()
         )),
         "the target supervisor's own words must survive both hops: {refusal}"
-    );
-
-    // A profile name the helm catalog does not have is refused by NAME, with
-    // no session created — the no-silent-fallback rule.
-    let output = spawn_agent_command_args(
-        &[
-            "create",
-            "--cwd",
-            &created_cwd,
-            "--profile",
-            "No Such Profile",
-            "--host",
-            "this machine",
-        ],
-        &asker_id,
-        &token,
-        &socket,
-    )
-    .await;
-    assert!(!output.status.success());
-    let refusal = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        refusal.contains("No Such Profile") && refusal.contains("Relay Fixture"),
-        "the helm-wide catalog refusal must name the requested profile and an available choice: {refusal}"
     );
 
     // `helm`, `supervisor` and `work` deliberately outlive this test's last

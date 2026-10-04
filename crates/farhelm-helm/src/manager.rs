@@ -1427,8 +1427,8 @@ impl ConnectionManager {
     }
 
     /// The fleet's revision counter — what the invalidation socket
-    /// subscribes to, and what the REST edge's own publishers (profile
-    /// mutations, remembered-default writes) bump.
+    /// subscribes to, and what the REST edge's own publishers (host edits,
+    /// launch-history writes, provisioning progress) bump.
     ///
     /// Handed out as the `Arc` rather than as a borrow because a subscriber
     /// outlives the request that created it: the socket task holds this for
@@ -4165,25 +4165,6 @@ impl HostActor {
                 };
             }
         };
-        if let Err(error) =
-            crate::sessions::resolve_session_profiles_from_store(&self.store, &mut entries).await
-        {
-            let error = peer_text(&format!("could not resolve session profiles: {error:#}"));
-            warn!(
-                error = error.as_str(),
-                destination = %self.destination(),
-                "refreshing the host's session profiles failed; keeping the previous cache"
-            );
-            return RefreshStep {
-                health: RefreshHealth::Failed { error },
-                end_connection: None,
-                live: LiveSessions::Retain,
-                contested: None,
-                truncated: None,
-                cache_changed: false,
-                discarded: false,
-            };
-        }
         let Some(identity) = identity else {
             // Live-only: the walk succeeded, so the count is real, but
             // there is nothing to bind a cache write to. See this method's
@@ -5672,7 +5653,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         }

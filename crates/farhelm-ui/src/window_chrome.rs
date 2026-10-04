@@ -253,8 +253,8 @@ fn take_click_detail() -> Option<ClickReport> {
 /// Give empty sidebar-header space a native drag action, never its controls.
 ///
 /// This separate, non-focusable element has no interactive descendants. A
-/// parent-level mouse handler would also receive clicks from Profiles or the
-/// version label, stealing normal control activation and text selection —
+/// parent-level mouse handler would also receive clicks from the settings
+/// gear or the version label, stealing normal control activation and text selection —
 /// and it would break the bridge pairing, which assumes exactly one Rust
 /// press handler consumes each POST. Dioxus's native drag helper ignores
 /// dragging while the window is fullscreen.

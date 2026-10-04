@@ -312,8 +312,6 @@ pub(crate) fn unexpected_reply(what: &str, reply: &ControlMsg, mutating: bool) -
 pub(crate) struct SpawnArgs {
     pub(crate) cwd: PathBuf,
     pub(crate) title: Option<String>,
-    pub(crate) agent: Option<String>,
-    pub(crate) profile_id: Option<String>,
     pub(crate) inherit_agent: bool,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
@@ -363,8 +361,6 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
         parent: args.parent,
         cwd,
         invocation: None,
-        profile_name: args.agent,
-        profile_id: args.profile_id,
         inherit_agent: args.inherit_agent,
         title: args.title,
         cols: 80,
@@ -373,7 +369,6 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
         confirm_yolo: args.confirm_yolo,
         agent_kind: None,
         resume_template: None,
-        source_profile: None,
         // Explicit inheritance has no structured selector. The
         // supervisor copies the authenticated parent's stored launch
         // bundle, which is the only safe source of that provenance.
@@ -559,12 +554,10 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 enum ReplyKind {
     Hosts,
     Sessions,
-    Profiles,
     Session,
     Restarted,
     Stopped,
     Created,
-    ResolvedProfile,
 }
 
 impl ReplyKind {
@@ -572,7 +565,6 @@ impl ReplyKind {
         match verb {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
-            farhelm_proto::AgentVerb::Profiles {} => ReplyKind::Profiles,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
@@ -585,10 +577,6 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Create { .. } | farhelm_proto::AgentVerb::Clone { .. } => {
                 ReplyKind::Created
             }
-            // This is an internal supervisor-to-helm query, never a CLI
-            // verb. Classifying it keeps a malformed peer reply recoverable
-            // instead of letting a new wire variant abort this process.
-            farhelm_proto::AgentVerb::ResolveProfile { .. } => ReplyKind::ResolvedProfile,
         }
     }
 
@@ -596,12 +584,10 @@ impl ReplyKind {
         match reply {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
-            AgentReply::Profiles { .. } => ReplyKind::Profiles,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
-            AgentReply::ResolvedProfile { .. } => ReplyKind::ResolvedProfile,
         }
     }
 
@@ -615,7 +601,6 @@ impl ReplyKind {
         match self {
             ReplyKind::Hosts => "hosts listing",
             ReplyKind::Sessions => "sessions listing",
-            ReplyKind::Profiles => "profiles listing",
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",
@@ -624,7 +609,6 @@ impl ReplyKind {
             // both, and a reader who sees "session row" against "created
             // session row" can tell which end of the mismatch is which.
             ReplyKind::Created => "created session row",
-            ReplyKind::ResolvedProfile => "resolved profile",
         }
     }
 }
@@ -747,29 +731,5 @@ mod tests {
         );
         let dial = full_env().dial("farhelm spawn").expect("complete env");
         assert_eq!(dial.session_id, "s-1");
-    }
-
-    /// Profile resolution is an internal reply shape, so it must not share
-    /// the creating verbs' classification: otherwise a malformed create or
-    /// clone reply can evade the outcome-unknown remedy.
-    #[farhelm_testtrace::test]
-    fn profile_resolution_has_its_own_reply_kind() {
-        let create = ReplyKind::of_verb(&farhelm_proto::AgentVerb::Create {
-            host: None,
-            cwd: "/w".to_string(),
-            profile_name: None,
-            profile_id: None,
-            invocation: Some("claude".to_string()),
-            title: None,
-            intent_key: None,
-            confirm_yolo: false,
-        });
-        let resolve = ReplyKind::of_verb(&farhelm_proto::AgentVerb::ResolveProfile {
-            name: Some("claude".to_string()),
-            id: None,
-            confirm_yolo: false,
-        });
-        assert_ne!(create, resolve);
-        assert_eq!(resolve.noun(), "resolved profile");
     }
 }

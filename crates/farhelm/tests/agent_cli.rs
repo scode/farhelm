@@ -14,8 +14,7 @@
 
 use farhelm_proto::io::{FrameReader, FrameWriter};
 use farhelm_proto::{
-    AgentHost, AgentOutcome, AgentProfile, AgentReply, AgentSession, AgentVerb, ControlMsg,
-    ErrorKind, Frame,
+    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ControlMsg, ErrorKind, Frame,
 };
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -312,7 +311,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 3,
+            "schema_version": 4,
             "caller": {"session_id": "session-1", "host_id": "host-local"},
             "reply": {
                 "reply": "hosts",
@@ -328,59 +327,6 @@ fn hosts_json_has_the_exact_discovery_envelope() {
             }
         })
     );
-}
-
-/// Profile discovery exposes only the stable selector metadata in its human
-/// table; launch commands and provider settings do not exist in this shape.
-#[farhelm_testtrace::test]
-fn profiles_prints_the_id_name_and_builtin_table() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(request, AgentVerb::Profiles {});
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Profiles {
-                    caller_host_id: "host-local".to_string(),
-                    profiles: vec![
-                        AgentProfile {
-                            id: "builtin-codex".to_string(),
-                            name: "codex".to_string(),
-                            builtin: true,
-                        },
-                        AgentProfile {
-                            id: "profile-2".to_string(),
-                            name: "duplicate".to_string(),
-                            builtin: false,
-                        },
-                    ],
-                    complete: true,
-                },
-            },
-        })
-    });
-
-    let output = output_with_timeout(agent_command_with_args(&socket, &["profiles"]));
-    finish_server(done, thread);
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("UTF-8 table"),
-        [
-            "ID            NAME      BUILTIN",
-            "builtin-codex codex     true",
-            "profile-2     duplicate false",
-            "",
-        ]
-        .join("\n")
-    );
-    assert!(output.stderr.is_empty());
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
@@ -1467,7 +1413,6 @@ fn instructions_print_every_verb_without_a_session() {
     for verb in [
         "hosts",
         "sessions",
-        "profiles",
         "rename",
         "stop",
         "create",
@@ -1532,12 +1477,6 @@ fn the_help_flag_still_prints_clap_usage() {
 /// single stdout line is — so a confirmation sentence on stdout would make
 /// the two verbs that need parsing the two that cannot be. The listings are
 /// parsed too, but as tables, where an extra line is survivable.
-///
-/// The `--profile` → `profile_name` spelling is checked because it is the
-/// one place the CLI's word and the wire's word deliberately differ: the
-/// helm resolves that value against the TARGET host's catalog, and sending
-/// it as an id would resolve on the wrong catalog rather than fail (ids
-/// collide across installs by construction).
 #[farhelm_testtrace::test]
 fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -1557,9 +1496,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                profile_name: Some("Claude Code".to_string()),
-                profile_id: None,
-                invocation: None,
+                invocation: Some("claude --model opus".to_string()),
                 title: Some("over there".to_string()),
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
@@ -1594,8 +1531,8 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             "/srv/work",
             "--host",
             "builder",
-            "--profile",
-            "Claude Code",
+            "--invocation",
+            "claude --model opus",
             "--title",
             "over there",
             "--idempotency-key",
@@ -1743,22 +1680,18 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
     );
 }
 
-/// Spec: `farhelm agent create` naming both `--profile` and `--invocation`
-/// is refused by the CLI itself, with nothing sent and nothing on stdout.
+/// Spec: `farhelm agent create --profile`, removed with agent profiles, is
+/// refused by the CLI itself with a message naming `--invocation`, with
+/// nothing sent and nothing on stdout.
 ///
-/// Refused HERE rather than only at the helm because clap can: the two are
-/// mutually exclusive on the wire as well, so the round trip would end in
-/// the same refusal, and spending it to learn what a local check knows
-/// costs an agent a supervisor hop and a helm hop. The helm's own refusal
-/// stays in place for every other client — this is a shortcut, not the
-/// authority.
-///
-/// No mock supervisor is started, which is the sharp end: if this ever
-/// regressed into sending the request, there would be no socket to connect
-/// to and the failure would still be an error — so the assertion is
-/// specifically that clap's own conflict message is what came back.
+/// The parse-level refusal is unit-tested beside the flag; this pins it
+/// through the real binary, where an agent meets it: exit status 2 and the
+/// message on stderr. No mock supervisor is started, which is the sharp
+/// end: if this ever regressed into sending the request, there would be no
+/// socket to connect to and the failure would still be an error — so the
+/// assertion is specifically that the removal message is what came back.
 #[farhelm_testtrace::test]
-fn create_naming_both_selectors_is_refused_before_anything_is_sent() {
+fn create_with_the_removed_profile_flag_is_refused_before_anything_is_sent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let output = output_with_timeout(agent_command_with_args(
@@ -1777,8 +1710,8 @@ fn create_naming_both_selectors_is_refused_before_anything_is_sent() {
     assert!(output.stdout.is_empty(), "a refused create prints no id");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("--invocation") && stderr.contains("--profile"),
-        "the refusal must name both flags: {stderr}"
+        stderr.contains("agent profiles were removed") && stderr.contains("--invocation"),
+        "the refusal must say why and name the replacement: {stderr}"
     );
 }
 
@@ -1809,8 +1742,8 @@ fn create_without_a_cwd_is_refused() {
 ///
 /// The same hazard `a_rename_title_starting_with_a_hyphen_is_not_misparsed_
 /// as_a_flag` covers for titles, applied to the whole creating surface.
-/// Every one of these values is judged DOWNSTREAM — a profile name by the
-/// target's catalog, an idempotency key by its reservation table, a
+/// Every one of these values is judged DOWNSTREAM — a host name by the
+/// helm's registry, an idempotency key by its reservation table, a
 /// directory by the target's filesystem — and every one of them may
 /// legally begin with `-`, so a local refusal here is this CLI declining to
 /// carry a value the far end would have accepted or explained.
@@ -1838,8 +1771,6 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
             title,
             intent_key,
             confirm_yolo: _,
-            profile_name,
-            profile_id,
         } = request
         else {
             panic!("expected a Create verb, got {request:?}");
@@ -1849,14 +1780,6 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         assert_eq!(cwd, "-odd-dir");
         assert_eq!(title.as_deref(), Some("-odd-title"));
         assert_eq!(intent_key.as_deref(), Some("-odd-key"));
-        assert_eq!(
-            profile_name, None,
-            "the invocation selector was chosen, so no profile travels"
-        );
-        assert_eq!(
-            profile_id, None,
-            "the invocation selector excludes a profile id"
-        );
         Some(ControlMsg::AgentResponse {
             req_id,
             outcome: AgentOutcome::Ok {
@@ -1900,72 +1823,6 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         output.status.code(),
         Some(0),
         "clap must carry every hyphen-leading value, got stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), "new-session\n");
-}
-
-/// Spec: a `--profile` beginning with a hyphen reaches the wire verbatim.
-///
-/// Separate from the sibling above because `--profile` and `--invocation`
-/// are mutually exclusive: they cannot both be exercised in one command
-/// line, and a profile name is exactly the kind of value whose legality the
-/// TARGET host's catalog decides — refusing it here would tell an agent its
-/// name is malformed when the truth is that this CLI would not carry it.
-#[farhelm_testtrace::test]
-fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        let AgentVerb::Create { profile_name, .. } = request else {
-            panic!("expected a Create verb, got {request:?}");
-        };
-        assert_eq!(profile_name.as_deref(), Some("-dash-profile"));
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Created {
-                    session: AgentSession {
-                        id: "new-session".to_string(),
-                        host_id: "1".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "t".to_string(),
-                        cwd: "/w".to_string(),
-                        agent: "-dash-profile".to_string(),
-                        status: String::new(),
-                        current: false,
-                        restart_offer: Default::default(),
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
-    let output = output_with_timeout(agent_command_with_args(
-        &socket,
-        &[
-            "create",
-            "--host",
-            "this machine",
-            "--cwd",
-            "/w",
-            "--profile",
-            "-dash-profile",
-        ],
-    ));
-    finish_server(done, thread);
-
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "clap must carry the hyphen-leading profile name, got stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "new-session\n");

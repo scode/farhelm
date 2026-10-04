@@ -34,11 +34,6 @@
         "{conversation}"
       ],
       "seen_activity_at": 1700000090,
-      "source_profile": {
-        "existence": "renamed",
-        "id": "profile-1",
-        "name": "Codex"
-      },
       "stale": true,
       "status": {
         "exit_code": 3,

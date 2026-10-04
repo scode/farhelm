@@ -188,7 +188,6 @@ test("a create reply claiming yolo does not change what the next New dialog pres
 
     // A command create, which submits no launch at all.
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-    await form.locator(".create-session-profile").selectOption("");
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     expect(await submit()).not.toHaveProperty("launch");

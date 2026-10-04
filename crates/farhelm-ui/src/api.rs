@@ -2,8 +2,7 @@
 //! endpoint — the session routes
 //! (fetch/create/stop/restart/rename/delete/tab-open/tab-close), the host
 //! registry's (list/probe/provision/update/retarget/remove/adopt/retry) since
-//! PLAN_M7.md item 7 extended the M6 host surface, and the helm-wide profile catalog's
-//! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
+//! PLAN_M7.md item 7 extended the M6 host surface —
 //! generally expose failures — transport, status, or body-read — as a
 //! single displayable `String`. Fresh-checkout submission also preserves
 //! whether the server proved the attempt definitely unaccepted: the composer
@@ -59,8 +58,8 @@ use crate::github_checkout::{
     FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
 };
 use crate::skew;
-use crate::{Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Profile, Session, Tab};
-use serde::{Deserialize, Serialize};
+use crate::{Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Session, Tab};
+use serde::Deserialize;
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
 /// `SessionListBody`): `{"sessions": [...], "total": N, "matching": N,
@@ -189,11 +188,6 @@ pub(crate) struct SessionFilter {
     pub(crate) parent: String,
     /// Substring of the working directory, case-insensitively.
     pub(crate) directory: String,
-    /// A profile, named by its id or by the name a session snapshotted at
-    /// creation — the latter is what keeps a DELETED profile's sessions
-    /// findable, and is why this is free text rather than a picker over the
-    /// catalog as it stands today.
-    pub(crate) profile: String,
     /// A status, spelled exactly as the wire spells it. The helm refuses a
     /// word it does not know with a 400 rather than answering "no sessions",
     /// so this is offered as a choice rather than typed.
@@ -222,8 +216,8 @@ impl SessionFilter {
 
     /// Whether the USER narrowed this listing — the BANNER predicate.
     ///
-    /// True for a filter the user applied (host, parent, directory, profile,
-    /// status, or title).
+    /// True for a filter the user applied (host, parent, directory, status,
+    /// or title).
     pub(crate) fn narrows(&self) -> bool {
         self != &SessionFilter::default()
     }
@@ -246,7 +240,6 @@ impl SessionFilter {
         for (name, value) in [
             ("parent", &self.parent),
             ("directory", &self.directory),
-            ("profile", &self.profile),
             ("status", &self.status),
             ("title", &self.title),
         ] {
@@ -1498,14 +1491,14 @@ pub(crate) async fn fetch_sessions(
 /// an untested cadence.
 pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 
-/// What a create says to launch: a command line, or a profile from the helm
-/// catalog (PLAN_M6_75.md item 3's two creation modes).
+/// What a create says to launch: a command line, or structured composer
+/// choices the helm compiles.
 ///
 /// One argument rather than two optional ones, because the wire treats them
-/// as a CHOICE: a body naming both is refused (a profile already states what
-/// to run, so there is no honest merge) and a body naming neither is refused
-/// too. Two `Option` parameters would let a caller express both illegal
-/// shapes and find out over the network; this type lets it express neither.
+/// as a CHOICE: a body naming both is refused (there is no honest merge) and
+/// a body naming neither is refused too. Two `Option` parameters would let a
+/// caller express both illegal shapes and find out over the network; this
+/// type lets it express neither.
 ///
 /// Borrowed rather than owned: every caller already holds the string it is
 /// about to send, and a create is one request rather than something stored.
@@ -1513,9 +1506,6 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 pub(crate) enum CreateAgent<'a> {
     /// A raw invocation, shell-split by the supervisor.
     Command(&'a str),
-    /// A `Profile::id` from the helm catalog. The helm resolves it before
-    /// forwarding the resulting invocation to the selected host.
-    Profile(&'a str),
     /// Structured intent compiled by the helm into one safe invocation.
     Structured(&'a LaunchSelection),
 }
@@ -1787,7 +1777,7 @@ async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<Strin
 /// Split from the request purely so the two rules it has to keep can be
 /// exercised without a helm: the title's absent-versus-empty distinction, and
 /// the creation mode's exclusivity — a body carrying both `invocation` and
-/// `profile_id`, or neither, is a 400 rather than a create, and the failure
+/// `launch`, or neither, is a 400 rather than a create, and the failure
 /// would arrive at the moment a user pressed the button.
 fn create_body(
     cwd: &str,
@@ -1811,20 +1801,15 @@ fn create_body(
     // Exactly one of the two mode fields is ever written. Building it from
     // ONE value is what makes the exclusivity structural rather than a rule
     // each caller has to remember, and there is no honest merge to fall back
-    // on: a profile already states what to run.
+    // on.
     match agent {
         CreateAgent::Command(invocation) => body["invocation"] = serde_json::json!(invocation),
-        CreateAgent::Profile(profile_id) => body["profile_id"] = serde_json::json!(profile_id),
         CreateAgent::Structured(selection) => body["launch"] = serde_json::json!(selection),
     }
-    // The connection this create was prepared against. It matters most in
-    // PROFILE mode, where the id would otherwise resolve on whatever install
-    // now answers for that host — every fresh supervisor seeds the same
-    // starters, so the wrong install is a successful launch of the wrong
-    // thing rather than a refusal. Sent in raw mode too: the directory and
-    // the command were chosen for a machine, and the same substitution puts
-    // them on another one. This is the only request in the API that still
-    // carries such a claim; profile edits and catalog reads carry none.
+    // The connection this create was prepared against: the directory and the
+    // command were chosen for a machine, and a retarget or adoption would
+    // otherwise put them on another one. This is the only request in the API
+    // that still carries such a claim.
     if let Some(incarnation) = expected_incarnation {
         body["expected_incarnation"] = serde_json::json!(incarnation);
     }
@@ -3059,7 +3044,7 @@ pub(crate) enum Commit {
 /// `authority` names the surface that WILL say what happened — the read that
 /// follows this mutation — and it is a parameter rather than a constant
 /// because the answer differs per resource: a host verb is settled by the
-/// hosts list, a profile verb by the helm catalog. A message naming the
+/// hosts list, a preference write by the next preferences read. A message naming the
 /// wrong one is worse than a vague one, since it sends the user to a surface
 /// that has nothing to do with what they just did.
 fn unvalidated_note(error: impl std::fmt::Display, authority: &str) -> String {
@@ -3437,185 +3422,6 @@ pub(crate) async fn send_feedback(
     })
 }
 
-// ---------------------------------------------------------------------
-// Agent profiles (PLAN_M6_75.md items 5 and 8)
-//
-// Profiles belong to the helm and every host consumes this one catalog. The
-// UI therefore reads and writes only `/api/profiles`; selected-host state is
-// not part of any profile request.
-// ---------------------------------------------------------------------
-
-/// What `GET /api/profiles` answers with: the helm catalog and its remembered
-/// default together (farhelm-helm's `ProfilesView`).
-///
-/// The remembered default is served raw, even when it names a profile that
-/// is no longer in the catalog beside it. In this UI only the profiles popup
-/// reads it (to mark the "last used" row); the create dialog never selects
-/// from it, per SPEC.md's rule that New does not silently choose a
-/// remembered profile (see `profiles::resolve_agent`).
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
-pub(crate) struct ProfileCatalog {
-    /// The catalog in the helm's own order (by id, stable across
-    /// renames). Not re-sorted here: the helm does not sort it either, and a
-    /// picker that reordered itself on every rename would move options out
-    /// from under a user mid-choice.
-    pub(crate) profiles: Vec<Profile>,
-    /// The id of the profile a session was last created from in this helm, or
-    /// `None` if none ever was.
-    ///
-    /// May name a profile ABSENT from `profiles`, and that combination is
-    /// meaningful rather than a bug: it is a deleted default, which is
-    /// precisely what SPEC.md's ask-don't-guess fallback keys off. The helm
-    /// deliberately does not filter it out, and neither does this.
-    #[serde(default)]
-    pub(crate) default_profile: Option<String>,
-}
-
-/// A profile's whole definition, as a create or an edit sends it.
-///
-/// There is no partial-update shape and there deliberately is not one: an
-/// edit REPLACES the definition, because per-field optionality would make
-/// "clear the resume template" and "leave it alone" the same request. Every
-/// caller therefore has to have read what it is replacing, which is what the
-/// editor does.
-///
-/// Owned rather than borrowed, unlike [`CreateAgent`]: the editing surface
-/// assembles one of these from drafts it owns and hands it over.
-///
-/// Serialized DIRECTLY as the request body of both mutations — the type is
-/// the wire shape. That is a guard, not a convenience: the far side replaces
-/// the whole definition, so a hand-written body that fell out of sync with
-/// the struct would silently clear whichever field it stopped sending.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct ProfileSpec {
-    pub(crate) name: String,
-    pub(crate) invocation: String,
-    /// The wire spelling of the kind (`claude`, `codex`, `generic`), echoed
-    /// verbatim — including one this build does not recognize, which is why
-    /// it is a string here as well as on [`Profile`].
-    pub(crate) agent_kind: String,
-    /// The resume argv, or absent — and absent is a real value rather than a
-    /// missing field, with an outcome that depends on the kind: an integrated
-    /// kind (`claude`, `codex`) has the supervisor DERIVE a template from the
-    /// invocation, while a generic one derives none at all and can therefore
-    /// only be restarted fresh. Never a synonym for the empty vector.
-    pub(crate) resume_template: Option<Vec<String>>,
-}
-
-/// Read the helm-wide profile catalog and its remembered default together.
-///
-/// The pair is one snapshot because a dangling remembered id is meaningful:
-/// it tells the picker to ask instead of silently substituting another
-/// profile. Every host uses this same catalog.
-pub(crate) async fn fetch_profiles(base: &str) -> Result<ProfileCatalog, String> {
-    let url = format!("{base}/api/profiles");
-    let resp = send_read(client().get(&url)).await?;
-    if !resp.status().is_success() {
-        return Err(read_failure("GET", &url, resp).await);
-    }
-    resp.json::<ProfileCatalog>()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// How a profile mutation the helm ACCEPTED came back.
-///
-/// [`Commit`]'s shape plus the one thing the host verbs have no use for: the
-/// profile as the helm now holds it. The caller needs it, and needs it
-/// synchronously — the authoritative catalog re-read is a round trip away,
-/// and until it lands this client would otherwise still be handing out the
-/// definition it just replaced (see `profiles::CatalogRead::absorb`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProfileCommit {
-    /// Accepted, and the reply described the result: the profile as the
-    /// helm now holds it.
-    Confirmed(Profile),
-    /// Accepted, but the reply could not be read by this build. Carries the
-    /// decode failure, for a warning line — and, deliberately, nothing to
-    /// reconcile from: an unread reply is exactly the case where only the
-    /// catalog read that follows can say what happened.
-    Unvalidated(String),
-}
-
-/// Classify a profile mutation's successful response.
-///
-/// The catalog — not the hosts list — is what settles a profile change, and
-/// this is where that is said (see [`unvalidated_note`]).
-async fn profile_commit(resp: reqwest::Response) -> ProfileCommit {
-    match resp.json::<Profile>().await {
-        Ok(profile) => ProfileCommit::Confirmed(profile),
-        Err(error) => ProfileCommit::Unvalidated(unvalidated_note(error, "the profile list below")),
-    }
-}
-
-/// Define a new profile in the helm catalog (`POST /api/profiles`).
-///
-/// Nothing is validated here. The name's control-character rule, the
-/// per-field size cap, the catalog bound and the `{conversation}` placeholder
-/// rule for an integrated kind's resume template are all the helm's,
-/// and its refusal is what the user acts on — a second copy of those rules in
-/// the client would be the one that drifted, and it could not check the
-/// catalog bound at all.
-///
-/// A 2xx whose body will not decode is [`ProfileCommit::Unvalidated`] rather
-/// than an error, on the same reasoning as the host mutations: the profile
-/// exists, and telling the user their change was rejected when it
-/// demonstrably happened is the worse failure. The catalog re-read that
-/// follows is the authoritative account either way.
-pub(crate) async fn create_profile(
-    base: &str,
-    spec: &ProfileSpec,
-) -> Result<ProfileCommit, String> {
-    let url = format!("{base}/api/profiles");
-    let resp = send(client().post(&url).json(&spec)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
-    }
-    Ok(profile_commit(resp).await)
-}
-
-/// Replace a helm profile's whole definition (`POST /api/profiles/{profile_id}`).
-///
-/// A POST to the resource rather than a PUT or PATCH, matching this API's own
-/// verb vocabulary (`/stop`, `/rename`, `/destination`) — and emphatically
-/// not a partial update: see [`ProfileSpec`].
-///
-/// Nothing this does touches the sessions already created from the profile.
-/// Their launch and resume snapshots are their own (SPEC.md's snapshot rule),
-/// and a rename simply starts showing up as `Renamed` on their
-/// `SourceProfile` — which is what the session list renders rather than
-/// silently adopting the new name.
-pub(crate) async fn update_profile(
-    base: &str,
-    profile_id: &str,
-    spec: &ProfileSpec,
-) -> Result<ProfileCommit, String> {
-    let url = format!("{base}/api/profiles/{}", encode_path_segment(profile_id));
-    let resp = send(client().post(&url).json(&spec)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
-    }
-    Ok(profile_commit(resp).await)
-}
-
-/// Remove a profile from the helm catalog (`DELETE /api/profiles/{profile_id}`).
-///
-/// The reply is an empty object, exactly like `stop` and session `delete`, so
-/// a 200 IS the whole answer and there is nothing for a decode to fail on.
-///
-/// Existing sessions are untouched, and so is a remembered default that
-/// named this profile: the helm does not clear it, so later catalog reads can
-/// carry a default that names no profile. The create dialog does not act on
-/// the default either way.
-pub(crate) async fn delete_profile(base: &str, profile_id: &str) -> Result<(), String> {
-    let url = format!("{base}/api/profiles/{}", encode_path_segment(profile_id));
-    let resp = send(client().delete(&url)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("DELETE", &url, resp).await);
-    }
-    Ok(())
-}
-
 /// Decodes the helm's golden HTTP fixtures with this module's envelopes.
 #[cfg(test)]
 mod http_contract_tests;
@@ -3915,8 +3721,8 @@ mod tests {
     /// The helm refuses both illegal shapes with a 400, so getting this wrong
     /// fails at the moment a user presses create — and the "both" shape is
     /// the one a client reaches by accident, by keeping a stale invocation
-    /// beside a freshly chosen profile. Asserting the ABSENCE of the other
-    /// key is therefore the load-bearing half of each case.
+    /// beside a freshly chosen structured launch. Asserting the ABSENCE of
+    /// the other key is therefore the load-bearing half of each case.
     #[farhelm_testtrace::test]
     fn a_create_body_carries_one_creation_mode_and_not_the_other() {
         let raw = create_body(
@@ -3929,8 +3735,8 @@ mod tests {
         );
         assert_eq!(raw["invocation"], serde_json::json!("claude"));
         assert!(
-            raw.get("profile_id").is_none(),
-            "a raw create must not also name a profile"
+            raw.get("launch").is_none(),
+            "a raw create must not also name a structured launch"
         );
         assert_eq!(
             raw["title"],
@@ -3940,20 +3746,27 @@ mod tests {
         );
         assert_eq!(raw["host"], serde_json::json!(7));
 
-        let by_profile = create_body(
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        let structured = create_body(
             "/tmp",
-            CreateAgent::Profile("p-1"),
+            CreateAgent::Structured(&selection),
             "named",
             "key-2",
             Some(7),
             Some(11),
         );
-        assert_eq!(by_profile["profile_id"], serde_json::json!("p-1"));
+        assert_eq!(structured["launch"], serde_json::json!(selection));
         assert!(
-            by_profile.get("invocation").is_none(),
-            "a profile already says what to run, and a body naming both is refused outright"
+            structured.get("invocation").is_none(),
+            "a structured launch states what to run, and a body naming both is refused outright"
         );
-        assert_eq!(by_profile["title"], serde_json::json!("named"));
+        assert_eq!(structured["title"], serde_json::json!("named"));
     }
 
     /// All supported agent selectors must carry the accepted destination and
@@ -3981,7 +3794,6 @@ mod tests {
         };
         for (agent, selector) in [
             (CreateAgent::Command("agent"), "invocation"),
-            (CreateAgent::Profile("profile-1"), "profile_id"),
             (CreateAgent::Structured(&selection), "launch"),
         ] {
             let body = fresh_create_body(agent, "intent", 3, &checkout);
@@ -3991,7 +3803,7 @@ mod tests {
             assert_eq!(body["host"], 3);
             assert_eq!(body["expected_incarnation"], 5);
             assert!(body["title"].is_null());
-            for key in ["invocation", "profile_id", "launch"] {
+            for key in ["invocation", "launch"] {
                 assert_eq!(body.get(key).is_some(), key == selector);
             }
         }
@@ -4001,14 +3813,14 @@ mod tests {
     /// modes, and omits the field when it has nothing to assert.
     ///
     /// This is the one precondition the API still has, and the guard it
-    /// feeds refuses a create that would otherwise LAUNCH the wrong profile
-    /// on a retargeted host; the absent form is what keeps a caller with no
+    /// feeds refuses a create that would otherwise launch on a retargeted
+    /// host the user did not choose; the absent form is what keeps a caller with no
     /// connection to name (a script, an older client) able to create at all.
     #[farhelm_testtrace::test]
     fn a_create_names_the_connection_it_was_prepared_against() {
         let body = create_body(
             "/tmp",
-            CreateAgent::Profile("starter-claude"),
+            CreateAgent::Command("claude"),
             "",
             "key",
             Some(3),
@@ -4084,74 +3896,6 @@ mod tests {
         let mut body = restart_request_body(false, None);
         confirm_yolo(&mut body);
         assert_eq!(body["confirm_yolo"], serde_json::json!(true));
-    }
-
-    /// An edit sends the profile's WHOLE definition, every field present.
-    ///
-    /// The far side replaces rather than merges, so a field this body omitted
-    /// would be cleared on every save — which for `resume_template` means an
-    /// editor that never showed the field would quietly strip a starter
-    /// profile's resume command the first time anyone renamed it. The
-    /// explicit `null` is how "no template" is stated rather than implied.
-    #[farhelm_testtrace::test]
-    fn a_profile_spec_sends_its_whole_definition_including_an_absent_template() {
-        let spec = ProfileSpec {
-            name: "Claude Code".to_string(),
-            invocation: "claude".to_string(),
-            agent_kind: "claude".to_string(),
-            resume_template: Some(vec![
-                "claude".into(),
-                "--resume".into(),
-                "{conversation}".into(),
-            ]),
-        };
-        let body = serde_json::to_value(&spec).expect("a spec always serializes");
-        assert_eq!(body["name"], serde_json::json!("Claude Code"));
-        assert_eq!(body["invocation"], serde_json::json!("claude"));
-        assert_eq!(body["agent_kind"], serde_json::json!("claude"));
-        assert_eq!(
-            body["resume_template"],
-            serde_json::json!(["claude", "--resume", "{conversation}"])
-        );
-
-        let generic = ProfileSpec {
-            resume_template: None,
-            ..spec
-        };
-        assert_eq!(
-            serde_json::to_value(&generic).expect("a spec always serializes")["resume_template"],
-            serde_json::Value::Null,
-            "absence is a value here, and it has to be SENT to replace a template that was there"
-        );
-    }
-
-    /// A catalog with no remembered default decodes as "none ever", and one
-    /// whose default names a profile the catalog no longer holds decodes
-    /// intact.
-    ///
-    /// The second half is the case the whole shape exists for: a deleted
-    /// default is what SPEC.md's ask-don't-guess fallback keys off, so a
-    /// decoder that dropped it — or that helpfully filtered it against the
-    /// catalog — would turn "your last profile is gone, pick another" into a
-    /// silent nothing.
-    #[farhelm_testtrace::test]
-    fn a_catalog_keeps_a_remembered_default_that_no_longer_resolves() {
-        let fresh: ProfileCatalog = serde_json::from_value(serde_json::json!({
-            "profiles": [],
-        }))
-        .expect("a helm with nothing remembered still answers");
-        assert_eq!(fresh.default_profile, None);
-
-        let stale: ProfileCatalog = serde_json::from_value(serde_json::json!({
-            "profiles": [{
-                "id": "p-1", "name": "Codex", "invocation": "codex",
-                "agent_kind": "codex", "resume_template": null,
-            }],
-            "default_profile": "p-gone",
-        }))
-        .unwrap();
-        assert_eq!(stale.default_profile.as_deref(), Some("p-gone"));
-        assert_eq!(stale.profiles.len(), 1);
     }
 
     /// The other half of `SessionListBody`'s missing-field tolerance
@@ -4238,7 +3982,6 @@ mod tests {
             host: Some(7),
             parent: "session/root".to_string(),
             directory: "/srv/my project".to_string(),
-            profile: "claude code".to_string(),
             status: "waiting".to_string(),
             title: "a&b".to_string(),
         };
@@ -4246,7 +3989,7 @@ mod tests {
         assert_eq!(
             filter.query(),
             "host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
-             profile=claude%20code&status=waiting&title=a%26b"
+             status=waiting&title=a%26b"
         );
     }
 

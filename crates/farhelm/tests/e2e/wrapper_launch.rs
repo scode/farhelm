@@ -1,4 +1,4 @@
-//! Wrapper profiles: the `{cwd}` placeholder, substituted at launch, end
+//! Wrapper launches: the `{cwd}` placeholder, substituted at launch, end
 //! to end against a real supervisor.
 //!
 //! A "wrapper" here is a launcher of the shape `wrapper run <dir> <agent
@@ -7,7 +7,7 @@
 //! the agent's parent for the agent's whole life (the real ones hold a
 //! kernel `flock` on the directory while they are up). Farhelm could
 //! already launch such a thing, but only with the directory baked into
-//! the invocation string. `{cwd}` lets one profile follow the session's
+//! the invocation string. `{cwd}` lets one command line follow the session's
 //! working directory; `Supervisor::spawn_agent` substitutes it once at launch.
 //! The report-driven tests use `hook-report`; other cases keep `claude-record`
 //! as a plain argv-echoing fixture. Identity always comes from an explicit report.
@@ -173,17 +173,17 @@ fn hook_tail(fixtures: &CaptureFixtures) -> Vec<String> {
 /// `--resume` — the fake agent's trailing `extra` catch-all merely accepts
 /// and echoes it — so every resume assertion in this file reads the
 /// `FAKE-AGENT ARGV:` marker and nothing else.
-fn wrapper_profile(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
-    wrapper_profile_with_tail(fixtures, record_tail(fixtures))
+fn wrapper_launch(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
+    wrapper_launch_with_tail(fixtures, record_tail(fixtures))
 }
 
-/// Build a wrapper profile around the explicit-report fixture.
-fn hook_wrapper_profile(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
-    wrapper_profile_with_tail(fixtures, hook_tail(fixtures))
+/// Build a wrapper launch around the explicit-report fixture.
+fn hook_wrapper_launch(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
+    wrapper_launch_with_tail(fixtures, hook_tail(fixtures))
 }
 
 /// Build a wrapper invocation and matching resume template from a fixture tail.
-fn wrapper_profile_with_tail(
+fn wrapper_launch_with_tail(
     fixtures: &CaptureFixtures,
     tail: Vec<String>,
 ) -> (String, Vec<String>) {
@@ -353,7 +353,7 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 // Tests
 // ---------------------------------------------------------------------
 
-/// A wrapper profile is handed the session's own working directory, and
+/// A wrapper launch is handed the session's own working directory, and
 /// the session it launches can report its conversation through the hook.
 ///
 /// This is the feature in one test. The directory contains a SPACE
@@ -367,11 +367,11 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 /// explicit hook report supplies the identity; a wrong `{cwd}` would still
 /// make the agent run in the wrong place and fail the wrapper assertions.
 #[farhelm_testtrace::test]
-async fn a_wrapper_profile_receives_the_sessions_directory() {
+async fn a_wrapper_launch_receives_the_sessions_directory() {
     let (h, fixtures, _accepting) = hook_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
     let work = dir_with_a_space(parent.path());
-    let (invocation, template) = hook_wrapper_profile(&fixtures);
+    let (invocation, template) = hook_wrapper_launch(&fixtures);
 
     let session = h
         .client
@@ -413,7 +413,7 @@ async fn a_wrapper_profile_receives_the_sessions_directory() {
     assert_eq!(
         snapshot_of(&h, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::Resume,
-        "a wrapper profile with an explicit kind and a template offers a resume like any other"
+        "a wrapper launch with an explicit kind and a template offers a resume like any other"
     );
 }
 
@@ -439,7 +439,7 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
     let (h, fixtures, _accepting) = hook_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
     let work = dir_with_a_space(parent.path());
-    let (invocation, template) = hook_wrapper_profile(&fixtures);
+    let (invocation, template) = hook_wrapper_launch(&fixtures);
 
     let session = h
         .client
@@ -558,7 +558,7 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
          they do not would make this test assert nothing"
     );
 
-    let (invocation, template) = hook_wrapper_profile(&fixtures);
+    let (invocation, template) = hook_wrapper_launch(&fixtures);
     let session = h
         .client
         .create_session_with_extras(
@@ -609,7 +609,7 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
 /// everything under the agent.
 ///
 /// The wrapper's presence is the one structural difference a wrapper
-/// profile makes to teardown: there is an extra process between the pane
+/// launch makes to teardown: there is an extra process between the pane
 /// and the agent, holding whatever the real wrapper holds (a `flock`, in
 /// the case this feature was built for). The docs claim nothing about
 /// that process lets ANY of them escape the stop sweep, and this is where
@@ -681,23 +681,23 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
     wait_until_pid_gone(grandchild_pid, 15).await;
 }
 
-/// A wrapper profile with NEITHER an agent kind NOR a resume template
+/// A wrapper launch with NEITHER an agent kind NOR a resume template
 /// gets no resume offer, however well the launch itself works.
 ///
 /// What this test is about is the missing KIND — the template is omitted
 /// only so that nothing else can be producing the outcome.
 ///
 /// The missing kind is the failure a user hits when they build a wrapper
-/// profile and forget it, and it is silent: the session launches, the
+/// launch and forget it, and it is silent: the session launches, the
 /// agent runs, records get written, and the only symptom is that Restart
 /// is unavailable. Kind derivation reads the invocation's FIRST word,
 /// and for a wrapper that word is the wrapper — so `generic` is the
-/// correct answer here and the profile has to say otherwise itself.
+/// correct answer here and the launch has to say otherwise itself.
 #[farhelm_testtrace::test]
-async fn a_generic_wrapper_profile_gets_no_resume_offer() {
+async fn a_generic_wrapper_launch_gets_no_resume_offer() {
     let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let (invocation, _template) = wrapper_profile(&fixtures);
+    let (invocation, _template) = wrapper_launch(&fixtures);
 
     let session = h
         .client
@@ -723,6 +723,6 @@ async fn a_generic_wrapper_profile_gets_no_resume_offer() {
     assert_eq!(
         snapshot.restart_offer,
         farhelm_proto::RestartOffer::NoConversationReporting,
-        "a wrapper profile that never declared its kind has nothing to resume"
+        "a wrapper launch that never declared its kind has nothing to resume"
     );
 }

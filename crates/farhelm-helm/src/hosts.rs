@@ -691,9 +691,7 @@ async fn add_host_owned(state: Arc<AppState>, spec: HostSpec) -> axum::response:
 /// straddle the move. It first takes the host's provisioning lock
 /// (`ConnectionManager::host_provision_lock`), which a confirmed run holds
 /// throughout, so a retarget also cannot move the registry out from under a
-/// frozen host plan. The remembered default profile is NOT touched by a
-/// retarget — it is a bare id per registry row (SPEC.md, Sessions /
-/// Creation).
+/// frozen host plan.
 ///
 /// Refuses the reserved local row (409 — it has no destination to change),
 /// an unknown id (404), an unusable destination (400), and a destination

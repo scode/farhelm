@@ -49,14 +49,14 @@ pub(crate) enum YoloReason {
     ChosenPermission,
     /// A structured launch on a harness that offers only YOLO.
     OnlyMode(LaunchHarness),
-    /// A raw command line or a profile, whose invocation turns the agent's
-    /// approval prompts off.
+    /// A raw command line whose invocation turns the agent's approval
+    /// prompts off.
     CommandLine,
 }
 
 impl YoloReason {
     /// The reason for a launch described by its structured selection, or by
-    /// `None` for a raw command line or profile.
+    /// `None` for a raw command line.
     ///
     /// Derives the wording from the harness capability table rather than
     /// naming harnesses here, so adding a single-mode harness gets the right
@@ -292,7 +292,7 @@ mod tests {
     /// reasons call for different reactions: pick another permission mode,
     /// accept that this harness offers only YOLO, or fix the command line. A wrong
     /// reason sends the user looking for a setting that does not exist.
-    /// Specifies: no selection means a command line or profile; a harness
+    /// Specifies: no selection means a command line; a harness
     /// whose only mode is YOLO gets the only-mode sentence naming it; any
     /// other structured launch was YOLO by choice.
     #[test]

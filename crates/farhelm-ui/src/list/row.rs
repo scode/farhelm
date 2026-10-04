@@ -15,7 +15,6 @@ use crate::icons::{
 };
 use crate::launch_composer::{selection_explicit_before_permissions, selection_permission_value};
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::profiles::{existence_word, source_profile_label};
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 use crate::{LaunchHarness, Session, SessionStatus};
 
@@ -224,12 +223,7 @@ fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<Deta
             values.push(permission.to_string());
         }
         values.extend(selection_explicit_before_permissions(launch));
-        if let Some(source) = &session.source_profile {
-            values.push(source_profile_label(source));
-        }
         values
-    } else if let Some(source) = &session.source_profile {
-        vec![source_profile_label(source)]
     } else {
         vec![compact_invocation(&session.invocation).basename]
     };
@@ -447,7 +441,7 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
         PermissionGlyph::Default => "default permission mode",
-        PermissionGlyph::Unknown => "unknown permission mode — profile or custom command",
+        PermissionGlyph::Unknown => "unknown permission mode — custom command",
         PermissionGlyph::Approve => "approve permission mode",
         PermissionGlyph::SmartApprove => "smart approve permission mode",
         PermissionGlyph::Chat => "chat permission mode",
@@ -537,7 +531,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
 /// classifier owns the vendor-specific flag tables.
 ///
 /// Argv is real shell-word splitting (`shell_words::split`), the same
-/// parser `farhelm-supervisor` uses to turn a profile's invocation string
+/// parser `farhelm-supervisor` uses to turn a session's invocation string
 /// into the argv it execs — this is a DISPLAY helper reusing that logic,
 /// not a second, divergent implementation of it. Scanning for a marker
 /// STOPS at a bare `--`: everything after it is positional argument data by
@@ -664,7 +658,7 @@ std::thread_local! {
 /// first line. Compact mode is the explicit escape hatch for a fleet where
 /// that repeated context is less useful. A structured selection names the
 /// harness glyph directly; legacy rows use the retained invocation only for a
-/// conservative display classification, including profile-backed rows. The
+/// conservative display classification. The
 /// full cwd remains available on the open button in compact mode, and the
 /// agent tooltip retains the full invocation and permission meaning. See
 /// `abbreviate_home` and `compact_invocation` for the display constraints.
@@ -898,18 +892,10 @@ pub(super) fn SessionRow(
     // attributes carry the original: an abbreviation the user cannot undo
     // would make the sidebar's own claim about a session unverifiable.
     let cwd_shown = abbreviate_home(&session.cwd);
-    // A profile name is a useful provenance label, not evidence of the
-    // executable or permission mode it ran. The sidebar therefore classifies
-    // every legacy row from its retained invocation, profile-backed included;
+    // The sidebar classifies every legacy row from its retained invocation;
     // structured metadata remains authoritative where it exists.
     let agent = agent_badge(&session);
-    // The profile remains provenance a user may need to inspect, even though
-    // it is not evidence for classification. Keep it in the native tooltip as
-    // well as the accessible name so neither display surface loses it.
-    let agent_tooltip = session.source_profile.as_ref().map_or_else(
-        || agent.description.clone(),
-        |source| format!("{} — {}", source_profile_label(source), agent.description),
-    );
+    let agent_tooltip = agent.description.clone();
     // `None` for a status nothing has classified yet, and the row then
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
@@ -1569,23 +1555,17 @@ pub(super) fn SessionRow(
                             }
                         }
                         // The agent track is a bounded visual classifier.
-                        // Its tooltip also preserves profile provenance when
-                        // there is one, because that name remains useful even
-                        // though it is never trusted as harness evidence.
                         span {
                             class: "session-agent",
                             title: "{display_peer(&agent_tooltip)}",
                             // Give each glyph its own hover target. The
-                            // parent still exposes provenance and argv when
-                            // the pointer is between the two marks.
+                            // parent still exposes the argv when the pointer
+                            // is between the two marks.
                             span { title: "{display_peer(&agent_tooltip)}",
                                 HarnessIcon { glyph: agent.harness }
                             }
                             span { title: "{permission_description(agent.permission)}",
                                 PermissionIcon { glyph: agent.permission }
-                            }
-                            if let Some(source) = &session.source_profile {
-                                span { class: "visually-hidden", "{display_peer(&source_profile_label(source))}. " }
                             }
                             span { class: "visually-hidden", "{display_peer(&agent.description)}" }
                         }
@@ -1970,7 +1950,6 @@ pub(super) fn SessionRow(
                                 div {
                                     class: "session-row-menu-summary",
                                     title: "{menu_header_summary_tooltip(&menu_summary_parts)}",
-                                    "data-profile-existence": session.source_profile.as_ref().map(|source| existence_word(source.existence)),
                                     PeerLine {
                                         class: "session-row-menu-summary-runs".to_string(),
                                         parts: menu_summary_parts.clone(),
@@ -2116,8 +2095,8 @@ pub(super) fn SessionRow(
                                 // why clone has no visibility field to gate
                                 // it at all. Rather than acting on this
                                 // row's process at all, it reads this row's
-                                // host, directory, title, and launch
-                                // profile (or raw invocation) to seed a
+                                // host, directory, title, and launch (its
+                                // structured choices or raw invocation) to seed a
                                 // brand-new, independent create — the click
                                 // only OPENS that form pre-filled
                                 // (`create_form::CreatePrefill`); nothing
@@ -2406,7 +2385,6 @@ pub(super) fn row_specimen(id: &str) -> Session {
         host_identity: None,
         host_name: None,
         stale: false,
-        source_profile: None,
         github_repo: None,
         working_copy: None,
         // Old-helm default: most existing row tests predate this field and
@@ -2997,8 +2975,8 @@ mod tests {
 
     /// Harness recognition is deliberately bounded to executable evidence:
     /// each supported spelling earns its own glyph, while an arbitrary
-    /// command remains the neutral terminal instead of borrowing a profile
-    /// name or a flag from a different tool.
+    /// command remains the neutral terminal instead of borrowing a label or
+    /// a flag from a different tool.
     #[farhelm_testtrace::test]
     fn recognized_executables_choose_their_own_harness_glyphs() {
         assert_eq!(known_harness("codex"), HarnessGlyph::Codex);
@@ -3125,11 +3103,7 @@ mod tests {
                 PermissionGlyph::Unknown,
                 "{invocation}"
             );
-            assert!(
-                agent_badge(&session)
-                    .description
-                    .contains("profile or custom command")
-            );
+            assert!(agent_badge(&session).description.contains("custom command"));
         }
         for (permission, expected) in [
             (crate::LaunchPermission::Approve, PermissionGlyph::Approve),
@@ -3218,7 +3192,7 @@ mod tests {
     }
 
     /// Real shell-word splitting (`shell_words::split`, the same parser
-    /// `farhelm-supervisor` uses on a profile's invocation), pinned against
+    /// `farhelm-supervisor` uses on a session's invocation), pinned against
     /// the specific quoting shapes a hand-rolled partial parser gets wrong.
     #[farhelm_testtrace::test]
     fn the_basename_survives_every_shell_quoting_shape() {

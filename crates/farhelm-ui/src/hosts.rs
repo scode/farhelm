@@ -1821,8 +1821,8 @@ pub(crate) fn HostsPanel(
 // the session row's (PR #239, mechanics shared via `menu_panel`) — leaves
 // `.host-row-main` exactly three children regardless of host kind, so
 // there is no longer a control count for the sidebar's width to run out
-// on. Profiles now live beside New in the session list header, but the remaining host verbs
-// keep this menu because the same narrow-sidebar constraint still applies.
+// on. The host verbs keep this menu because the same narrow-sidebar
+// constraint still applies.
 
 /// One command in a host row's actions menu, in the order the menu offers
 /// them.

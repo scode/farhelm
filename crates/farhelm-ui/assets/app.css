@@ -182,7 +182,7 @@
                                    than this — toward the surfaces it has
                                    to stay distinct from — would take that
                                    text below AA again */
-  --chip-bg: #394252; /* the default-profile badge's small filled chip */
+  --chip-bg: #394252; /* small filled chips, such as the invocation badge */
 
   /* Foregrounds, loudest first. Each clears WCAG AA (4.5:1) against
      every surface it actually lands on, and for the two quiet ones that
@@ -305,8 +305,8 @@
 
   /* Elevation. The surface ladder above says which LEVEL a thing sits on;
      this says that one of them is genuinely in front. Spent on the panels
-     that open over content which looks like them: the row actions menu,
-     the profiles popover, and the launch composer's search results. The
+     that open over content which looks like them: the row actions menu
+     and the launch composer's search results. The
      row menu is the case that set the rule, and the reason is specific to
      WHAT it covers: it floats over other SESSION ROWS, elements that look exactly like the
      row it belongs to and carry the same kinds of control, so a flat
@@ -827,7 +827,6 @@ samp {
 }
 
 .session-heading .new-session-button,
-.session-heading .profiles-toggle,
 .hosts-heading .update-all-button {
   padding: 2px 8px;
   font-size: 12px;
@@ -1891,7 +1890,7 @@ samp {
 }
 
 /* The header is context for the command list, outside its menu role.
-   Truncation keeps an unbounded title or profile from changing placement;
+   Truncation keeps an unbounded title or command from changing placement;
    the full values remain on the header's native tooltips. */
 .session-row-menu-header {
   padding: 6px 11px 7px;
@@ -1926,11 +1925,6 @@ samp {
 
 .session-row-menu-summary-runs {
   min-width: 0;
-}
-
-.session-row-menu-summary[data-profile-existence="renamed"],
-.session-row-menu-summary[data-profile-existence="unrecognized"] {
-  color: var(--warn);
 }
 
 /* The same box in its confirmation lives. Delete and replace prompts are
@@ -2904,9 +2898,9 @@ samp {
 }
 
 /* The invocation badge: what the session IS, in as few characters as the
-   question allows (see `compact_invocation` and the profile branch in
-   `row.rs`). A filled chip rather than another line of plain metadata,
-   because it now shares a line with the directory and the two would
+   question allows (see `compact_invocation` in `row.rs`). A filled chip
+   rather than another line of plain metadata, because it now shares a line
+   with the directory and the two would
    otherwise read as one run-on string — `--chip-bg` is the palette's
    small-filled-badge surface, which is exactly this. Horizontal padding
    only: vertical padding here would grow every row by two pixels for no
@@ -2915,14 +2909,6 @@ samp {
   padding: 0 6px;
   border-radius: var(--radius-sm);
   background: var(--chip-bg);
-}
-
-/* A renamed or unrecognized profile-named badge carries the same amber the
-   menu header summary does. A deleted catalog row stays plain: the
-   snapshotted name is useful history, not a warning about the session. */
-.session-invocation[data-profile-existence="renamed"],
-.session-invocation[data-profile-existence="unrecognized"] {
-  color: var(--warn);
 }
 
 /* ===== Status badges ============================================== */
@@ -3930,188 +3916,6 @@ samp {
   margin-top: 4px;
 }
 
-/* ===== Profiles popup ============================================= */
-
-/* The catalog belongs to the helm rather than a host row, so its management
-   surface floats from the session list header. Viewport bounds mirror the filter popup:
-   the inline geometry variables clamp the anchor, and overflow keeps every
-   profile reachable on a short window. */
-.profiles-popover {
-  box-sizing: border-box;
-  position: fixed;
-  z-index: 20;
-  width: 320px;
-  overflow: auto;
-  padding: 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-menu);
-}
-
-.profiles-popup-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.profiles-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.profiles-title {
-  font-size: 12px;
-  color: var(--fg-1);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.new-profile-button,
-.profile-edit,
-.profile-delete,
-.profile-save,
-.profile-cancel {
-  font-size: 12px;
-  padding: 2px 8px;
-  flex-shrink: 0;
-}
-
-.profile-delete {
-  color: var(--danger);
-}
-
-/* SPEC.md's snapshot rule, stated where profiles are edited. Quiet — it is
-   context rather than a warning — but never hidden: it is the one thing
-   about a profile edit that is not visible from its result. */
-.profiles-snapshot-note,
-.profiles-empty {
-  font-size: 12px;
-  color: var(--fg-1);
-}
-
-.profile-row {
-  display: flex;
-  flex-direction: column;
-  padding: 3px 0;
-}
-
-.profile-row-main {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-/* The confirmation is wider than the popup's ordinary name/action row.
-   Give its consequence and scope full lines so both buttons remain visible
-   without horizontal scrolling, including after a failed focus handoff. */
-.profile-row-confirming {
-  flex-wrap: wrap;
-}
-
-.profile-row-confirming > .confirm-consequence,
-.profile-row-confirming > .confirm-title {
-  flex: 1 0 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  margin-right: 0;
-}
-
-/* Same shrink discipline the host and session rows keep: a profile name and
-   an invocation are unbounded user data, and without a floor plus ellipsis
-   they would push this row's edit and delete controls out of reach — which
-   for a mistyped invocation are the only affordances that could fix it. */
-.profile-name {
-  font-weight: 600;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 0;
-  min-width: 8em;
-}
-
-.profile-kind {
-  font-size: 12px;
-  color: var(--fg-1);
-  flex-shrink: 0;
-}
-
-/* The host's remembered last-used profile, marked rather than reordered so
-   the catalog's order stays the supervisor's. Shape is shared with the
-   status badges above. */
-.profile-default {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: var(--radius-lg);
-  background: var(--chip-bg);
-  color: var(--fg-0);
-  flex-shrink: 0;
-}
-
-.profile-detail {
-  display: flex;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--fg-1);
-  min-width: 0;
-}
-
-.profile-invocation,
-.profile-resume {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-/* The editor reuses the add-host form's shape entirely — same inline,
-   non-modal box, same field styling — so the surfaces that define things do
-   not look like they come from different applications. */
-.profile-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 0 4px;
-}
-
-.profile-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--fg-1);
-}
-
-.profile-form input,
-.profile-kind-select {
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg-0);
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 8px;
-}
-
-.profile-kind-select {
-  align-self: flex-start;
-  min-width: 12em;
-}
-
-/* Two lines that mean different things, sharing one look because a user's
-   response to both is the same: read it, then look at the list below.
-   `.profiles-warning` says a change HAPPENED and could not be described;
-   `.profiles-notice` says the world moved under an editor (a precondition
-   refused, a profile deleted from elsewhere) and nothing was saved. Amber, not
-   red: neither is a failure of the thing the user asked for. */
-.profiles-warning,
-.profiles-notice {
-  font-size: 12px;
-  color: var(--warn);
-}
-
 /* A stale session's notice (SPEC.md: metadata behind a clear notice, and
    no terminal). It takes the terminal's place in the layout rather than
    floating over it, which is why it can wrap freely and does not need the
@@ -4233,8 +4037,7 @@ samp {
 }
 
 .create-session-form input,
-.create-session-host,
-.create-session-profile {
+.create-session-host {
   background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -4246,11 +4049,8 @@ samp {
 
 /* Sized to its content rather than stretched like the text fields beside
    it: a host name is short and fixed, and a full-width select would read as
-   a field the user is expected to type into. The agent picker shares the
-   rule for the same reason — and shares it deliberately, so the two choices
-   a create makes before anything is typed look like one pair. */
-.create-session-host,
-.create-session-profile {
+   a field the user is expected to type into. */
+.create-session-host {
   align-self: flex-start;
   min-width: 12em;
 }
@@ -4259,15 +4059,8 @@ samp {
    registry and the effective target has therefore moved. Amber rather than
    red because nothing has failed — but visible, because the failure this
    prevents is exactly the invisible one, a selector showing host A while
-   the create carries host B.
-
-   The profile note shares it: it is the same kind of statement, made when a
-   remembered or chosen profile is gone (SPEC.md's ask-don't-guess), and the
-   failure it prevents is likewise a picker that appears to have remembered
-   something it has not. */
-.create-session-host-note,
-.create-session-profile-note,
-.create-session-profile-error {
+   the create carries host B. */
+.create-session-host-note {
   font-size: 12px;
   color: var(--warn);
 }

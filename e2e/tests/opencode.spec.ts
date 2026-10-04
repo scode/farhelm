@@ -70,7 +70,7 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   });
   await expect(form).toContainText("fixture captured launch");
   await harness.getByRole("button", { name: "other / command", exact: true }).click();
-  await expect(form.locator(".create-session-profile")).toBeEnabled();
+  await expect(form.getByLabel("agent command")).toBeEnabled();
   // Retained structured settings are a draft, not a second active launch mode.
   await expect(harness.locator('[aria-pressed="true"]')).toHaveCount(1);
   await expect(harness.getByRole("button", { name: "other / command", exact: true })).toHaveAttribute("aria-pressed", "true");

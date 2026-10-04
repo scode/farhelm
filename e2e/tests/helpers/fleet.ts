@@ -209,16 +209,6 @@ export interface SessionRow {
   /** The supervisor's agent kind for the session ("codex", "generic", …);
    * the drag-copy notice tests in mouse-modes.spec.ts check it. */
   agent_kind?: string;
-  /**
-   * The profile this session was created from, absent for a raw-created one.
-   *
-   * `existence` is the field specs actually wait on: the helm derives it per
-   * reply from its catalog, so it changes under a session nobody touched. A
-   * spec that renames a profile and then asserts about a row has to settle on
-   * this value before it plays a notification, or it is telling the page to
-   * re-read a view that has not moved yet.
-   */
-  source_profile?: { id: string; name: string; existence: string };
 }
 
 /**
@@ -241,41 +231,11 @@ export interface HostRow {
   /** The helm's connection token, which a session create echoes back as
    * `expected_incarnation` — captured by the wire specs so they can assert the
    * request carried THIS value rather than merely some value. The create is
-   * the only guarded request; profile reads and edits carry no precondition. */
+   * the only guarded request. */
   incarnation: number;
   /** Whether the host is set to start YOLO launches without asking; every host starts
    * asking first (`false`). Read back by `setLocalYoloWithoutAsking` to prove its write. */
   yolo_without_asking: boolean;
-}
-
-/**
- * One profile from `GET /api/profiles`, narrowed on the same
- * terms as [`SessionRow`]: a field here is a field some assertion depends on.
- *
- * All of them are, now. The preservation spec reads the whole definition back
- * to prove an edit of one field rewrote nothing else, so the type says so
- * rather than leaving a reader to believe this suite only ever looks at names.
- */
-export interface ProfileRow {
-  id: string;
-  name: string;
-  invocation: string;
-  agent_kind: string;
-  resume_template: string[] | null;
-}
-
-/**
- * The profiles reply: the helm-wide catalog plus this helm's remembered
- * default.
- *
- * The helm serves the remembered id RAW, even when it names a deleted
- * profile. The create dialog never selects from it (SPEC.md: New does not
- * silently choose a remembered profile), so specs read it here to set up a
- * remembered profile the dialog must NOT pick.
- */
-export interface ProfilesView {
-  profiles: ProfileRow[];
-  default_profile: string | null;
 }
 
 /** Fail loudly rather than returning a half-decoded body: every caller here
@@ -353,16 +313,17 @@ export async function createSession(
     cwd?: string;
     invocation?: string;
     host?: number;
-    profile_id?: string;
+    /** The integrated agent kind to record for the typed command, when its
+     * first word would not derive the one the spec needs. */
+    agent_kind?: string;
   },
 ): Promise<SessionRow> {
   const response = await request.post("/api/sessions", {
     data: {
       cwd: body.cwd ?? "/tmp",
       title: body.title,
-      ...(body.profile_id
-        ? { profile_id: body.profile_id }
-        : { invocation: body.invocation ?? FAKE_AGENT }),
+      invocation: body.invocation ?? FAKE_AGENT,
+      ...(body.agent_kind === undefined ? {} : { agent_kind: body.agent_kind }),
       ...(body.host === undefined ? {} : { host: body.host }),
     },
   });
@@ -492,84 +453,6 @@ export async function cleanupSession(request: APIRequestContext, id: string): Pr
         `cleanup: ${what} session ${id} failed (${response.status()}): ${await response.text()}`,
       );
     }
-  }
-}
-
-/** The helm-wide profile catalog, as every UI consumer reads it. */
-export async function listProfiles(request: APIRequestContext): Promise<ProfilesView> {
-  const response = await request.get("/api/profiles");
-  await ok(response, "reading profiles");
-  return await response.json();
-}
-
-/**
- * Define a profile through the real API.
- *
- * Deliberately NOT through the panel, for [`createSession`]'s reason: a
- * fixture built through the surface under test cannot distinguish "the page
- * was told" from "the page did it itself", which is exactly what the
- * feed-driven and snapshot tests set out to separate. The one spec that
- * drives the panel does so as its subject, not as setup.
- *
- * `agent_kind` defaults to `generic` because the fake agent is not an
- * integrated one — naming a kind here would ask the supervisor to apply
- * Claude Code's or Codex's heuristics to a script that has neither shape.
- */
-export async function createProfile(
-  request: APIRequestContext,
-  body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
-): Promise<ProfileRow> {
-  const response = await request.post("/api/profiles", {
-    data: {
-      name: body.name,
-      invocation: body.invocation ?? FAKE_AGENT,
-      agent_kind: body.agent_kind ?? "generic",
-      ...(body.resume_template ? { resume_template: body.resume_template } : {}),
-    },
-  });
-  await ok(response, `creating profile ${body.name}`);
-  return await response.json();
-}
-
-/**
- * Replace a profile's definition — the whole definition, because the API
- * replaces rather than merges and a partial body would clear what it omitted.
- */
-export async function updateProfile(
-  request: APIRequestContext,
-  id: string,
-  body: { name: string; invocation?: string; agent_kind?: string; resume_template?: string[] },
-): Promise<ProfileRow> {
-  const response = await request.post(`/api/profiles/${id}`, {
-    data: {
-      name: body.name,
-      invocation: body.invocation ?? FAKE_AGENT,
-      agent_kind: body.agent_kind ?? "generic",
-      ...(body.resume_template ? { resume_template: body.resume_template } : {}),
-    },
-  });
-  await ok(response, `updating profile ${id}`);
-  return await response.json();
-}
-
-/**
- * Delete a profile, tolerating one that is already gone.
- *
- * Cleanup runs after a failed test and after tests that delete the profile
- * themselves as part of what they prove, so "already gone" is a normal
- * outcome rather than an error worth raising over the real failure. Leaving
- * one behind is not an option: the stack is shared, and a live profile
- * changes what the NEXT spec's create dialog preselects.
- */
-export async function cleanupProfile(
-  request: APIRequestContext,
-  id: string,
-): Promise<void> {
-  const response = await request.delete(`/api/profiles/${id}`);
-  if (!response.ok() && response.status() !== 404) {
-    throw new Error(
-      `cleanup: deleting profile ${id} failed (${response.status()}): ${await response.text()}`,
-    );
   }
 }
 

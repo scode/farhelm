@@ -1922,7 +1922,6 @@ dependencies = [
  "farhelm-supervisor",
  "farhelm-teststate",
  "farhelm-testtrace",
- "futures-util",
  "gloo-timers",
  "mime_guess",
  "percent-encoding",

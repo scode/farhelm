@@ -9,12 +9,11 @@
 //! login home and explicitly pinned child shell keep vendor executables and
 //! the test runner's configuration outside the proof.
 
-use crate::agent_relay::{ScriptedHandler, SessionPeer, connect_helm, credential_for};
+use crate::agent_relay::{SessionPeer, credential_for};
 use crate::harness::*;
 use farhelm_helm::CreateExtras;
 use farhelm_proto::{
-    AgentKind, AgentReply, ControlMsg, LaunchEffort, LaunchHarness, LaunchPermission,
-    LaunchSelection,
+    AgentKind, ControlMsg, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
 };
 
 /// An owned named executable plus the working directory it must outlive.
@@ -902,8 +901,6 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
             parent: Some(parent.id.clone()),
             cwd: fixture.work.path().to_string_lossy().into_owned(),
             invocation: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: true,
             title: Some("structured child".to_string()),
             cols: WIDE_COLS,
@@ -912,7 +909,6 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
             confirm_yolo: false,
             agent_kind: None,
             resume_template: None,
-            source_profile: None,
             github_checkout: None,
             launch: None,
         })
@@ -939,15 +935,14 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
     assert_eq!(stored.launch, Some(selection));
 }
 
-/// Restricted raw launch data is refused, while a profile selector may
-/// replace structured-parent inheritance through the attached helm.
+/// Restricted raw launch data is refused at the process boundary, leaving no
+/// child.
 ///
-/// A session credential can choose inheritance or ask the helm to resolve a
-/// profile. It cannot declare that arbitrary invocation metadata is trusted.
-/// The refusal must leave no child, and the accepted profile path must clear
-/// the parent's structured snapshot in every projection.
+/// A session credential can only choose explicit inheritance. It cannot
+/// declare that arbitrary invocation metadata is trusted, even from a
+/// structured parent whose own launch the request copies word for word.
 #[farhelm_testtrace::test]
-async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_metadata() {
+async fn restricted_raw_data_is_refused() {
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
@@ -968,8 +963,6 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
             parent: Some(parent.id.clone()),
             cwd: fixture.work.path().to_string_lossy().into_owned(),
             invocation: Some(fixture.invocation(&selection)),
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             title: Some("raw override".to_string()),
             cols: WIDE_COLS,
@@ -978,7 +971,6 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
             confirm_yolo: false,
             agent_kind: Some(AgentKind::Codex),
             resume_template: None,
-            source_profile: None,
             launch: None,
             github_checkout: None,
         })
@@ -991,7 +983,10 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
     else {
         panic!("raw restricted data must be refused: {raw_reply:?}");
     };
-    assert!(message.contains("exactly one profile name, profile id, or explicit inheritance"));
+    assert!(
+        message.contains("explicit inheritance selector"),
+        "the refusal names the one selector a session may use: {message}"
+    );
     let sessions = h
         .client
         .list_sessions()
@@ -1000,67 +995,6 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
         .sessions;
     assert_eq!(sessions.len(), 1, "a refused raw request creates no child");
     assert_eq!(sessions[0].id, parent.id);
-
-    let profile = farhelm_proto::ProfileSnapshot {
-        id: "structured-override-profile".to_string(),
-        name: "Structured override profile".to_string(),
-    };
-    let helm = connect_helm(
-        &h.sup,
-        ScriptedHandler::answering(AgentReply::ResolvedProfile {
-            invocation: fixture.invocation(&selection),
-            agent_kind: AgentKind::Codex,
-            resume_template: None,
-            source_profile: profile,
-        }),
-    )
-    .await;
-    let (_channel, _replay, _stream) = helm
-        .attach_live(&parent.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach the profile-resolving helm to the structured parent");
-    let profile_reply = peer
-        .control(ControlMsg::CreateSession {
-            req_id: 2,
-            parent: Some(parent.id),
-            cwd: fixture.work.path().to_string_lossy().into_owned(),
-            invocation: None,
-            profile_name: Some("Structured override profile".to_string()),
-            profile_id: None,
-            inherit_agent: false,
-            title: Some("profile override".to_string()),
-            cols: WIDE_COLS,
-            rows: ROWS,
-            intent_key: Some("structured-parent-profile-override".to_string()),
-            confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            source_profile: None,
-            launch: None,
-            github_checkout: None,
-        })
-        .await;
-    let ControlMsg::SessionCreated {
-        session: profile_child,
-        ..
-    } = profile_reply
-    else {
-        panic!("profile override must create a child: {profile_reply:?}");
-    };
-    assert_eq!(profile_child.launch, None);
-    // The refused raw request never executes the wrapper, so the profile
-    // child is the second actual launch after the parent.
-    assert_forwarded(&observed_argv(&h, &profile_child.id, 2).await, &selection);
-    let profile_live = wait_for_live_status(&h.client, &profile_child.id, 30).await;
-    assert_eq!(profile_live.launch, None);
-    let profile_stored = SessionStore::open(&h.state.path().join("supervisor.db"), false)
-        .await
-        .expect("reopen durable store")
-        .session(&profile_child.id)
-        .await
-        .expect("read profile override")
-        .expect("profile override remains stored");
-    assert_eq!(profile_stored.launch, None);
 }
 
 #[cfg(test)]

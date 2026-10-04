@@ -70,7 +70,7 @@ fn focus_restart_with_trigger() {
 
 /// Explain the first fact that prevents editing a resumed launch.
 ///
-/// Provenance takes priority because a raw/profile session cannot supply the
+/// Provenance takes priority because a raw session cannot supply the
 /// structured choices even if its conversation is captured later. The three
 /// generic integrations are named only in the explanation; the actual
 /// availability rule does not maintain a harness capability list.
@@ -3137,7 +3137,6 @@ mod tests {
             host_identity: None,
             host_name: Some("this machine".to_string()),
             stale: false,
-            source_profile: None,
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
@@ -3508,7 +3507,6 @@ mod tests {
                 host_identity: None,
                 host_name: None,
                 stale: false,
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
@@ -3560,7 +3558,6 @@ mod tests {
                 host_identity: None,
                 host_name: None,
                 stale,
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
@@ -3652,7 +3649,6 @@ mod tests {
             host_identity: None,
             host_name: None,
             stale: false,
-            source_profile: None,
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
@@ -3720,7 +3716,6 @@ mod tests {
                 host_identity: None,
                 host_name: None,
                 stale: false,
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: Some(None),
@@ -3779,7 +3774,6 @@ mod tests {
             host_identity: None,
             host_name: None,
             stale: false,
-            source_profile: None,
             github_repo: None,
             working_copy: None,
             seen_activity_at: Some(Some(1_700_000_000)),

@@ -2023,7 +2023,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -4026,7 +4025,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -5254,7 +5252,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )

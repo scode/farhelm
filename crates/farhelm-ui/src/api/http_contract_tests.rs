@@ -8,15 +8,11 @@
 //! the shared files under `crates/farhelm-helm/http-contract/`, and these tests
 //! decode the same files here. A helm-side change fails there first; the
 //! updated fixture then fails here if this crate cannot read the new shape.
-//!
-//! `Profile` and `SourceProfile` are different: the helm passes farhelm-proto's
-//! types through unchanged, so their contract test encodes with the proto type
-//! directly instead of going through a fixture.
 
 use super::{HostListing, SessionListBody};
 use crate::{
     HostKind, HostPhase, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    ProfileExistence, RefreshHealth, RestartOffer, SessionStatus,
+    RefreshHealth, RestartOffer, SessionStatus,
 };
 
 const SESSION_LIST_JSON: &str =
@@ -68,15 +64,6 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     );
     assert_eq!(row.host_name.as_deref(), Some("buildbox"));
     assert!(row.stale);
-    let profile = row.source_profile.as_ref().expect("source_profile decodes");
-    assert_eq!(
-        (
-            profile.id.as_str(),
-            profile.name.as_str(),
-            profile.existence
-        ),
-        ("profile-1", "Codex", ProfileExistence::Renamed)
-    );
     assert_eq!(row.seen_activity_at, Some(Some(1_700_000_090)));
     let repo = row.github_repo.as_ref().expect("github_repo decodes");
     assert_eq!(
@@ -218,60 +205,4 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
             refresh: RefreshHealth::Pending,
         }
     );
-}
-
-/// Why this matters: the profile catalog and each row's source profile are
-/// farhelm-proto types the helm forwards unchanged, while this crate keeps its
-/// own tolerant copies (a kind stays a string so an edit never rewrites a word
-/// a newer helm introduced).
-///
-/// Specification: a proto `Profile` and `SourceProfile`, serialized as the
-/// helm serializes them, decode into this crate's mirrors with the same
-/// values, including the kind's wire spelling.
-#[farhelm_testtrace::test]
-fn proto_profile_types_decode_into_the_ui_mirrors() {
-    let profile = farhelm_proto::Profile {
-        id: "profile-1".to_string(),
-        builtin: true,
-        name: "Codex".to_string(),
-        invocation: "codex".to_string(),
-        agent_kind: farhelm_proto::AgentKind::Codex,
-        resume_template: Some(vec!["codex".to_string(), "resume".to_string()]),
-    };
-    let decoded: crate::Profile =
-        serde_json::from_value(serde_json::to_value(&profile).unwrap()).unwrap();
-    assert_eq!(decoded.id, "profile-1");
-    assert!(decoded.builtin);
-    assert_eq!(decoded.name, "Codex");
-    assert_eq!(decoded.invocation, "codex");
-    assert_eq!(decoded.agent_kind, "codex");
-    assert_eq!(decoded.resume_template, profile.resume_template);
-
-    for (existence, expected) in [
-        (
-            farhelm_proto::ProfileExistence::Present,
-            ProfileExistence::Present,
-        ),
-        (
-            farhelm_proto::ProfileExistence::Renamed,
-            ProfileExistence::Renamed,
-        ),
-        (
-            farhelm_proto::ProfileExistence::Deleted,
-            ProfileExistence::Deleted,
-        ),
-    ] {
-        let source = farhelm_proto::SourceProfile {
-            id: "profile-1".to_string(),
-            name: "Codex".to_string(),
-            existence,
-        };
-        let decoded: crate::SourceProfile =
-            serde_json::from_value(serde_json::to_value(&source).unwrap()).unwrap();
-        assert_eq!(decoded.existence, expected);
-        assert_eq!(
-            (decoded.id.as_str(), decoded.name.as_str()),
-            ("profile-1", "Codex")
-        );
-    }
 }

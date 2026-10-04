@@ -27,11 +27,10 @@ immediately, but cannot recover events from documents that predate script instal
 prove event absence. A killed Playwright worker may bypass fixture finalization, leaving the enclosing run recorder as
 the available evidence. Trace inspection caps selected event streams, not the entire Playwright trace archive.
 
-For helper changes that need the real product stack, these existing selections exercise focus refusal, held replay and
-manual-context takeover. Each names both engines without widening to the full product battery:
+For helper changes that need the real product stack, these existing selections exercise held replay and manual-context
+takeover. Each names both engines without widening to the full product battery:
 
 ```sh
-npx playwright test --project=chromium-profiles --project=webkit-profiles -g 'a popup-vetoed terminal reveal requires a later click$'
 npx playwright test --project=chromium-terminal-replay-rename --project=webkit-terminal-replay-rename -g 'replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, under the banner$'
 npx playwright test --project=chromium-terminal-reconnect --project=webkit-terminal-reconnect -g 'manual-reconnect-takes-the-session-back$'
 ```

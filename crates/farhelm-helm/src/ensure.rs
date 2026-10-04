@@ -500,7 +500,6 @@ mod tests {
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 }],

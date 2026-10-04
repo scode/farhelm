@@ -3217,11 +3217,11 @@ mod tests {
         assert_eq!(emitter.pid, 10);
     }
 
-    /// A supported one-level wrapper profile: a resident wrapper is the
+    /// A supported one-level wrapper launch: a resident wrapper is the
     /// pane process and Claude is its direct child. The wrapper's image
     /// and argv are irrelevant.
     ///
-    /// Why this test matters: wrapper profiles are a supported launch
+    /// Why this test matters: wrapper launches are a supported launch
     /// shape (`e2e/wrapper_launch.rs`), and they must keep hook capture.
     #[farhelm_testtrace::test]
     fn claude_admits_a_hook_under_a_one_level_wrapper() {

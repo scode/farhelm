@@ -38,14 +38,8 @@ test("Cursor launches without claiming session tracking", async ({ page, request
   });
   await expect(form).toContainText("fixture captured Cursor launch");
 
-  // The inactive structured draft must not leak its notice into another
-  // profile, and both built-in Cursor profiles disclose the same limitation.
+  // The inactive structured draft must not leak its notice into the
+  // command path.
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-  const profiles = form.locator(".create-session-profile");
-  await profiles.selectOption("builtin-cursor");
-  await expect(form).toContainText("Cursor session tracking and Resume are not supported.");
-  await profiles.selectOption("builtin-cursor-yolo");
-  await expect(form).toContainText("Cursor session tracking and Resume are not supported.");
-  await profiles.selectOption("");
   await expect(form).not.toContainText("Cursor session tracking and Resume are not supported.");
 });

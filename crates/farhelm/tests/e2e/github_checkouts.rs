@@ -11,7 +11,7 @@ use crate::harness::*;
 use crate::structured_launches::{FakeHarness, fake_harness, observed_argv_in_state};
 use farhelm_proto::{
     AcceptedGithubPreview, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission,
-    LaunchSelection, ProfileExistence, SessionInfo,
+    LaunchSelection, SessionInfo,
 };
 use serde_json::{Value, json};
 use std::ffi::OsString;
@@ -330,13 +330,11 @@ impl CheckoutStack {
     }
 }
 
-/// The four launch modes whose accepted snapshots must survive recovery.
+/// The two launch modes whose accepted snapshots must survive recovery.
 #[derive(Clone, Debug)]
 enum Selector {
     Raw,
     Structured(LaunchSelection),
-    ProfileId,
-    ProfileName,
 }
 
 /// One original request and the authoritative outcome observed without its reply.
@@ -566,12 +564,6 @@ fn create_body(
         Selector::Structured(selection) => {
             object.insert("launch".into(), serde_json::to_value(selection).unwrap());
         }
-        Selector::ProfileId => {
-            object.insert("profile_id".into(), json!("builtin-codex-yolo"));
-        }
-        Selector::ProfileName => {
-            object.insert("profile_name".into(), json!("codex-yolo"));
-        }
     }
     serde_json::to_vec(&body).expect("serialize create body")
 }
@@ -736,7 +728,7 @@ async fn await_prepared(
 }
 
 /// Assert immutable checkout identity and selector-specific launch metadata.
-fn assert_case_metadata(session: &SessionInfo, case: &AcceptedCase, browser_reply: bool) {
+fn assert_case_metadata(session: &SessionInfo, case: &AcceptedCase) {
     assert_eq!(session.id, case.session.id, "{} session id", case.label);
     assert_eq!(session.cwd, case.preview.binding.cwd, "{} cwd", case.label);
     assert_eq!(session.canonical_cwd.as_deref(), Some(session.cwd.as_str()));
@@ -763,30 +755,10 @@ fn assert_case_metadata(session: &SessionInfo, case: &AcceptedCase, browser_repl
         Selector::Raw => {
             assert_eq!(session.invocation, "codex --yolo");
             assert!(session.launch.is_none());
-            assert!(session.source_profile.is_none());
         }
         Selector::Structured(selection) => {
             assert_eq!(session.launch.as_ref(), Some(selection));
-            assert!(session.source_profile.is_none());
             assert!(session.invocation.starts_with("codex "));
-        }
-        Selector::ProfileId | Selector::ProfileName => {
-            assert!(session.launch.is_none());
-            assert_eq!(session.invocation, "codex --yolo");
-            let profile = session
-                .source_profile
-                .as_ref()
-                .expect("profile-backed session carries its snapshot");
-            assert_eq!(profile.id, "builtin-codex-yolo");
-            assert_eq!(profile.name, "codex-yolo");
-            assert_eq!(
-                profile.existence,
-                if browser_reply {
-                    ProfileExistence::Present
-                } else {
-                    ProfileExistence::Unresolved
-                }
-            );
         }
     }
 }
@@ -795,7 +767,7 @@ fn assert_case_metadata(session: &SessionInfo, case: &AcceptedCase, browser_repl
 fn assert_process_argv(case: &AcceptedCase, argv: &str) {
     let words = shell_words::split(argv).expect("fake executable argv is shell-safe");
     match &case.selector {
-        Selector::Raw | Selector::ProfileId | Selector::ProfileName => {
+        Selector::Raw => {
             assert_eq!(
                 words.first().map(String::as_str),
                 Some("--yolo"),
@@ -902,7 +874,7 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
     assert_eq!(status, 200, "diagnostic create failed: {body}");
     let session: SessionInfo = serde_json::from_str(&body).expect("diagnostic session JSON");
     let case = AcceptedCase::new(title, selector, 1, Vec::new(), accepted, session.clone());
-    assert_case_metadata(&session, &case, true);
+    assert_case_metadata(&session, &case);
     let argv = await_prepared(&stack, &session, &stack.hook_a(), 1).await;
     assert_process_argv(&case, &argv);
     assert_eq!(
@@ -936,8 +908,6 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
                 workspace_trust: None,
             }),
         ),
-        ("profile-id-recovery", Selector::ProfileId),
-        ("profile-name-recovery", Selector::ProfileName),
     ];
     let mut cases = Vec::new();
     for (index, (label, selector)) in selectors.into_iter().enumerate() {
@@ -957,7 +927,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         let session = await_server_session(stack.supervisor.state.path(), label).await;
         let generation = u32::try_from(index + 1).unwrap();
         let case = AcceptedCase::new(label, selector, generation, body, accepted, session);
-        assert_case_metadata(&case.session, &case, false);
+        assert_case_metadata(&case.session, &case);
         let argv = await_prepared(&stack, &case.session, &stack.hook_a(), generation).await;
         assert_process_argv(&case, &argv);
         drop(unread);
@@ -984,7 +954,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         let text = response.text().await.expect("read replay response");
         assert!(status.is_success(), "{} replay failed: {text}", case.label);
         let replayed: SessionInfo = serde_json::from_str(&text).expect("replayed session JSON");
-        assert_case_metadata(&replayed, case, true);
+        assert_case_metadata(&replayed, case);
         let argv = observed_argv_in_state(
             stack.supervisor.state.path(),
             &case.session.id,
@@ -1060,16 +1030,19 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         directory_names(stack.root_b.path()),
         std::slice::from_ref(&fresh_preview.binding.basename)
     );
+    // The fixture executable counts launches across the whole test: every
+    // accepted case launched once, so this create is the next one.
+    let fresh_generation = u32::try_from(cases.len() + 1).unwrap();
     let fresh_case = AcceptedCase::new(
         fresh_title,
         fresh_selector,
-        5,
+        fresh_generation,
         Vec::new(),
         fresh_preview,
         fresh.clone(),
     );
-    assert_case_metadata(&fresh, &fresh_case, true);
-    let argv = await_prepared(&stack, &fresh, &stack.hook_b(), 5).await;
+    assert_case_metadata(&fresh, &fresh_case);
+    let argv = await_prepared(&stack, &fresh, &stack.hook_b(), fresh_generation).await;
     assert_process_argv(&fresh_case, &argv);
     assert_eq!(hook_count(&stack.hook_b(), &fresh.cwd), 1);
     assert_eq!(directory_names(stack.root_a.path()), expected_a);

@@ -31,7 +31,6 @@ test("the web shell hides the spacer and loads no bridge script", async ({ page 
   const spacer = bar.locator(".window-drag-region");
   // Fixture premise: the production header rendered with its controls.
   await expect(shell).toBeVisible({ timeout: 20_000 });
-  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await expect(bar.locator(".app-version")).not.toHaveText("");
   // The wordmark leads the bar, named for assistive technology by the brand
   // file's own label, and sits left of the version.

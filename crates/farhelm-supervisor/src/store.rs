@@ -55,12 +55,8 @@
 //! generation fence prevents a late report from changing a replacement launch.
 //! Historical stored identities remain valid regardless of their provenance.
 //!
-//! Agent profiles themselves live in the helm's catalog. This store keeps
-//! only the immutable profile identity snapshotted when a session was
-//! created, beside the resolved invocation and integration fields needed to
-//! relaunch that session without consulting a helm. Profile existence is
-//! therefore deliberately absent here: the supervisor reports it as
-//! unresolved and the helm derives it against its own current catalog.
+//! Each session row keeps the resolved invocation and integration fields
+//! needed to relaunch that session without consulting a helm.
 //!
 //! The `title` is the one piece of metadata a USER can change after
 //! creation (PLAN_M5.md item 3), and its writer —
@@ -89,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 24;
+const SCHEMA_VERSION: i64 = 25;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1039,9 +1035,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
 /// session to "no integration" would discard a captured conversation
 /// identity that may be sitting in the very next column.
 ///
-/// Shared by the session and profile decoders, which is why the message
-/// names neither: both columns hold the same vocabulary on purpose (see
-/// [`PROFILES_SCHEMA`]), and each caller adds its own row identity as
+/// The message names no row: each caller adds its own row identity as
 /// context.
 fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind> {
     use farhelm_proto::AgentKind as K;
@@ -1217,7 +1211,7 @@ pub struct StoredSession {
     pub cwd: String,
     pub invocation: String,
     /// The structured choice that produced `invocation`, when this row came
-    /// from the launch composer. Legacy raw and profile rows leave it empty;
+    /// from the launch composer. Legacy rows leave it empty;
     /// this field is never reconstructed by parsing their command lines.
     pub launch: Option<farhelm_proto::LaunchSelection>,
     pub tmux_name: String,
@@ -1350,46 +1344,6 @@ pub struct StoredSession {
     /// is `Unknown` and fails closed at the corridor. Only OMP uses
     /// this column today.
     pub omp_launch_program: Option<String>,
-    /// Which profile this session was CREATED from, or `None` for a
-    /// raw-created session (PLAN_M6_75.md item 4).
-    ///
-    /// Immutable, like the integration snapshot beside it and for the same
-    /// reason SPEC.md gives: editing or deleting a profile must not disturb
-    /// the sessions already created from it, so nothing ever rewrites this
-    /// — not a rename, not a delete, not a restart. See [`ProfileSnapshot`]
-    /// for what is (and deliberately is not) in it.
-    pub source_profile: Option<ProfileSnapshot>,
-}
-
-/// The identity of the profile a session was created from, exactly as it
-/// was at that moment (PLAN_M6_75.md item 4).
-///
-/// The durable half of `farhelm_proto::SourceProfile`, whose third field —
-/// the profile's CURRENT existence — is deliberately absent here: existence
-/// is a statement about the helm catalog at reply-build time, and a column
-/// holding it would be wrong the moment anyone edited or deleted a profile.
-/// See that wire type's docs for the whole snapshot-plus-derived-existence
-/// argument; this struct is the "nothing mutable lives in the snapshot"
-/// half of it.
-///
-/// The two fields are stored as two nullable columns that are written and
-/// read only as a PAIR. SQLite is not asked to enforce that (a table-level
-/// `CHECK` cannot be added by `ALTER TABLE ADD COLUMN`, so adding one would
-/// make a migrated database differ from a fresh one — the exact divergence
-/// `migrated_and_fresh_schemas_agree` exists to prevent), so the invariant
-/// lives in code: one writer ([`insert_session_row`]) sets both or neither,
-/// and [`decode_session_row`] refuses a half-written row rather than
-/// guessing at the missing side.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProfileSnapshot {
-    /// The profile's immutable id — the key existence is derived by, and
-    /// the key a client filters on. Never re-resolved to a name.
-    pub id: String,
-    /// The profile's name AS IT WAS when this session was created. Not
-    /// refreshed when the profile is renamed; that is the whole point of
-    /// snapshotting it (the session keeps saying what it was created from,
-    /// and the derived existence is what reports the rename).
-    pub name: String,
 }
 
 /// What [`SessionStore::delete_session_archiving_memberships`] settled.
@@ -1524,6 +1478,10 @@ pub struct SessionStore {
 /// - 24: remove the scan's record locator, ambiguity flag, and first-input
 ///   timestamp. The conversation identity, source, and ownership proof remain;
 ///   the no-report diagnostic now keeps its own launch-scoped timer in memory.
+/// - 25: drop `source_profile_id`/`source_profile_name`: profiles were
+///   removed, and with them every session's snapshot of the profile it came
+///   from (SPEC.md, the launch-kinds upgrade paragraph). Nothing else read
+///   them; the session's own stored launch is unaffected.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1571,8 +1529,6 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  captured_conversation TEXT,
                  generation            INTEGER NOT NULL DEFAULT 0,
                  launch_scoped         INTEGER NOT NULL DEFAULT 0,
-                 source_profile_id     TEXT,
-                 source_profile_name   TEXT,
                  parent                TEXT,
                  session_token         TEXT,
                  creation_seq          INTEGER,
@@ -1629,7 +1585,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 24;
+             PRAGMA user_version = 25;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2208,6 +2164,19 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 23 to 24")?;
         version = 24;
     }
+    if version == 24 {
+        // Profiles are gone, built-in and stored, with no conversion
+        // (SPEC.md); a session no longer remembers which one it came from.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions DROP COLUMN source_profile_id;
+             ALTER TABLE sessions DROP COLUMN source_profile_name;
+             PRAGMA user_version = 25;
+             COMMIT;",
+        )
+        .context("migrating schema from version 24 to 25")?;
+        version = 25;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2347,12 +2316,11 @@ fn insert_session_row(
          (id, title, cwd, invocation, tmux_name, pane, created_at, creation_seq, \
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
-          generation, launch_scoped, \
-          source_profile_id, source_profile_name, parent, session_token, \
+          generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2372,11 +2340,6 @@ fn insert_session_row(
             row.captured_conversation,
             row.generation,
             i64::from(row.launch_scoped),
-            // Both or neither, from one `Option` — see `ProfileSnapshot`
-            // for why this pairing is a code invariant rather than a
-            // `CHECK` constraint.
-            row.source_profile.as_ref().map(|profile| &profile.id),
-            row.source_profile.as_ref().map(|profile| &profile.name),
             row.parent,
             session_token,
             row.last_activity_at,
@@ -2412,7 +2375,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
                                agent_kind, resume_template, canonical_cwd, \
                                captured_conversation, generation, launch_scoped, created_at, \
-                               source_profile_id, source_profile_name, parent, creation_seq, \
+                               parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program";
 
@@ -2420,16 +2383,14 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
 /// cannot happen inside a rusqlite row mapper (whose error type is
 /// rusqlite's own — see `load_all`'s two-stage comment).
 ///
-/// The trailing members are the raw agent-kind text, the raw
-/// resume-template JSON, and the raw source-profile id/name pair; every
-/// other column is already in place on the partially-built
+/// The trailing members are the raw agent-kind text and the raw
+/// resume-template JSON; every other column is already in place on the partially-built
 /// `StoredSession`, because only these (with the outcome) can be REFUSED.
 type SessionColumns = (
     StoredSession,
     OutcomeColumns,
     String,
     Option<String>,
-    (Option<String>, Option<String>),
     i64,
     Option<String>,
 );
@@ -2445,7 +2406,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
     Ok((
         StoredSession {
             id: r.get(0)?,
-            parent: r.get(19)?,
+            parent: r.get(17)?,
             title: r.get(1)?,
             cwd: r.get(2)?,
             invocation: r.get(3)?,
@@ -2460,21 +2421,19 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             generation: r.get(14)?,
             launch_scoped: r.get::<_, i64>(15)? != 0,
             created_at: r.get(16)?,
-            last_activity_at: r.get(21)?,
-            last_work_started_at: r.get(22)?,
+            last_activity_at: r.get(19)?,
+            last_work_started_at: r.get(20)?,
             creation_seq: 0,
-            source_profile: None,
-            conversation_source: r.get(23)?,
-            capture_ownership_version: r.get(25)?,
-            omp_reporter_asset: r.get(26)?,
-            omp_launch_program: r.get(27)?,
+            conversation_source: r.get(21)?,
+            capture_ownership_version: r.get(23)?,
+            omp_reporter_asset: r.get(24)?,
+            omp_launch_program: r.get(25)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
         r.get(11)?,
-        (r.get(17)?, r.get(18)?),
-        r.get::<_, i64>(20)?,
-        r.get(24)?,
+        r.get::<_, i64>(18)?,
+        r.get(22)?,
     ))
 }
 
@@ -2499,36 +2458,17 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// `{cwd}`-first vector that slipped past this refusal would exec a
 /// program literally named `{cwd}` on restart, not the working directory
 /// itself.
-///
-/// A HALF-WRITTEN source-profile pair is refused for the same class of
-/// reason (see [`ProfileSnapshot`] for why SQLite is not asked to enforce
-/// the pairing): an id with no name would render as a session created from
-/// a nameless profile, and a name with no id could never have its existence
-/// derived at all, since the id is the only key the catalog is looked up
-/// by. Neither is something to invent a value for.
 fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
     let (
         mut row,
         (state, exit_code, annotation, error_detail),
         kind,
         template,
-        source_profile,
         creation_seq,
         launch,
     ) = columns;
     row.creation_seq = u64::try_from(creation_seq)
         .with_context(|| format!("session {} has a negative creation sequence", row.id))?;
-    row.source_profile = match source_profile {
-        (Some(id), Some(name)) => Some(ProfileSnapshot { id, name }),
-        (None, None) => None,
-        (id, name) => anyhow::bail!(
-            "session {} has only half of a source-profile snapshot recorded (id {:?}, name {:?}); \
-             the two columns are written together or not at all",
-            row.id,
-            id,
-            name
-        ),
-    };
     row.outcome = LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
         .with_context(|| format!("session {}", row.id))?;
     row.agent_kind =
@@ -2552,12 +2492,6 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
                 row.id,
                 selection.harness,
                 agent_kind_column(row.agent_kind)
-            );
-        }
-        if row.source_profile.is_some() {
-            anyhow::bail!(
-                "session {} records both a structured launch and profile provenance",
-                row.id
             );
         }
     }
@@ -5726,7 +5660,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: scoped,
-                    source_profile: None,
                 },
                 None,
             )
@@ -6588,7 +6521,14 @@ mod tests {
                     column.0 == "sessions"
                         && !matches!(
                             column.1.as_str(),
-                            "captured_record" | "capture_ambiguous" | "first_input_at"
+                            // Dropped on purpose by later schemas: the
+                            // scan bookkeeping (24) and the profile
+                            // snapshot (25).
+                            "captured_record"
+                                | "capture_ambiguous"
+                                | "first_input_at"
+                                | "source_profile_id"
+                                | "source_profile_name"
                         )
                 })
                 .map(|column| column.1.clone())
@@ -6655,7 +6595,8 @@ mod tests {
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                24
+                SCHEMA_VERSION,
+                "the v23 fixture migrates all the way to the current schema"
             );
         }
         let fresh_path = dir.path().join("fresh.db");
@@ -6696,6 +6637,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&db_path).expect("open raw v19 fixture");
+            restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
@@ -7095,7 +7037,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -7147,7 +7088,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -7753,7 +7693,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -7821,7 +7760,6 @@ mod tests {
                     captured_conversation: Some("conversation-7".to_string()),
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -7909,7 +7847,6 @@ mod tests {
                         captured_conversation: None,
                         generation: 0,
                         launch_scoped: false,
-                        source_profile: None,
                     },
                     None,
                 )
@@ -7971,6 +7908,7 @@ mod tests {
             // the separate migration-ladder tests cover the latter. Restore
             // archived too, since schema 17 still carried that column.
             let conn = store.conn.lock();
+            restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "DROP TABLE working_copy_members;
                  DROP TABLE working_copies;
@@ -8047,6 +7985,7 @@ mod tests {
         std::fs::write(&attachment, b"retained attachment").expect("write attachment");
         {
             let conn = store.conn.lock();
+            restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
@@ -8428,7 +8367,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -8488,7 +8426,6 @@ mod tests {
             captured_conversation: None,
             generation: 0,
             launch_scoped: false,
-            source_profile: None,
         }
     }
 
@@ -9924,7 +9861,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -10303,7 +10239,7 @@ mod tests {
     /// readers, not merely fail to be refused. An overbroad refusal that
     /// matched the placeholder ANYWHERE in the vector, rather than only at
     /// slot 0, would pass every negative test above while still breaking
-    /// every legitimate wrapper profile — this is the test that would catch
+    /// every legitimate wrapper invocation — this is the test that would catch
     /// that mistake.
     #[farhelm_testtrace::test]
     async fn a_wrapper_shaped_session_row_loads_through_both_readers() {
@@ -10342,7 +10278,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -10414,6 +10349,70 @@ mod tests {
             other => panic!("expected a claimed generation, got {other:?}"),
         }
     }
+    /// Restore the two session columns every schema from v8 through v24 had
+    /// and schema 25 drops (`source_profile_id`, `source_profile_name`).
+    ///
+    /// A fixture built by downgrading a current database to an older version
+    /// must hold them, or the schema-25 rung's `DROP COLUMN` fails on a shape
+    /// no real older database ever had.
+    fn restore_pre_v25_session_profile_columns(conn: &Connection) {
+        conn.execute_batch(
+            "ALTER TABLE sessions ADD COLUMN source_profile_id TEXT;
+             ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;",
+        )
+        .expect("restore the historical profile snapshot columns");
+    }
+
+    /// Spec: schema 25 drops a session's profile snapshot columns
+    /// (`source_profile_id`, `source_profile_name`) and keeps everything else
+    /// about the row, including one whose snapshot was set.
+    ///
+    /// Why: profiles were removed with no conversion (SPEC.md, the
+    /// launch-kinds upgrade paragraph), so the snapshot has nothing left to
+    /// describe, but a session created from a profile is a live session the
+    /// user still owns: the step must not lose it, its command, or its
+    /// captured conversation along with the columns.
+    #[farhelm_testtrace::test]
+    async fn schema_25_drops_profile_snapshots_and_keeps_the_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("create current db");
+        insert_running(&store, "s1").await;
+        drop(store);
+        {
+            let conn = Connection::open(&db_path).expect("open fixture");
+            restore_pre_v25_session_profile_columns(&conn);
+            conn.execute_batch(
+                "UPDATE sessions SET source_profile_id = 'p-1',
+                                     source_profile_name = 'Reviewer',
+                                     captured_conversation = 'conv-1'
+                 WHERE id = 's1';
+                 PRAGMA user_version = 24;",
+            )
+            .expect("plant a v24 row created from a profile");
+        }
+
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v24");
+        let row = store
+            .session("s1")
+            .await
+            .unwrap()
+            .expect("the session survives");
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-1"));
+        drop(store);
+        let columns = columns_of(&db_path);
+        assert!(
+            !columns
+                .iter()
+                .any(|column| column.0 == "sessions" && column.1.starts_with("source_profile")),
+            "schema 25 drops both snapshot columns: {columns:?}"
+        );
+    }
+
     /// Restore the profiles table that every schema from v8 through v14 had.
     ///
     /// These downgrade fixtures start from a current database, where the
@@ -10542,6 +10541,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&db_path).expect("open raw v17 fixture");
+            restore_pre_v25_session_profile_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN last_work_started_at;
                  ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
@@ -10653,6 +10653,7 @@ mod tests {
         // Reverse every later schema change, including removed columns.
         // Version 12 still had archived, while activity, provenance, launch
         // metadata and work-start ordering all arrived later.
+        restore_pre_v25_session_profile_columns(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
@@ -10754,6 +10755,7 @@ mod tests {
         // Leaving a work-start or checkout-origin column behind would make its own
         // migration fail on a duplicate instead of exercising provenance.
         // Restore archived as well so its later removal sees the old shape.
+        restore_pre_v25_session_profile_columns(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
@@ -11211,108 +11213,6 @@ mod tests {
         assert!(store.session("gone").await.expect("read").is_none());
     }
 
-    /// A session's source-profile snapshot must survive the on-disk round
-    /// trip intact, and a HALF-written pair must be refused at load
-    /// (PLAN_M6_75.md item 4).
-    ///
-    /// The refusal half is the part worth a test: SQLite is deliberately
-    /// not asked to enforce the pairing (a table-level `CHECK` cannot be
-    /// added by `ALTER TABLE`, so adding one would make migrated and fresh
-    /// databases differ), which means the invariant lives entirely in code
-    /// and would rot silently without this. A row with an id and no name
-    /// would render as a session created from a nameless profile; one with
-    /// a name and no id could never have its existence derived at all.
-    #[farhelm_testtrace::test]
-    async fn a_sessions_source_profile_round_trips_and_a_half_row_is_refused() {
-        let (_dir, store) = fresh_store().await;
-        store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    capture_ownership_version: 0,
-                    omp_reporter_asset: None,
-                    omp_launch_program: None,
-                    id: "s1".to_string(),
-                    parent: None,
-                    title: "s1".to_string(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: "/tmp/work".to_string(),
-                    invocation: "claude".to_string(),
-                    launch: None,
-                    tmux_name: "fh-s1".to_string(),
-                    pane: "%0".to_string(),
-                    outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
-                    canonical_cwd: None,
-                    captured_conversation: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: Some(ProfileSnapshot {
-                        id: "starter-claude".to_string(),
-                        name: "Claude Code".to_string(),
-                    }),
-                },
-                None,
-            )
-            .await
-            .expect("insert");
-        assert_eq!(
-            store
-                .session("s1")
-                .await
-                .expect("read")
-                .expect("present")
-                .source_profile,
-            Some(ProfileSnapshot {
-                id: "starter-claude".to_string(),
-                name: "Claude Code".to_string(),
-            })
-        );
-
-        {
-            let conn = store.conn.lock();
-            conn.execute(
-                "UPDATE sessions SET source_profile_name = NULL WHERE id = ?1",
-                rusqlite::params!["s1"],
-            )
-            .expect("hand-edit half the pair away");
-        }
-        let refusal = store
-            .session("s1")
-            .await
-            .expect_err("half a snapshot is not something to guess the other half of");
-        assert!(
-            format!("{refusal:#}").contains("half of a source-profile snapshot"),
-            "the refusal must say what is wrong with the row: {refusal:#}"
-        );
-
-        // The OTHER orientation, which is not symmetric and would be easy
-        // to miss with a check written as "if the id is missing": a name
-        // with no id is worse, because the id is the only key existence can
-        // be derived by, so the row could never be described at all.
-        {
-            let conn = store.conn.lock();
-            conn.execute(
-                "UPDATE sessions SET source_profile_id = NULL, source_profile_name = 'orphan' \
-                 WHERE id = ?1",
-                rusqlite::params!["s1"],
-            )
-            .expect("hand-edit the other half away");
-        }
-        let refusal = store
-            .session("s1")
-            .await
-            .expect_err("a name with no id names nothing this build can look up");
-        assert!(
-            format!("{refusal:#}").contains("half of a source-profile snapshot"),
-            "the refusal must say what is wrong with the row: {refusal:#}"
-        );
-    }
-
     /// The full migration ladder preserves a version-7 session while
     /// removing the obsolete profile catalog at version 15.
     ///
@@ -11323,9 +11223,9 @@ mod tests {
     /// running, created by a build that had no catalog at all.
     ///
     /// This matters because the ladder still passes through the historical
-    /// version-8 catalog shape before version 15 drops it. The session's
-    /// newly added source columns must remain null and its other metadata
-    /// must survive both transitions.
+    /// version-8 catalog shape before version 15 drops it, and the
+    /// version-8 source columns before version 25 drops them. The session's
+    /// other metadata must survive every transition.
     #[farhelm_testtrace::test]
     async fn the_full_migration_preserves_v7_sessions_and_drops_the_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -11340,11 +11240,6 @@ mod tests {
         assert_eq!(rows[0].invocation, "claude");
         assert_eq!(rows[0].agent_kind, farhelm_proto::AgentKind::Claude);
         assert_eq!(rows[0].outcome, LastOutcome::Running);
-        assert_eq!(
-            rows[0].source_profile, None,
-            "a session that predates the catalog is raw-created, not a session whose profile \
-             the migration had to invent"
-        );
         let conn = Connection::open(&path).expect("inspect migrated schema");
         let profile_tables: i64 = conn
             .query_row(
@@ -11459,7 +11354,6 @@ mod tests {
             captured_conversation: None,
             generation: 0,
             launch_scoped: false,
-            source_profile: None,
         };
         store
             .insert_session(

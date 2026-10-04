@@ -48,7 +48,7 @@ const terminalMultihostSpec = "terminal-multihost.spec.ts";
 // and nothing puts one back. That teardown must therefore be last across the
 // WHOLE run, not merely last within its own engine: an engine-local ordering
 // left chromium's multihost teardown ahead of every webkit project — and the
-// specs that need the second host (`agent-relay`, `filters`, `profiles`) can
+// specs that need the second host (`agent-relay`, `filters`) can
 // only wait for it, never restore it. The symptom was a WebKit relay suite
 // that failed in its `beforeAll` or skipped its whole point.
 //

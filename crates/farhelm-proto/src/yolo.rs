@@ -5,7 +5,7 @@
 //! permission choice ([`LaunchSelection::permissions`]), resolved through
 //! [`crate::LaunchHarness::effective_permission`]. An omitted Pi, OpenCode,
 //! OMP or Goose permission means YOLO; supported approval choices still win.
-//! A raw command line or profile invocation carries only argv, so it
+//! A raw command line carries only argv, so it
 //! is YOLO when its program is a recognized vendor CLI and an argument before `--`
 //! is one of that vendor's permission-bypass flags or its options spell a
 //! YOLO mode (`--permission-mode bypassPermissions`, Codex's `-a never` with
@@ -285,7 +285,7 @@ fn program_argv_is_yolo(argv: &[String]) -> bool {
 }
 
 /// Classify a raw invocation with the same shell-word splitting used to launch
-/// profiles. Invalid quoting cannot establish a YOLO mode; validation reports
+/// it. Invalid quoting cannot establish a YOLO mode; validation reports
 /// the malformed command separately.
 pub fn invocation_is_yolo(invocation: &str) -> bool {
     shell_words::split(invocation).is_ok_and(|argv| argv_is_yolo(&argv))

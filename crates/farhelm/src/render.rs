@@ -43,7 +43,7 @@ pub(crate) fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// piece of information that has no other spelling — which row is the
 /// asking session, and which host it is on.
 ///
-/// Only ever called with the reply to `Hosts`, `Sessions`, or `Profiles` —
+/// Only ever called with the reply to `Hosts` or `Sessions` —
 /// the four lifecycle verbs print their own one-line confirmation instead
 /// (see `main`'s `Rename`/`Stop`/`Restart` arms) and the two creating verbs
 /// print an id on stdout with their confirmation on stderr — which is why
@@ -119,21 +119,6 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             }));
             Ok(aligned(&rows, &[]))
         }
-        AgentReply::Profiles { profiles, .. } => {
-            let mut rows = vec![vec![
-                "ID".to_string(),
-                "NAME".to_string(),
-                "BUILTIN".to_string(),
-            ]];
-            rows.extend(profiles.iter().map(|profile| {
-                vec![
-                    profile.id.clone(),
-                    profile.name.clone(),
-                    profile.builtin.to_string(),
-                ]
-            }));
-            Ok(aligned(&rows, &[0, 1]))
-        }
         // Refused rather than rendered: a lifecycle or creating reply has
         // one row and no table to be, and printing an empty one would read
         // as an empty fleet. `main` never routes one here — see this
@@ -142,8 +127,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         AgentReply::Session { .. }
         | AgentReply::Restarted { .. }
         | AgentReply::Stopped {}
-        | AgentReply::Created { .. }
-        | AgentReply::ResolvedProfile { .. } => {
+        | AgentReply::Created { .. } => {
             anyhow::bail!("only discovery listings are rendered as a table")
         }
     }
