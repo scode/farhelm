@@ -6,12 +6,13 @@ use super::backend::{
 };
 use super::e2e::{E2E_BACKEND_ENV, E2ePayloads, E2eProvisioningBackend};
 use super::http::{
-    ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest, ProvisioningRequestError,
-    ProvisioningView, RunAccepted, RunStatus, StepStatus, UpdatePlanResponse,
+    HostPlanResponse, ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest,
+    ProvisioningRequestError, ProvisioningView, RunAccepted, RunStatus, StepStatus,
 };
 use super::payloads::{PayloadSelection, PayloadSource, production_payloads};
 use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
+    ResolvedPath, UninstallFacts,
 };
 use crate::manager::{ConnectionManager, HostState, peer_text};
 use crate::store::{
@@ -19,7 +20,7 @@ use crate::store::{
 };
 use anyhow::{Context as _, bail};
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,16 @@ use std::time::Duration;
 /// shaped installation beside it.
 const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine; run farhelm helm setup here instead of provisioning from \
      the panel";
+
+/// What the hosts panel says when uninstall is chosen for the helm's own
+/// machine. The panel never removes Farhelm there: `farhelm uninstall` does,
+/// with the ownership checks that machine's installation needs.
+const LOCAL_UNINSTALL_HANDOFF: &str =
+    "this is the helm's own machine; remove Farhelm here with farhelm uninstall";
+
+/// How many running sessions an uninstall refusal names before summarizing
+/// the rest as a count, so a busy host cannot make the message unbounded.
+const UNINSTALL_REFUSAL_NAMED_SESSIONS: usize = 10;
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -70,6 +81,13 @@ enum PendingConfirmation {
         expected_identity: Option<String>,
         registration: ProbeRegistration,
     },
+    /// UNINSTALL revalidates by planning again and requiring the same plan
+    /// (see [`ProvisioningService::revalidate`]), so beyond the host it needs
+    /// only the registration the plan was made against.
+    Uninstall {
+        host: HostId,
+        registration: ProbeRegistration,
+    },
 }
 
 /// Confirmation either preserves the frozen executor plan or discovers that
@@ -98,6 +116,17 @@ struct DiscoveredDial {
     farhelm: PathBuf,
     state_dir: Option<PathBuf>,
     identity: Option<String>,
+}
+
+/// What [`ProvisioningService::delete_registered_host`] does with the host's
+/// run task, if it still has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunTask {
+    /// Abort it and wait for it to end: Remove, which holds the host's
+    /// provisioning lock itself, so any task left is a finished run's.
+    Abort,
+    /// Only drop its handle: UNINSTALL's last step, which IS that task.
+    Detach,
 }
 
 /// Process-local orchestration authority for probes and one run per host.
@@ -590,6 +619,11 @@ impl ProvisioningService {
                 {
                     ReachOutcome::Supported(reach) => reach,
                     ReachOutcome::Manual(reason) => return Ok(ProbeResponse::Manual { reason }),
+                    ReachOutcome::SetupManaged => {
+                        return Ok(ProbeResponse::Manual {
+                            reason: ProvisioningOperation::Add.setup_managed_refusal(),
+                        });
+                    }
                 };
                 let probe_id = uuid::Uuid::new_v4().to_string();
                 let plan = self.layout.plan(
@@ -913,7 +947,7 @@ impl ProvisioningService {
     /// With no local plan reachable at all, there is no stale local plan
     /// for a newly written unit to lose a race against — see the note in
     /// [`Self::start_update`].
-    pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
+    pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_updates() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
@@ -939,13 +973,13 @@ impl ProvisioningService {
     pub(super) async fn plan_update_for_local_executor_tests(
         &self,
         host: HostId,
-    ) -> anyhow::Result<UpdatePlanResponse> {
+    ) -> anyhow::Result<HostPlanResponse> {
         self.plan_update_unguarded(host).await
     }
 
     /// The UPDATE planner itself. See [`Self::plan_update`] for the local
     /// row's refusal, which is deliberately NOT part of this.
-    async fn plan_update_unguarded(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
+    async fn plan_update_unguarded(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
         let _slot = self
             .plan_slots
             .acquire()
@@ -1041,6 +1075,11 @@ impl ProvisioningService {
                     reason,
                 )));
             }
+            ReachOutcome::SetupManaged => {
+                return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                    ProvisioningOperation::Update.setup_managed_refusal(),
+                )));
+            }
         };
         let probe_id = uuid::Uuid::new_v4().to_string();
         let plan = self.layout.plan_for_row(
@@ -1066,7 +1105,7 @@ impl ProvisioningService {
             },
         )
         .await;
-        Ok(UpdatePlanResponse {
+        Ok(HostPlanResponse {
             probe_id,
             plan,
             confirmation,
@@ -1112,6 +1151,311 @@ impl ProvisioningService {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         }
         self.start_run(host, pending, false).await
+    }
+
+    /// Plan removing Farhelm from a remote host and retain the plan behind a
+    /// one-use id, changing neither the registry nor the host.
+    ///
+    /// Unlike UPDATE, the user sees this plan and confirms it: the response
+    /// carries the rendered confirmation, and only posting its id back to
+    /// [`Self::start_uninstall`] removes anything.
+    pub(super) async fn plan_uninstall(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
+        let row = self.host_row(host).await?;
+        if !row.kind.panel_uninstalls() {
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                LOCAL_UNINSTALL_HANDOFF.to_string(),
+            )));
+        }
+        let _slot = self
+            .plan_slots
+            .acquire()
+            .await
+            .expect("the provisioning planning semaphore is never closed");
+        let plan = self.uninstall_plan(host, &row).await?;
+        let probe_id = uuid::Uuid::new_v4().to_string();
+        let confirmation = plan.confirmation();
+        self.retain_plan(
+            probe_id.clone(),
+            PendingPlan {
+                plan: plan.clone(),
+                confirmation: PendingConfirmation::Uninstall {
+                    host,
+                    registration: registration_for_row(&row)?,
+                },
+            },
+        )
+        .await;
+        Ok(HostPlanResponse {
+            probe_id,
+            plan,
+            confirmation,
+        })
+    }
+
+    /// Decide whether Farhelm may be removed from `row`'s host right now,
+    /// and freeze the plan that would do it.
+    ///
+    /// Shared by planning and by confirmation, which plans again and
+    /// requires the same result: every fact the plan rests on (the
+    /// connection, the session list, the running binary, which files
+    /// remain and where they lead) is then checked twice by one piece of
+    /// code instead of being copied into a second list of facts to compare.
+    ///
+    /// The ordinary path needs the host connected, because only a connected
+    /// host can show that none of its sessions are running, and needs the
+    /// supervisor it is connected to to be the one the unit runs. There is
+    /// one exception, for continuing a run that failed after it removed the
+    /// unit file: with no unit file left nothing can start the supervisor
+    /// again, so the remaining steps may go ahead without a connection, but
+    /// only on positive evidence that no supervisor answers. A host whose
+    /// supervisor answers but cannot be used (another protocol, an identity
+    /// problem) is refused outright, because something is running there
+    /// and, for an identity problem, the destination may now reach a
+    /// different machine.
+    async fn uninstall_plan(
+        &self,
+        host: HostId,
+        row: &HostRow,
+    ) -> anyhow::Result<ProvisioningPlan> {
+        let refused =
+            |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
+        let status = self.manager.status(host);
+        let not_connected = || {
+            let phase = status
+                .as_ref()
+                .map_or("not connected", |status| status.state.phase());
+            refused(format!(
+                "uninstall needs this host connected, so Farhelm can check that none of its \
+                 sessions are running; it is {phase} right now. Get it connected first, then choose \
+                 uninstall again"
+            ))
+        };
+        let client = status
+            .as_ref()
+            .filter(|status| status.state.is_connected())
+            .and_then(|status| status.client.clone());
+        let target = self.probe_target_for_row(row);
+        let (dialed, state_dir) = match &client {
+            Some(client) => {
+                require_no_running_sessions(client).await?;
+                match self
+                    .backend
+                    .probe(&target)
+                    .await
+                    .map_err(anyhow::Error::new)?
+                {
+                    ProbeObservation::Supervisor {
+                        host_identity,
+                        dial_farhelm,
+                        dial_state_dir,
+                        ..
+                    } => {
+                        // The fresh probe dials the destination again, so it
+                        // must reach the same install the checked session list
+                        // came from: a recorded identity has to be reported
+                        // back exactly. Unlike UPDATE planning, a peer that
+                        // reports none is refused too, since uninstall removes
+                        // files and cannot afford to act on an unverified
+                        // machine.
+                        if let Some(recorded) = &row.host_identity
+                            && host_identity.as_ref() != Some(recorded)
+                        {
+                            return Err(refused(format!(
+                                "the supervisor answering at this host's destination reports {}, \
+                                 not the identity {} this host has on record, so uninstall cannot \
+                                 tell it is the same machine; resolve that first",
+                                host_identity
+                                    .as_deref()
+                                    .map_or_else(|| "no identity".to_string(), peer_text),
+                                peer_text(recorded),
+                            )));
+                        }
+                        (Some(dial_farhelm), dial_state_dir)
+                    }
+                    ProbeObservation::SkewedSupervisor { .. } | ProbeObservation::Absent => {
+                        return Err(refused(
+                            "the supervisor stopped answering while uninstall was checking it; \
+                             choose uninstall again"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            None => {
+                if let Some(status) = &status
+                    && matches!(status.state, HostState::Retired { .. })
+                {
+                    return Err(refused(
+                        "the helm's connection to this host has stopped, so uninstall cannot check \
+                         its sessions; restart the helm, then choose uninstall again"
+                            .to_string(),
+                    ));
+                }
+                if let Some(status) = &status
+                    && matches!(
+                        status.state,
+                        HostState::VersionSkew { .. }
+                            | HostState::IdentityMismatch { .. }
+                            | HostState::IdentityUnverified { .. }
+                            | HostState::Duplicate { .. }
+                    )
+                {
+                    return Err(refused(format!(
+                        "uninstall is refused while this host is {}: a supervisor answers there \
+                         that Farhelm cannot use, so it cannot check that none of its sessions are \
+                         running. Resolve that first, then choose uninstall again",
+                        status.state.phase()
+                    )));
+                }
+                match self.backend.probe(&target).await {
+                    Ok(ProbeObservation::Absent) => {}
+                    Ok(_) | Err(_) => return Err(not_connected()),
+                }
+                // No running supervisor to ask, so the row's registered
+                // paths stand in. Only an absolute binary path says where
+                // the install is; a bare name was resolved through the
+                // host's PATH and proves nothing about the lib directory.
+                (
+                    row.remote_farhelm
+                        .as_deref()
+                        .map(PathBuf::from)
+                        .filter(|path| path.is_absolute()),
+                    row.remote_state_dir.as_deref().map(PathBuf::from),
+                )
+            }
+        };
+        let reach = match self.backend.inspect(&target).await {
+            Ok(ReachOutcome::Supported(reach)) => reach,
+            Ok(ReachOutcome::Manual(reason)) => return Err(refused(reason)),
+            Ok(ReachOutcome::SetupManaged) => {
+                return Err(refused(
+                    ProvisioningOperation::Uninstall.setup_managed_refusal(),
+                ));
+            }
+            Err(_) if client.is_none() => return Err(not_connected()),
+            Err(failure) => return Err(anyhow::Error::new(failure)),
+        };
+        let paths = self.layout.uninstall_paths(&reach);
+        let state_dir = state_dir.or_else(|| paths.state_dir_override.clone());
+        let mut asked = vec![paths.unit_path.as_path(), paths.lib_dir.as_path()];
+        asked.extend(state_dir.as_deref());
+        asked.extend(dialed.as_deref());
+        let inspection = self
+            .backend
+            .inspect_uninstall(&target.transport, &self.layout.unit_name, &asked)
+            .await
+            .map_err(anyhow::Error::new)?;
+        let [unit_file, lib_dir, rest @ ..] = inspection.paths.as_slice() else {
+            return Err(anyhow::Error::new(BackendFailure::new(
+                "inspecting the installation to remove answered for fewer paths than asked",
+                "",
+            )));
+        };
+        let unit = &self.layout.unit_name;
+        if client.is_none() && unit_file.exists {
+            return Err(not_connected());
+        }
+        if client.is_some() && !inspection.unit_running() {
+            return Err(refused(format!(
+                "the supervisor this host answers with is not running under {unit}; uninstall \
+                 only removes a supervisor set up from the hosts panel"
+            )));
+        }
+        if inspection.unit_running() && inspection.unit_kill_mode != "process" {
+            return Err(refused(format!(
+                "{unit} is running with KillMode={}, so stopping it would also end the sessions' \
+                 tmux server, and uninstall does not stop it that way. An Update from the hosts \
+                 panel rewrites the unit; choose uninstall again after that",
+                inspection.unit_kill_mode
+            )));
+        }
+        // The "no unit file left" rule and the removal both look at the
+        // planned unit path; a unit systemd loads from anywhere else is not
+        // provisioning's and could start the supervisor again.
+        if let Some(fragment) = &inspection.unit_fragment
+            && fragment.canonical.is_some()
+            && fragment.canonical != unit_file.canonical
+        {
+            return Err(refused(format!(
+                "{unit} on this host is loaded from {}, not from {}; uninstall only removes a unit \
+                 set up from the hosts panel",
+                fragment.path.display(),
+                unit_file.path.display()
+            )));
+        }
+        let unresolved = |path: &Path| {
+            refused(format!(
+                "uninstall cannot tell where {} leads on this host, so it cannot check that the \
+                 removal leaves the host's data alone",
+                path.display()
+            ))
+        };
+        let resolved = |host_path: &super::backend::HostPath| {
+            host_path
+                .canonical
+                .clone()
+                .map(|canonical| ResolvedPath {
+                    named: host_path.path.clone(),
+                    canonical,
+                })
+                .ok_or_else(|| unresolved(&host_path.path))
+        };
+        let mut rest = rest.iter();
+        let state_dir = match state_dir {
+            Some(_) => rest.next(),
+            None => Some(&inspection.default_state_dir),
+        }
+        .map(resolved)
+        .transpose()?
+        .expect("the state directory was asked for or reported by default");
+        let farhelm = rest.next();
+        // A run that failed after removing the lib directory leaves an
+        // unconnected host whose registered binary lies in a directory that
+        // is gone: there is nothing left to protect, and insisting on
+        // resolving it would refuse the retry forever. A connected host
+        // keeps the check, since a supervisor is running from somewhere.
+        let farhelm = if client.is_none() && !lib_dir.exists {
+            None
+        } else {
+            farhelm.map(resolved).transpose()?
+        };
+        let lib_dir = lib_dir
+            .exists
+            .then(|| resolved(lib_dir).map(|lib| lib.canonical))
+            .transpose()?;
+        self.layout.plan_uninstall(
+            target.transport,
+            &reach,
+            &paths,
+            &UninstallFacts {
+                unit_file: unit_file.exists,
+                lib_dir,
+                farhelm,
+                state_dir,
+            },
+        )
+    }
+
+    /// Consume one host-bound UNINSTALL plan and only then claim the run.
+    /// On a helm-owned task for [`Self::start_update`]'s reason: a dropped
+    /// request must not leave the host marked busy.
+    pub(super) async fn start_uninstall(
+        self: &Arc<Self>,
+        host: HostId,
+        request: ProvisionRequest,
+    ) -> anyhow::Result<RunAccepted> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move {
+            let pending = service.consume_plan(&request.probe_id).await?;
+            if !matches!(
+                pending.confirmation,
+                PendingConfirmation::Uninstall { host: planned, .. } if planned == host
+            ) {
+                return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
+            }
+            service.start_run(host, pending, false).await
+        })
+        .await
     }
 
     pub(super) async fn consume_plan(&self, probe_id: &str) -> anyhow::Result<PendingPlan> {
@@ -1182,32 +1526,64 @@ impl ProvisioningService {
         })
     }
 
-    /// Forget process-local progress alongside the durable row. Pending
-    /// confirmation tokens for that host are removed as well.
-    pub(crate) async fn forget_host(&self, host: HostId) {
+    /// Delete `host`'s registry row and everything this helm keeps for it:
+    /// its cached sessions (by cascade), its retained progress, its pending
+    /// confirmation ids, its busy marker, its connection actor and its
+    /// cache-write lock. Returns whether an actor was running.
+    ///
+    /// The caller must already hold the host's provisioning lock. Two
+    /// callers share this: the hosts panel's Remove, which takes that lock
+    /// itself and aborts any run task (there can be none while it holds the
+    /// lock, but a finished run's handle may remain), and UNINSTALL's last
+    /// step, which runs INSIDE the host's run and so already holds the lock
+    /// and must not abort its own task. That is why Remove's own entry
+    /// point cannot be reused from the run: it would wait for a lock its
+    /// caller holds, or abort the run that called it.
+    ///
+    /// The order is Remove's: the cache-write lock so no cache write
+    /// interleaves with the deletion, the row, the helm's memory of the
+    /// host, then the actor, and its lock only after the row is gone.
+    pub(crate) async fn delete_registered_host(
+        &self,
+        host: HostId,
+        run_task: RunTask,
+    ) -> anyhow::Result<bool> {
+        let serialized = self.manager.host_write_lock(host).await;
+        self.store.remove_ssh_host(host).await?;
+        let task = self.forget_host_memory(host).await;
+        if run_task == RunTask::Abort
+            && let Some(task) = task
+        {
+            task.abort();
+            let _ = task.await;
+        }
+        let stopped = self.manager.stop_actor(host).await;
+        self.manager.forget_cache_lock(host);
+        drop(serialized);
+        Ok(stopped)
+    }
+
+    /// Drop process-local progress, pending confirmation ids and the busy
+    /// marker for a host whose row is gone, handing back its run task's
+    /// handle for the caller to abort or merely detach.
+    async fn forget_host_memory(&self, host: HostId) -> Option<tokio::task::JoinHandle<()>> {
         let mut memory = self.memory.lock().await;
         let task = memory.tasks.remove(&host);
-        if let Some(task) = &task {
-            task.abort();
-        }
         memory.runs.remove(&host);
+        memory.busy.remove(&host);
         let removed: std::collections::HashSet<String> = memory
             .plans
             .iter()
-            .filter(|(_, pending)| {
-                matches!(
-                    &pending.confirmation,
-                    PendingConfirmation::Update { host: planned, .. } if *planned == host
-                )
+            .filter(|(_, pending)| match &pending.confirmation {
+                PendingConfirmation::Update { host: planned, .. }
+                | PendingConfirmation::Uninstall { host: planned, .. } => *planned == host,
+                PendingConfirmation::Add { .. } => false,
             })
             .map(|(id, _)| id.clone())
             .collect();
         memory.plans.retain(|id, _| !removed.contains(id));
         memory.plan_order.retain(|id| !removed.contains(id));
-        drop(memory);
-        if let Some(task) = task {
-            let _ = task.await;
-        }
+        task
     }
 
     #[cfg(test)]
@@ -1401,6 +1777,31 @@ impl ProvisioningService {
                     })?;
                 Ok(Revalidation::Execute)
             }
+            // Plan again under the run's lock and require the same plan: the
+            // session check, the connection, the running binary and the
+            // files that remain are all rechecked by the code that decided
+            // them at planning. A refusal now is reported in its own words;
+            // a different plan means the host changed under the
+            // confirmation, and the user should see the new one first.
+            PendingConfirmation::Uninstall { registration, .. } => {
+                self.require_registration_unchanged(host, registration)
+                    .await?;
+                let row = self.host_row(host).await.map_err(|error| {
+                    BackendFailure::new(format!("re-reading the confirmed host row: {error:#}"), "")
+                })?;
+                let replanned = self
+                    .uninstall_plan(host, &row)
+                    .await
+                    .map_err(|error| BackendFailure::new(format!("{error:#}"), ""))?;
+                if replanned != pending.plan {
+                    return Err(BackendFailure::new(
+                        "the host changed after the uninstall plan was made; choose uninstall \
+                         again to see the new plan",
+                        "",
+                    ));
+                }
+                Ok(Revalidation::Execute)
+            }
         }
     }
 
@@ -1525,7 +1926,7 @@ impl ProvisioningService {
         let prepared = match self.prepare_payloads(&plan).await {
             Ok(prepared) => prepared,
             Err((index, error)) => {
-                self.fail_action(host, index, &plan.actions[index], error)
+                self.fail_action(host, plan.operation, index, &plan.actions[index], error)
                     .await;
                 return;
             }
@@ -1538,7 +1939,8 @@ impl ProvisioningService {
                 Ok(ActionOutcome::Skipped(message)) => (StepStatus::Skipped, Some(message)),
                 Ok(ActionOutcome::Degraded(message)) => (StepStatus::Degraded, Some(message)),
                 Err(error) => {
-                    self.fail_action(host, index, action, error).await;
+                    self.fail_action(host, plan.operation, index, action, error)
+                        .await;
                     return;
                 }
             };
@@ -1648,12 +2050,21 @@ impl ProvisioningService {
     async fn fail_action(
         &self,
         host: HostId,
+        operation: ProvisioningOperation,
         index: usize,
         action: &ProvisioningAction,
         error: BackendFailure,
     ) {
+        // The way to continue depends on the operation: a failed setup or
+        // update reruns provisioning, a failed uninstall is chosen again.
+        let remedy = match operation {
+            ProvisioningOperation::Add | ProvisioningOperation::Update => {
+                "rerun provisioning to continue"
+            }
+            ProvisioningOperation::Uninstall => "choose uninstall again to continue",
+        };
         let message = format!(
-            "step {} ({}) failed: {}; rerun provisioning to continue",
+            "step {} ({}) failed: {}; {remedy}",
             index + 1,
             action.label(),
             error.rendered()
@@ -1743,6 +2154,34 @@ impl ProvisioningService {
             }
             ProvisioningAction::RestartSupervisor { unit } => {
                 self.backend.restart(&plan.target, unit).await
+            }
+            ProvisioningAction::DisableSupervisor { unit } => {
+                self.backend.disable(&plan.target, unit).await
+            }
+            ProvisioningAction::RemoveUnit { destination, .. } => {
+                self.backend.remove_unit(&plan.target, destination).await
+            }
+            ProvisioningAction::StopSupervisor { unit } => {
+                self.backend.stop(&plan.target, unit).await
+            }
+            ProvisioningAction::RemoveDirectory { path } => {
+                self.backend.remove_directory(&plan.target, path).await
+            }
+            // The run holds the host's provisioning lock, so the row
+            // removal must not take it again or abort this task; see
+            // `delete_registered_host`. Its progress view goes with the
+            // row, which is why the confirming client builds its success
+            // notice from the plan it already holds.
+            ProvisioningAction::ForgetHost => {
+                self.delete_registered_host(host, RunTask::Detach)
+                    .await
+                    .map_err(|error| {
+                        BackendFailure::new(
+                            format!("removing the host from the host list: {error:#}"),
+                            "",
+                        )
+                    })?;
+                Ok(ActionOutcome::Completed)
             }
             ProvisioningAction::AttachSupervisor => {
                 if let Some(outcome) = self.backend.injected_attach(&plan.target).await? {
@@ -1868,6 +2307,59 @@ impl ProvisioningService {
             },
         }
     }
+}
+
+/// Refuse UNINSTALL while the host has any session that has not ended or
+/// any live terminal tab, naming them.
+///
+/// Reads a fresh list through the host's connection, never the helm's
+/// cached snapshot: the question is what is running now. A session whose
+/// status is unknown counts as running (`has_ended`, not `is_live`), since
+/// "could not tell" is not evidence it stopped, and a list the supervisor
+/// cut at its cap refuses too, because the sessions it left out are
+/// unchecked. Nothing is stopped or killed here or later: the user stops
+/// them, as SPEC.md asks of `farhelm uninstall` too.
+async fn require_no_running_sessions(
+    client: &crate::client::SupervisorClient,
+) -> anyhow::Result<()> {
+    let refused = |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
+    let listing = client.list_sessions().await.map_err(|error| {
+        refused(format!(
+            "uninstall could not read this host's session list ({error:#}), so it cannot check \
+             that none are running; get the host connected first"
+        ))
+    })?;
+    if listing.truncated {
+        return Err(refused(
+            "uninstall is refused: this host holds more sessions than one list can carry, so \
+             Farhelm cannot check that none are running; delete sessions you no longer need first"
+                .to_string(),
+        ));
+    }
+    let running: Vec<&farhelm_proto::SessionInfo> = listing
+        .sessions
+        .iter()
+        .filter(|session| !session.status.has_ended() || !session.tabs.is_empty())
+        .collect();
+    if running.is_empty() {
+        return Ok(());
+    }
+    let mut named = running
+        .iter()
+        .take(UNINSTALL_REFUSAL_NAMED_SESSIONS)
+        .map(|session| format!("\"{}\"", peer_text(&session.title)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if running.len() > UNINSTALL_REFUSAL_NAMED_SESSIONS {
+        named.push_str(&format!(
+            " and {} more",
+            running.len() - UNINSTALL_REFUSAL_NAMED_SESSIONS
+        ));
+    }
+    Err(refused(format!(
+        "uninstall is refused while sessions on this host have not ended or still have terminal \
+         tabs open: {named}. Stop those sessions and close their tabs, then choose uninstall again"
+    )))
 }
 
 fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {

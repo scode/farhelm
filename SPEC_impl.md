@@ -2937,10 +2937,58 @@ coordinates rather than assuming the standard layout.
 
 The supervisor-unit ownership rule in SPEC.md is enforced twice on remote hosts. The reach check reports whether the
 user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the same
-test `units::is_managed` applies), and such a host gets the `Manual` outcome ADD and UPDATE both refuse on, before any
-plan exists. The remote unit write repeats the test in the same shell command that renames the new unit into place,
-because a retained plan is confirmed later and setup may have run on the host in between. The local executor branch has
-no such check: the panel never installs a unit on the helm's own machine.
+test `units::is_managed` applies), and such a host gets the `SetupManaged` outcome every operation refuses on, before
+any plan exists, each in its own words (installing or updating there is the host's installer and setup; removing is its
+`farhelm uninstall`). The remote unit write repeats the test in the same shell command that renames the new unit into
+place, and uninstall's unit removal repeats it in the same shell command as the `rm`, because a retained plan is
+confirmed later and setup may have run on the host in between. The local executor branch has no such check: the panel
+never installs a unit on the helm's own machine.
+
+UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
+consumes the plan's id from a body, like update's route, but the user sees and confirms the rendered plan, like setup's.
+Its actions disable the supervisor unit, remove the unit file, stop the unit, reload the user manager, remove the lib
+directory, and finally forget the host. Removing the file before stopping keeps the supervisor answering until nothing
+can start it again: up to the unit file's removal the host stays connected and the ordinary checks apply, and after it a
+retry may proceed without a connection. Stopping before reloading keeps the stop from killing anything but the
+supervisor. The unit's `KillMode=process` leaves the private tmux server, which holds any ended sessions' panes, out of
+the stop, but systemd forgets a removed unit's settings when the user manager reloads: a reload after the file is gone
+turns `KillMode` into the default `control-group`, and a stop then ends the whole group (verified on a real user manager
+when this was built). The disable step passes `--no-reload`, because `systemctl disable` otherwise reloads the manager
+itself, and the stop step refuses a running unit whose loaded `KillMode` is not `process` (after something else reloaded
+the manager between a failed run's unit removal and its retry, say, or for a hand-written unit without it) rather than
+kill its tmux server; the refusal names an Update from the hosts panel, which rewrites the unit, as the way out. The
+tmux server is not stopped by uninstall at all: one holding ended sessions keeps running, from the removed binary if it
+was the private one, until it exits or the host restarts. Only the removals still outstanding are planned (the unit
+file's two steps when it exists, the lib directory's when it exists), and each host command treats work already done as
+a skip, so a failed run continues from wherever it stopped with no process-local memory of how far it got, which would
+not survive a helm restart. Every path comes from the plan, frozen from the same layout and overrides an install uses,
+never re-derived at run time.
+
+The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
+plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live
+round trip, never the cache) with no session that has not ended and none with a live tab, a list the supervisor did not
+truncate, its supervisor unit running (a connected supervisor whose unit is not running was started some other way, and
+removing its lib directory would leave it running from deleted files), and the fresh probe reporting exactly the
+recorded identity, a missing one included, since the probe dials the destination again and uninstall must not act on a
+machine it has not verified. The unit systemd loaded (`FragmentPath`) must be the planned unit file, so neither "no unit
+file left" nor the removal can miss a unit loaded from elsewhere. A host that is not connected is refused when a
+supervisor answers there but cannot be used (version skew, an identity problem), and otherwise needs the probe's
+positive evidence that no supervisor answers and its unit file already gone; when its lib directory is gone too, the
+registered binary is no longer checked, since there is nothing left to protect and the check would strand the retry. The
+binary the probe dialed must lie inside the lib directory and the host's state directory must not, compared as canonical
+paths the host resolves (`readlink -f`), since the lib directory is removed with `rm -rf` and a state directory
+symlinked into it would otherwise go with it; a path the host cannot resolve refuses. A row with no recorded state
+directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
+started between the confirmation check and the stop is not locked out: it survives, unmanaged, which matches
+`farhelm uninstall`'s stance of neither forcibly terminating nor proving that everything stopped.
+
+The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
+own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share
+`ProvisioningService::delete_registered_host`, which takes the cache-write lock, deletes the row, purges the host's
+progress, plans and busy marker (aborting the task only for Remove), stops the actor and forgets its lock. The helm
+keeps no result for a deleted host, so the confirming client builds its success notice from the plan it already holds.
+Uninstall's host actions have only an SSH implementation: the local row is refused at planning, and the direct-local
+executor answers them with an error rather than an implementation nothing can reach.
 
 The Hosts header's `update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
 request that each available SSH row's menu would send. The row's permanently mounted provisioning panel retains its own

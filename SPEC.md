@@ -117,6 +117,22 @@ Provisioning is idempotent and doubles as recovery: re-running it against an alr
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
 intact. Losing the helm never strands a provisioned host.
 
+Removing Farhelm from a remote host is a host action too, the uninstall item in that host's menu, with no command-line
+counterpart. The helm plans the removal over SSH and shows it before touching the host: the supervisor's user service
+and its unit file go, and so does Farhelm's private lib directory with the binary and any private tmux in it, each named
+by its path on the host; the host's Farhelm data directory stays, named by its path, with a note that deleting it by
+hand removes the data too. Nothing changes until the user confirms. Uninstall never stops or kills a session or terminal
+tab. It refuses, naming them, while the host has any session that has not ended (an unknown status counts) or any open
+terminal tab, and checks again at confirmation. It also refuses a host it cannot check because it is not connected, a
+host whose supervisor unit `farhelm helm setup` manages there (that host's own `farhelm uninstall` removes it), and a
+supervisor running from anywhere other than Farhelm's lib directory. Success removes the host from the list, cached
+sessions included, as removing it does, and the window that confirmed says Farhelm was removed and where the data
+remains. A run that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall
+again continues from there. Such a retry may go ahead without a connection only once the unit file is gone, since
+nothing can start the supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in
+the panel: Farhelm there is removed with `farhelm uninstall` (see
+[Uninstall scope and interaction](#uninstall-scope-and-interaction)).
+
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
 passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,
 transparently. Supervisors listen on no network port. The helm's own machine is a host without registration: its
@@ -306,8 +322,8 @@ their own data, independently installed dependencies, and unrelated files are un
 shared parent directories or change their permissions.
 
 The command affects only the selected local installation. It does not contact registered hosts, uninstall remotely
-provisioned supervisors, or remove a separate provisioning-owned local installation. Removing a helm does not stop
-sessions on its remote hosts.
+provisioned supervisors (the hosts panel's uninstall does that; see [Topology](#topology)), or remove a separate
+provisioning-owned local installation. Removing a helm does not stop sessions on its remote hosts.
 
 ### Operator prerequisites and failure behavior
 
@@ -1929,11 +1945,11 @@ group-writable or sticky shared directory is outside what the installer's lock, 
 against.
 
 On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
-without `farhelm helm setup`'s managed-by marker belongs to provisioning, and ADD and UPDATE may replace it. A unit that
-carries the marker belongs to setup on that host: provisioning refuses to touch it, both when planning and at the moment
-of writing, and says setup manages it there, the same hand-off the helm's own machine gets. A hand-written unit under
-that exact name on a host the user asks Farhelm to provision is the user's to move aside first; provisioning does not
-try to tell it apart from its own.
+without `farhelm helm setup`'s managed-by marker belongs to provisioning: ADD and UPDATE may replace it, and uninstall
+may remove it. A unit that carries the marker belongs to setup on that host: provisioning refuses to touch it, both when
+planning and at the moment of writing or removing, and says setup manages it there, the same hand-off the helm's own
+machine gets. A hand-written unit under that exact name on a host the user asks Farhelm to provision is the user's to
+move aside first; provisioning does not try to tell it apart from its own.
 
 ### First-class harnesses
 
@@ -1973,14 +1989,14 @@ detect aliasing or add complexity to cope with it.
 ### Supported host setup
 
 Confirmed 2026-09-28: for remote hosts, the supported, user-facing way to install and update a supervisor is the helm's
-own setup and Update from the hosts panel, on the hosts that provisioning targets. Every other way a host can end up
-with a supervisor works on a best-effort basis, mainly for people working on Farhelm itself: a supervisor started by
-hand with `farhelm supervisor run`, one installed with `install.sh`, one run by a unit the user wrote or changed with
-drop-ins, one at paths other than the layout setup installs, or a host provisioning does not target. Do not spend
-significant complexity making setup or Update detect, adapt to, coexist with, or preserve such setups; refusing with a
-clear message is enough. Setup and Update may treat the layout they install as their own, including re-applying the
-settings they manage, such as start at boot and linger, on every run. The rules above about shared directories and
-unrelated host configuration still hold.
+own setup and Update from the hosts panel, on the hosts that provisioning targets, and the way to remove one is the same
+panel's uninstall. Every other way a host can end up with a supervisor works on a best-effort basis, mainly for people
+working on Farhelm itself: a supervisor started by hand with `farhelm supervisor run`, one installed with `install.sh`,
+one run by a unit the user wrote or changed with drop-ins, one at paths other than the layout setup installs, or a host
+provisioning does not target. Do not spend significant complexity making setup or Update detect, adapt to, coexist with,
+or preserve such setups; refusing with a clear message is enough. Setup and Update may treat the layout they install as
+their own, including re-applying the settings they manage, such as start at boot and linger, on every run. The rules
+above about shared directories and unrelated host configuration still hold.
 
 A Linux machine running a helm remains supported, but the standalone installer temporarily does not cover that setup. On
 a Mac the installer supplies the desktop app, which manages its own helm and local supervisor.

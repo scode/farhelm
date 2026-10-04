@@ -2,8 +2,8 @@
 //! shipped provisioning orchestration without changing its HTTP or state path.
 
 use super::backend::{
-    ActionOutcome, BackendFailure, PreparedPayload, ProbeObservation, ProbeTarget,
-    ProvisioningBackend, Reach, ReachOutcome,
+    ActionOutcome, BackendFailure, HostPath, PreparedPayload, ProbeObservation, ProbeTarget,
+    ProvisioningBackend, Reach, ReachOutcome, UninstallInspection,
 };
 use super::payloads::PayloadSource;
 use super::plan::{DirectorySpec, PayloadArch, PayloadKind, ProvisioningTarget};
@@ -352,6 +352,70 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         _unit: &str,
     ) -> Result<ActionOutcome, BackendFailure> {
         self.action(target, "restart-supervisor").await
+    }
+
+    /// Every removable file is reported present and at its own canonical
+    /// path, and the unit running under provisioning's kill policy, so an
+    /// injected UNINSTALL plans its full step list. The steps themselves are
+    /// simulated like every other action, which is what keeps a browser
+    /// spec's real remote supervisor running while the panel uninstalls it.
+    async fn inspect_uninstall(
+        &self,
+        target: &ProvisioningTarget,
+        _unit: &str,
+        paths: &[&Path],
+    ) -> Result<UninstallInspection, BackendFailure> {
+        self.record(target, "inspect-uninstall").await?;
+        let behavior = self.behavior(target).await?;
+        let present = |path: PathBuf| HostPath {
+            canonical: Some(path.clone()),
+            path,
+            exists: true,
+        };
+        Ok(UninstallInspection {
+            paths: paths
+                .iter()
+                .map(|path| present(path.to_path_buf()))
+                .collect(),
+            default_state_dir: present(PathBuf::from(behavior.home).join(".local/state/farhelm")),
+            unit_active_state: "active".to_string(),
+            unit_kill_mode: "process".to_string(),
+            // The unit loaded from the planned path, which is the first one
+            // asked about.
+            unit_fragment: paths.first().map(|path| present(path.to_path_buf())),
+        })
+    }
+
+    async fn disable(
+        &self,
+        target: &ProvisioningTarget,
+        _unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(target, "disable-supervisor").await
+    }
+
+    async fn remove_unit(
+        &self,
+        target: &ProvisioningTarget,
+        _destination: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(target, "remove-unit").await
+    }
+
+    async fn stop(
+        &self,
+        target: &ProvisioningTarget,
+        _unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(target, "stop-supervisor").await
+    }
+
+    async fn remove_directory(
+        &self,
+        target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(target, "remove-directory").await
     }
 
     /// The e2e fixture never stands in for a machine whose units

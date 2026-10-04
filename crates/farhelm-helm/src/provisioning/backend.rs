@@ -145,6 +145,62 @@ pub(super) struct Reach {
 pub(super) enum ReachOutcome {
     Supported(Reach),
     Manual(String),
+    /// The host's supervisor unit carries `farhelm helm setup`'s managed-by
+    /// marker, so setup owns it there and the panel acts on it for no
+    /// operation. Kept apart from `Manual` because the refusal's remedy
+    /// depends on the operation; see
+    /// `ProvisioningOperation::setup_managed_refusal`.
+    SetupManaged,
+}
+
+/// What [`ProvisioningBackend::inspect_uninstall`] found on the host.
+///
+/// Canonical paths are the host's own `readlink -f` answers, because the
+/// guards that keep uninstall's `rm -rf` away from the user's data compare
+/// real locations, not spellings: SPEC.md treats each canonical path as the
+/// location it names, and a state directory symlinked into the lib
+/// directory must be recognized as inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UninstallInspection {
+    /// One entry per asked path, in the order asked.
+    pub(super) paths: Vec<HostPath>,
+    /// The state directory a supervisor started without `--state-dir`
+    /// picks on this host (`$XDG_STATE_HOME/farhelm` when that is absolute,
+    /// `~/.local/state/farhelm` otherwise, the supervisor's own rule), as
+    /// the same ssh environment the probe dials through resolves it.
+    pub(super) default_state_dir: HostPath,
+    /// The unit's `ActiveState` (`active`, `inactive`, `failed`, ...).
+    /// systemd reports `inactive` for a unit it does not know.
+    pub(super) unit_active_state: String,
+    /// The unit's loaded `KillMode`. Provisioning's unit says `process`;
+    /// after its file is removed and the user manager reloaded, systemd
+    /// forgets that and reports its default, `control-group`.
+    pub(super) unit_kill_mode: String,
+    /// Where systemd loaded the unit from (`FragmentPath`), with its
+    /// canonical form, or `None` when systemd knows no file for it. A
+    /// unit loaded from anywhere but the plan's unit path is not the one
+    /// uninstall would remove, and "no unit file left" says nothing about
+    /// it.
+    pub(super) unit_fragment: Option<HostPath>,
+}
+
+/// One path as the host sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct HostPath {
+    pub(super) path: PathBuf,
+    /// Whether anything is at the path (a dangling symlink counts).
+    pub(super) exists: bool,
+    /// Where the path really leads, or `None` when the host could not
+    /// resolve it (a missing parent, a symlink loop).
+    pub(super) canonical: Option<PathBuf>,
+}
+
+impl UninstallInspection {
+    /// Whether the supervisor unit is running or changing state, as opposed
+    /// to stopped or unknown to systemd.
+    pub(super) fn unit_running(&self) -> bool {
+        !matches!(self.unit_active_state.as_str(), "inactive" | "failed")
+    }
 }
 
 /// Idempotent actions distinguish useful no-ops and optional degradation
@@ -246,6 +302,45 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure>;
+
+    /// Read, without changing anything, what UNINSTALL needs to know about
+    /// the installation on the target: which of `paths` exist and where
+    /// they really lead, the state directory a supervisor started without
+    /// `--state-dir` would use there, and the supervisor unit's run state
+    /// and loaded kill policy. See [`UninstallInspection`].
+    async fn inspect_uninstall(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+        paths: &[&Path],
+    ) -> Result<UninstallInspection, BackendFailure>;
+    /// Disable the supervisor unit without stopping it.
+    async fn disable(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure>;
+    /// Delete the supervisor unit file, refusing one that carries setup's
+    /// managed-by marker; an absent file is a skip.
+    async fn remove_unit(
+        &self,
+        target: &ProvisioningTarget,
+        destination: &Path,
+    ) -> Result<ActionOutcome, BackendFailure>;
+    /// Stop the supervisor unit; one that is not running is a skip, and one
+    /// whose loaded kill policy is not `process` is refused, because
+    /// stopping it would end every process it started.
+    async fn stop(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure>;
+    /// Delete one directory tree; an absent one is a skip.
+    async fn remove_directory(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
 
     /// Read one unit file out of THIS machine's systemd user directory,
@@ -2251,6 +2346,169 @@ impl ProvisioningBackend for SystemBackend {
         Ok(ActionOutcome::Completed)
     }
 
+    /// Read-only, so it runs on either transport, though only UNINSTALL
+    /// planning asks and that refuses the local row before it gets here.
+    ///
+    /// The output is NUL-separated: an existence flag and a canonical path
+    /// (empty when unresolvable) per asked path, then the default state
+    /// directory and its canonical form, then the unit's `ActiveState`,
+    /// `KillMode` and `FragmentPath`, and the fragment's existence and
+    /// canonical form. A failing `systemctl show` fails the whole command
+    /// rather than reading as empty values. `readlink -f` rather than
+    /// `realpath`: both GNU and BusyBox provide it.
+    async fn inspect_uninstall(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+        paths: &[&Path],
+    ) -> Result<UninstallInspection, BackendFailure> {
+        let mut script = String::from(
+            "resolve() { if [ -e \"$1\" ] || [ -L \"$1\" ]; then printf 1; else printf 0; fi; \
+             printf '\\0'; readlink -f -- \"$1\" 2>/dev/null | tr -d '\\n'; printf '\\0'; }; ",
+        );
+        for path in paths {
+            script.push_str(&format!("resolve {}; ", shell_path(path)?));
+        }
+        script.push_str(&format!(
+            "case \"${{XDG_STATE_HOME-}}\" in /*) state=\"$XDG_STATE_HOME/farhelm\" ;; \
+               *) state=\"$HOME/.local/state/farhelm\" ;; esac; \
+             printf '%s\\0' \"$state\"; resolve \"$state\"; \
+             active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
+             mode=$(systemctl --user show -p KillMode --value -- {unit}) || exit 1; \
+             fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
+             printf '%s\\0%s\\0%s\\0' \"$active\" \"$mode\" \"$fragment\"; \
+             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '0\\0\\0'; fi",
+            unit = crate::ssh::shell_quote(unit),
+        ));
+        let output = self
+            .require_shell(target, &script, "inspecting the installation to remove")
+            .await?;
+        parse_uninstall_inspection(&output.stdout, paths).ok_or_else(|| {
+            BackendFailure::new(
+                "inspecting the installation to remove returned malformed output",
+                String::from_utf8_lossy(&output.stdout),
+            )
+        })
+    }
+
+    async fn disable(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(target, "disabling the supervisor unit")?;
+        // `--runtime` mirrors `enable_now`: the real-transport fixture links
+        // its unit for this boot only, and only a runtime disable removes
+        // that link. `--no-reload` because `disable` otherwise reloads the
+        // user manager itself, and any reload before the stop step can make
+        // systemd forget the unit's `KillMode=process` (it did for the
+        // fixture's linked unit, whose file the disable takes out of the
+        // search path); uninstall's only reload is its own step after the
+        // stop.
+        let runtime = if self.runtime_units { " --runtime" } else { "" };
+        let unit = crate::ssh::shell_quote(unit);
+        self.require_shell(
+            target,
+            &format!("systemctl --user{runtime} disable --no-reload -- {unit}"),
+            "disabling the supervisor unit",
+        )
+        .await?;
+        Ok(ActionOutcome::Completed)
+    }
+
+    /// The marker test is the reach check's (first line exactly
+    /// `units::MANAGED_MARKER`, read with `head` so a marker-only file with
+    /// no newline still counts), repeated here in the same shell as the
+    /// `rm`: setup may have taken the unit over since the plan was made, and
+    /// a unit it cannot read fails the step instead of passing as unmarked.
+    async fn remove_unit(
+        &self,
+        target: &ProvisioningTarget,
+        destination: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(target, "removing the supervisor unit file")?;
+        let script = format!(
+            "f={file}; \
+             if [ ! -e \"$f\" ] && [ ! -L \"$f\" ]; then printf absent; exit 0; fi; \
+             first_line=$(head -n 1 -- \"$f\") || {{ \
+               printf '%s\\n' \"cannot read $f to check whether farhelm helm setup manages it\" >&2; \
+               exit 78; }}; \
+             if [ \"$first_line\" = {marker} ]; then \
+               printf '%s\\n' 'refusing to remove a unit managed by farhelm helm setup' >&2; \
+               exit 79; fi; \
+             rm -f -- \"$f\"",
+            file = shell_path(destination)?,
+            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
+        );
+        let output = self
+            .require_shell(target, &script, "removing the supervisor unit file")
+            .await?;
+        Ok(if output.stdout == b"absent" {
+            ActionOutcome::Skipped(format!("{} was already gone", destination.display()))
+        } else {
+            ActionOutcome::Completed
+        })
+    }
+
+    /// A unit that is not running, including one systemd no longer knows
+    /// (its file removed and the manager reloaded), reports `inactive` or
+    /// `failed` here, and stopping it would fail with "not loaded"; that is
+    /// a step already done, so it is skipped.
+    async fn stop(
+        &self,
+        target: &ProvisioningTarget,
+        unit: &str,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(target, "stopping the supervisor unit")?;
+        let unit = crate::ssh::shell_quote(unit);
+        // The kill-policy check runs in the same shell as the stop. A unit
+        // whose file is gone loses `KillMode=process` at the next reload of
+        // the user manager, and stopping it then ends its whole control
+        // group: the private tmux server and every session in it. Uninstall
+        // stops the unit before it reloads, so this only fires when
+        // something else reloaded between a failed run and its retry.
+        let script = format!(
+            "state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
+             case \"$state\" in inactive|failed) printf 'not-running'; exit 0 ;; esac; \
+             mode=$(systemctl --user show -p KillMode --value -- {unit}) || exit 1; \
+             if [ \"$mode\" != process ]; then \
+               printf '%s\\n' \"refusing to stop the supervisor: its unit's loaded KillMode is $mode, so \
+             stopping it would also end the sessions' tmux server; an Update from the hosts panel \
+             rewrites the unit, after which uninstall can stop it\" >&2; exit 80; fi; \
+             systemctl --user stop -- {unit}"
+        );
+        let output = self
+            .require_shell(target, &script, "stopping the supervisor unit")
+            .await?;
+        Ok(if output.stdout == b"not-running" {
+            ActionOutcome::Skipped("the supervisor was not running".to_string())
+        } else {
+            ActionOutcome::Completed
+        })
+    }
+
+    async fn remove_directory(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        require_remote(target, "removing Farhelm's lib directory")?;
+        let script = format!(
+            "d={dir}; \
+             if [ ! -e \"$d\" ] && [ ! -L \"$d\" ]; then printf absent; exit 0; fi; \
+             rm -rf -- \"$d\"",
+            dir = shell_path(path)?,
+        );
+        let output = self
+            .require_shell(target, &script, "removing Farhelm's lib directory")
+            .await?;
+        Ok(if output.stdout == b"absent" {
+            ActionOutcome::Skipped(format!("{} was already gone", path.display()))
+        } else {
+            ActionOutcome::Completed
+        })
+    }
+
     /// The helm's own process environment is the authority here, which is
     /// the one place in this file where that is true rather than a
     /// shortcut: this method asks about the machine the helm itself runs
@@ -2292,6 +2550,70 @@ impl ProvisioningBackend for SystemBackend {
                 error.to_string(),
             )),
         }
+    }
+}
+
+/// Parse [`SystemBackend::inspect_uninstall`]'s output, or `None` when it
+/// does not have exactly the fields asked for.
+pub(super) fn parse_uninstall_inspection(
+    output: &[u8],
+    asked: &[&Path],
+) -> Option<UninstallInspection> {
+    fn host_path<'a>(
+        fields: &mut impl Iterator<Item = &'a [u8]>,
+        path: PathBuf,
+    ) -> Option<HostPath> {
+        let exists = match fields.next()? {
+            b"1" => true,
+            b"0" => false,
+            _ => return None,
+        };
+        let canonical = fields.next()?;
+        Some(HostPath {
+            path,
+            exists,
+            canonical: (!canonical.is_empty())
+                .then(|| bytes_path(canonical).ok())
+                .flatten(),
+        })
+    }
+    let mut fields = output.split(|byte| *byte == 0);
+    let paths = asked
+        .iter()
+        .map(|path| host_path(&mut fields, path.to_path_buf()))
+        .collect::<Option<Vec<_>>>()?;
+    let default_state = bytes_path(fields.next()?).ok()?;
+    let default_state_dir = host_path(&mut fields, default_state)?;
+    let unit_active_state = String::from_utf8(fields.next()?.to_vec()).ok()?;
+    let unit_kill_mode = String::from_utf8(fields.next()?.to_vec()).ok()?;
+    let fragment = bytes_path(fields.next()?).ok()?;
+    let unit_fragment = host_path(&mut fields, fragment.clone())?;
+    let unit_fragment = (!fragment.as_os_str().is_empty()).then_some(unit_fragment);
+    // The output ends with a NUL, which leaves one empty trailing field.
+    if fields.next() != Some(b"") || fields.next().is_some() {
+        return None;
+    }
+    Some(UninstallInspection {
+        paths,
+        default_state_dir,
+        unit_active_state,
+        unit_kill_mode,
+        unit_fragment,
+    })
+}
+
+/// Refuse an UNINSTALL host action on the direct local transport.
+///
+/// Uninstall is planned only for remote rows (the helm's own machine is
+/// `farhelm uninstall`'s), so a local plan cannot reach these actions; this
+/// keeps the local executor from growing an implementation nothing can call.
+fn require_remote(target: &ProvisioningTarget, what: &str) -> Result<(), BackendFailure> {
+    match target {
+        ProvisioningTarget::Ssh { .. } => Ok(()),
+        ProvisioningTarget::Local => Err(BackendFailure::new(
+            format!("{what} is not done on the helm's own machine; use farhelm uninstall there"),
+            "",
+        )),
     }
 }
 
@@ -2584,20 +2906,15 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             user_unit_dir.display()
         )));
     }
-    // Setup's unit is refused here, before any plan exists, so ADD and UPDATE
-    // share one refusal: both turn a `Manual` outcome into "not from the
-    // panel". The write itself re-checks the marker (see `install_bytes`),
-    // because a plan is confirmed some time after this inspection.
+    // Setup's unit is refused here, before any plan exists, so every
+    // operation refuses it the same way, each in its own words (see
+    // `ProvisioningOperation::setup_managed_refusal`). The unit write and the
+    // unit removal re-check the marker (see `install_bytes` and
+    // `remove_unit`), because a plan is confirmed some time after this
+    // inspection.
     match fields[8] {
         b"" => {}
-        b"setup" => {
-            return Ok(ReachOutcome::Manual(format!(
-                "{} on this host is managed by farhelm helm setup there, so the hosts panel does not \
-                 replace it. Update Farhelm on that host with its installer and farhelm helm setup, or \
-                 move the unit aside to let the panel provision the host.",
-                crate::units::SUPERVISOR_UNIT_NAME
-            )));
-        }
+        b"setup" => return Ok(ReachOutcome::SetupManaged),
         _ => {
             return Err(BackendFailure::new(
                 "the provisioning reach check returned malformed output",

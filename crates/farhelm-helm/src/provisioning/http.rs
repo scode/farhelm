@@ -81,10 +81,10 @@ pub(crate) struct RunAccepted {
     pub(super) run_id: String,
 }
 
-/// A frozen UPDATE plan. Posting its opaque id back to the same host route
-/// consumes it exactly once and starts the run.
+/// A frozen UPDATE or UNINSTALL plan. Posting its opaque id back to the same
+/// host route consumes it exactly once and starts the run.
 #[derive(Debug, Serialize)]
-pub(crate) struct UpdatePlanResponse {
+pub(crate) struct HostPlanResponse {
     pub(super) probe_id: String,
     pub(super) plan: ProvisioningPlan,
     pub(super) confirmation: String,
@@ -199,6 +199,29 @@ pub(crate) async fn update_host(
             Err(error) => provisioning_error(error),
         },
         None => match state.provisioning.plan_update(host).await {
+            Ok(plan) => axum::Json(plan).into_response(),
+            Err(error) => provisioning_error(error),
+        },
+    }
+}
+
+/// `POST /api/hosts/{id}/uninstall` — the update route's shape: plan
+/// without a body (the response carries the confirmation the user must
+/// accept), then consume the returned opaque plan when the same route
+/// receives its confirmation body.
+pub(crate) async fn uninstall_host(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    request: Option<axum::Json<ProvisionRequest>>,
+) -> Response {
+    match request {
+        Some(axum::Json(request)) => {
+            match state.provisioning.start_uninstall(host, request).await {
+                Ok(run) => (StatusCode::ACCEPTED, axum::Json(run)).into_response(),
+                Err(error) => provisioning_error(error),
+            }
+        }
+        None => match state.provisioning.plan_uninstall(host).await {
             Ok(plan) => axum::Json(plan).into_response(),
             Err(error) => provisioning_error(error),
         },
