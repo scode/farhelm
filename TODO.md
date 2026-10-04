@@ -44,12 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Settle Codex trust markers in command launches.** Command launches still expand the compiler's internal
-  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}` markers, although their public placeholder contract names only
-  `{cwd}`, `{conversation}` and `{farhelm_args}`. Decide whether these internal markers should expand only in agent
-  launches or be an explicit exception for command launches, then align the specification, implementation and tests.
-  Follow-up to the launch-kind redesign in PR #1563.
-
 - **Settle retry limits for template-based session creation.** A retry with the same idempotency key is promised the
   first accepted session even after a template edit, but the helm prunes its saved launch resolutions after 30 days and
   retains only the newest 256 per requesting session. Once a resolution is evicted, a retry resolves templates again; if
