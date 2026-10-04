@@ -41,17 +41,28 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// the restart button names through `aria-describedby`.
 ///
 /// The explanation is visually hidden and duplicated into the button's
-/// `title`: `title` is the mouse tooltip and nothing more — it is unreachable
-/// by keyboard, absent on touch, and skipped by some screen readers — so the
-/// text a user is entitled to before restarting has to exist as a real
-/// element too. `aria-describedby` takes precedence over `title` as the
-/// accessible description, so the two do not double-announce.
+/// hover tooltip (`data-tooltip`, `assets/tooltip.js`). The tooltip is a
+/// visual aid and nothing more: it is absent on touch and is not part of
+/// the accessibility tree, so the text a user is entitled to before
+/// restarting has to exist as a real element too, and this element is the
+/// button's accessible description.
 ///
 /// A fixed id rather than a per-session one, for the reason every other
 /// element id in this view is fixed (see `tabs`): exactly one `SessionView`
 /// is mounted at a time.
 const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
+/// The DOM ids of the header copy buttons' accessible descriptions.
+///
+/// Each copy button's hover tooltip names its full value and the copy action,
+/// but the tooltip is a visual aid outside the accessibility tree. The
+/// `title` it replaced used to double as the button's accessible
+/// description, which also kept the value announced while the button's
+/// contents read only "✓ copied". These visually hidden elements carry the
+/// same text for assistive technology. Fixed ids for the same reason as
+/// [`RESTART_OFFER_DESCRIPTION_ID`].
+const COPY_DIRECTORY_DESCRIPTION_ID: &str = "header-copy-directory-description";
+const COPY_COMMAND_DESCRIPTION_ID: &str = "header-copy-command-description";
 
 /// Return keyboard focus to the header action after its modal unmounts.
 ///
@@ -181,7 +192,7 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   (`restart_button_label`, which names the offer rather than the
 ///   action) — the VISIBLE glyph is the compact "restart" every action
 ///   button uses, so the cluster fits the supported minimum width, and
-///   `aria-label`/`title` carry the full offer wording for whoever reads
+///   `aria-label` and the hover tooltip carry the full offer wording for whoever reads
 ///   them. `restart_offer_text`'s elaboration — why the terminal is gone,
 ///   what happens to the conversation — is a further hover tooltip and
 ///   assistive-technology description, which is what had no business being
@@ -1820,7 +1831,7 @@ pub(crate) fn SessionView(
     // the notice.
     let stale_metadata = stale_badge.is_some() || stale_activity.is_some();
     // One string, built once, for both the visible metadata and its own
-    // `title`: the line is truncated with an ellipsis at whatever width the
+    // tooltip: the line is truncated with an ellipsis at whatever width the
     // header has left, and the tooltip is the only way back to the full cwd
     // and invocation. Two copies of the format would let the two drift.
     // The restart offer's explanation, now the restart button's tooltip and
@@ -1832,7 +1843,7 @@ pub(crate) fn SessionView(
     // the compact "restart" every header action uses (so the cluster fits
     // the header's supported minimum width — see the `.titlebar-actions`
     // CSS), so this is what actually carries SPEC.md's "restart says so"
-    // promise to `aria-label` and to the hover `title`, in front of the
+    // promise to `aria-label` and to the hover tooltip, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
     // Whether Restart can run at all; Restart with additionally needs a launch
@@ -1911,7 +1922,7 @@ pub(crate) fn SessionView(
             // middle, actions pinned right — see this component's docs for
             // why everything that used to be its own band lives here.
             header { class: "titlebar",
-                // Both of these carry their own text as `title` because both
+                // Both of these carry their own text as a tooltip because both
                 // ellipsize: a title and a cwd share `CreateSession`'s 64 KiB
                 // field budget, so the hover tooltip is the only route back
                 // to a value the row cannot fit.
@@ -1924,9 +1935,10 @@ pub(crate) fn SessionView(
                 // Peer text: the title, directory and command come from the
                 // session's host and from agents, so each is escaped and
                 // direction-isolated like every other peer value (see
-                // `peer.rs`), tooltips included. Native tooltips cannot be
-                // isolated, so escaping is what keeps them honest there.
-                span { class: "title", title: "{display_peer(&shown_title)}",
+                // `peer.rs`), tooltips included. A tooltip is one attribute
+                // string and cannot be isolated, so escaping is what keeps it
+                // honest there.
+                span { class: "title", "data-tooltip": "{display_peer(&shown_title)}",
                     span { class: "peer-value", dir: "ltr", "{display_peer(&shown_title)}" }
                 }
                 // Its own `if`, not nested under the badge's: see
@@ -1935,14 +1947,15 @@ pub(crate) fn SessionView(
                 if let Some(activity) = &header_activity {
                     span {
                         class: "status-time",
-                        title: "{activity.absolute}",
+                        "data-tooltip": "{activity.absolute}",
                         "{activity.age}"
                     }
                 }
                 button {
                     r#type: "button",
                     class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
-                    title: "{display_peer(&shown.cwd)} — click to copy",
+                    "data-tooltip": "{display_peer(&shown.cwd)} — click to copy",
+                    "aria-describedby": COPY_DIRECTORY_DESCRIPTION_ID,
                     // The clipboard gets the raw bytes (a copy that differed
                     // from the value would be useless); the feedback says
                     // when those bytes hold characters the display escaped.
@@ -1961,7 +1974,8 @@ pub(crate) fn SessionView(
                 button {
                     r#type: "button",
                     class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
-                    title: "{display_peer(&shown.invocation)} — click to copy",
+                    "data-tooltip": "{display_peer(&shown.invocation)} — click to copy",
+                    "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
                     onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
                     if copied_command().is_some() {
                         span { class: "copy-feedback", "✓ copied" }
@@ -1969,6 +1983,14 @@ pub(crate) fn SessionView(
                         span { class: "copy-glyph", "📋" }
                         span { class: "peer-value", dir: "ltr", "{display_peer(&shown.invocation)}" }
                     }
+                }
+                // The two copy buttons' accessible descriptions (see the
+                // id constants for why they exist beside the tooltips).
+                span { id: COPY_DIRECTORY_DESCRIPTION_ID, class: "visually-hidden",
+                    "{display_peer(&shown.cwd)} — click to copy"
+                }
+                span { id: COPY_COMMAND_DESCRIPTION_ID, class: "visually-hidden",
+                    "{display_peer(&shown.invocation)} — click to copy"
                 }
                 // The warning floats below the header, anchored to the
                 // titlebar rather than inside the copy button, so no amount
@@ -2019,12 +2041,12 @@ pub(crate) fn SessionView(
                             // e.g. "resume conversation") is what this
                             // control's accessible name carries now that the
                             // visible label stays compact beside the other
-                            // always-visible actions. `title` repeats the
+                            // always-visible actions. The tooltip repeats the
                             // offer for a mouse's hover, ahead of the further
                             // elaboration `offer_explanation` provides
                             // through `aria-describedby` below.
                             "aria-label": "{restart_label}",
-                            title: "{restart_label} — {offer_explanation}",
+                            "data-tooltip": "{restart_label} — {offer_explanation}",
                             "aria-describedby": RESTART_OFFER_DESCRIPTION_ID,
                             // Greyed out rather than removed when the session
                             // cannot resume (SPEC.md): `aria-disabled` keeps
@@ -2123,7 +2145,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-primary restart-with-trigger",
-                        title: "{restart_with_description}",
+                        "data-tooltip": "{restart_with_description}",
                         "aria-describedby": RESTART_WITH_DESCRIPTION_ID,
                         "aria-disabled": with_reason.is_some(),
                         disabled: lifecycle.busy(),
@@ -2471,7 +2493,7 @@ pub(crate) fn SessionView(
                         if let Some(activity) = &stale_activity {
                             span {
                                 class: "status-time",
-                                title: "{activity.absolute}",
+                                "data-tooltip": "{activity.absolute}",
                                 "{activity.age}"
                             }
                         }
@@ -2497,7 +2519,7 @@ pub(crate) fn SessionView(
                             // "Restart or Replace" wording; the accessible
                             // name and tooltip keep the conversation promise.
                             "aria-label": "{restart_label}",
-                            title: "{restart_label} — {offer_explanation}",
+                            "data-tooltip": "{restart_label} — {offer_explanation}",
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
                                 if !lifecycle.claim_into(&mut view_claim) {
@@ -2908,7 +2930,7 @@ fn activity_destination(
 /// button's hover tooltip and accessible description rather than a band
 /// above the terminal. `restart_button_label` carries the offer itself
 /// into the button's ACCESSIBLE name (`aria-label`, and the front half of
-/// `title`) — the visible label is kept compact beside the other
+/// its hover tooltip) — the visible label is kept compact beside the other
 /// always-visible actions. This function adds the reason and elaboration
 /// behind that name, which is what did not deserve permanent chrome.
 ///
@@ -3043,7 +3065,7 @@ fn interrupted_surface_text(offer: RestartOffer, replace_with: bool) -> String {
 }
 
 /// The restart control's accessible name (`aria-label`, and the front half
-/// of its hover `title`) — names the OFFER rather than the action, because
+/// of its hover tooltip) — names the OFFER rather than the action, because
 /// "restart" alone (the control's compact VISIBLE glyph, since the header
 /// consolidation) would leave a user guessing whether their conversation
 /// survives, which is the exact question SPEC.md requires an honest answer
@@ -3096,7 +3118,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "smaller",
-                title: "Smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
+                "data-tooltip": "smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
                 "aria-label": "Smaller terminal text",
                 onclick: move |_| step(-1),
                 "A\u{2212}"
@@ -3105,7 +3127,7 @@ fn TerminalTextSize() -> Element {
                 r#type: "button",
                 class: "btn btn-neutral tab-text-size",
                 "data-text-size": "larger",
-                title: "Larger terminal text (Cmd/Ctrl+Shift++)",
+                "data-tooltip": "larger terminal text (Cmd/Ctrl+Shift++)",
                 "aria-label": "Larger terminal text",
                 onclick: move |_| step(1),
                 "A+"

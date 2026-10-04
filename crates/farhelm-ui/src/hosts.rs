@@ -2048,7 +2048,7 @@ fn host_menu_summary_parts(host: &Host) -> Vec<DetailPart> {
     ]
 }
 
-/// Build the native tooltip from isolated header runs without allowing peer
+/// Build the hover tooltip from isolated header runs without allowing peer
 /// text to reorder the app-authored separator.
 fn host_menu_summary_tooltip(parts: &[DetailPart]) -> String {
     parts
@@ -2876,6 +2876,10 @@ fn HostRow(
                         "host-status {phase_class(&host.state)}"
                     },
                     role: "status",
+                    // A "too new" label's explanation (the versions and "update
+                    // the helm") lives in its hover tooltip, which is not in
+                    // the accessibility tree; this names a clipped copy of it.
+                    aria_describedby: too_new_title(&host.state).map(|_| format!("host-status-description-{id}")),
                     aria_label: if update_is_active {
                         None
                     } else {
@@ -2902,7 +2906,7 @@ fn HostRow(
                             {
                                 span {
                                     class: "host-status-label",
-                                    title: too_new_title(&host.state),
+                                    "data-tooltip": too_new_title(&host.state),
                                     "{phase_display_label(&host.state)}"
                                 }
                             }
@@ -2916,8 +2920,11 @@ fn HostRow(
                         r#type: "button",
                         class: "btn host-update-button",
                         "data-update-kind": urgency,
-                        title: host_update_title(&host.state),
+                        "data-tooltip": host_update_title(&host.state),
                         aria_label: format!("update {shown_name}"),
+                        // The tooltip's builds and urgency, for assistive
+                        // technology, which the tooltip does not reach.
+                        aria_describedby: host_update_title(&host.state).map(|_| format!("host-update-description-{id}")),
                         onclick: {
                             let binding = click_binding.clone();
                             move |_| {
@@ -2936,6 +2943,14 @@ fn HostRow(
                         },
                         span { "aria-hidden": "true", "↑" }
                         "update"
+                    }
+                }
+                if let Some(text) = too_new_title(&host.state) {
+                    span { id: "host-status-description-{id}", class: "visually-hidden", "{text}" }
+                }
+                if inline_update.is_some() {
+                    if let Some(text) = host_update_title(&host.state) {
+                        span { id: "host-update-description-{id}", class: "visually-hidden", "{text}" }
                     }
                 }
                 // The toggle stays mounted while a modal dialog takes over.
@@ -2996,12 +3011,12 @@ fn HostRow(
                                     class: "session-row-menu-header",
                                     div {
                                         class: "session-row-menu-title",
-                                        title: "{shown_name}",
+                                        "data-tooltip": "{shown_name}",
                                         span { class: "peer-value", dir: "ltr", "{shown_name}" }
                                     }
                                     div {
                                         class: "session-row-menu-summary",
-                                        title: "{host_menu_summary_tooltip(&menu_summary_parts)}",
+                                        "data-tooltip": "{host_menu_summary_tooltip(&menu_summary_parts)}",
                                         PeerLine {
                                             class: "session-row-menu-summary-runs".to_string(),
                                             parts: menu_summary_parts.clone(),

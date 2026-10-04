@@ -1121,6 +1121,15 @@ declare_assets! {
     // either; `feed::FleetFeed`'s snippet waits for the global this file
     // assigns.
     const EVENTS_JS: Asset = asset!("/assets/events.js");
+    // Farhelm's own hover tooltip (see the file's module docs for why the
+    // browser's `title` tooltip is not used anywhere). It installs one
+    // delegated listener set on `document` when it loads and needs nothing
+    // from the Rust side, so no snippet waits for its global; components only
+    // set `data-tooltip`. Rendered from `App` on both builds rather than from
+    // `AppBody` with the terminal and feed scripts: it has nothing to do with
+    // authentication, and the desktop's startup and failure pages (whose
+    // Retry button has hover text) render before `AppBody` exists.
+    const TOOLTIP_JS: Asset = asset!("/assets/tooltip.js");
     const APP_CSS: Asset = asset!("/assets/app.css");
     // The webview console shim (PLAN_desktop_web_bug_triage.md; see that file's
     // own module docs for the loaded-first and desktop-only contracts).
@@ -1197,13 +1206,20 @@ pub fn App() -> Element {
                 // `window.interpreter` lazily at press time, so it attaches
                 // correctly whenever its own script finishes loading.
                 document::Script { src: CLICK_DETAIL_JS }
+                // Before the bootstrap gate so its own pages get hover text.
+                document::Script { src: TOOLTIP_JS }
                 auth::DesktopBootstrapGate {}
             }
         };
     }
 
     #[cfg(not(native_desktop))]
-    return rsx! { window_chrome::WindowFrame { AppBody {} } };
+    return rsx! {
+        window_chrome::WindowFrame {
+            document::Script { src: TOOLTIP_JS }
+            AppBody {}
+        }
+    };
 }
 
 /// Keep `data-window-active` on the root element (`<html>`) set to `"true"`

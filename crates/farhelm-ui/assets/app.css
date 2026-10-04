@@ -916,7 +916,7 @@ samp {
 
    Directory and command line give up width first, then the session name;
    status, age, and the action cluster never shrink or hide. That ordering is
-   deliberate: the two copy buttons preserve their full values in `title`,
+   deliberate: the two copy buttons preserve their full values in their tooltips,
    while the actions must remain readable and keyboard reachable. At widths
    below the header's 650px full-visibility width the row may clip; it never wraps or moves the
    actions into another menu. */
@@ -947,7 +947,7 @@ samp {
 }
 
 /* Copy affordances stay keyboard reachable, and their values give up width
-   before the title while the full value remains available in `title`.
+   before the title while the full value remains available in the tooltip.
 
    Content-sized (`flex-basis: auto`) with no width cap: each field takes the
    width its value needs, and only once the row runs out of room do they
@@ -1023,6 +1023,56 @@ samp {
   margin-bottom: 4px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+/* Farhelm's own hover tooltip (tooltip.js), the one element every
+   `data-tooltip` shows through. It replaces the browser's `title` tooltip,
+   whose delay the page cannot shorten.
+
+   Fixed to the viewport and positioned by the script from the target's
+   measured rectangle, so no scroll container clips it (`.app-sidebar` would
+   clip anything anchored inside a row). It wears the row menu panels' look
+   (`.session-row-menu-panel`: same background, border, radius and shadow)
+   so it reads as the same floating level in both themes, with no arrow.
+   Text wraps at about 280px and is clamped to eight lines, because session
+   titles have no length limit and the native tooltips it replaces were
+   truncated by the platform; the viewport bound covers a window shorter
+   than that. `unicode-bidi: isolate` keeps a peer string's own direction
+   from reordering anything around it. It is never interactive: no pointer
+   events, never focusable.
+
+   Above everything else on the z-index ladder (see `.header-confirm`),
+   including the modal backdrops at 40: dialogs are ordinary DOM rather
+   than top-layer `<dialog>` elements, so their buttons' tooltips need this
+   to paint over the dialog they belong to. */
+.farhelm-tooltip {
+  position: fixed;
+  z-index: 50;
+  box-sizing: border-box;
+  max-width: min(280px, calc(100vw - 8px));
+  max-height: calc(100vh - 8px);
+  padding: 4px 8px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  pointer-events: none;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  overflow: hidden;
+}
+/* `display` above would otherwise override the `hidden` attribute the
+   script toggles. */
+.farhelm-tooltip[hidden] {
+  display: none;
 }
 
 /* The hidden-characters warning after a header copy. It hangs below the
@@ -1106,8 +1156,8 @@ samp {
 }
 
 /* Keep the unavailable Restart and Restart with controls hoverable for their
-   explanation. Native disabled buttons do not expose `title` consistently in
-   webviews. */
+   explanation. Some engines send no pointer events to a natively disabled
+   button, so its tooltip could never show. */
 .titlebar-actions .restart-primary[aria-disabled="true"],
 .titlebar-actions .restart-with-trigger[aria-disabled="true"] {
   opacity: 0.5;
@@ -1160,6 +1210,7 @@ samp {
         notice, same scope, in the opposite corner
      20 `.session-row-menu-panel` — a sidebar row's action menu
      30 `.header-confirm` (this rule) — must outrank the row menu above
+     50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop
    Right-aligned to the anchor, which is at the row's trailing edge, so the
    panel opens inward rather than off the window. */
 .header-confirm {
@@ -1219,8 +1270,8 @@ samp {
 
    - The restart offer's explanation, an `aria-describedby` target. Removing
      it from the accessibility tree would mean the description silently does
-     not exist. It reaches a user through two channels: the button's `title`
-     as a mouse's hover tooltip, and this element as assistive technology's
+     not exist. It reaches a user through two channels: the button's
+     hover tooltip (`data-tooltip`), and this element as assistive technology's
      accessible description. Those are the two channels this class actually
      serves, not a claim about every user without a pointer.
    - A live status badge's WORD, whose visible half is a colored dot (see

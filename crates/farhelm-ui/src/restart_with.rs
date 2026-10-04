@@ -653,7 +653,7 @@ pub(crate) fn RestartWithDialog(
                     button {
                         class: "btn btn-primary restart-with-submit",
                         r#type: "button",
-                        title: "{offer_label}",
+                        "data-tooltip": "{offer_label}",
                         disabled: !may_submit && !busy,
                         aria_disabled: if busy { "true" },
                         onclick: move |_| {

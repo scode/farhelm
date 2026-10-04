@@ -790,12 +790,12 @@ test("clone pre-fills the create form from a typed-command row, and the edited c
     const cloned = row(page, cloneId);
     await expect(cloned).toBeVisible({ timeout: 20_000 });
     await expect(cloned.locator(".session-title")).toHaveText(title);
-    await expect(cloned.locator(".session-cwd")).toHaveAttribute("title", newCwd);
+    await expect(cloned.locator(".session-cwd")).toHaveAttribute("data-tooltip", newCwd);
 
     // The original row: same directory, same title, still there — cloning
     // must not have touched it.
     await expect(source).toBeVisible();
-    await expect(source.locator(".session-cwd")).toHaveAttribute("title", originalCwd);
+    await expect(source.locator(".session-cwd")).toHaveAttribute("data-tooltip", originalCwd);
     await expect(source.locator(".session-title")).toHaveText(title);
   } finally {
     if (cloneId) await cleanupSession(request, cloneId);

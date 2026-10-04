@@ -51,6 +51,17 @@ Native external links from the terminal (the U6 plain-text URL work):
 - Confirm an OSC 8 hyperlink still opens the same way, and that ordinary text selection and copy in the terminal are
   unaffected by the link detector.
 
+Hover help (Farhelm's own tooltip, which replaced the browser's slow `title` tooltip):
+
+- Rest the pointer on a sidebar row's status dot, agent mark and permission mark, and on a header button: a small themed
+  box appears after about a third of a second, directly above the control and clear of the cursor; moving straight on to
+  the next mark shows its text at once. No second, slower system tooltip appears on top of it after a second or two.
+- Rest on the gear at the top of the sidebar: with no room above, the box appears below it, far enough down that the
+  cursor does not cover the text. Near the window's right edge, the box shifts left to stay inside.
+- Tab through controls (with Keyboard navigation turned on in System Settings › Keyboard, or using Option-Tab; by
+  default macOS moves Tab only between text fields and pop-ups): each focused control shows its box in the same place.
+  Press Escape, click, or switch to another app: the box goes away. Scroll the sidebar while one shows: it goes away.
+
 Observed: not run; native macOS verification is deferred to the maintainer.
 
 Candidate revision: not recorded

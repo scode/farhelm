@@ -161,13 +161,13 @@ test("an interrupted session's view leads with the resume offer, and declining c
   // would do to the conversation — both, because the user is being asked
   // to act on something they did not do. Since the header consolidation it
   // says so on the restart control itself rather than in a permanent band:
-  // `title` as a mouse's hover tooltip, and an `aria-describedby` target as
+  // `data-tooltip` as a mouse's hover tooltip, and an `aria-describedby` target as
   // assistive technology's accessible description. Both are asserted,
   // because either alone leaves one of those two channels unable to read
   // it.
   const restart = page.locator(".restart-primary");
   await expect(restart).toHaveAttribute(
-    "title",
+    "data-tooltip",
     /interrupted by a host reboot.*resumes this session's own conversation/,
   );
   const described = await restart.getAttribute("aria-describedby");
@@ -247,7 +247,7 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
   await expect(restart).toBeVisible();
   await expect(restart).toHaveAttribute("aria-disabled", "true");
   await expect(restart).toHaveAttribute("aria-label", "restart unavailable");
-  await expect(restart).toHaveAttribute("title", /no conversation Farhelm can resume was captured.*replace/);
+  await expect(restart).toHaveAttribute("data-tooltip", /no conversation Farhelm can resume was captured.*replace/);
   await expect(page.locator("#restart-offer-description")).toContainText("no conversation Farhelm can resume");
   await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "true");
 

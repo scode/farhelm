@@ -166,7 +166,7 @@ pub(crate) struct ActivityStamp {
     /// long-quiet session reads `1000d` rather than being capped, so nothing
     /// downstream may size itself on an assumed maximum width.
     pub(crate) age: String,
-    /// The same instant spelled out in full, for the `title` attribute.
+    /// The same instant spelled out in full, for the hover tooltip.
     /// Always present when `age` is: an abbreviation is never the only place
     /// a value is recorded (SPEC.md's Session list rule, which the row
     /// already applies to its directory and invocation).

@@ -242,7 +242,7 @@ fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<Deta
     parts
 }
 
-/// Build the header's native tooltip from already separated display runs.
+/// Build the header's hover tooltip from already separated display runs.
 ///
 /// The visible line uses one isolated element per peer value; the tooltip is
 /// necessarily one attribute string, so every peer run is escaped before the
@@ -404,6 +404,14 @@ struct AgentBadge {
     permission: PermissionGlyph,
     description: String,
 }
+
+/// Hover text for a row's stale mark, in both densities.
+///
+/// The visible mark is the bare word (or, compact, a glyph), so the tooltip
+/// says what it means rather than repeating it: the row is the helm's
+/// last-known view of a session whose host is not connected right now
+/// (`Session::stale`; SPEC.md keeps such sessions listed, marked stale).
+const STALE_TOOLTIP: &str = "stale: the host is not connected, so this is its last-known state";
 
 /// Keep the specific approval mode audible even when several modes share a shield.
 fn permission_description(permission: PermissionGlyph) -> &'static str {
@@ -583,7 +591,7 @@ fn PeerTitle(class: &'static str, title: String, quoted: bool, tooltip: bool) ->
         span {
             class: "{class} peer-value",
             dir: "{isolated}",
-            title: tooltip.then(|| shown.clone()),
+            "data-tooltip": tooltip.then(|| shown.clone()),
             "{text}"
         }
     }
@@ -1387,10 +1395,11 @@ pub(super) fn SessionRow(
                     class: "session-row-open",
                     // Keep the full directory discoverable when compact mode
                     // removes the metadata line and its own tooltip.
-                    // Native tooltips do not inherit DOM direction isolation,
-                    // so every peer-derived `title` goes through
-                    // `display_peer`, like the title's own tooltip.
-                    title: if compact { display_peer(&session.cwd) },
+                    // A tooltip is one attribute string and cannot carry
+                    // DOM direction isolation, so every peer-derived hover
+                    // text goes through `display_peer`, like the title's own
+                    // tooltip.
+                    "data-tooltip": if compact { display_peer(&session.cwd) },
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1453,7 +1462,7 @@ pub(super) fn SessionRow(
                                     // The compact row button's tooltip names
                                     // its cwd, so this wrapper keeps ended
                                     // detail available to pointer users too.
-                                    span { class: "compact-ended-status", title: "{display_peer(&badge.text)}",
+                                    span { class: "compact-ended-status", "data-tooltip": "{display_peer(&badge.text)}",
                                         EndedStatusIcon { glyph }
                                         span { class: "visually-hidden", "{badge.text}" }
                                     }
@@ -1497,9 +1506,10 @@ pub(super) fn SessionRow(
                         // the full-width detail line so they stay readable
                         // without competing with the agent and activity.
                         span { class: if compact { "session-identity-copy compact" } else { "session-identity-copy" },
-                            // Native tooltips do not inherit DOM direction
-                            // isolation. Escape invisible directional controls
-                            // in this new display surface like other peer text.
+                            // A tooltip is one attribute string and cannot
+                            // carry DOM direction isolation. Escape invisible
+                            // directional controls in this display surface
+                            // like other peer text.
                             // Titles are peer text (agents may rename any
                             // session), so the row shows them escaped and
                             // direction-isolated, not just in the tooltip.
@@ -1525,7 +1535,7 @@ pub(super) fn SessionRow(
                             }
                             if compact {
                                 if session.stale {
-                                    span { class: "compact-qualifier", title: "stale",
+                                    span { class: "compact-qualifier", "data-tooltip": "{STALE_TOOLTIP}",
                                         QualifierIcon { glyph: QualifierGlyph::Stale }
                                         span { class: "visually-hidden", "stale" }
                                     }
@@ -1535,14 +1545,14 @@ pub(super) fn SessionRow(
                         // The agent track is a bounded visual classifier.
                         span {
                             class: "session-agent",
-                            title: "{display_peer(&agent_tooltip)}",
+                            "data-tooltip": "{display_peer(&agent_tooltip)}",
                             // Give each glyph its own hover target. The
                             // parent still exposes the argv when the pointer
                             // is between the two marks.
-                            span { title: "{display_peer(&agent_tooltip)}",
+                            span { "data-tooltip": "{display_peer(&agent_tooltip)}",
                                 HarnessIcon { glyph: agent.harness }
                             }
-                            span { title: "{permission_description(agent.permission)}",
+                            span { "data-tooltip": "{permission_description(agent.permission)}",
                                 PermissionIcon { glyph: agent.permission }
                             }
                             span { class: "visually-hidden", "{display_peer(&agent.description)}" }
@@ -1568,7 +1578,7 @@ pub(super) fn SessionRow(
                         if let Some(activity) = &activity {
                             span {
                                 class: "status-time",
-                                title: "{activity.absolute}",
+                                "data-tooltip": "{activity.absolute}",
                                 "{activity.age}"
                             }
                         }
@@ -1585,7 +1595,7 @@ pub(super) fn SessionRow(
                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
                             }
                             if session.stale {
-                                span { class: "stale-badge", title: "stale", "stale" }
+                                span { class: "stale-badge", "data-tooltip": "{STALE_TOOLTIP}", "stale" }
                             }
                         }
                     }
@@ -1600,7 +1610,7 @@ pub(super) fn SessionRow(
                             span {
                                 class: "session-host peer-value",
                                 dir: "ltr",
-                                title: "{display_peer(host_name)}",
+                                "data-tooltip": "{display_peer(host_name)}",
                                 "{host_name}"
                             }
                             span { class: "session-host-separator", ":" }
@@ -1612,13 +1622,23 @@ pub(super) fn SessionRow(
                         // logical order under it — rtl applied directly to
                         // the text would move a leading "/" to the visual
                         // right (see `.session-cwd` in app.css). The
-                        // `title` carries the UNABBREVIATED path, which is
+                        // tooltip carries the UNABBREVIATED path, which is
                         // what makes the `~` safe: see `abbreviate_home`
                         // for whose home it does and does not know about.
-                        span { class: "session-cwd", title: "{display_peer(&session.cwd)}",
+                        span { class: "session-cwd", "data-tooltip": "{display_peer(&session.cwd)}",
                             span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
                         }
                     }
+                    }
+                    // Compact mode drops the metadata line, so the directory
+                    // reaches the pointer through the open button's tooltip
+                    // and assistive technology through this clipped copy,
+                    // which joins the button's accessible name. The native
+                    // `title` the tooltip replaced was the button's
+                    // accessible description instead; the tooltip is not in
+                    // the accessibility tree at all.
+                    if compact {
+                        span { class: "visually-hidden", "{display_peer(&session.cwd)}" }
                     }
                 }
                 // The actions menu: one small toggle beside the open
@@ -1917,17 +1937,16 @@ pub(super) fn SessionRow(
                                 class: "session-row-menu-header",
                                 div {
                                     class: "session-row-menu-title",
-                                    title: "{display_peer(&session.title)}",
+                                    "data-tooltip": "{display_peer(&session.title)}",
                                     span {
                                         class: "peer-value",
                                         dir: "ltr",
-                                        title: "{display_peer(&session.title)}",
                                         "{display_peer(&session.title)}"
                                     }
                                 }
                                 div {
                                     class: "session-row-menu-summary",
-                                    title: "{menu_header_summary_tooltip(&menu_summary_parts)}",
+                                    "data-tooltip": "{menu_header_summary_tooltip(&menu_summary_parts)}",
                                     PeerLine {
                                         class: "session-row-menu-summary-runs".to_string(),
                                         parts: menu_summary_parts.clone(),
@@ -2451,8 +2470,9 @@ mod tests {
     /// invisible character or a direction override could render identically
     /// to another session's, or make the delete and replace confirmations
     /// quote a different title than the one they act on. Spec: the row's
-    /// visible title and both confirmation quotes show the escaped form
-    /// (`display_peer`) and never the raw control characters.
+    /// visible title, its hover tooltip, and both confirmation quotes show
+    /// the escaped form (`display_peer`) and never the raw control
+    /// characters.
     #[farhelm_testtrace::test]
     fn titles_render_escaped_in_the_row_and_both_confirmations() {
         std::thread_local! {
@@ -2569,6 +2589,20 @@ mod tests {
             assert!(
                 texts.iter().any(|text| text == &escaped),
                 "{prompt:?}: the row shows the escaped title: {texts:?}"
+            );
+            // The title's hover text is the one copy of it that cannot be
+            // direction-isolated (a tooltip is a single attribute string),
+            // so escaping is its whole defense: the row's tooltip carries
+            // the escaped title, and no tooltip carries the raw one.
+            assert!(
+                attribute("data-tooltip", &|value: &str| value == escaped) >= 1,
+                "{prompt:?}: the row title's tooltip is the escaped title"
+            );
+            assert_eq!(
+                attribute("data-tooltip", &|value: &str| value.contains('\u{202E}')
+                    || value.contains('\u{200B}')),
+                0,
+                "{prompt:?}: a raw control character reached a tooltip"
             );
             let confirmation_mounted = texts.iter().any(|text| text == &quoted);
             assert_eq!(

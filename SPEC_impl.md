@@ -227,7 +227,7 @@ legacy session has no verdict and carries the unclassified mark; nothing that ca
 guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with
 older snapshots. The full invocation remains in its accessible text and tooltip. The working directory is tilde-folded
 against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly.
-Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a
+Every one of those abbreviations is lossy, so the untouched string rides along in the row's tooltip — the row is a
 summary, and the full truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
@@ -237,7 +237,7 @@ non-optional. Agent-launch non-YOLO modes share the plain shield but retain thei
 command launch gets the plain shield only from its own not-YOLO assertion, and a legacy command gets the question mark.
 Both slots remain fixed-width.
 
-The agent and permission SVGs sit in separate `title` targets, so hovering the permission mark explains its mode instead
+The agent and permission SVGs sit in separate tooltip targets, so hovering the permission mark explains its mode instead
 of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
 full invocation.
 
@@ -392,21 +392,21 @@ else in the steady state. It used to be four stacked bands costing roughly 170px
 surface whose entire point is the terminal. Two of those bands had to go somewhere rather than merely shrink. The
 restart offer's explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's rule that
 Restart always resumes and, when it cannot, is greyed out with the specific reason is carried by the button's accessible
-name (`aria-label` and, alongside the further elaboration, `title`) — naming the offer (`resume conversation` or
+name (`aria-label` and, alongside the further elaboration, its tooltip) — naming the offer (`resume conversation` or
 `restart unavailable`) rather than the action. An unavailable Restart, like an unavailable Restart with, is
 `aria-disabled` rather than natively disabled, so its tooltip stays hoverable in webviews and its click handler is what
-refuses. The directory and invocation buttons carry their full values in `title`, shrink before the session title, and
-reveal a clipboard affordance on hover or keyboard focus. The six action buttons remain fully visible and in DOM order
-from a 650px main pane. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing
-actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that
-opened it, still confirm-in-place with focus on cancel; the consequence sentence they lead with is the one line standing
-between a click and a killed process tree, and a header that kept it in flow would have to either wrap or truncate it.
-Header Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted card's
-confirmation. Everything conditional — a refused restart's prose, the host-unreachable notice and its last-known-status
-band, the "helm stopped listing this session" line — is still a full-width band, because a band that only appears when
-it has something to say costs the steady state nothing. A classified status renders in at most one place: the header
-normally, the stale notice's own metadata band for a stale session (where SPEC.md's title/directory/last-known-status
-triple is assembled), and nowhere at all for a session nothing has classified yet.
+refuses. The directory and invocation buttons carry their full values in their tooltips, shrink before the session
+title, and reveal a clipboard affordance on hover or keyboard focus. The six action buttons remain fully visible and in
+DOM order from a 650px main pane. The app's 320px main-pane floor is unchanged; between those widths the row may clip
+its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under the
+button that opened it, still confirm-in-place with focus on cancel; the consequence sentence they lead with is the one
+line standing between a click and a killed process tree, and a header that kept it in flow would have to either wrap or
+truncate it. Header Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted
+card's confirmation. Everything conditional — a refused restart's prose, the host-unreachable notice and its
+last-known-status band, the "helm stopped listing this session" line — is still a full-width band, because a band that
+only appears when it has something to say costs the steady state nothing. A classified status renders in at most one
+place: the header normally, the stale notice's own metadata band for a stale session (where SPEC.md's
+title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
 
 Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
 launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's
@@ -620,6 +620,32 @@ button behavior remain AppKit-owned; actual native appearance and interactions r
 window root installs native layout before authentication completes. Bootstrap and error pages reserve a top band without
 requiring the sidebar to mount. A build-mismatch notice stays below that band and above the scrolling shell, with the
 app bar pinned above it so the warning remains readable.
+
+Hover help is Farhelm's own tooltip, `assets/tooltip.js`, not the browser's `title` tooltip. The native tooltip's delay
+belongs to the engine and cannot be shortened by any attribute, style or script, and WebKit, which the macOS desktop app
+embeds, also ignores the macOS tooltip-delay default; at a second or more, nobody discovered the hover texts that
+existed. So no element keeps a `title` as hover help, because one would bring the slow native box back on top. Elements
+opt in with a `data-tooltip` attribute, set like any other attribute by components, and by scripts on elements they
+create; one delegated listener set on `document` and one body-level `role="tooltip"` element serve the whole page,
+keeping the mechanism out of every component's props. The tooltip appears 300 ms after the pointer comes to rest on a
+target (each movement inside it restarts the wait) or keyboard focus (`:focus-visible`) reaches one, and at once when
+another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a press, Escape, a
+scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full delay). It hides
+on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses focus), Escape,
+losing focus, window blur, the target leaving the document (checked on a short timer rather than with a DOM observer,
+which would run on every live status update), and a scroll of the document or of a container holding the target, but not
+a scroll elsewhere such as the terminal under live output. Touch never shows it. It is placed above the target with a 6
+px gap and, only without room there, below with a 28 px gap: a page cannot know the cursor's size, and standard cursors
+extend downward from their hot spot, so space above a control is never under the cursor while a box just below a small
+icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container clips it, wears the
+row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines. Peer text still goes
+through `display_peer` before it becomes tooltip text, which the script sets with `textContent`. The tooltip element is
+a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep accessible
+text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information a
+screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are
+also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two hover displays
+keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress popup and the
+terminal's link-target display.
 
 Known risks, accepted deliberately:
 

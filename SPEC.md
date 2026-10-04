@@ -900,6 +900,10 @@ or mark unread action. The hover text uses the same status and permission meanin
 technology. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
 than here.
 
+In the web and desktop clients, hover text appears about 300 ms after the pointer rests on a control or icon that has
+it, or keyboard focus reaches one, and at once when moving on to another while one is showing; it sits above the control
+so the pointer does not cover it.
+
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. A compatible supervisor whose build is older than the helm's is still connected and usable, but its row says
 `old

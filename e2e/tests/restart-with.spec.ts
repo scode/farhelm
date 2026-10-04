@@ -376,7 +376,7 @@ test("unavailable restart with stays visible and inert with a reason", async ({ 
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
   await trigger.hover();
-  await expect(trigger).toHaveAttribute("title", reason);
+  await expect(trigger).toHaveAttribute("data-tooltip", reason);
   const descriptionId = await trigger.getAttribute("aria-describedby");
   expect(descriptionId, "the reason needs an assistive-technology target").toBeTruthy();
   await expect(page.locator(`#${descriptionId}`)).toHaveText(reason);
@@ -1050,7 +1050,7 @@ test("restart with is unavailable for a command launch without a resume command"
   const trigger = page.locator(".restart-with-trigger");
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
-  await expect(trigger).toHaveAttribute("title", /no resume command/);
+  await expect(trigger).toHaveAttribute("data-tooltip", /no resume command/);
 });
 
 /**

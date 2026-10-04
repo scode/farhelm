@@ -202,8 +202,9 @@ pub(crate) fn status_badge(
 /// session's badge already carries its color on visible text, so a dot
 /// beside it would repeat in a symbol what the word says in letters.
 ///
-/// `title` carries the full text on every badge, for two different reasons
-/// that happen to want the same attribute. An ended badge is capped at 32ch
+/// `data-tooltip` carries the full text on every badge (Farhelm's own hover
+/// tooltip, `assets/tooltip.js`), for two different reasons that happen to
+/// want the same attribute. An ended badge is capped at 32ch
 /// and ellipsizes (`app.css`'s `.status-badge`) — the shim's own `error`
 /// detail rides straight into this text and can run long, so the tooltip is
 /// the only way back to a badge that has visibly clipped. A live badge has
@@ -231,7 +232,7 @@ pub(crate) fn status_badge(
 /// the badge's status tooltip behind an action-only tooltip.
 ///
 /// The dot itself stays `aria-hidden="true"` regardless: it is a MOUSE
-/// shortcut only, never a focusable control (`dot_title` sets a `title`
+/// shortcut only, never a focusable control (`dot_title` sets a hover
 /// tooltip, not an accessible name) — the row's `…` menu carries the same
 /// toggle as a real, keyboard-operable menu item, and is the path a screen
 /// reader or keyboard user takes instead.
@@ -242,7 +243,7 @@ pub(crate) fn StatusBadgeView(
     dot_title: Option<String>,
 ) -> Element {
     // Computed once, ahead of the rsx below, so the `onclick` closure has
-    // its own `bool` to check rather than fighting `title: dot_title` for
+    // its own `bool` to check rather than fighting the dot's tooltip for
     // ownership of the `String` — the class selector needs the same
     // answer, so one shared value is also what keeps the two from being
     // able to drift apart.
@@ -252,7 +253,7 @@ pub(crate) fn StatusBadgeView(
         |action| format!("{} — {action}", badge.text),
     );
     rsx! {
-        span { class: "status-badge {badge.class}", title: "{badge.text}",
+        span { class: "status-badge {badge.class}", "data-tooltip": "{badge.text}",
             if badge.visible {
                 "{badge.text}"
             } else {
@@ -272,7 +273,7 @@ pub(crate) fn StatusBadgeView(
                 span {
                     class: if toggle_offered { "status-dot status-dot-toggle" } else { "status-dot" },
                     "aria-hidden": "true",
-                    title: dot_hover,
+                    "data-tooltip": dot_hover,
                     onclick: move |evt| {
                         // `stop_propagation` is why a dot click does not
                         // also select the row: the row's own open control

@@ -528,16 +528,6 @@ are large mostly because of their tests.
   supervisor comes back at the new version with its tmux sessions intact. The old half must be a real released artifact,
   not this tree's build — same-version update tests are exactly what could never see this bug.
 
-- Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
-  activity time, the cwd line and the profile chip) but the browser owns their ~1s delay and nothing — no CSS,
-  attribute, or JS — shortens it; WebKit's web content ignores the macOS tooltip-delay default too. A faster, themed
-  tooltip is a component shown on hover after a delay of the app's own choosing (~300ms), and it has to escape the
-  sidebar: `.app-sidebar`'s `overflow: hidden auto` clips anything anchored inside a row near its edges, so the tooltip
-  needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's popover is the pattern
-  to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop / delete, the host row's
-  buttons) is an hour and needs none of this. Plan: `plans/queue/hover-help.md` (taken over by the Near term hover help
-  entry).
-
 - Consider dropping the race-proofing around host identity, keeping the identity itself. To be clear about what stays:
   the per-install identity the supervisor mints on first run and stores in its own database, independent of hostname and
   address, so a retargeted row or a state directory moved to another machine is recognized as the same install; "never

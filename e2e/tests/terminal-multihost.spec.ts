@@ -3063,17 +3063,17 @@ test.describe("multi-host", () => {
         const button = row.getByRole("button", { name: /^update / });
         await expect(button).toBeVisible();
         await expect(button).toHaveAttribute("data-update-kind", updateKind);
-        await expect(button).toHaveAttribute("title", new RegExp(`update ${updateKind}`));
-        await expect(button).toHaveAttribute("title", /0\.1\.0/);
+        await expect(button).toHaveAttribute("data-tooltip", new RegExp(`update ${updateKind}`));
+        await expect(button).toHaveAttribute("data-tooltip", /0\.1\.0/);
         await expect(button).toHaveAttribute(
-          "title",
+          "data-tooltip",
           /click to update this host to the helm's version/,
         );
         if (updateKind === "required") {
-          await expect(button).toHaveAttribute("title", /protocol 1.*0\.2\.0.*protocol 8/);
+          await expect(button).toHaveAttribute("data-tooltip", /protocol 1.*0\.2\.0.*protocol 8/);
         } else {
           await expect(button).toHaveAttribute(
-            "title",
+            "data-tooltip",
             new RegExp(helmBuild().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
           );
         }
