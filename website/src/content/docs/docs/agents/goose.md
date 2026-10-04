@@ -5,6 +5,13 @@ sidebar:
   order: 10
 ---
 
+## Running Goose from a custom command
+
+A [custom command](/docs/agents/custom-commands/) that declares Goose must start an interactive session itself, the way
+Farhelm's own Goose launch does: `goose session {farhelm_args}`, with the resume command
+`goose session --resume --session-id {conversation} {farhelm_args}`. Farhelm no longer adds the `session` subcommand to
+a bare `goose`.
+
 ## Model choice
 
 You can leave the model unset in Farhelm. Goose then uses its configured provider and model; Farhelm does not add

@@ -27,9 +27,9 @@ assistant message.
 
 Farhelm checks the reported session file before resuming: it reads a bounded prefix of the file without following
 symlinks and requires the session header inside it to match the conversation it was told about. If the file is missing,
-belongs to a different conversation, or does not read as the session it was reported to be, Farhelm refuses Resume and
-offers a fresh launch instead — it never silently starts a new conversation under a Resume request. This matters because
-OMP itself can silently start a new conversation when given a missing session file.
+belongs to a different conversation, or does not read as the session it was reported to be, Farhelm refuses to restart
+the session (replace it to start over) — it never silently starts a new conversation under a restart. This matters
+because OMP itself can silently start a new conversation when given a missing session file.
 
 ## How Farhelm knows the report is yours
 
@@ -59,8 +59,8 @@ so a typo or a retired id can land on a different model rather than failing. A t
 also be interpreted as a thinking level rather than part of the model name (OMP guards the common cases, but the
 interpretation is OMP's, not Farhelm's). The explicit `--provider openrouter` spelling makes provider intent explicit;
 it does not switch that resolution off. If exact upstream routing of an arbitrary custom id matters, verify it in OMP
-itself: the composer accepts a syntactically valid custom id that need not exist in OMP's catalog, subject to Farhelm's
-existing harness-compatibility checks on which harness owns which id.
+itself: the session launcher accepts a syntactically valid custom id that need not exist in OMP's catalog, subject to
+Farhelm's existing harness-compatibility checks on which harness owns which id.
 
 ## Limitations
 

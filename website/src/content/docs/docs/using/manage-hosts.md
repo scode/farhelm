@@ -2,7 +2,7 @@
 title: Manage hosts
 description: Name, update, uninstall, and remove the hosts your helm knows about.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Farhelm keeps your hosts in one shared list. A host is your Mac or a Linux machine that runs sessions. Select a host's

@@ -2,7 +2,7 @@
 title: Work in a session
 description: Drive the agent's terminal, open extra shell tabs, and paste screenshots and files.
 sidebar:
-  order: 3
+  order: 4
   badge:
     text: Stub
     variant: caution

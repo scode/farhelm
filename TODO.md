@@ -56,22 +56,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm binary remain. Refuse that layout before changing the host, with a message naming the symlink target; keep the
   host listed and its data untouched. Follow-up to the remote uninstall change in PRs #1565 and #1568.
 
-- **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
-  end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
-  selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate
-  resume command alongside its start command; each path decides YOLO, resume and restart behavior its own way. Example
-  of the resulting complexity: the sensitive-host YOLO check classifies only the start command, so a custom profile
-  whose hand-written resume command adds `--dangerously-skip-permissions` passes the check at creation and every later
-  Resume runs with approvals off unconfirmed (`yolo-guard-skips-resume-template.md`, triaged 2026-10-01 as a spec
-  clarification rather than a code fix because closing it was not worth the complexity). Another: the resume command
-  Farhelm derives by appending a conversation selector to the original command line collides with a selector the user's
-  own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, could
-  restart into a different conversation or a fresh one (`claude-resume-template-selector-collision.md`, triaged
-  2026-10-01; Codex had the same problem in `codex-resume-template-duplicates-selector.md`, and both now refuse such a
-  launch at create time unless it brings its own resume command). Walked through with the maintainer on 2026-10-03:
-  profiles are removed, launches become agent or command launches with named templates, and the spec change is
-  https://github.com/scode/farhelm/pull/1537. Plan: `plans/queue/launch-representation.md`.
-
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
   Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
@@ -166,13 +150,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
   setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
   SPEC.md's "Ownership during cleanup and provisioning" section states the rule.
-- Tell users that the sensitive-host YOLO confirmation, and the sidebar's YOLO badge, recognize a custom command line or
-  profile as YOLO only on a best-effort basis: common shapes such as a vendor's approval-skipping flag, also behind an
-  `env NAME=value` prefix, are caught, but an arbitrary wrapper (a script, `sh -c '…'`) that turns approvals off may not
-  be. Launches built with the New dialog's harness and permission choices are always classified exactly. SPEC.md's
-  YOLO-launch paragraph will state the rule once `yolo-guard-misses-env-prefix.md`'s triage outcome lands. Moot once the
-  launch-kinds redesign lands, since command launches then carry an explicit YOLO assertion and nothing is recognized
-  from command lines; that plan removes this entry. Plan: `plans/queue/launch-representation.md`.
 
 ## Tricky bugs
 
@@ -481,17 +458,6 @@ are large mostly because of their tests.
   identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
   use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
   limitations of Muse.
-
-- Separate an agent profile's common invocation (how to invoke the agent), initial launch arguments, and resume
-  arguments into three independently specified parts. The immediate restart fix is deliberately simpler: when no
-  explicit resume template is supplied, reuse the original invocation and append the agent's resume syntax, assuming
-  every original argument is reusable and there is no initial prompt, launch-only input, or custom command shape to
-  interpret. Keep the immediate fix to launch arguments plus resume arguments; custom argument handling belongs to this
-  follow-up. It must remove that assumption: initial prompts and launch-only options must not be replayed on resume, and
-  existing resume/continue selectors or an end-of-options marker must not collide with the generated resume command.
-  Preserve shared permission and configuration options without requiring users to duplicate them between launch and
-  resume. Settle the composition, editor, and migration behavior when this is picked up; keep it out of the immediate
-  fix. Superseded by the launch-kinds redesign, which removes it. Plan: `plans/queue/launch-representation.md`.
 
 - Reconsider agent parent/child relationships: either remove them or make them useful. Current parent tracking is
   optional, and fleet `agent create`/`clone` do not record the asking session, so the parent filter cannot reliably

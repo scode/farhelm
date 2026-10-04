@@ -2,7 +2,7 @@
 title: Send feedback
 description: Tell Farhelm's maintainer something, privately, from inside the app.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 To tell Farhelm's maintainer something, whether a bug, a wish, or a one-line remark, select the **?** button at the top
