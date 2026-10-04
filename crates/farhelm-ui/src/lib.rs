@@ -141,6 +141,7 @@ mod auth;
 #[cfg(native_desktop)]
 pub mod desktop;
 mod feed;
+mod feedback;
 mod github_checkout;
 mod hosts;
 mod icons;

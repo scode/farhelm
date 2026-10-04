@@ -12,7 +12,15 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use web_time::Instant;
 
-use crate::menu_panel::PanelPlacement;
+use std::collections::HashMap;
+
+use crate::menu_panel::{
+    MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
+    cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
+    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, remember_menu_item,
+    row_menu_relay_key, session_menu_placement_style, session_menu_pointer_style,
+    should_measure_on_mount,
+};
 use crate::ops::OpLock;
 use crate::peer::display_peer;
 use crate::profiles::{
@@ -354,12 +362,294 @@ async fn settled_profile_focus(focus: FocusCoordinator, trusted_outside: bool) -
 /// accessible name the bar's mark needs.
 const WORDMARK_SVG: &str = include_str!("../../../packaging/farhelm-desktop/wordmark-dark.svg");
 
+/// What the help menu offers, in the order it shows them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum HelpAction {
+    SendFeedback,
+    Documentation,
+}
+
+impl HelpAction {
+    /// The item's label, which is also its `data-help-action` marker.
+    fn label(self) -> &'static str {
+        match self {
+            HelpAction::SendFeedback => "send feedback",
+            HelpAction::Documentation => "documentation",
+        }
+    }
+
+    /// The description line under the label.
+    fn description(self) -> &'static str {
+        match self {
+            HelpAction::SendFeedback => "privately, to Farhelm's maintainer",
+            HelpAction::Documentation => "opens farhelm.io/docs in your browser",
+        }
+    }
+}
+
+const HELP_ACTIONS: [HelpAction; 2] = [HelpAction::SendFeedback, HelpAction::Documentation];
+
+/// The docs site the Documentation item opens.
+const DOCS_URL: &str = "https://farhelm.io/docs/";
+
+/// Open the docs site through the page's shared link opener
+/// (`terminal-links.js`), which knows how to reach the system browser from
+/// the desktop webview and opens a new tab elsewhere. The URL is a constant,
+/// so it needs none of the opener callers' validation.
+///
+/// That opener is its own script asset, loaded asynchronously, so a click
+/// right after the page loads can arrive before it exists. The fallback
+/// repeats the opener's two branches (navigate the `dioxus:` page, which the
+/// desktop shell turns into a system-browser open; otherwise a `noopener`
+/// tab) so the item never silently does nothing.
+fn open_documentation() {
+    let url = serde_json::to_string(DOCS_URL).expect("a string always serializes");
+    document::eval(&format!(
+        "(() => {{
+            const url = {url};
+            if (window.farhelmTerminalLinks) {{
+                window.farhelmTerminalLinks.openTerminalUrl(url);
+            }} else if (window.location.protocol === 'dioxus:') {{
+                window.location.assign(url);
+            }} else {{
+                window.open(url, '_blank', 'noopener');
+            }}
+        }})();"
+    ));
+}
+
+/// The sidebar bar's help menu: a `?` toggle to the right of the settings
+/// gear, opening a small menu with Send feedback and Documentation
+/// (SPEC.md "Feedback").
+///
+/// It reuses the row menus' machinery (`menu_panel`) so it behaves like
+/// them: arrow keys, Home/End, Escape and Tab inside the menu, focus back on
+/// the toggle when it closes, the same side flyout and pointer, and the
+/// shared outside-pointer dismissal, which reaches this menu through its own
+/// relay button keyed `help:bar`. Its elements carry the host row menu's
+/// panel and item classes for the shared look, plus `help-menu-*` classes of
+/// their own, which is what the dismissal and focus helpers look for.
+///
+/// Its open state is local: unlike the row menus, nothing else on the page
+/// needs to know or close it, beyond what the outside-pointer dismissal
+/// already does.
+#[component]
+fn HelpMenu(layout_epoch: ReadSignal<u64>, on_send_feedback: EventHandler<()>) -> Element {
+    let mut open = use_signal(|| false);
+    // The layout epoch the open menu was measured under. Its coordinates
+    // are a snapshot, so a later resize or scroll closes the menu, as it
+    // does the session and host menus, rather than leaving it detached
+    // from its toggle (the bar's controls move at the narrow-window
+    // breakpoint).
+    let mut opened_epoch = use_signal(|| *layout_epoch.peek());
+    let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
+    let placement = use_signal(|| PanelPlacement::Unmeasured);
+    let item_handles = use_signal(HashMap::new);
+    let mut menu_focus = use_signal(|| None::<usize>);
+    let mut menu_requested = use_signal(|| None::<usize>);
+    let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
+    let focus_queue = MenuFocusQueue {
+        target: use_signal(|| None::<Rc<MountedData>>),
+        draining: use_signal(|| false),
+    };
+    let open_generation = use_signal(|| 0_u64);
+    let order: MenuOrder<HelpAction, 2> = MenuOrder::pack(HELP_ACTIONS, |_| true);
+    let close_menu = use_callback(move |()| open.set(false));
+    let wiring = MenuWiring {
+        order,
+        handles: item_handles,
+        focus: focus_queue,
+        focused: menu_focus,
+        requested: menu_requested,
+        open_intent,
+        close_menu,
+    };
+    let spawn_measurement = move || {
+        let mut placement = placement;
+        let generation = open_generation();
+        spawn(async move {
+            let measured = match toggle_handle.peek().clone() {
+                Some(handle) => handle.get_client_rect().await.ok(),
+                None => None,
+            };
+            if let Some(outcome) =
+                measurement_outcome(generation, *open_generation.peek(), measured)
+            {
+                placement.set(outcome);
+            }
+        });
+    };
+    let mut begin_open = move |intent: MenuOpenIntent| {
+        let mut open_generation = open_generation;
+        let mut placement = placement;
+        let mut item_handles = item_handles;
+        open_generation += 1;
+        placement.set(PanelPlacement::Unmeasured);
+        item_handles.write().clear();
+        cancel_menu_focus(focus_queue);
+        menu_focus.set(None);
+        menu_requested.set(None);
+        open_intent.set(Some(intent));
+        opened_epoch.set(*layout_epoch.peek());
+        install_row_menu_outside_dismiss();
+        open.set(true);
+        spawn_measurement();
+    };
+    use_effect(move || {
+        let epoch = layout_epoch();
+        if *open.peek() && epoch != *opened_epoch.peek() {
+            open.set(false);
+        }
+    });
+    // The close teardown the row menus share: forget focus bookkeeping and,
+    // when focus was inside the menu, hand it back to the toggle.
+    use_effect(move || {
+        if open() {
+            return;
+        }
+        cancel_menu_focus(focus_queue);
+        let was_inside = menu_focus.peek().is_some();
+        menu_focus.set(None);
+        menu_requested.set(None);
+        open_intent.set(None);
+        let mut item_handles = item_handles;
+        item_handles.write().clear();
+        if was_inside {
+            focus_menu_toggle("data-help-menu", "bar", ".app-help-toggle");
+        }
+    });
+    let tab_stop = menu_focus()
+        .and_then(|position| order.get(position))
+        .or_else(|| order.get(0));
+    let mut choose = move |action: HelpAction| {
+        open.set(false);
+        match action {
+            HelpAction::SendFeedback => on_send_feedback.call(()),
+            HelpAction::Documentation => open_documentation(),
+        }
+    };
+
+    rsx! {
+        span { class: "app-help-menu", "data-help-menu": "bar",
+            button {
+                r#type: "button",
+                class: "btn btn-neutral app-help-toggle",
+                aria_label: "help",
+                title: "help",
+                aria_haspopup: "menu",
+                aria_expanded: open(),
+                onkeydown: move |evt| {
+                    if !open() {
+                        let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+                            return;
+                        };
+                        evt.prevent_default();
+                        begin_open(intent);
+                        return;
+                    }
+                    handle_menu_key(&evt, None, wiring, &());
+                },
+                onfocusin: move |_| forget_menu_focus(wiring),
+                onmounted: move |element| {
+                    toggle_handle.set(Some(element.data()));
+                    if should_measure_on_mount(open(), *placement.peek()) {
+                        spawn_measurement();
+                    }
+                },
+                onclick: move |_| {
+                    if open() {
+                        open.set(false);
+                    } else {
+                        begin_open(MenuOpenIntent::First);
+                    }
+                },
+                crate::icons::HelpIcon {}
+            }
+            if open() {
+                div {
+                    class: "host-row-menu-flyout help-menu-flyout",
+                    style: session_menu_placement_style(placement()),
+                    if let Some(pointer_style) = session_menu_pointer_style(placement()) {
+                        span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
+                    }
+                    div { class: "host-row-menu-panel help-menu-panel",
+                        div {
+                            class: "host-row-menu-items session-row-menu-items",
+                            role: "menu",
+                            aria_label: "help",
+                            // Rendered from the same list keyboard order is
+                            // built from, so the two cannot drift apart.
+                            for action in HELP_ACTIONS {
+                                button {
+                                    key: "{action.label()}",
+                                    r#type: "button",
+                                    class: "btn session-row-menu-item host-row-menu-item help-menu-item",
+                                    "data-help-action": action.label(),
+                                    role: "menuitem",
+                                    tabindex: if tab_stop == Some(action) { "0" } else { "-1" },
+                                    onmounted: move |element| remember_menu_item(wiring, action, element.data()),
+                                    onfocusin: move |_| menu_focus.set(order.position(action)),
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| handle_menu_key(&evt, order.position(action), wiring, &()),
+                                    onclick: move |_| choose(action),
+                                    span { class: "session-row-menu-copy",
+                                        span { class: "session-row-menu-label", "{action.label()}" }
+                                        span { class: "session-row-menu-description", "{action.description()}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            button {
+                r#type: "button",
+                class: ROW_MENU_OUTSIDE_RELAY,
+                "data-row-menu": row_menu_relay_key("help", "bar"),
+                hidden: true,
+                tabindex: "-1",
+                onclick: move |_| open.set(false),
+            }
+        }
+    }
+}
+
+/// How long after the feedback dialog closes its success is announced: long
+/// enough for the dialog's modal isolation to be released (one frame or
+/// two), so the status region is in the accessibility tree when it changes.
+const ANNOUNCE_AFTER_CLOSE_MS: u64 = 100;
+
 /// Render the sticky sidebar bar: the Farhelm wordmark at the window's top
-/// left, then the build identity and the helm-wide settings gear.
+/// left, then the build identity, the helm-wide settings gear, and the help
+/// menu.
 /// The modal is a sibling so the sticky bar cannot cap its stacking order.
 #[component]
-pub(crate) fn AppBar() -> Element {
+pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let mut settings_open = use_signal(|| false);
+    let mut feedback_open = use_signal(|| false);
+    // The success announcement lives here, outside the dialog: a status
+    // region inserted together with its text is not reliably announced, and
+    // the dialog closes itself moments after success. This one is always
+    // mounted (visually hidden) and only changes its text.
+    let mut feedback_notice = use_signal(String::new);
+    // Set when a send succeeds; the announcement waits for the dialog to
+    // close (see `close_feedback`).
+    let mut pending_thanks = use_signal(|| false);
+    let close_feedback = move |_| {
+        crate::feedback::return_focus_to_help();
+        feedback_open.set(false);
+        // Announce a success only now: while the dialog is open its modal
+        // isolation marks this status region inert, and a live region that
+        // changes while inert (or that is already populated when it becomes
+        // visible again) is not reliably announced. The short wait lets the
+        // release of isolation land before the text changes.
+        if std::mem::take(&mut *pending_thanks.write()) {
+            spawn(async move {
+                sleep_ms(ANNOUNCE_AFTER_CLOSE_MS).await;
+                feedback_notice.set(crate::feedback::THANKS.to_string());
+            });
+        }
+    };
     let close_settings = move |_| {
         crate::settings::return_focus_to_gear();
         settings_open.set(false);
@@ -370,6 +660,12 @@ pub(crate) fn AppBar() -> Element {
     // direction-changing characters become visible escapes, and the element
     // is bidi-isolated. The client build takes the same path for uniformity.
     let version = display_peer(displayed_version(skew.as_ref()));
+    // The feedback dialog sends the version as the helm or this build
+    // reported it (fitted to its cap) and displays that same string
+    // bidi-isolated (`peer-value`) rather than escaped. Invisible formatting
+    // characters, if a build stamp ever held any, would therefore be sent
+    // without showing; the stamp comes from the user's own helm.
+    let sent_version = displayed_version(skew.as_ref()).to_string();
 
     rsx! {
         div {
@@ -393,10 +689,25 @@ pub(crate) fn AppBar() -> Element {
                 onclick: move |_| settings_open.set(true),
                 crate::icons::SettingsIcon {}
             }
+            HelpMenu {
+                layout_epoch,
+                on_send_feedback: move |_| {
+                    feedback_notice.set(String::new());
+                    feedback_open.set(true);
+                },
+            }
         }
         if settings_open() {
             crate::settings::SettingsDialog { on_close: close_settings }
         }
+        if feedback_open() {
+            crate::feedback::FeedbackDialog {
+                version: sent_version,
+                on_sent: move |_| pending_thanks.set(true),
+                on_close: close_feedback,
+            }
+        }
+        p { class: "visually-hidden feedback-notice", role: "status", "{feedback_notice}" }
     }
 }
 

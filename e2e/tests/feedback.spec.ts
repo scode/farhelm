@@ -1,0 +1,265 @@
+/**
+ * The sidebar bar's help menu and the feedback dialog it opens (SPEC.md
+ * "Feedback"). The dialog's promise to the user is that what it shows is the
+ * whole submission and that nothing is sent until Send, so these tests read
+ * the attached values off the page and compare them with the request the
+ * browser actually made.
+ *
+ * Every feedback request is intercepted with `page.route` before it leaves
+ * the browser. The stack's helm is a real one whose feedback route forwards
+ * to the production endpoint, so a send that slipped past the route would
+ * post to the internet; the helm's own forwarding is covered by its Rust
+ * tests against a stand-in server instead.
+ */
+import { Page, Route } from "@playwright/test";
+import { expect, test } from "./helpers/evidence";
+
+const DOCS_URL = "https://farhelm.io/docs/";
+
+// The premise every test here rests on: no feedback request reaches the real
+// helm. Routes registered later by a test take precedence over this one.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/feedback", (route) =>
+    route.fulfill({ status: 500, contentType: "text/plain", body: "Couldn't send feedback: not routed by this test." }));
+});
+
+async function openHelpMenu(page: Page) {
+  const toggle = page.getByRole("button", { name: "help", exact: true });
+  await toggle.click();
+  const menu = page.getByRole("menu", { name: "help", exact: true });
+  await expect(menu).toBeVisible();
+  return { toggle, menu };
+}
+
+async function openFeedbackDialog(page: Page) {
+  const { menu } = await openHelpMenu(page);
+  await menu.locator('[data-help-action="send feedback"]').click();
+  const dialog = page.getByRole("dialog", { name: "send feedback", exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+/** Route every feedback POST to `answer`, recording each JSON body sent. */
+async function interceptFeedback(page: Page, answer: (route: Route) => Promise<void>) {
+  const sent: unknown[] = [];
+  await page.route("**/api/feedback", async (route) => {
+    sent.push(route.request().postDataJSON());
+    await answer(route);
+  });
+  return sent;
+}
+
+/**
+ * The help menu lives in the bar to the right of the gear and behaves like
+ * the other sidebar menus. A pointer opens and closes it from its toggle.
+ * From the keyboard, ArrowDown on the toggle opens it with focus on its
+ * first item, arrow keys move between its two items, and Escape closes it
+ * and gives focus back to the toggle (focus is asserted on the keyboard
+ * path, as the row menus' own tests do, because a pointer open does not
+ * move focus the same way in every engine). A pointer press outside closes
+ * it.
+ */
+test("the help menu sits right of the gear and follows the menu conventions", async ({ page }) => {
+  await page.goto("/");
+  const gear = page.getByRole("button", { name: "settings", exact: true });
+  const { toggle, menu } = await openHelpMenu(page);
+  const gearBox = await gear.boundingBox();
+  const toggleBox = await toggle.boundingBox();
+  expect(toggleBox!.x).toBeGreaterThan(gearBox!.x);
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const items = menu.getByRole("menuitem");
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText("send feedback");
+  await expect(items.nth(1)).toContainText("documentation");
+  await toggle.click();
+  await expect(menu).toHaveCount(0);
+
+  await toggle.focus();
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu).toBeVisible();
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  await toggle.click();
+  await expect(menu).toBeVisible();
+  // A press on the session list header, well away from the menu.
+  const header = page.locator(".session-heading").first();
+  await header.click({ position: { x: 4, y: 4 } });
+  await expect(menu).toHaveCount(0);
+
+  // A layout change that can move things under the menu (here the window,
+  // and with it the sidebar, getting shorter) invalidates its measured
+  // position, so it closes, as the session and host menus do, rather than
+  // staying detached from its toggle.
+  const size = page.viewportSize()!;
+  await toggle.click();
+  await expect(menu).toBeVisible();
+  await page.setViewportSize({ width: size.width, height: size.height - 60 });
+  await expect(menu).toHaveCount(0);
+  await page.setViewportSize(size);
+});
+
+/**
+ * Documentation opens the docs site through the page's shared link opener,
+ * the one that reaches the system browser from the desktop webview. The
+ * opener is replaced with a recorder so the test checks the target and the
+ * call without navigating anywhere.
+ */
+test("documentation opens the docs site through the shared link opener", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "help", exact: true })).toBeVisible();
+  // The opener is its own script asset, loaded asynchronously; replace it
+  // only once it exists, or the help menu would use its fallback instead.
+  await page.waitForFunction(() => "farhelmTerminalLinks" in window);
+  await page.evaluate(() => {
+    const links = (window as unknown as { farhelmTerminalLinks: { openTerminalUrl: (uri: string) => void } })
+      .farhelmTerminalLinks;
+    const opened: string[] = [];
+    (window as unknown as { openedLinks: string[] }).openedLinks = opened;
+    links.openTerminalUrl = (uri: string) => {
+      opened.push(uri);
+    };
+  });
+  const { menu } = await openHelpMenu(page);
+  await menu.locator('[data-help-action="documentation"]').click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { openedLinks: string[] }).openedLinks))
+    .toEqual([DOCS_URL]);
+  await expect(menu).toHaveCount(0);
+});
+
+/**
+ * The submission the browser sends is exactly the message, the contact and
+ * the attached values the dialog displayed, from the web UI. Send is
+ * disabled until there is a message; on success the dialog thanks the user,
+ * closes by itself, and focus returns to the help toggle.
+ */
+test("send feedback sends exactly what the dialog shows, then thanks and closes", async ({ page }) => {
+  const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  const send = dialog.getByRole("button", { name: "send", exact: true });
+  await expect(send).toBeDisabled();
+  await expect(dialog).toContainText("privately to Farhelm's maintainer");
+
+  await dialog.locator(".feedback-message").fill("The sidebar is great.\nSecond line.");
+  await dialog.locator(".feedback-contact").fill("someone@example.com");
+  await expect(dialog.locator(".feedback-surface")).toHaveText("web UI");
+  // The operating system is read asynchronously; wait until it is no longer
+  // the placeholder before reading the value the dialog will send.
+  await expect(dialog.locator(".feedback-os")).not.toHaveText("unknown");
+  const version = (await dialog.locator(".feedback-version").textContent())!;
+  // The version sent is the one the sidebar shows.
+  await expect(page.locator(".app-version")).toHaveText(version);
+  const os = (await dialog.locator(".feedback-os").textContent())!;
+  expect(sent).toEqual([]);
+
+  await send.click();
+  await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks");
+  // The announcement lives in a status region outside the dialog. While the
+  // dialog is open that region is inert (modal isolation), so it must stay
+  // empty until the dialog has closed, or the change would go unannounced.
+  const notice = page.locator(".feedback-notice[role=status]");
+  await expect(notice).toHaveText("");
+  expect(sent).toEqual([
+    {
+      message: "The sidebar is great.\nSecond line.",
+      contact: "someone@example.com",
+      version,
+      surface: "web",
+      os,
+    },
+  ]);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+  await expect(notice).toContainText("Thanks");
+  expect(await notice.evaluate((el) => el.closest("[inert]") === null)).toBe(true);
+});
+
+/**
+ * A failed send says so in plain words and keeps everything typed, so the
+ * user can retry or copy it. The helm's own sentence is shown as it is;
+ * anything else the helm answers with (axum's text for an oversized body,
+ * say) becomes a plain sentence naming the status, and a helm that cannot be
+ * reached at all gets a plain sentence too, never the HTTP client's own
+ * error text. A retry that succeeds then sends the same text.
+ */
+test("a failed send keeps the text and says it failed", async ({ page }) => {
+  const answers = [
+    (route: Route) =>
+      route.fulfill({
+        status: 502,
+        contentType: "text/plain",
+        body: "Couldn't send feedback: the feedback service could not be reached.",
+      }),
+    (route: Route) => route.fulfill({ status: 413, contentType: "text/plain", body: "length limit exceeded" }),
+    // The helm itself unreachable: the request never gets an answer.
+    (route: Route) => route.abort("connectionrefused"),
+    (route: Route) => route.fulfill({ status: 204 }),
+  ];
+  let answered = 0;
+  const sent = await interceptFeedback(page, (route) => answers[Math.min(answered++, 3)](route));
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  const message = dialog.locator(".feedback-message");
+  await message.fill("Keep this text.");
+  const send = dialog.getByRole("button", { name: "send", exact: true });
+
+  await send.click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Couldn't send feedback: the feedback service could not be reached.",
+  );
+  await expect(message).toHaveValue("Keep this text.");
+  await expect(send).toBeEnabled();
+
+  await send.click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Couldn't send feedback: Farhelm could not take the request (HTTP 413).",
+  );
+  await expect(message).toHaveValue("Keep this text.");
+
+  await send.click();
+  await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback: the request to Farhelm failed.");
+  await expect(dialog.getByRole("alert")).not.toContainText("error sending request");
+  await expect(message).toHaveValue("Keep this text.");
+
+  await send.click();
+  await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks");
+  expect(sent).toHaveLength(4);
+  for (const body of sent) expect((body as { message: string }).message).toBe("Keep this text.");
+});
+
+/**
+ * The dialog refuses what the helm would refuse, before anything is sent: a
+ * blank message keeps Send disabled, and a message over the shared cap says
+ * why. Cancel closes without sending.
+ */
+test("the dialog refuses blank and over-long messages without sending", async ({ page }) => {
+  const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  const send = dialog.getByRole("button", { name: "send", exact: true });
+  const message = dialog.locator(".feedback-message");
+
+  // Enabled first, so the blank check below shows the refusal rather than
+  // the disabled state the dialog opens in.
+  await message.fill("hello");
+  await expect(send).toBeEnabled();
+  await message.fill("   \n  ");
+  await expect(send).toBeDisabled();
+  await message.fill("x".repeat(4001));
+  await expect(dialog.getByRole("alert")).toContainText("longer than 4000 characters");
+  await expect(send).toBeDisabled();
+  await message.fill("x".repeat(4000));
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(send).toBeEnabled();
+
+  await dialog.getByRole("button", { name: "cancel", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(sent).toEqual([]);
+});

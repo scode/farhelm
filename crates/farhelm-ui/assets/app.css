@@ -725,13 +725,23 @@ samp {
 
 /* The gear owns fixed space; a long version gives way before either icon.
    It stays outside the macOS drag spacer and the bar retains one row. */
-.app-bar .app-settings-toggle {
+.app-bar .app-settings-toggle,
+.app-bar .app-help-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   margin-left: 6px;
   padding: 2px;
+}
+/* The help menu's wrapper holds its toggle, its fixed-position flyout and a
+   hidden relay button. As an inline box it would add a text line's height
+   around the toggle and grow the bar, so it is a flex item sized by the
+   toggle alone. */
+.app-bar .app-help-menu {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 /* The count remains its own element for the committed-list contract. Count,
@@ -2250,6 +2260,53 @@ samp {
 }
 .app-settings-dialog > .host-settings-help {
   margin: 0;
+}
+/* The feedback dialog (feedback.rs): two labelled fields stacked full width,
+   then the attached values as a two-column list so the user can read exactly
+   what goes with the message. Errors use the same danger colour as the
+   other inline refusals. */
+.feedback-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg-0);
+}
+.feedback-field textarea,
+.feedback-field input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.feedback-field textarea {
+  resize: vertical;
+  min-height: 6em;
+}
+.feedback-attached > .host-settings-help {
+  margin: 0 0 6px;
+}
+.feedback-attached dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.feedback-attached dt {
+  color: var(--fg-1);
+}
+.feedback-attached dd {
+  margin: 0;
+  color: var(--fg-0);
+  overflow-wrap: anywhere;
+}
+.feedback-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+.feedback-thanks {
+  margin: 0;
+  color: var(--fg-0);
 }
 .app-settings-choice {
   display: flex;
