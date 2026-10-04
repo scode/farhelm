@@ -1,13 +1,13 @@
 ---
 title: Manage hosts
-description: Name, update, and remove the hosts your helm knows about.
+description: Name, update, uninstall, and remove the hosts your helm knows about.
 sidebar:
   order: 5
 ---
 
 Farhelm keeps your hosts in one shared list. A host is your Mac or a Linux machine that runs sessions. Select a host's
-`⋯` menu to edit its SSH destination or display name, mark it safe for YOLO sessions, update Farhelm, or remove it from
-the list.
+`⋯` menu to edit its SSH destination or display name, mark it safe for YOLO sessions, update Farhelm, uninstall Farhelm
+from it, or remove it from the list.
 
 An older remote host also shows an **↑ update** button beside its name when an update is available. Amber means the
 update is optional; red means it is required before the host can connect. Hover over the button to see the versions and
@@ -27,6 +27,28 @@ To bring the question back, select the gear beside the version number at the top
 **remove hosts without asking**. The other checkbox, **set up new hosts without asking**, controls the question shown
 when a new host needs setup. Ticking either box skips its question. Your next action follows the change immediately;
 other open clients pick it up when they reload. These choices apply to all hosts on your helm.
+
+## Uninstall Farhelm from a remote host
+
+Select **uninstall** in a remote host's `⋯` menu to remove Farhelm from that host. Farhelm first shows what it will
+remove: the [supervisor](/docs/how-it-works/the-pieces/)'s service and Farhelm's program files on the host, each with
+its path there. It also names the directory that holds the host's Farhelm data, which it keeps. Nothing changes until
+you select **uninstall** in that dialog; **cancel** or **Escape** leaves the host as it was. Once it is done, the host
+is gone from the list, and a line above the list says where its data remains. Delete that directory on the host yourself
+if you want the data gone too.
+
+Uninstall never stops a session for you. If any session on the host has not ended (it is running, waiting or idle, or
+its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
+and close their terminal tabs first (see [Stop, restart, and resume](/docs/using/stop-restart-resume/)); a stopped
+session can still have a tab open. It also needs Farhelm to be connected to the host, so it can check. If the host shows
+as unreachable or with a problem, fix that first.
+
+If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
+**uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has already removed the
+service, the next one can finish even though the host no longer answers.
+
+The Mac running Farhelm has no **uninstall** in its menu. To remove Farhelm from it, see
+[Uninstall Farhelm](/docs/get-started/uninstall/).
 
 Adding a remote host is described in [Add a remote host](/docs/get-started/add-a-remote-host/), including the SSH
 prerequisite and setup details.

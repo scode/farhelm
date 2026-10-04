@@ -51,6 +51,7 @@ use crate::{Host, HostId};
 /// The selector the isolation and the focus scripts find the dialog by.
 const DIALOG_SELECTOR: &str = r#".host-settings-dialog[role="dialog"]"#;
 const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
+const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
 
 /// One setting the dialog can change, as the key its last write's outcome is
 /// filed under. A superset of [`EditField`]: the YOLO checkbox writes through
@@ -146,6 +147,17 @@ pub(crate) fn install_add_dialog() {
         ADD_DIALOG_SELECTOR,
         ".add-host-ssh",
         Some(".add-host-cancel"),
+    );
+}
+
+/// Focus and isolate a row's uninstall confirmation with Cancel first, as
+/// the removal dialog does: the confirm button removes Farhelm from a host,
+/// so a stray Enter must land on the safe answer.
+pub(crate) fn install_uninstall_dialog() {
+    install_dialog_with_selector(
+        UNINSTALL_DIALOG_SELECTOR,
+        ".uninstall-cancel",
+        Some(".uninstall-cancel"),
     );
 }
 

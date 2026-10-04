@@ -118,11 +118,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm or the page. Reminder for the maintainer: this is about how the agents' session hooks might block while the
   helm is not available (details TBD).
 
-- **Uninstall Farhelm from remote hosts.** `farhelm uninstall` only removes Farhelm from the Mac it runs on, and nothing
-  removes it from a remote host: the docs' "Uninstall Farhelm" page tells users to stop the host's sessions and then run
-  `systemctl` and `rm` by hand on the host. Add a supported way to uninstall from a remote host, and replace those
-  manual steps in the docs with it. Plan: `plans/queue/remote-uninstall.md`.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.

@@ -121,17 +121,17 @@ Removing Farhelm from a remote host is a host action too, the uninstall item in 
 counterpart. The helm plans the removal over SSH and shows it before touching the host: the supervisor's user service
 and its unit file go, and so does Farhelm's private lib directory with the binary and any private tmux in it, each named
 by its path on the host; the host's Farhelm data directory stays, named by its path, with a note that deleting it by
-hand removes the data too. Nothing changes until the user confirms. Uninstall never stops or kills a session or terminal
-tab. It refuses, naming them, while the host has any session that has not ended (an unknown status counts) or any open
-terminal tab, and checks again at confirmation. It also refuses a host it cannot check because it is not connected, a
-host whose supervisor unit `farhelm helm setup` manages there (that host's own `farhelm uninstall` removes it), and a
-supervisor running from anywhere other than Farhelm's lib directory. Success removes the host from the list, cached
-sessions included, as removing it does, and the window that confirmed says Farhelm was removed and where the data
-remains. A run that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall
-again continues from there. Such a retry may go ahead without a connection only once the unit file is gone, since
-nothing can start the supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in
-the panel: Farhelm there is removed with `farhelm uninstall` (see
-[Uninstall scope and interaction](#uninstall-scope-and-interaction)).
+hand removes the data too. Nothing changes until the user confirms, and while the removal runs the host row shows its
+progress the way an update's does, worded as uninstalling. Uninstall never stops or kills a session or terminal tab. It
+refuses, naming them, while the host has any session that has not ended (an unknown status counts) or any open terminal
+tab, and checks again at confirmation. It also refuses a host it cannot check because it is not connected, a host whose
+supervisor unit `farhelm helm setup` manages there (that host's own `farhelm uninstall` removes it), and a supervisor
+running from anywhere other than Farhelm's lib directory. Success removes the host from the list, cached sessions
+included, as removing it does, and the window that confirmed says Farhelm was removed and where the data remains. A run
+that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall again continues
+from there. Such a retry may go ahead without a connection only once the unit file is gone, since nothing can start the
+supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in the panel: Farhelm
+there is removed with `farhelm uninstall` (see [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
 passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,

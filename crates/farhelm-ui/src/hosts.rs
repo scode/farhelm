@@ -73,7 +73,8 @@ use crate::ops::{OpGuard, OpLock};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, ProvisioningMenuState, ProvisioningPanel,
-    ProvisioningTraceShape, SetupPlanConfirmation, UpdateProgressSummary, UpdateStepLine,
+    ProvisioningTraceShape, SetupPlanConfirmation, UninstallNotice, UpdateProgressSummary,
+    UpdateStepLine,
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -1060,6 +1061,37 @@ pub(crate) fn HostsPanel(
     // panel is the only place left to say so; opening the dialog again
     // clears it, the same way a fresh attempt clears an in-dialog error.
     let mut add_error = use_signal(|| None::<String>);
+    // Uninstalls this window confirmed, each with the notice owed once its
+    // host leaves the list. The row's provisioning panel adds the entry as it
+    // submits and drops it on a refusal or a failed run; the panel cannot
+    // show the notice itself because it unmounts with its row, and the helm
+    // keeps no result for a host it has forgotten. Removing a host by hand
+    // drops its entry too.
+    let mut uninstall_notices = use_signal(HashMap::<HostId, UninstallNotice>::new);
+    // The newest such notice, shown above the list until dismissed or
+    // replaced by a newer one.
+    let mut uninstall_notice = use_signal(|| None::<UninstallNotice>);
+    use_effect(move || {
+        let gone: Vec<HostId> = {
+            let read = hosts.read();
+            let Some(list) = read.hosts() else {
+                return;
+            };
+            uninstall_notices
+                .read()
+                .keys()
+                .filter(|id| !list.iter().any(|host| host.id == **id))
+                .copied()
+                .collect()
+        };
+        let mut owed = uninstall_notices;
+        for id in gone {
+            let notice = owed.write().remove(&id);
+            if let Some(notice) = notice {
+                uninstall_notice.set(Some(notice));
+            }
+        }
+    });
 
     // Closes BOTH row-menu signals every time the add form mounts,
     // unmounts, or (via `on_added` setting `adding` back to `false`)
@@ -1201,6 +1233,12 @@ pub(crate) fn HostsPanel(
             return;
         }
         remove_open.set(None);
+        // A host the user removes by hand did not leave the list through an
+        // uninstall, so a notice still owed for it (an uninstall whose reply
+        // was lost, say) must not appear as if one had succeeded.
+        if uninstall_notices.peek().contains_key(&host) {
+            uninstall_notices.write().remove(&host);
+        }
         if skip_future {
             preferences.0.write().skip_host_remove_confirmation = Some(true);
             store_preference(&remove_base, PreferenceValue::HostRemoveConfirmation(true));
@@ -1517,6 +1555,20 @@ pub(crate) fn HostsPanel(
                     parts: probe_error_parts(error),
                 }
             }
+            if let Some(notice) = uninstall_notice() {
+                div { class: "uninstall-notice", role: "status",
+                    PeerLine {
+                        class: "uninstall-notice-text",
+                        parts: uninstall_notice_parts(&notice),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral uninstall-notice-dismiss",
+                        onclick: move |_| uninstall_notice.set(None),
+                        "dismiss"
+                    }
+                }
+            }
             // Two different failures, said differently, decided by whether a
             // snapshot exists. A FIRST load that failed has nothing behind
             // it and must say so plainly; a REFRESH that failed leaves rows
@@ -1610,6 +1662,7 @@ pub(crate) fn HostsPanel(
                                         }
                                     },
                                     on_changed,
+                                    uninstall_notices,
                                 }
                             },
                             on_retry: on_retry.clone(),
@@ -1662,7 +1715,11 @@ pub(crate) fn HostsPanel(
                                 // status spot, and planning never consults the
                                 // lock — so neither the reveal nor the lock
                                 // check applies to it here.
-                                if request.operation == ProvisioningOperation::Add {
+                                // Uninstall's plan is confirmed the same way.
+                                if matches!(
+                                    request.operation,
+                                    ProvisioningOperation::Add | ProvisioningOperation::Uninstall
+                                ) {
                                     if ops.busy_now() {
                                         return;
                                     }
@@ -1789,6 +1846,7 @@ enum HostMenuAction {
     AutomaticSetup,
     Update,
     Settings,
+    Uninstall,
     Remove,
 }
 
@@ -1816,6 +1874,7 @@ fn HostMenuActionIcon(action: HostMenuAction) -> Element {
                 HostMenuAction::AutomaticSetup => rsx! { path { d: "M7 1.8 L8.3 5.5 L12.2 6.8 L8.3 8.2 L7 12 L5.7 8.2 L1.8 6.8 L5.7 5.5 Z" } },
                 HostMenuAction::Update => rsx! { path { d: "M7 2 V10 M4 5 L7 2 L10 5 M3 11.5 H11" } },
                 HostMenuAction::Settings => rsx! { path { d: "M5.2 2.2 H8.8 L9.3 4.1 L11 5.1 L12.7 4.2 L14 6.5 L12.5 7.8 V9.8 L14 11.1 L12.7 13.4 L11 12.5 L9.3 13.5 H5.2 L4.7 11.6 L3 10.6 L1.3 11.5 L0 9.2 L1.5 7.9 V5.9 L0 4.6 L1.3 2.3 L3 3.2 L4.7 2.2 Z" } circle { cx: "7", cy: "7.9", r: "1.7" } },
+                HostMenuAction::Uninstall => rsx! { path { d: "M7 2 V10 M4 7 L7 10 L10 7 M3 12 H11" } },
                 HostMenuAction::Remove => rsx! { path { d: "M2.5 4 H11.5 M5.5 4 V2.5 H8.5 V4 M3.8 4 L4.5 12 H9.5 L10.2 4" } },
             }
         }
@@ -1827,13 +1886,14 @@ fn HostMenuActionIcon(action: HostMenuAction) -> Element {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 7] = [
+const HOST_MENU_ACTIONS: [HostMenuAction; 8] = [
     HostMenuAction::Retry,
     HostMenuAction::Adopt,
     HostMenuAction::Rerun,
     HostMenuAction::AutomaticSetup,
     HostMenuAction::Update,
     HostMenuAction::Settings,
+    HostMenuAction::Uninstall,
     HostMenuAction::Remove,
 ];
 
@@ -1868,6 +1928,9 @@ fn host_menu_order(
         HostMenuAction::Rerun => provisioning.rerun.is_some(),
         HostMenuAction::AutomaticSetup => provisioning.automatic_setup,
         HostMenuAction::Update => provisioning.update,
+        // Rendered inside the destructive group beside Remove, which only a
+        // manageable row has; the panel offers it only for remote rows.
+        HostMenuAction::Uninstall => manageable && provisioning.uninstall,
         HostMenuAction::Remove => manageable,
         // Every host has settings: the YOLO-launch setting applies to the
         // local row and to a kind this build does not recognize alike. What
@@ -1931,6 +1994,19 @@ fn resolve_edit_submission(field: EditField, value: &str) -> Result<EditSubmissi
         EditField::Destination => Ok(EditSubmission::Destination(value.to_string())),
         EditField::Alias => validate_alias_draft(value).map(EditSubmission::Alias),
     }
+}
+
+/// The one-line notice an uninstall leaves behind once its host is gone:
+/// that Farhelm was removed, and where the host's data stayed. The host's
+/// name and the path are peer text and render escaped.
+fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
+    vec![
+        DetailPart::Text("Farhelm was removed from ".to_string()),
+        DetailPart::Peer(notice.host_name.clone()),
+        DetailPart::Text("; its data remains in ".to_string()),
+        DetailPart::Peer(notice.state_dir.clone()),
+        DetailPart::Text(" on that host.".to_string()),
+    ]
 }
 
 /// The host row menu toggle's accessible name: the host's display name (or
@@ -2162,7 +2238,7 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
             },
             UpdateProgressDot {}
             span { class: "host-update-count",
-                span { class: "visually-hidden", "updating: " }
+                span { class: "visually-hidden", "{summary.verb()}: " }
                 "{summary.done}/{summary.total}"
             }
             if let Some(step) = summary.current_step.clone() {
@@ -2172,6 +2248,7 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
             if let Some(origin) = popup_origin() {
                 UpdateProgressPopup {
                     origin,
+                    verb: summary.verb(),
                     done: summary.done,
                     total: summary.total,
                     steps: summary.steps.clone(),
@@ -2298,6 +2375,8 @@ impl PopupAnchor {
 #[component]
 fn UpdateProgressPopup(
     origin: PopupOrigin,
+    /// "updating" or "uninstalling", from the run's summary.
+    verb: &'static str,
     done: usize,
     total: usize,
     steps: Vec<UpdateStepLine>,
@@ -2352,7 +2431,7 @@ fn UpdateProgressPopup(
             "aria-hidden": "true",
             style,
             onmounted: move |element| own.set(Some(element.data())),
-            span { "updating: {done} of {total} steps done" }
+            span { "{verb}: {done} of {total} steps done" }
             span { class: "host-update-popup-elapsed", "{elapsed} elapsed" }
             ol { class: "provisioning-steps host-update-popup-steps",
                 for step in steps {
@@ -2579,8 +2658,14 @@ fn HostRow(
         .rerun
         .is_some_and(|operation| match operation {
             ProvisioningOperation::Update => update_disabled,
-            ProvisioningOperation::Add => setup_disabled,
+            // A failed uninstall never offers a rerun (its own item
+            // continues it); the arm keeps the match exhaustive.
+            ProvisioningOperation::Add | ProvisioningOperation::Uninstall => setup_disabled,
         });
+    // Uninstall plans and then waits on the user's confirmation, as setup
+    // does, so it keeps setup's lock discipline. (No planning term: the item
+    // is not offered at all while a plan is in flight.)
+    let uninstall_disabled = busy;
 
     // ===== This row's own "⋯" menu state ================================
     //
@@ -3050,6 +3135,7 @@ fn HostRow(
                                                 match operation {
                                                     ProvisioningOperation::Update => "try the failed update again",
                                                     ProvisioningOperation::Add => "try the failed setup again",
+                                                    ProvisioningOperation::Uninstall => "try the failed uninstall again",
                                                 }
                                             }
                                         }
@@ -3184,6 +3270,51 @@ fn HostRow(
                                     // by `MenuOrder`, so arrow navigation
                                     // steps straight past it.
                                     div { class: "host-row-menu-separator", role: "separator" }
+                                    if provisioning_menu.uninstall {
+                                        button {
+                                            r#type: "button",
+                                            class: "btn session-row-menu-item host-row-menu-item provisioning-uninstall",
+                                            role: "menuitem",
+                                            aria_describedby: "host-menu-uninstall-description",
+                                            aria_disabled: if uninstall_disabled { "true" },
+                                            tabindex: if menu_tab_stop == Some(HostMenuAction::Uninstall) { "0" } else { "-1" },
+                                            onmounted: move |element| {
+                                                remember_menu_item(menu_wiring, HostMenuAction::Uninstall, element.data())
+                                            },
+                                            onfocusin: move |_| {
+                                                menu_focus.set(menu_order.position(HostMenuAction::Uninstall));
+                                            },
+                                            onfocusout: move |_| menu_focus.set(None),
+                                            onkeydown: move |evt| {
+                                                handle_menu_key(
+                                                    &evt,
+                                                    menu_order.position(HostMenuAction::Uninstall),
+                                                    menu_wiring,
+                                                    &id,
+                                                );
+                                            },
+                                            onclick: {
+                                                let binding = click_binding.clone();
+                                                move |_| {
+                                                    if uninstall_disabled {
+                                                        return;
+                                                    }
+                                                    // Only plans: the helm's plan opens in a
+                                                    // confirmation dialog, and nothing on the
+                                                    // host changes until the user confirms it.
+                                                    on_provisioning.call((id, ActionRequest {
+                                                        operation: ProvisioningOperation::Uninstall,
+                                                        binding: binding.clone(),
+                                                    }));
+                                                }
+                                            },
+                                            HostMenuActionIcon { action: HostMenuAction::Uninstall }
+                                            span { class: "session-row-menu-copy",
+                                                span { class: "session-row-menu-label", "uninstall" }
+                                                span { id: "host-menu-uninstall-description", class: "session-row-menu-description", "remove Farhelm from this host, keeping its data" }
+                                            }
+                                        }
+                                    }
                                     button {
                                         r#type: "button",
                                         class: "btn session-row-menu-item host-row-menu-item host-remove",
@@ -4043,7 +4174,9 @@ mod tests {
     /// session row.
     #[farhelm_testtrace::test]
     fn the_host_menu_follows_manageability_and_adoptability() {
-        use HostMenuAction::{Adopt, AutomaticSetup, Remove, Rerun, Retry, Settings, Update};
+        use HostMenuAction::{
+            Adopt, AutomaticSetup, Remove, Rerun, Retry, Settings, Uninstall, Update,
+        };
 
         // Ssh, adoptable: every non-provisioning item, in declared order.
         let ssh_adoptable = host_menu_order(true, true, ProvisioningMenuState::default());
@@ -4106,17 +4239,71 @@ mod tests {
                 rerun: Some(ProvisioningOperation::Update),
                 automatic_setup: true,
                 update: true,
+                uninstall: true,
                 planning: false,
             },
         );
-        assert_eq!(all_actions.len(), 7);
+        assert_eq!(all_actions.len(), 8);
         assert_eq!(all_actions.get(0), Some(Retry));
         assert_eq!(all_actions.get(1), Some(Adopt));
         assert_eq!(all_actions.get(2), Some(Rerun));
         assert_eq!(all_actions.get(3), Some(AutomaticSetup));
         assert_eq!(all_actions.get(4), Some(Update));
         assert_eq!(all_actions.get(5), Some(Settings));
-        assert_eq!(all_actions.get(6), Some(Remove));
+        assert_eq!(all_actions.get(6), Some(Uninstall));
+        assert_eq!(all_actions.get(7), Some(Remove));
+
+        // Uninstall sits in the destructive group with Remove, which only a
+        // manageable row has, so an unmanageable row never shows it even if
+        // its panel were to offer it.
+        let offered_uninstall = ProvisioningMenuState {
+            uninstall: true,
+            ..ProvisioningMenuState::default()
+        };
+        let remote_uninstall = host_menu_order(false, true, offered_uninstall);
+        assert_eq!(remote_uninstall.get(2), Some(Uninstall));
+        assert_eq!(remote_uninstall.last(), Some(Remove));
+        assert_eq!(
+            host_menu_order(false, false, offered_uninstall).position(Uninstall),
+            None
+        );
+    }
+
+    /// The notice an uninstall leaves names the host and the kept data
+    /// directory as peer text, between the UI's own words.
+    ///
+    /// Why it matters: both values come from the helm (a host name may be
+    /// an ssh destination the remote end chose, the path is the host's), so
+    /// they must render through the escaping path rather than as trusted
+    /// text. Specified: the host name and the path are the only peer runs,
+    /// in that order, and the sentence says Farhelm was removed and the data
+    /// remains.
+    #[farhelm_testtrace::test]
+    fn the_uninstall_notice_keeps_host_values_as_peer_text() {
+        let parts = uninstall_notice_parts(&UninstallNotice {
+            host_name: "build-box".to_string(),
+            state_dir: "/home/u/.local/state/farhelm".to_string(),
+            superseded_run: None,
+        });
+        let peers: Vec<&str> = parts
+            .iter()
+            .filter_map(|part| match part {
+                DetailPart::Peer(value) => Some(value.as_str()),
+                DetailPart::Text(_) => None,
+            })
+            .collect();
+        assert_eq!(peers, ["build-box", "/home/u/.local/state/farhelm"]);
+        let text: String = parts
+            .iter()
+            .map(|part| match part {
+                DetailPart::Text(value) | DetailPart::Peer(value) => value.as_str(),
+            })
+            .collect();
+        assert_eq!(
+            text,
+            "Farhelm was removed from build-box; its data remains in \
+             /home/u/.local/state/farhelm on that host."
+        );
     }
 
     /// The client-side mirror of the helm's alias validation

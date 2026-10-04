@@ -2755,6 +2755,29 @@ pub(crate) struct UpdatePlan {
     pub(crate) confirmation: String,
 }
 
+/// The one-use plan returned by the first UNINSTALL request.
+///
+/// Same inspect-then-consume wire as [`UpdatePlan`], but the user confirms
+/// the rendered `confirmation` before the second request consumes it. The
+/// state directory comes from the plan itself: the helm keeps no result for
+/// a host it has forgotten, so the success notice is built from what the
+/// confirming client already holds.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct UninstallPlan {
+    /// Opaque, one-use confirmation id bound to this host and plan.
+    pub(crate) probe_id: String,
+    /// The removal the second request authorizes, rendered by the helm.
+    pub(crate) confirmation: String,
+    pub(crate) plan: UninstallPlanFacts,
+}
+
+/// The part of the helm's frozen UNINSTALL plan this client reads.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct UninstallPlanFacts {
+    /// The host's Farhelm data directory, which the uninstall keeps.
+    pub(crate) state_dir: String,
+}
+
 /// Identity returned once the helm has accepted a long provisioning run.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProvisioningAccepted {
@@ -2814,12 +2837,14 @@ impl SubmissionError {
     }
 }
 
-/// Whether a retained run was an ADD convergence or an explicit UPDATE.
+/// Whether a retained run was an ADD convergence, an explicit UPDATE, or an
+/// UNINSTALL removing Farhelm from a remote host.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ProvisioningOperation {
     Add,
     Update,
+    Uninstall,
 }
 
 /// A provisioning run's retained aggregate state.
@@ -3183,6 +3208,46 @@ pub(crate) async fn update_host(
         Err(error) => ProvisioningSubmission::Unvalidated(format!(
             "the helm accepted the update, but its run identity could not be read ({error}); \
              this host's provisioning panel is the authoritative view of what happened"
+        )),
+    })
+}
+
+/// Freeze an UNINSTALL plan without changing the host.
+pub(crate) async fn plan_host_uninstall(base: &str, host: HostId) -> Result<UninstallPlan, String> {
+    let url = format!("{base}/api/hosts/{host}/uninstall");
+    let resp = send(client().post(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<UninstallPlan>().await.map_err(|error| {
+        format!("the helm planned the uninstall, but its reply could not be read: {error}")
+    })
+}
+
+/// Consume the one-use plan returned by [`plan_host_uninstall`].
+pub(crate) async fn uninstall_host(
+    base: &str,
+    host: HostId,
+    probe_id: &str,
+) -> Result<ProvisioningSubmission, SubmissionError> {
+    let url = format!("{base}/api/hosts/{host}/uninstall");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "probe_id": probe_id })),
+    )
+    .await
+    .map_err(SubmissionError::Ambiguous)?;
+    if !resp.status().is_success() {
+        return Err(SubmissionError::Refused(
+            refusal_text("POST", &url, resp).await,
+        ));
+    }
+    Ok(match resp.json::<ProvisioningAccepted>().await {
+        Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
+        Err(error) => ProvisioningSubmission::Unvalidated(format!(
+            "the helm accepted the uninstall, but its run identity could not be read ({error}); \
+             the hosts list is the authoritative view of what happened"
         )),
     })
 }

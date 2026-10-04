@@ -23,16 +23,11 @@ To remove your data as well, delete `~/.local/state/farhelm` once the uninstall 
 
 ## From a remote host
 
-Uninstalling on your Mac does not touch your remote hosts, and their sessions keep running. There is no uninstall
-command for a remote host yet. To remove Farhelm from one, first stop its sessions in Farhelm, then run this on the
-host:
+Uninstalling on your Mac does not touch your remote hosts, and their sessions keep running. To remove Farhelm from a
+remote host, select **uninstall** in that host's `⋯` menu in the host list; see
+[Manage hosts](/docs/using/manage-hosts/#uninstall-farhelm-from-a-remote-host).
 
-```sh
-systemctl --user disable --now farhelm-supervisor.service
-rm ~/.config/systemd/user/farhelm-supervisor.service
-systemctl --user daemon-reload
-rm -rf ~/.local/lib/farhelm
-```
-
-Delete `~/.local/state/farhelm` on the host as well to remove its data. Then remove the host from your list in Farhelm;
-see [Manage hosts](/docs/using/manage-hosts/).
+Farhelm needs to reach the host to do this, so it can check that nothing is still running there. If the host shows as
+unreachable or with a problem in the list, fix that first, then choose **uninstall** again. The one exception is
+finishing an uninstall that stopped partway: once it has removed Farhelm's service, the host is expected to look
+unreachable, and choosing **uninstall** again still finishes the job.

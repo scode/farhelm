@@ -5770,6 +5770,22 @@ samp {
   overflow-wrap: anywhere;
 }
 
+/* The notice an uninstall leaves above the host list once its host is gone,
+   laid out like the delete notice above: the text, then a dismiss button on
+   the same line. */
+.uninstall-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 12px;
+  padding: 2px 12px 0;
+}
+.uninstall-notice .uninstall-notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Every animation on the page stands still while the window is inactive:
    the window or tab lacks keyboard focus, or is hidden or minimized.
    `AppBody` (src/lib.rs) keeps `data-window-active` on the root element in

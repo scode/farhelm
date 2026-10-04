@@ -61,8 +61,8 @@ use dioxus::prelude::*;
 use crate::api::{
     PreferenceValue, ProbeResponse, ProvisioningAccepted, ProvisioningOperation,
     ProvisioningStatus, ProvisioningSubmission, ProvisioningView, SubmissionError,
-    fetch_provisioning, plan_host_update, probe_local_host, probe_ssh_host, provision_host,
-    store_preference, update_host,
+    fetch_provisioning, plan_host_uninstall, plan_host_update, probe_local_host, probe_ssh_host,
+    provision_host, store_preference, uninstall_host, update_host,
 };
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::settings_dialog;
@@ -83,6 +83,10 @@ pub(crate) struct ProvisioningMenuState {
     pub(crate) rerun: Option<ProvisioningOperation>,
     pub(crate) automatic_setup: bool,
     pub(crate) update: bool,
+    /// Uninstall is offered: a remote row with no run, plan or update
+    /// intent in flight. A failed uninstall offers this again rather than a
+    /// rerun, since choosing uninstall again is how it continues.
+    pub(crate) uninstall: bool,
     /// A plan is in flight: ADD planning or a displayed offer, a live
     /// automatic-update intent in any phase, or a retained accepted/observed
     /// run that has not reached a terminal state. While set, the menu offers
@@ -101,6 +105,8 @@ struct MenuFacts {
     failed_operation: Option<ProvisioningOperation>,
     /// The host kind accepts provisioning from the panel at all.
     update_allowed: bool,
+    /// The host kind can be uninstalled from the panel (remote rows only).
+    uninstall_allowed: bool,
     /// The local row's supervisor is not running (setup, not Update).
     local_setup: bool,
     /// A plan or an automatic-update intent is under way.
@@ -124,6 +130,7 @@ impl ProvisioningMenuState {
             run_active,
             failed_operation,
             update_allowed,
+            uninstall_allowed,
             local_setup,
             plan_in_flight,
             can_retry_local_setup,
@@ -131,11 +138,13 @@ impl ProvisioningMenuState {
         } = facts;
         ProvisioningMenuState {
             // A failed Update is not offered again on a too-new host either:
-            // the rerun is the same downgrade.
+            // the rerun is the same downgrade. A failed uninstall is never a
+            // rerun: its own menu item continues it.
             rerun: (update_allowed && !plan_in_flight)
                 .then_some(failed_operation)
                 .flatten()
-                .filter(|operation| !(too_new && *operation == ProvisioningOperation::Update)),
+                .filter(|operation| !(too_new && *operation == ProvisioningOperation::Update))
+                .filter(|operation| *operation != ProvisioningOperation::Uninstall),
             automatic_setup: !run_active
                 && update_allowed
                 && local_setup
@@ -143,6 +152,7 @@ impl ProvisioningMenuState {
                 && failed_operation.is_none()
                 && can_retry_local_setup,
             update: !run_active && update_allowed && !local_setup && !plan_in_flight && !too_new,
+            uninstall: !run_active && uninstall_allowed && !plan_in_flight,
             planning: plan_in_flight,
         }
     }
@@ -156,6 +166,20 @@ impl ProvisioningMenuState {
 pub(crate) struct ProvisioningTraceShape {
     pub(crate) operation: ProvisioningOperation,
     pub(crate) status: ProvisioningStatus,
+}
+
+/// What the hosts panel says once an uninstall this window confirmed has
+/// removed its host from the list: the host's name and where its data
+/// stayed. Both are peer text and render through the escaping path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UninstallNotice {
+    pub(crate) host_name: String,
+    pub(crate) state_dir: String,
+    /// The run the row was showing when this notice was registered: on a
+    /// retry, the earlier failed run. Its failure says nothing about the
+    /// attempt this notice belongs to, so a read of it arriving late must
+    /// not withdraw the notice; only a different run failing does.
+    pub(crate) superseded_run: Option<String>,
 }
 
 /// One row-menu provisioning command, with the row it was aimed at.
@@ -215,12 +239,16 @@ fn decide_request(
         ProvisioningOperation::Update if update_owned => RequestDecision::Coalesce,
         ProvisioningOperation::Update if add_planning => RequestDecision::Refuse,
         ProvisioningOperation::Update => RequestDecision::Plan,
-        ProvisioningOperation::Add if update_owned || add_planning || page_busy => {
+        // UNINSTALL shows a plan and waits for confirmation, as ADD does,
+        // so it shares ADD's blockers and its supersede rule.
+        ProvisioningOperation::Add | ProvisioningOperation::Uninstall
+            if update_owned || add_planning || page_busy =>
+        {
             RequestDecision::Refuse
         }
         // A second ADD supersedes a merely displayed offer, as before: the
         // older plan is dropped unsent and planning starts over.
-        ProvisioningOperation::Add => RequestDecision::Plan,
+        ProvisioningOperation::Add | ProvisioningOperation::Uninstall => RequestDecision::Plan,
     }
 }
 
@@ -428,11 +456,26 @@ impl UpdatePendingPhase {
     }
 }
 
+impl UpdateProgressSummary {
+    /// The word the row's inline status and its hover popup use for this
+    /// run: "updating" or "uninstalling".
+    pub(crate) fn verb(&self) -> &'static str {
+        match self.operation {
+            ProvisioningOperation::Uninstall => "uninstalling",
+            ProvisioningOperation::Add | ProvisioningOperation::Update => "updating",
+        }
+    }
+}
+
 /// The small per-host summary published from the provisioning panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpdateProgressSummary {
     /// The exact tracked run id, so replacing a run also replaces its clock.
     pub(crate) run_id: String,
+    /// The run's operation, UPDATE or UNINSTALL. Only the status wording
+    /// depends on it ("updating" or "uninstalling"): SPEC.md asks for an
+    /// uninstall's progress to show in the row the way Update's does.
+    pub(crate) operation: ProvisioningOperation,
     /// First executor-ordered `running` step, absent when the view names none.
     pub(crate) current_step: Option<String>,
     /// Every executor step in the snapshot, in executor order, for the hover
@@ -530,7 +573,23 @@ fn update_progress_summary(
     {
         return None;
     }
+    Some(summarize_running_view(
+        view,
+        tracked.run_id.clone(),
+        tracked.started_at,
+        ProvisioningOperation::Update,
+    ))
+}
 
+/// The compact summary of one running snapshot: its steps, which one is
+/// current, and how many are done. Callers have already established that
+/// `view` is the live run they mean to summarize.
+fn summarize_running_view(
+    view: &ProvisioningView,
+    run_id: String,
+    started_at: Instant,
+    operation: ProvisioningOperation,
+) -> UpdateProgressSummary {
     let done = view
         .steps
         .iter()
@@ -553,15 +612,15 @@ fn update_progress_summary(
             current: Some(index) == current_index,
         })
         .collect();
-
-    Some(UpdateProgressSummary {
-        run_id: tracked.run_id.clone(),
+    UpdateProgressSummary {
+        run_id,
+        operation,
         current_step,
         steps,
         done,
         total: view.steps.len(),
-        started_at: tracked.started_at,
-    })
+        started_at,
+    }
 }
 
 /// The compact update status this row publishes to its host row, if any.
@@ -581,6 +640,7 @@ fn derive_row_update_progress(
     intent: Option<&UpdateIntent>,
     tracked: Option<&TrackedRun>,
     view: Option<&ProvisioningView>,
+    uninstall_clock: Option<&(String, Instant)>,
 ) -> Option<HostUpdateProgress> {
     if let Some(live) = intent {
         return Some(HostUpdateProgress::Pending(match live.phase {
@@ -589,16 +649,35 @@ fn derive_row_update_progress(
             IntentPhase::Submitting => UpdatePendingPhase::Submitting,
         }));
     }
-    let run = tracked.filter(|run| {
+    if let Some(run) = tracked.filter(|run| {
         run.operation == Some(ProvisioningOperation::Update) && retained_run_live(Some(run))
+    }) {
+        return Some(
+            view.and_then(|view| update_progress_summary(view, run))
+                .map_or(
+                    HostUpdateProgress::Pending(UpdatePendingPhase::AwaitingProgress),
+                    HostUpdateProgress::Running,
+                ),
+        );
+    }
+    // A running UNINSTALL shows in the row the same way. It has no tracked
+    // run or intent (it is confirmed like setup), so the live read itself is
+    // the evidence, paired with the clock the panel started when it first
+    // saw this run (see `uninstall_clock` in the panel). This matters most
+    // once the run stops the supervisor: without it the row's status would
+    // read unreachable while the removal is still going.
+    let (clock_run, started_at) = uninstall_clock?;
+    let view = view.filter(|view| {
+        view.operation == Some(ProvisioningOperation::Uninstall)
+            && view.status == ProvisioningStatus::Running
+            && view.run_id.as_deref() == Some(clock_run.as_str())
     })?;
-    Some(
-        view.and_then(|view| update_progress_summary(view, run))
-            .map_or(
-                HostUpdateProgress::Pending(UpdatePendingPhase::AwaitingProgress),
-                HostUpdateProgress::Running,
-            ),
-    )
+    Some(HostUpdateProgress::Running(summarize_running_view(
+        view,
+        clock_run.clone(),
+        *started_at,
+        ProvisioningOperation::Uninstall,
+    )))
 }
 
 /// Whether a retained tracked run still owns its row.
@@ -643,6 +722,9 @@ struct PendingPlan {
     binding: HostBinding,
     probe_id: String,
     confirmation: String,
+    /// The data directory an UNINSTALL plan keeps, for the success notice;
+    /// `None` for every other operation.
+    kept_state_dir: Option<String>,
 }
 
 /// What preparing a run established without yet mutating the target.
@@ -746,6 +828,41 @@ pub(crate) fn SetupPlanConfirmation(
     }
 }
 
+/// Render the helm's uninstall plan with its two answers.
+///
+/// The text is the helm's, rendered from the plan the run will consume (see
+/// [`PlanConfirmation`] for why the UI never re-renders it), and it already
+/// names what goes and what stays. The confirm button is in the danger tier
+/// because the removal cannot be undone from Farhelm; cancel takes focus
+/// first so a stray Enter dismisses rather than removes.
+#[component]
+pub(crate) fn UninstallConfirmation(
+    confirmation: String,
+    busy: bool,
+    on_confirm: EventHandler<()>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    rsx! {
+        PeerBlock { class: "provisioning-plan", text: confirmation }
+        div { class: "provisioning-confirm-actions",
+            button {
+                r#type: "button",
+                class: "btn btn-danger provisioning-confirm uninstall-confirm",
+                disabled: busy,
+                onclick: move |_| on_confirm.call(()),
+                "uninstall"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-neutral provisioning-cancel uninstall-cancel",
+                autofocus: true,
+                onclick: move |_| on_cancel.call(()),
+                "cancel"
+            }
+        }
+    }
+}
+
 /// Prepare a fresh plan for the requested idempotent operation.
 async fn prepare(
     base: &str,
@@ -761,6 +878,17 @@ async fn prepare(
                 binding,
                 probe_id: planned.probe_id,
                 confirmation: planned.confirmation,
+                kept_state_dir: None,
+            }))
+        }
+        ProvisioningOperation::Uninstall => {
+            let planned = plan_host_uninstall(base, host.id).await?;
+            Ok(Preparation::Plan(PendingPlan {
+                operation,
+                binding,
+                probe_id: planned.probe_id,
+                confirmation: planned.confirmation,
+                kept_state_dir: Some(planned.plan.state_dir),
             }))
         }
         ProvisioningOperation::Add => {
@@ -796,6 +924,7 @@ async fn prepare(
                     binding,
                     probe_id,
                     confirmation,
+                    kept_state_dir: None,
                 }),
                 ProbeResponse::Manual { reason } => Preparation::Manual(reason),
                 ProbeResponse::Unvalidated(problem) => Preparation::Unvalidated(problem),
@@ -839,6 +968,11 @@ struct Submission<R> {
     local_auto_retry: Signal<bool>,
     on_running: EventHandler<bool>,
     on_changed: EventHandler<()>,
+    /// Called when the helm definitively refused an UNINSTALL submission,
+    /// so the notice registered for it before the POST is withdrawn. Never
+    /// called for other operations, and not for a lost reply: that run may
+    /// have committed, and if it removes the host the notice is owed.
+    on_uninstall_refused: EventHandler<()>,
     reread: R,
 }
 
@@ -900,13 +1034,22 @@ where
         mut local_auto_retry,
         on_running,
         on_changed,
+        on_uninstall_refused,
         reread,
     } = submission;
     spawn(async move {
         let result = match plan.operation {
             ProvisioningOperation::Add => provision_host(&base, &plan.probe_id).await,
             ProvisioningOperation::Update => update_host(&base, host_id, &plan.probe_id).await,
+            ProvisioningOperation::Uninstall => {
+                uninstall_host(&base, host_id, &plan.probe_id).await
+            }
         };
+        if plan.operation == ProvisioningOperation::Uninstall
+            && matches!(result, Err(SubmissionError::Refused(_)))
+        {
+            on_uninstall_refused.call(());
+        }
         // Progress reads and registry reconciliation are ordinary reads;
         // release the page token as soon as submission has an outcome.
         drop(claim);
@@ -1612,6 +1755,12 @@ pub(crate) fn ProvisioningPanel(
     /// Ask the authoritative registry to refresh after registration or an
     /// accepted run.
     on_changed: EventHandler<()>,
+    /// Notices owed for confirmed uninstalls, keyed by host. This panel adds
+    /// its host's entry as it submits and drops it on a refusal or a failed
+    /// run; the parent shows it once the host leaves the list, since this
+    /// panel unmounts with its row and the helm keeps no result for a host
+    /// it forgot.
+    mut uninstall_notices: Signal<HashMap<HostId, UninstallNotice>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<SharedPreferences>();
@@ -1639,6 +1788,10 @@ pub(crate) fn ProvisioningPanel(
     // old target's run as the new target's work.
     let mut outstanding_submission = use_signal(|| None::<OutstandingSubmission>);
     let mut tracked = use_signal(|| None::<TrackedRun>);
+    // When this panel first saw the current running UNINSTALL, by run id: the
+    // origin of its inline elapsed time. Uninstall has no tracked run (it is
+    // confirmed like setup), so this is its only clock.
+    let mut uninstall_clock = use_signal(|| None::<(String, Instant)>);
     // Run ids a target change detached from this row. The progress route is
     // host-scoped, not target-scoped, so the helm can keep reporting the old
     // target's retained run after a retarget; adopting it would reinterpret
@@ -1782,7 +1935,10 @@ pub(crate) fn ProvisioningPanel(
     let plan_base = base.clone();
     let plan_host = host.clone();
     let plan_progress = request_progress.clone();
-    let begin_add_plan = move || -> bool {
+    // UNINSTALL plans through the same path: it, too, shows the helm's plan
+    // and submits only on an explicit confirmation. Only ADD carries the
+    // local-setup retry and the remembered "don't ask again" answer.
+    let begin_confirmed_plan = move |operation: ProvisioningOperation| -> bool {
         if *planning.peek() || ops.busy_now() {
             return false;
         }
@@ -1793,10 +1949,12 @@ pub(crate) fn ProvisioningPanel(
         let base = plan_base.clone();
         let host = plan_host.clone();
         let requested_binding = HostBinding::from(&host);
-        let is_local_add = host.kind.sets_up_locally();
+        let is_local_add = host.kind.sets_up_locally() && operation == ProvisioningOperation::Add;
+        let remembered_answer = operation == ProvisioningOperation::Add
+            && preferences.0.peek().skip_host_setup_confirmation == Some(true);
         let reread = plan_progress.clone();
         spawn(async move {
-            let prepared = prepare(&base, &host, ProvisioningOperation::Add).await;
+            let prepared = prepare(&base, &host, operation).await;
             if *current_binding.peek() != requested_binding {
                 planning.set(false);
                 return;
@@ -1806,10 +1964,7 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
-                    auto_submit_add.set(
-                        !is_local_add
-                            && preferences.0.peek().skip_host_setup_confirmation == Some(true),
-                    );
+                    auto_submit_add.set(!is_local_add && remembered_answer);
                     pending.set(Some(plan));
                     on_reveal_details.call(());
                 }
@@ -1962,7 +2117,7 @@ pub(crate) fn ProvisioningPanel(
     // instead of becoming a second plan that starts when the first one's
     // planning flag clears.
     let mut consume_request = {
-        let mut begin_add = begin_add_plan.clone();
+        let mut begin_confirmed = begin_confirmed_plan.clone();
         let mut begin_auto = begin_update;
         move |request: &ActionRequest| -> bool {
             // Snapshot the decision inputs as owned values first. A peek
@@ -1982,7 +2137,9 @@ pub(crate) fn ProvisioningPanel(
                         begin_auto();
                         true
                     }
-                    ProvisioningOperation::Add => begin_add(),
+                    operation @ (ProvisioningOperation::Add | ProvisioningOperation::Uninstall) => {
+                        begin_confirmed(operation)
+                    }
                 },
             }
         }
@@ -2101,6 +2258,8 @@ pub(crate) fn ProvisioningPanel(
                 local_auto_retry,
                 on_running,
                 on_changed,
+                // Only an UNINSTALL owes a notice; this path submits updates.
+                on_uninstall_refused: EventHandler::new(|()| {}),
                 reread: claim_progress.clone(),
             },
             plan,
@@ -2181,10 +2340,35 @@ pub(crate) fn ProvisioningPanel(
             auto_details.write().remove(&host_id);
         }
 
+        // Start the elapsed clock the first time a running uninstall is
+        // seen, keyed by its run id so a later run gets a fresh one.
+        let running_uninstall = current_progress
+            .as_ref()
+            .filter(|view| {
+                view.operation == Some(ProvisioningOperation::Uninstall)
+                    && view.status == ProvisioningStatus::Running
+            })
+            .and_then(|view| view.run_id.clone());
+        let previous_clock = uninstall_clock.peek().clone();
+        let clock = match (running_uninstall, previous_clock) {
+            (Some(run), Some((seen, at))) if seen == run => Some((seen, at)),
+            (Some(run), _) => {
+                let started = (run, Instant::now());
+                uninstall_clock.set(Some(started.clone()));
+                Some(started)
+            }
+            (None, previous) => {
+                if previous.is_some() {
+                    uninstall_clock.set(None);
+                }
+                None
+            }
+        };
         let row_progress = derive_row_update_progress(
             current_intent.as_ref(),
             current_tracked.as_ref(),
             current_progress.as_ref(),
+            clock.as_ref(),
         );
         let previous = row_update_progress.peek().get(&host_id).cloned();
         if previous != row_progress {
@@ -2207,7 +2391,7 @@ pub(crate) fn ProvisioningPanel(
     // state clears them even when the path was a failed-run rerun rather
     // than the initial automatic probe.
     let mut was_local_setup = use_signal(|| local_setup);
-    let mut auto_plan = begin_add_plan.clone();
+    let mut auto_plan = begin_confirmed_plan.clone();
     use_effect(use_reactive(
         (&local_setup, &binding),
         move |(local_setup, binding)| {
@@ -2234,7 +2418,7 @@ pub(crate) fn ProvisioningPanel(
                 && !*local_probe_started.peek()
             {
                 local_probe_started.set(true);
-                auto_plan();
+                auto_plan(ProvisioningOperation::Add);
             }
             if !local_setup && *was_local_setup.peek() {
                 local_probe_started.set(false);
@@ -2278,6 +2462,7 @@ pub(crate) fn ProvisioningPanel(
                 run_active,
                 failed_operation,
                 update_allowed,
+                uninstall_allowed: menu_host_kind.uninstalls_from_panel(),
                 local_setup,
                 plan_in_flight,
                 can_retry_local_setup,
@@ -2289,6 +2474,32 @@ pub(crate) fn ProvisioningPanel(
         },
     ));
 
+    // An uninstall that failed keeps its host in the list, so the notice
+    // owed for its success must not survive to be shown later, for example
+    // when the user removes the host by hand. A successful run never gets
+    // here: its row, and this panel with it, is gone.
+    use_effect(move || {
+        let failed_run = progress.read().as_ref().and_then(|view| {
+            (view.status == ProvisioningStatus::Failed
+                && view.operation == Some(ProvisioningOperation::Uninstall))
+            .then(|| view.run_id.clone())
+            .flatten()
+        });
+        let Some(failed_run) = failed_run else {
+            return;
+        };
+        // A retry is confirmed while the row still shows the earlier failed
+        // run, and a read of that run can land after the new notice is
+        // registered; only a failure of some other run belongs to it.
+        let owed_by_another_run = uninstall_notices
+            .peek()
+            .get(&host_id)
+            .is_some_and(|notice| notice.superseded_run.as_deref() != Some(failed_run.as_str()));
+        if owed_by_another_run {
+            uninstall_notices.write().remove(&host_id);
+        }
+    });
+
     // Explicit setup confirmation enters the same binding-checked,
     // single-consumption submission as automatic remote update. ADD
     // preparation may already have registered an answering supervisor, but
@@ -2296,6 +2507,7 @@ pub(crate) fn ProvisioningPanel(
     // exclusion even if this row disappears while the POST is pending.
     let submit_base = base.clone();
     let submit_progress = request_progress.clone();
+    let notice_host_name = host.name.clone();
     let confirm = use_callback(move |_| {
         let Some(plan) = pending.peek().clone() else {
             return;
@@ -2308,6 +2520,27 @@ pub(crate) fn ProvisioningPanel(
         let Some(claim) = confirm_ops.claim_guard() else {
             return;
         };
+        // The notice an uninstall owes, built now from the plan the user
+        // confirmed and registered with the parent BEFORE the POST. Once the
+        // host is forgotten nothing else can say where its data stayed, and
+        // waiting for the reply is not safe: this panel unmounts with its
+        // row, so if the run finishes and the list drops the host before the
+        // reply arrives, the submission task dies with the panel and would
+        // never register it. A definite refusal withdraws it again.
+        if let Some(state_dir) = plan.kept_state_dir.clone() {
+            let superseded_run = progress
+                .peek()
+                .as_ref()
+                .and_then(|view| view.run_id.clone());
+            uninstall_notices.write().insert(
+                host_id,
+                UninstallNotice {
+                    host_name: notice_host_name.clone(),
+                    state_dir,
+                    superseded_run,
+                },
+            );
+        }
         // Every attempt consumes what was displayed from the client's point
         // of view too. A refusal or transport ambiguity cannot prove the
         // helm left this one-use id unconsumed.
@@ -2337,6 +2570,9 @@ pub(crate) fn ProvisioningPanel(
                 local_auto_retry,
                 on_running,
                 on_changed,
+                on_uninstall_refused: EventHandler::new(move |()| {
+                    uninstall_notices.write().remove(&host_id);
+                }),
                 reread: submit_progress.clone(),
             },
             plan,
@@ -2391,6 +2627,7 @@ pub(crate) fn ProvisioningPanel(
         live_intent.as_ref(),
         tracked.read().as_ref(),
         snapshot.as_ref(),
+        uninstall_clock.read().as_ref(),
     )
     .is_some();
     let visible_trace = (!details_open && !inline_update_status)
@@ -2531,6 +2768,41 @@ pub(crate) fn ProvisioningPanel(
                             }
                         }
                     }
+                } else if plan.operation == ProvisioningOperation::Uninstall {
+                    // A removal the user has to read before agreeing to,
+                    // so it gets the same modal treatment as setup, with
+                    // the destructive confirm in the danger tier. Cancel
+                    // and Escape stay live for the reason the setup
+                    // dialog's do.
+                    div { class: "host-settings-backdrop", role: "presentation",
+                        div {
+                            class: "host-settings-dialog host-uninstall-dialog",
+                            role: "dialog",
+                            aria_modal: "true",
+                            aria_label: "uninstall Farhelm from this host",
+                            tabindex: "-1",
+                            onmounted: move |_| settings_dialog::install_uninstall_dialog(),
+                            onkeydown: move |evt: KeyboardEvent| {
+                                if evt.key() == Key::Escape && !evt.is_composing() {
+                                    settings_dialog::return_focus_to_row(host_id);
+                                    pending.set(None);
+                                    action_error.set(None);
+                                    action_warning.set(None);
+                                }
+                            },
+                            UninstallConfirmation {
+                                confirmation: plan.confirmation,
+                                busy: page_busy,
+                                on_confirm: move |_| confirm.call(()),
+                                on_cancel: move |_| {
+                                    settings_dialog::return_focus_to_row(host_id);
+                                    pending.set(None);
+                                    action_error.set(None);
+                                    action_warning.set(None);
+                                },
+                            }
+                        }
+                    }
                 } else {
                     PlanConfirmation {
                         confirmation: plan.confirmation,
@@ -2623,6 +2895,7 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
     match operation {
         Some(ProvisioningOperation::Add) => "setup",
         Some(ProvisioningOperation::Update) => "update",
+        Some(ProvisioningOperation::Uninstall) => "uninstall",
         None => "idle",
     }
 }
@@ -2676,6 +2949,90 @@ mod tests {
             "rerunning a failed Update is the same downgrade"
         );
     }
+
+    /// The row menu offers uninstall only on a remote row with nothing in
+    /// flight, and a failed uninstall is continued by that same item rather
+    /// than offered as a rerun.
+    ///
+    /// Why it matters: SPEC.md makes uninstall unavailable while the host is
+    /// busy with setup, an update or another uninstall, the way Update is;
+    /// the local row is uninstalled with `farhelm uninstall`, never from the
+    /// panel; and "choose uninstall again" is how a partial removal
+    /// continues. Specified: offered when allowed and idle; withdrawn while a
+    /// run, a plan or an update intent is in flight or when the kind does not
+    /// allow it; still offered, with no rerun, after a failed uninstall.
+    #[farhelm_testtrace::test]
+    fn uninstall_is_offered_on_idle_remote_rows_and_continues_a_failed_one() {
+        let ready = MenuFacts {
+            update_allowed: true,
+            uninstall_allowed: true,
+            ..MenuFacts::default()
+        };
+        assert!(ProvisioningMenuState::offered(ready).uninstall);
+        for busy in [
+            MenuFacts {
+                run_active: true,
+                ..ready
+            },
+            MenuFacts {
+                plan_in_flight: true,
+                ..ready
+            },
+            MenuFacts {
+                uninstall_allowed: false,
+                ..ready
+            },
+        ] {
+            assert!(!ProvisioningMenuState::offered(busy).uninstall, "{busy:?}");
+        }
+        let failed = ProvisioningMenuState::offered(MenuFacts {
+            failed_operation: Some(ProvisioningOperation::Uninstall),
+            ..ready
+        });
+        assert!(failed.uninstall);
+        assert_eq!(failed.rerun, None);
+    }
+
+    /// A menu uninstall request plans like setup: it waits behind the page
+    /// lock, ADD planning and a live update, and otherwise plans.
+    ///
+    /// Why it matters: uninstall shows a plan and submits only on the
+    /// user's confirmation, so it must not start beside another plan of the
+    /// same row or slip past the page lock that confirmation needs.
+    /// Specified: refused while any of those blockers stands, planned once
+    /// none does, and dropped as stale when the row changed since the click.
+    #[farhelm_testtrace::test]
+    fn an_uninstall_request_waits_like_setup_and_then_plans() {
+        let host_id = 7;
+        let request = ActionRequest {
+            operation: ProvisioningOperation::Uninstall,
+            binding: ssh_binding(host_id),
+        };
+        let current = ssh_binding(host_id);
+        for (update_owned, add_planning, page_busy) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            assert_eq!(
+                decide_request(&request, &current, update_owned, add_planning, page_busy),
+                RequestDecision::Refuse
+            );
+        }
+        assert_eq!(
+            decide_request(&request, &current, false, false, false),
+            RequestDecision::Plan
+        );
+        let retargeted = HostBinding {
+            destination: Some("elsewhere@example.invalid".to_string()),
+            ..ssh_binding(host_id)
+        };
+        assert_eq!(
+            decide_request(&request, &retargeted, false, false, false),
+            RequestDecision::Stale
+        );
+    }
+
     fn ssh_binding(id: HostId) -> HostBinding {
         HostBinding {
             id,
@@ -3066,6 +3423,69 @@ mod tests {
         assert_eq!(update_progress_summary(&terminal, &tracked), None);
     }
 
+    /// A running uninstall shows in the row's inline status the way an
+    /// update does, worded as uninstalling, and only for the run the panel's
+    /// clock was started for.
+    ///
+    /// Why it matters: SPEC.md asks for an uninstall's progress to show in
+    /// the row like Update's, and once the run stops the supervisor the row's
+    /// connection status would otherwise read unreachable while the removal
+    /// is still going. Specified: a running uninstall view whose run id
+    /// matches the clock yields a running summary with its steps, done count
+    /// and "uninstalling"; no clock, another run's view, or a finished run
+    /// yields nothing.
+    #[farhelm_testtrace::test]
+    fn a_running_uninstall_shows_inline_like_an_update() {
+        let started_at = Instant::now();
+        let clock = ("run-u".to_string(), started_at);
+        let view = ProvisioningView {
+            run_id: Some("run-u".to_string()),
+            operation: Some(ProvisioningOperation::Uninstall),
+            status: ProvisioningStatus::Running,
+            steps: vec![
+                crate::api::ProvisioningStep {
+                    step: "disable-supervisor".to_string(),
+                    status: "completed".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "remove-unit".to_string(),
+                    status: "running".to_string(),
+                    message: None,
+                },
+            ],
+            message: None,
+        };
+        let Some(HostUpdateProgress::Running(summary)) =
+            derive_row_update_progress(None, None, Some(&view), Some(&clock))
+        else {
+            panic!("a running uninstall must show inline progress");
+        };
+        assert_eq!(summary.operation, ProvisioningOperation::Uninstall);
+        assert_eq!(summary.verb(), "uninstalling");
+        assert_eq!(summary.current_step.as_deref(), Some("remove-unit"));
+        assert_eq!((summary.done, summary.total), (1, 2));
+        assert_eq!(summary.started_at, started_at);
+
+        assert_eq!(
+            derive_row_update_progress(None, None, Some(&view), None),
+            None
+        );
+        let other_clock = ("run-other".to_string(), started_at);
+        assert_eq!(
+            derive_row_update_progress(None, None, Some(&view), Some(&other_clock)),
+            None
+        );
+        let finished = ProvisioningView {
+            status: ProvisioningStatus::Failed,
+            ..view.clone()
+        };
+        assert_eq!(
+            derive_row_update_progress(None, None, Some(&finished), Some(&clock)),
+            None
+        );
+    }
+
     /// The row's inline status covers the whole update lifecycle and names each pending stage.
     ///
     /// Browser tests hold planning, the claim wait, and submission at exact
@@ -3085,11 +3505,16 @@ mod tests {
         };
         let pending = |phase| Some(HostUpdateProgress::Pending(phase));
         assert_eq!(
-            derive_row_update_progress(Some(&intent(IntentPhase::Planning)), None, None),
+            derive_row_update_progress(Some(&intent(IntentPhase::Planning)), None, None, None),
             pending(UpdatePendingPhase::Planning)
         );
         assert_eq!(
-            derive_row_update_progress(Some(&intent(IntentPhase::WaitingForClaim)), None, None),
+            derive_row_update_progress(
+                Some(&intent(IntentPhase::WaitingForClaim)),
+                None,
+                None,
+                None
+            ),
             pending(UpdatePendingPhase::WaitingForClaim)
         );
 
@@ -3119,7 +3544,8 @@ mod tests {
             derive_row_update_progress(
                 Some(&intent(IntentPhase::Submitting)),
                 Some(&running_run),
-                Some(&running_view)
+                Some(&running_view),
+                None
             ),
             pending(UpdatePendingPhase::Submitting)
         );
@@ -3130,18 +3556,18 @@ mod tests {
             ..running_run.clone()
         };
         assert_eq!(
-            derive_row_update_progress(None, Some(&accepted), None),
+            derive_row_update_progress(None, Some(&accepted), None, None),
             pending(UpdatePendingPhase::AwaitingProgress)
         );
         let mut other_view = running_view.clone();
         other_view.run_id = Some("run-8".to_string());
         assert_eq!(
-            derive_row_update_progress(None, Some(&running_run), Some(&other_view)),
+            derive_row_update_progress(None, Some(&running_run), Some(&other_view), None),
             pending(UpdatePendingPhase::AwaitingProgress)
         );
 
         let Some(HostUpdateProgress::Running(summary)) =
-            derive_row_update_progress(None, Some(&running_run), Some(&running_view))
+            derive_row_update_progress(None, Some(&running_run), Some(&running_view), None)
         else {
             panic!("the tracked run's own running view shows full progress");
         };
@@ -3154,7 +3580,7 @@ mod tests {
                 ..running_run.clone()
             };
             assert_eq!(
-                derive_row_update_progress(None, Some(&terminal), None),
+                derive_row_update_progress(None, Some(&terminal), None, None),
                 None
             );
         }
@@ -3162,9 +3588,12 @@ mod tests {
             operation: Some(ProvisioningOperation::Add),
             ..running_run
         };
-        assert_eq!(derive_row_update_progress(None, Some(&add_run), None), None);
         assert_eq!(
-            derive_row_update_progress(None, None, Some(&running_view)),
+            derive_row_update_progress(None, Some(&add_run), None, None),
+            None
+        );
+        assert_eq!(
+            derive_row_update_progress(None, None, Some(&running_view), None),
             None
         );
     }
