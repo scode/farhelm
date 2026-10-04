@@ -126,6 +126,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Native `title` tooltips are the cheap way to get there; the Maybe later entry on custom hover tooltips covers the
   faster, themed alternative if the browser's built-in delay proves too slow. Plan: `plans/queue/hover-help.md`.
 
+- **Verify that agents keep running while Farhelm is closed on the Mac.** The docs' "Your first session" page says you
+  can quit Farhelm while an agent works, reopen it, and find the session still running. Check that claim, and fix
+  Farhelm or the page. Reminder for the maintainer: this is about how the agents' session hooks might block while the
+  helm is not available (details TBD).
+
+- **Uninstall Farhelm from remote hosts.** `farhelm uninstall` only removes Farhelm from the Mac it runs on, and nothing
+  removes it from a remote host: the docs' "Uninstall Farhelm" page tells users to stop the host's sessions and then run
+  `systemctl` and `rm` by hand on the host. Add a supported way to uninstall from a remote host, and replace those
+  manual steps in the docs with it.
+
+- **Remove the add-host dialog's two optional fields.** The add host dialog's **remote farhelm (optional)** and **remote
+  state dir (optional)** fields go. Nobody adding a host will know what to put in them, even the maintainer is unsure
+  what they are for, and they are not a tested part of the UI.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
