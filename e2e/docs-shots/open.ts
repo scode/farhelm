@@ -7,7 +7,7 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { Director } from "../readme-video/overlay";
 import { loadScenario } from "../readme-hero/scenario";
 import { DOCS_SHOTS_DIR } from "./paths";
-import { DOCS_THEME, openDocsFleet } from "./stage-docs";
+import { DOCS_THEME, openDocsFleet, readFleet } from "./stage-docs";
 
 /** Open the staged fleet with the docs overlay installed. */
 export async function open(page: Page, request: APIRequestContext) {
@@ -22,4 +22,19 @@ export async function openLauncher(page: Page) {
   const form = page.locator("form.create-session-form");
   await expect(form).toBeVisible();
   return form;
+}
+
+/**
+ * The list row of the first staged session matching `pick`, found by the id
+ * staging gave it. Fails when the scenario has no such session, so a shot
+ * that needs, say, a waiting session says so instead of photographing nothing.
+ */
+export function rowOf(
+  page: Page,
+  scenario: import("../readme-hero/scenario").Scenario,
+  pick: (session: import("../readme-hero/scenario").ScenarioSession) => boolean,
+) {
+  const session = scenario.sessions.find(pick);
+  if (!session) throw new Error("the docs scenario has no session this shot needs");
+  return page.locator(`[data-session-id="${readFleet().ids.get(session.title)}"]`);
 }

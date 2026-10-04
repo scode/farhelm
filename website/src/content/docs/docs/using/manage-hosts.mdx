@@ -1,0 +1,94 @@
+---
+title: Manage hosts
+description: Name, update, uninstall, and remove the hosts your helm knows about.
+sidebar:
+  order: 6
+---
+
+import Screenshot from '../../../../components/Screenshot.astro';
+
+The host list at the top of the sidebar holds every machine that runs your sessions: your Mac, listed as **local (this
+machine)**, and each Linux machine you added. Each row's dot says whether Farhelm can reach that host right now. Adding
+a host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
+
+## The host menu
+
+<Screenshot
+  name="manage-hosts/host-menu"
+  alt="A remote host's menu, opened from its three dots, with retry, settings, and remove explained."
+/>
+
+**update** installs your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
+appear only when a host needs attention, such as setting Farhelm up on a host that does not have it yet. Your Mac's own
+row has no **uninstall** or **remove**, and its **update** is greyed out: you update your Mac by running the installer
+again, as in [Install Farhelm](/docs/get-started/install/).
+
+## Host settings
+
+<Screenshot
+  name="manage-hosts/host-settings"
+  alt="A host's settings dialog, with the destination and alias edit buttons and the YOLO checkbox explained."
+/>
+
+The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
+alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
+the host itself. Your Mac's destination cannot be changed. The YOLO checkbox is the same choice the YOLO confirmation
+offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch).
+
+## Update a host
+
+When a remote host runs an older version of Farhelm than your Mac, an **↑ update** button appears beside its name: amber
+when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
+Clicking it updates the host straight away, without asking, and shows the progress in its place. **update all** at the
+top of the host list updates every remote host at once.
+
+Updating a host does not interrupt its sessions: they keep running through the update.
+
+## Uninstall Farhelm from a remote host
+
+**uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
+and Farhelm's program files, each with its path there. It also names the directory that holds the host's Farhelm data,
+which it keeps. Nothing changes until you select **uninstall** in that dialog. Once it is done, the host is gone from
+the list, and a line above the list says where its data remains; delete that directory on the host yourself if you want
+the data gone too.
+
+Uninstall never stops a session for you. If any session on the host has not ended (it is running, waiting or idle, or
+its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
+and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). It also needs
+Farhelm to be connected to the host so it can check, so fix a host that shows as unreachable first.
+
+If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
+**uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service,
+the next one can finish even though the host no longer answers.
+
+To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/uninstall/).
+
+## Remove a host
+
+<Screenshot
+  name="manage-hosts/remove-dialog"
+  alt="The remove host dialog, with the remove, and don't ask again button explained."
+/>
+
+As the dialog says, removing a host only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
+adding the same destination again brings back its sessions. **cancel** or Escape leaves the host where it was.
+
+## Turn the questions back on
+
+<Screenshot
+  name="manage-hosts/app-settings"
+  alt="The settings dialog opened from the gear at the top of the sidebar, with its two checkboxes."
+/>
+
+The gear beside the version number at the top of the sidebar opens these settings. Ticking a box skips its question;
+untick it to be asked again. They apply to every host, and other open Farhelm windows pick up a change when they reload.
+
+## See more about each host
+
+The **details** checkbox above the host list adds a line to each host with the version of Farhelm it runs and how many
+sessions it has, and for a host with an alias, its real destination.
+
+## Next
+
+[Supported agents](/docs/agents/) covers what each agent needs on a host, and
+[The pieces](/docs/how-it-works/the-pieces/) explains what Farhelm runs on each one.

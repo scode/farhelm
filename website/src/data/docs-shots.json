@@ -1,16 +1,16 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-04T01:50:41Z",
-  "captured_from": "b54b4c07c3458fc869e613d1702780f38b5591b3",
-  "commit": "98679c38ec6d2410152d68e14a4cfa8debfa6be5",
+  "captured_at": "2026-10-04T21:31:39Z",
+  "captured_from": "14c6b8b8b57105dfce7edaae23ca908eb8e09369",
+  "commit": "066e8b09b587263191ef7b08517d2d82184722b1",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
       "width": 1260
     },
     "add-a-remote-host/add-dialog": {
-      "height": 800,
+      "height": 588,
       "width": 1754
     },
     "add-a-remote-host/connected-host": {
@@ -22,7 +22,7 @@
       "width": 1754
     },
     "first-session/running-session": {
-      "height": 746,
+      "height": 752,
       "width": 1670
     },
     "first-session/statuses": {
@@ -31,6 +31,38 @@
     },
     "first-session/this-machine": {
       "height": 378,
+      "width": 1332
+    },
+    "manage-hosts/app-settings": {
+      "height": 1310,
+      "width": 1644
+    },
+    "manage-hosts/host-menu": {
+      "height": 880,
+      "width": 1830
+    },
+    "manage-hosts/host-settings": {
+      "height": 810,
+      "width": 1594
+    },
+    "manage-hosts/remove-dialog": {
+      "height": 724,
+      "width": 1024
+    },
+    "session-list/controls": {
+      "height": 698,
+      "width": 1392
+    },
+    "session-list/row": {
+      "height": 726,
+      "width": 1360
+    },
+    "session-list/row-menu": {
+      "height": 746,
+      "width": 1830
+    },
+    "session-list/statuses": {
+      "height": 654,
       "width": 1332
     },
     "start-a-session/destination": {
@@ -42,11 +74,11 @@
       "width": 1562
     },
     "start-a-session/harness-and-model": {
-      "height": 636,
+      "height": 562,
       "width": 1600
     },
     "start-a-session/host-menu": {
-      "height": 542,
+      "height": 622,
       "width": 1830
     },
     "start-a-session/host-yolo-setting": {
@@ -58,8 +90,8 @@
       "width": 1740
     },
     "start-a-session/new-button": {
-      "height": 516,
-      "width": 1148
+      "height": 518,
+      "width": 1088
     },
     "start-a-session/recent-setups": {
       "height": 730,
@@ -76,6 +108,22 @@
     "start-a-session/yolo-confirmation": {
       "height": 772,
       "width": 1860
+    },
+    "stop-restart-resume/header-actions": {
+      "height": 650,
+      "width": 1616
+    },
+    "stop-restart-resume/row-menu": {
+      "height": 844,
+      "width": 1830
+    },
+    "work-in-a-session/header": {
+      "height": 392,
+      "width": 1064
+    },
+    "work-in-a-session/tabs": {
+      "height": 410,
+      "width": 668
     }
   }
 }

@@ -267,7 +267,9 @@ export async function stageFleet(
         cwd,
         command: {
           command: `${session.yolo ? `${session.wrapper} ${permissionFlag}` : session.wrapper} {farhelm_args}`,
-          yolo: session.yolo,
+          // Scenarios leave `yolo` out for an ordinary session, and the API
+          // requires the answer either way.
+          yolo: session.yolo === true,
           agent: session.wrapper,
         },
         title: session.title,
