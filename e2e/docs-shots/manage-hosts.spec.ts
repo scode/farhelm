@@ -97,3 +97,20 @@ test("app settings", async ({ page, request }) => {
   });
   await shot(page, `${PAGE}/app-settings`, [dialog, page.locator(".app-settings-toggle")], { maxWidth: 930 });
 });
+
+test("details", async ({ page, request }) => {
+  const { director } = await open(page, request);
+  const toggle = page.locator(".host-details-toggle");
+  await toggle.check();
+  // The second host is a remote one with an alias, so its details also show
+  // the real destination behind the name.
+  const remote = page.locator(".host-row").nth(1);
+  await expect(remote.locator(".host-destination-detail")).toBeVisible();
+  await director.callout(toggle, "Shows more about each host.", { side: "right", dx: 230, dy: -30 });
+  await director.callout(
+    remote.locator(".host-detail"),
+    "Its Farhelm version and how many sessions it runs, and for a renamed host, its real destination.",
+    { side: "right", dy: 40 },
+  );
+  await shot(page, `${PAGE}/details`, [page.locator(".host-list"), toggle], { maxWidth: 930 });
+});
