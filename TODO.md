@@ -84,9 +84,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
   terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
 
-- **In-app feedback.** A super simple way to give feedback on Farhelm from inside the app. Design settled 2026-10-04 in
-  the plan: `plans/queue/in-app-feedback.md`.
-
 - **Permission prompts for actions requested through the `farhelm` CLI.** Every action an agent or a user attempts
   through the `farhelm` tool, against any host or session, should ask the user for permission first, with an "always
   allow when coming from this host" option. Model it on the per-host setting for starting YOLO sessions without asking:

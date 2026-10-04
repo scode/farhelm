@@ -2917,8 +2917,7 @@ pub(crate) fn ListView(
                 },
             }
         }
-        AppBar {
-        }
+        AppBar { layout_epoch }
         // The host list is one permanent surface. Keeping the component
         // mounted is a lifecycle requirement, not only a layout choice:
         // discovery, planning, and mutation replies must retain their owner.

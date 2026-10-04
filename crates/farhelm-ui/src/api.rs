@@ -3403,6 +3403,45 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
     Ok(())
 }
 
+/// Send the feedback dialog's submission to the maintainer, through the helm
+/// (SPEC.md "Feedback"; the helm makes the one outbound connection).
+///
+/// `Err` is one sentence starting "Couldn't send feedback:" for the dialog
+/// to show: the helm's own sentence when it refused or the send failed, a
+/// plain one naming the HTTP status when the helm answered with something
+/// else (axum's own text for an oversized or mismatched body is not written
+/// for people), or a plain one when the request did not get an ordinary
+/// answer at all (the helm unreachable, timed out, or refusing this
+/// client's credential). The submission is sent exactly as the dialog
+/// displayed it; nothing is retried or queued here.
+pub(crate) async fn send_feedback(
+    base: &str,
+    submission: &farhelm_proto::feedback::FeedbackSubmission,
+) -> Result<(), String> {
+    const PREFIX: &str = "Couldn't send feedback:";
+    let url = format!("{base}/api/feedback");
+    // `send` fails for a transport error (reqwest's own text, "error sending
+    // request for url ...", is not written for people), a timeout, and an
+    // authentication refusal alike, so the sentence names none of them.
+    let resp = send(client().post(&url).json(submission))
+        .await
+        .map_err(|_| format!("{PREFIX} the request to Farhelm failed."))?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let detail = resp.text().await.unwrap_or_default();
+    let detail = detail.trim();
+    Err(if detail.starts_with(PREFIX) {
+        detail.to_string()
+    } else {
+        format!(
+            "{PREFIX} Farhelm could not take the request (HTTP {}).",
+            status.as_u16()
+        )
+    })
+}
+
 // ---------------------------------------------------------------------
 // Agent profiles (PLAN_M6_75.md items 5 and 8)
 //

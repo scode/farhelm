@@ -373,6 +373,24 @@ pub(crate) fn RemoteHostIcon() -> Element {
     }
 }
 
+/// The sidebar bar's help menu toggle: a question mark in a circle, drawn
+/// with the same 16px box, stroke weight and `currentColor` as the settings
+/// gear beside it so the two read as one pair of controls.
+#[component]
+pub(crate) fn HelpIcon() -> Element {
+    rsx! {
+        svg {
+            width: "16", height: "16", view_box: "0 0 16 16",
+            fill: "none", stroke: "currentColor", stroke_width: "1.2",
+            stroke_linecap: "round", stroke_linejoin: "round",
+            "aria-hidden": "true",
+            circle { cx: "8", cy: "8", r: "6.6" }
+            path { d: "M6.1 6.2 C6.1 5 7 4.3 8 4.3 C9.1 4.3 9.9 5 9.9 6 C9.9 7.4 8 7.5 8 9.1" }
+            circle { cx: "8", cy: "11.4", r: "0.45", fill: "currentColor", stroke: "none" }
+        }
+    }
+}
+
 /// The app-wide settings affordance; its button supplies the accessible name.
 /// Inline geometry keeps the browser and desktop bundle on the same asset path.
 #[component]

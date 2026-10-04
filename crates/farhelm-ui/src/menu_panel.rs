@@ -798,7 +798,7 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
             const toggleSelector = {toggle_js};
             const active = document.activeElement;
             if (active && active !== document.body &&
-                !active.closest('.session-row-menu-flyout, .host-row-menu-panel')) return;
+                !active.closest('.session-row-menu-flyout, .host-row-menu-panel, .help-menu-panel')) return;
             for (const row of document.querySelectorAll(`[${{attrName}}]`)) {{
                 if (row.getAttribute(attrName) === wanted) {{
                     row.querySelector(toggleSelector)?.focus({{ preventScroll: true }});
@@ -812,23 +812,28 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
 // ===== Outside-click dismissal, shared by both rows' menus ============
 
 /// Class of the hidden buttons [`install_row_menu_outside_dismiss`] clicks to
-/// close a row menu. `ListView` renders one per menu identity it may have to
-/// dismiss and owns what each does, since `ListView` owns both menus' open
-/// state; see [`row_menu_relay_key`] for the identity each one carries.
+/// close a row menu. `ListView` renders one per row menu identity it may have
+/// to dismiss and owns what each does, since `ListView` owns both row menus'
+/// open state; `app_bar::HelpMenu` renders its own for the help menu, whose
+/// open state is local. See [`row_menu_relay_key`] for the identity each one
+/// carries.
 pub(crate) const ROW_MENU_OUTSIDE_RELAY: &str = "row-menu-outside-relay";
 
 /// The `data-row-menu` value naming one row's menu: `session:<id>` or
-/// `host:<id>`. The dismissal listener derives the same string from the
-/// open panel's row (`data-session-id` / `data-host-id`), which is how a
+/// `host:<id>`, or the sidebar bar's help menu, `help:bar`. The dismissal
+/// listener derives the same string from the open panel's row
+/// (`data-session-id` / `data-host-id`) or the help menu's `data-help-menu`
+/// marker, which is how a
 /// deferred dismissal names the menu it saw open instead of whichever menu
 /// happens to be open when the relay is handled.
 pub(crate) fn row_menu_relay_key(kind: &str, id: &str) -> String {
     format!("{kind}:{id}")
 }
 
-/// Close the open session or host row menu when a pointer goes down
-/// anywhere outside it, the way Escape does, so a menu no longer stays open
-/// until its own `⋯` is clicked again. Idempotent: the listener is
+/// Close the open session or host row menu, or the sidebar bar's help menu
+/// (`app_bar::HelpMenu`, which reuses this machinery and renders its own
+/// relay), when a pointer goes down anywhere outside it, the way Escape
+/// does, so a menu no longer stays open until its own `⋯` is clicked again. Idempotent: the listener is
 /// installed once per page, however many times this runs.
 ///
 /// "Outside" means outside the open menu's floating panel (for a session
@@ -877,16 +882,18 @@ pub(crate) fn install_row_menu_outside_dismiss() {
             window.__farhelmRowMenuOutsideDismiss = true;
             document.addEventListener('pointerdown', (event) => {{
                 if (!event.isTrusted) return;
-                const open = document.querySelector('.session-row-menu-flyout, .host-row-menu-panel');
+                const open = document.querySelector('.session-row-menu-flyout, .host-row-menu-panel, .help-menu-panel');
                 const target = event.target;
                 if (!open || !(target instanceof Element)) return;
                 if (open.contains(target)) return;
-                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"]')) return;
+                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"], .app-help-toggle[aria-expanded="true"]')) return;
                 const sessionRow = open.closest('[data-session-id]');
                 const hostRow = open.closest('[data-host-id]');
+                const helpMenu = open.closest('[data-help-menu]');
                 const key = sessionRow
                     ? 'session:' + sessionRow.getAttribute('data-session-id')
-                    : hostRow ? 'host:' + hostRow.getAttribute('data-host-id') : null;
+                    : hostRow ? 'host:' + hostRow.getAttribute('data-host-id')
+                    : helpMenu ? 'help:' + helpMenu.getAttribute('data-help-menu') : null;
                 if (key === null) return;
                 setTimeout(() => {{
                     for (const relay of document.querySelectorAll('.{ROW_MENU_OUTSIDE_RELAY}')) {{
