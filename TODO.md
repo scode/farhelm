@@ -140,6 +140,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   report is applied as soon as it is written rather than up to a pass later. Kept out of that plan on purpose, to keep
   it small.
 
+- **Auto-update the Mac app.** Chrome-style updates for the desktop app: check for a new stable release at startup and
+  daily, install it in the background with the same installer a user runs by hand, show a red up-arrow on the version
+  readout once it is installed, and offer Restart to update. One setting turns the automatic part off, on by default;
+  the local host row's Update and the help menu check on demand. Plan: `plans/queue/auto-update.md`.
+
+- **Lock down the release and update trust chain.** Auto-update installs the way a first install does: it fetches
+  `scripts/install.sh` from main over HTTPS and trusts the release's `SHA256SUMS` beside the archives. Once updates
+  install themselves, anyone who can push to main or upload release assets can run code on every Mac that updates,
+  without the user running anything. Tighten it. Two parts are required: verify what the updater installs with the
+  release signing system (minisign over `SHA256SUMS`, checked with the key the running app carries, with any key
+  rotation sequenced before that ships, per SPEC_impl.md "Release signing key"), possibly moving the installer off
+  main's raw file to a locked-down location; and make sure agents working on this machine cannot cause a release
+  directly (push a release tag, run the release workflow, or upload release assets).
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
