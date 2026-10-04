@@ -145,8 +145,8 @@ export async function answerYolo(form: Locator, yolo = false) {
  * required because every caller needs a known title, including the explicit
  * empty-title case. Filling and submitting stay separate because callers need
  * to inspect the form while a request is pending or after it fails. Only the
- * "other / command" path accepts an arbitrary command, so the helper selects
- * it before the command field becomes the request's source of intent, and
+ * command tab accepts an arbitrary command, so the helper selects it before
+ * the command field becomes the request's source of intent, and
  * answers the command's required YOLO question (`yolo`, default no).
  */
 export async function fillCreateForm(
@@ -156,7 +156,7 @@ export async function fillCreateForm(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByRole("button", { name: "other / command" }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   // A command launch has no default YOLO answer: the form asks every time.

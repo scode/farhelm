@@ -2130,7 +2130,7 @@ pub(crate) async fn restart_session(
     base: &str,
     id: &str,
     stop_if_running: bool,
-    with: Option<&LaunchSelection>,
+    with: Option<&crate::restart_with::RestartEdit>,
     allow_yolo: bool,
 ) -> Result<Session, ActionRefusal> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
@@ -2147,14 +2147,25 @@ pub(crate) async fn restart_session(
         .map_err(|e| ActionRefusal::from(e.to_string()))
 }
 
-/// Preserve the absent-versus-present override distinction on the restart wire.
+/// Preserve the absent-versus-present override distinction on the restart
+/// wire, and put each kind of edit under its own field: an agent edit's
+/// choices under `with`, a command edit's launch under `with_command`. The
+/// helm refuses a body naming both.
 fn restart_request_body(
     stop_if_running: bool,
-    with: Option<&LaunchSelection>,
+    with: Option<&crate::restart_with::RestartEdit>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({ "stop_if_running": stop_if_running });
-    if let Some(with) = with {
-        body["with"] = serde_json::to_value(with).expect("LaunchSelection is serializable");
+    match with {
+        None => {}
+        Some(crate::restart_with::RestartEdit::Agent(selection)) => {
+            body["with"] =
+                serde_json::to_value(selection).expect("LaunchSelection is serializable");
+        }
+        Some(crate::restart_with::RestartEdit::Command(command)) => {
+            body["with_command"] =
+                serde_json::to_value(command).expect("CommandLaunch is serializable");
+        }
     }
     body
 }
@@ -3550,9 +3561,32 @@ mod tests {
         assert_eq!(plain, serde_json::json!({"stop_if_running": false}));
         assert!(plain.get("with").is_none());
 
-        let edited = restart_request_body(true, Some(&selection));
+        let edited = restart_request_body(
+            true,
+            Some(&crate::restart_with::RestartEdit::Agent(selection.clone())),
+        );
         assert_eq!(edited["stop_if_running"], true);
         assert_eq!(edited["with"], serde_json::to_value(selection).unwrap());
+        assert!(edited.get("with_command").is_none());
+
+        let command = crate::CommandLaunch {
+            command: "claude {farhelm_args}".into(),
+            yolo: true,
+            agent: Some(LaunchHarness::Claude),
+            resume: Some("claude --resume {conversation} {farhelm_args}".into()),
+        };
+        let edited = restart_request_body(
+            false,
+            Some(&crate::restart_with::RestartEdit::Command(command.clone())),
+        );
+        assert_eq!(
+            edited["with_command"],
+            serde_json::to_value(command).unwrap()
+        );
+        assert!(
+            edited.get("with").is_none(),
+            "a body naming both is refused"
+        );
     }
 
     /// Saved fresh launches preserve repository intent independently of their

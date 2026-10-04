@@ -32,7 +32,7 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   const modelRow = form.locator(".launch-composer-model-choice");
   await expect(harness.locator(".launch-composer-model-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
-  await expect(harness.getByRole("button", { name: "other / command", exact: true })).toBeVisible();
+  await expect(form.getByRole("tab", { name: "command", exact: true })).toBeVisible();
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   const model = modelRow.getByRole("combobox", { name: "model", exact: true });
   await expect(model).toHaveValue("harness default");
@@ -69,12 +69,13 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
     harness: "open_code", model: "custom'42;$literal", effort: null, permissions: "yolo",
   });
   await expect(form).toContainText("fixture captured launch");
-  await harness.getByRole("button", { name: "other / command", exact: true }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form.getByLabel("agent command")).toBeEnabled();
-  // Retained structured settings are a draft, not a second active launch mode.
-  await expect(harness.locator('[aria-pressed="true"]')).toHaveCount(1);
-  await expect(harness.getByRole("button", { name: "other / command", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await harness.getByRole("button", { name: "OpenCode", exact: true }).click();
+  // The agent tab's settings are its draft, kept while the command tab is
+  // shown rather than a second active launch: its fields are not shown.
+  await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(harness).toHaveCount(0);
+  await form.getByRole("tab", { name: "agent", exact: true }).click();
   await expect(harness.locator('[aria-pressed="true"]')).toHaveCount(1);
   await expect(harness.getByRole("button", { name: "OpenCode", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(model).toHaveValue("custom'42;$literal");

@@ -294,7 +294,7 @@ test("a typed command survives a real fresh checkout", async ({ page, request })
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
@@ -326,7 +326,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     expect(history.ok()).toBe(true);
     expect((await history.json()).folders.some((folder: any) => folder.display_cwd === fixture.root)).toBe(true);
     const form = await openComposer(page, host);
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
@@ -361,7 +361,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);
@@ -458,7 +458,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await selectRepo(form, fixture.repo);

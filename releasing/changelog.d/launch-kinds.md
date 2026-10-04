@@ -8,4 +8,4 @@ Sessions created before this release keep running. One started by picking an age
 
 For agents using the `farhelm agent` commands: `farhelm agent create` takes `--command` instead of `--invocation` (which is refused naming the new flags), requires `--yolo` or `--no-yolo`, and accepts `--agent` and `--resume-command`. `farhelm agent sessions` can report a session that cannot restart because it has no resume command (`no_resume_command`); its `--json` schema version is now 5. The session-creation API takes `command` in place of `invocation`, `agent_kind` and `resume_template`, and refuses the old fields by name. Retrying a create with an idempotency key used before the upgrade is refused rather than repeated.
 
-Restart with can now change a command launch's command, resume command and YOLO answer from the API; the dialog for it arrives with the launcher's new tabs later in this release. Downgrading to an earlier release after this one is not supported.
+Downgrading to an earlier release after this one is not supported.

@@ -3650,7 +3650,7 @@ test.describe("multi-host", () => {
 
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
-      await form.getByRole("button", { name: "other / command" }).click();
+      await form.getByRole("tab", { name: "command", exact: true }).click();
       await form.locator(".create-session-host").selectOption(String(down));
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);

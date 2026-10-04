@@ -406,13 +406,18 @@ it has something to say costs the steady state nothing. A classified status rend
 normally, the stale notice's own metadata band for a stale session (where SPEC.md's title/directory/last-known-status
 triple is assembled), and nowhere at all for a session nothing has classified yet.
 
-Restart with uses a separate dialog because it relaunches the current session rather than creating one. It renders the
-same `LaunchControls` component as the session launcher, with the harness fixed to the session's stored structured
-selection. The dialog owns its draft and comparison baseline; the launcher keeps its own create-only state and effects.
-Only edited fields get changed markers; a marker's old model is a stored string and renders as an escaped,
-direction-isolated peer value. The dialog's submit uses Restart's stop-first consent and handles the reply through the
-same terminal reattachment path as an ordinary restart. That path reattaches the terminal even when the restart is
-refused and the dialog stays open, beneath a modal whose keystrokes must never reach the agent.
+Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
+launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's
+stored selection. For a command launch that declared an agent type and a resume command it shows the command, the resume
+command and the YOLO answer instead, checks the edit in the browser with the same `CommandLaunch::validate` the helm and
+supervisor apply, and sends it under `with_command` rather than `with`. Its two command fields follow the launcher's
+peer-text rule: they show the stored commands escaped and send the stored bytes back exactly when untouched. One
+component serves both kinds, so the focus rules, modal isolation, YOLO question and footer below exist once. The dialog
+owns its draft and comparison baseline; the launcher keeps its own create-only state and effects. Only edited fields get
+changed markers; a marker's old model is a stored string and renders as an escaped, direction-isolated peer value. The
+dialog's submit uses Restart's stop-first consent and handles the reply through the same terminal reattachment path as
+an ordinary restart. That path reattaches the terminal even when the restart is refused and the dialog stays open,
+beneath a modal whose keystrokes must never reach the agent.
 
 The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
 `body` is `inert`, including siblings rendered after it opened, so no other code can focus anything behind it and Tab
@@ -518,21 +523,25 @@ Clone reuses the create form rather than a second submit path: the click builds 
 click. A `use_effect` inside the form compares that generation against the last one it applied and reseeds the form
 whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
 row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
-overwrite an edit in progress. A structured source seeds the shared composer from its stored declarative selection,
-resolving omitted permissions through `LaunchHarness::effective_permission` rather than parsing the compiled invocation.
-A legacy source selects `other / command` in that same composer and seeds the raw invocation there. Destination, folder
-browser, optional name, search, and submission remain shared; only the structured model, effort, and permission controls
-are replaced by the raw command field.
+overwrite an edit in progress. An agent-launch source seeds the agent tab from its stored declarative selection,
+resolving omitted permissions through `LaunchHarness::effective_permission` rather than parsing the composed command,
+and also fills the command tab's command with the composed start command, YOLO unanswered, as a starting point for
+turning the setup into a command launch; the launch still comes from whichever tab is selected at submit. A
+command-launch source opens the command tab with its command, YOLO answer, declared agent type and resume command, and a
+legacy source opens the command tab with only its stored command. The two tabs are one `LaunchTab` value over two sets
+of signals, so switching shows and submits the other draft without copying anything between them. Destination, folder
+browser, optional name, search, and submission remain shared; only the tab's own controls differ.
 
-Search is the composer's one initial and post-selection focus target in both modes. Its command-mode result set is built
+Search is the composer's one initial and post-selection focus target on both tabs. Its command-tab result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
-would edit only a hidden draft. A harness, known model, or recent setup explicitly returns to structured mode; a folder
-changes the shared destination and leaves the active mode alone. The focus handoff runs only at dialog mount, explicit
-mode buttons, and accepted search results. Catalog, history, and operation rerenders cannot take focus back from another
-field. A clone or replace-with acceptance transfers that initial handoff from the originating row menu: removing the
-activated item can leave the row's inside-focus bookkeeping populated — the teardown reclaims the item's element
-identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its toggle return
-for the transfer instead of issuing it after the composer's own search focus and stealing it back.
+would edit only a hidden draft. A harness, known model, or recent setup switches to the agent tab; a folder, host, or
+name changes the shared field and leaves the active tab alone. There is no search result for the command tab itself:
+SPEC.md's list of what search matches has no launch kind, and the tab strip is that choice. The focus handoff runs only
+at dialog mount, the tab buttons, and accepted search results. Catalog, history, and operation rerenders cannot take
+focus back from another field. A clone or replace-with acceptance transfers that initial handoff from the originating
+row menu: removing the activated item can leave the row's inside-focus bookkeeping populated — the teardown reclaims the
+item's element identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its
+toggle return for the transfer instead of issuing it after the composer's own search focus and stealing it back.
 
 The leading `name:` label offers one action carrying its whole value, including later colons. `host:` filters the same
 registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
