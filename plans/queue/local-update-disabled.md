@@ -247,55 +247,63 @@ reviewed this plan's report. If a `## Decisions` section exists, its latest entr
 plan per `plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its report through the queue script, write a
 closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-04 (claim 98085b).
+### 2026-10-04: answer to a blocked question
 
-### What this is about
+The question, as the executor put it:
 
-In the hosts panel, each host row has a `⋯` menu with an **update** item that makes the helm install the newer Farhelm
-on that host over ssh. On the row for the helm's own machine ("this machine"), choosing **update** gets a refusal ("this
-is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel"), and that error then
-stays under the row with no way to dismiss it. You asked for the item to be greyed out on that row instead, with its
-description line pointing at the installer as the way to update this machine, so the refusal is never reached.
+> Blocked on 2026-10-04 (claim 98085b).
+>
+> ### What this is about
+>
+> In the hosts panel, each host row has a `⋯` menu with an **update** item that makes the helm install the newer Farhelm
+> on that host over ssh. On the row for the helm's own machine ("this machine"), choosing **update** gets a refusal
+> ("this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel"), and that error
+> then stays under the row with no way to dismiss it. You asked for the item to be greyed out on that row instead, with
+> its description line pointing at the installer as the way to update this machine, so the refusal is never reached.
+>
+> ### What I found
+>
+> The plan's one agreed fallback applies. It says: if the landed specifications still support a helm machine on which
+> re-running the installer is not how it updates (for example a Linux helm machine while the installer refuses Linux),
+> do not invent per-platform text; stop and ask. They do:
+>
+> - SPEC.md, "Installation and updates": the installer supports only a Mac installing the desktop app, and "Linux
+>   remains supported for running a helm and session hosts".
+> - SPEC.md, the upgrade section: "A Linux machine running a helm remains supported, but the standalone installer
+>   temporarily does not cover that setup."
+> - SPEC.md's topology section describes the local row's supervisor as either "the desktop app's managed local one, or
+>   one running beside a Linux helm", and says `farhelm helm setup` sets up a Linux helm machine.
+>
+> So the same greyed-out item shows on the Mac app's own machine, where re-running the installer is right, and on a
+> Linux helm machine, where the installer refuses to run. Nothing in the specs or docs says how a Linux helm machine is
+> updated; setup there starts from a `farhelm` binary you put on the machine yourself and `farhelm helm setup`.
+>
+> Nothing has been built. The rest of the plan (greyed-out item, no request sent, SPEC.md sentence, docs line, changelog
+> fragment, TODO removal) does not depend on the answer; only the description text and the matching SPEC.md and docs
+> wording do.
+>
+> ### The question
+>
+> What should the greyed-out item's description say, given that this machine may be a Mac running the app or a Linux
+> helm machine?
+>
+> 1. Wording that is true on both, naming the Mac installer as the common case, for example "Update this machine outside
+>    the hosts panel; on a Mac, re-run the installer." One string, no platform logic; on a Linux helm it is vague but
+>    not wrong.
+> 2. Different text per platform: "Re-run the installer to update this machine" on a Mac helm, and on a Linux helm
+>    something like "Install the newer farhelm binary here and re-run farhelm helm setup". The UI would need to learn
+>    which platform the helm runs on, which nothing it receives from the helm says today, and the Linux instruction
+>    would describe an update procedure the docs do not yet define.
+> 3. Point at the installer only, as originally planned, and accept that the text is wrong on a Linux helm machine until
+>    the installer supports Linux again.
+> 4. Hide the item on a Linux helm's own row and grey it out only on the Mac app's machine. This also needs the
+>    platform, and it partly undoes your decision that the item be "greyed out, not hidden".
+>
+> I recommend option 1. It keeps the change as small as planned and is never false. It still tells someone running the
+> Mac app to re-run the installer. If you want different wording, give the exact text and I will use it as written.
 
-### What I found
+The maintainer's answer:
 
-The plan's one agreed fallback applies. It says: if the landed specifications still support a helm machine on which
-re-running the installer is not how it updates (for example a Linux helm machine while the installer refuses Linux), do
-not invent per-platform text; stop and ask. They do:
-
-- SPEC.md, "Installation and updates": the installer supports only a Mac installing the desktop app, and "Linux remains
-  supported for running a helm and session hosts".
-- SPEC.md, the upgrade section: "A Linux machine running a helm remains supported, but the standalone installer
-  temporarily does not cover that setup."
-- SPEC.md's topology section describes the local row's supervisor as either "the desktop app's managed local one, or one
-  running beside a Linux helm", and says `farhelm helm setup` sets up a Linux helm machine.
-
-So the same greyed-out item shows on the Mac app's own machine, where re-running the installer is right, and on a Linux
-helm machine, where the installer refuses to run. Nothing in the specs or docs says how a Linux helm machine is updated;
-setup there starts from a `farhelm` binary you put on the machine yourself and `farhelm helm setup`.
-
-Nothing has been built. The rest of the plan (greyed-out item, no request sent, SPEC.md sentence, docs line, changelog
-fragment, TODO removal) does not depend on the answer; only the description text and the matching SPEC.md and docs
-wording do.
-
-### The question
-
-What should the greyed-out item's description say, given that this machine may be a Mac running the app or a Linux helm
-machine?
-
-1. Wording that is true on both, naming the Mac installer as the common case, for example "Update this machine outside
-   the hosts panel; on a Mac, re-run the installer." One string, no platform logic; on a Linux helm it is vague but not
-   wrong.
-2. Different text per platform: "Re-run the installer to update this machine" on a Mac helm, and on a Linux helm
-   something like "Install the newer farhelm binary here and re-run farhelm helm setup". The UI would need to learn
-   which platform the helm runs on, which nothing it receives from the helm says today, and the Linux instruction would
-   describe an update procedure the docs do not yet define.
-3. Point at the installer only, as originally planned, and accept that the text is wrong on a Linux helm machine until
-   the installer supports Linux again.
-4. Hide the item on a Linux helm's own row and grey it out only on the Mac app's machine. This also needs the platform,
-   and it partly undoes your decision that the item be "greyed out, not hidden".
-
-I recommend option 1. It keeps the change as small as planned and is never false. It still tells someone running the Mac
-app to re-run the installer. If you want different wording, give the exact text and I will use it as written.
+We are only targeting Mac OS right now. It's fine.
