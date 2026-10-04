@@ -120,8 +120,7 @@ impl Drop for ServeTask {
 }
 
 /// An invocation string running `script` through the kind-named symlink, so
-/// the supervisor derives the integration (and therefore hooks it) exactly
-/// as it would for a real `claude` on the user's PATH.
+/// the process looks like a real `claude` (or `codex`) on the user's PATH.
 fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> String {
     format!(
         "{} fake-agent --script {script} --record-home {}",
@@ -130,19 +129,49 @@ fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> S
     )
 }
 
-/// Create a claude-kind session running the hook-reporting fixture.
+/// A command launch running `script` through the `kind` symlink and
+/// declaring that agent type, with `{farhelm_args}` last and the resume
+/// command the agent type's own resume selector would give (Claude's
+/// `--resume`, Codex's `resume` subcommand): the declared-type launch a
+/// user would write for this program.
+fn hook_launch(
+    fixtures: &CaptureFixtures,
+    kind: farhelm_proto::LaunchHarness,
+    script: &str,
+) -> farhelm_proto::SessionLaunch {
+    let (name, selector) = match kind {
+        farhelm_proto::LaunchHarness::Codex => ("codex", "resume"),
+        farhelm_proto::LaunchHarness::Claude => ("claude", "--resume"),
+        other => panic!("the hook fixtures stand in for Claude and Codex, not {other:?}"),
+    };
+    let invocation = fixture_invocation(fixtures, name, script);
+    declared_command(
+        &format!("{invocation} {{farhelm_args}}"),
+        kind,
+        Some(&format!(
+            "{invocation} {selector} {{conversation}} {{farhelm_args}}"
+        )),
+    )
+}
+
+/// Create a Claude command launch running the hook-reporting fixture.
 pub(crate) async fn hook_session(
     h: &Harness,
     fixtures: &CaptureFixtures,
     cwd: &std::path::Path,
 ) -> SessionInfo {
     h.client
-        .create_session(
+        .create_session_with_extras(
             &cwd.to_string_lossy(),
-            &fixture_invocation(fixtures, "claude", "hook-report"),
+            hook_launch(
+                fixtures,
+                farhelm_proto::LaunchHarness::Claude,
+                "hook-report",
+            ),
             None,
             WIDE_COLS,
             ROWS,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a hook-reporting session")
@@ -371,6 +400,31 @@ fn settings_values(argv: &str) -> Vec<String> {
         .collect()
 }
 
+/// The conversation a restart would resume, read from a snapshot's filled
+/// resume command.
+///
+/// A declared Claude command's resume command ends `--resume
+/// {conversation} {farhelm_args}`: the snapshot fills the conversation and
+/// leaves `{farhelm_args}` for the spawn to expand, so the id sits in the
+/// second-to-last slot. Asserting that the last slot is still the
+/// placeholder is what proves the id landed in the conversation's own slot
+/// rather than merely somewhere in the command.
+fn resumed_conversation(argv: &Option<Vec<String>>) -> &str {
+    let argv = argv
+        .as_deref()
+        .expect("a resumable session has a filled resume command");
+    match argv {
+        [.., conversation, last]
+            if last == farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER =>
+        {
+            conversation
+        }
+        _ => panic!(
+            "the resume command must end with the conversation and {{farhelm_args}}: {argv:?}"
+        ),
+    }
+}
+
 /// The injected `--settings` JSON, parsed out of an argv marker line.
 ///
 /// The marker preserves real argv boundaries with shell-word quoting.
@@ -450,7 +504,7 @@ async fn a_reported_identity_is_offered_for_resume() {
     );
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
     assert_eq!(
-        snapshot.resume_argv.as_deref().unwrap().last().unwrap(),
+        resumed_conversation(&snapshot.resume_argv),
         "conv-1",
         "the offer is only real if the id reaches the argv a restart would run"
     );
@@ -499,14 +553,21 @@ async fn a_second_report_replaces_the_first() {
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &fixture_invocation(&fixtures, "claude", "hook-report"),
+            declared_command(
+                &format!(
+                    "{} {{farhelm_args}}",
+                    fixture_invocation(&fixtures, "claude", "hook-report")
+                ),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(&format!(
+                    "{} {{farhelm_args}}",
+                    shell_words::join(&template)
+                )),
+            ),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a hook-reporting session with an echoing resume template");
@@ -522,10 +583,7 @@ async fn a_second_report_replaces_the_first() {
         "the newer report is the one a resume must land in; {}",
         hook_log(&h, &session.id)
     );
-    assert_eq!(
-        snapshot.resume_argv.as_deref().unwrap().last().unwrap(),
-        "conv-2"
-    );
+    assert_eq!(resumed_conversation(&snapshot.resume_argv), "conv-2");
 
     h.client
         .restart_session(&session.id, true)
@@ -774,10 +832,7 @@ async fn a_report_survives_a_supervisor_restart() {
         "the successor reloaded the reported identity from the store alone"
     );
     assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::Resume);
-    assert_eq!(
-        after.resume_argv.as_deref().unwrap().last().unwrap(),
-        "conv-durable"
-    );
+    assert_eq!(resumed_conversation(&after.resume_argv), "conv-durable");
     // The provenance the successor reloads FROM, read back after it did:
     // it is not on the wire, so inspect the stored source directly.
     let store = SessionStore::open(&state.path().join("supervisor.db"), false)
@@ -792,50 +847,6 @@ async fn a_report_survives_a_supervisor_restart() {
             .conversation_source,
         Some("hook".to_string()),
         "a restart must preserve the stored report source"
-    );
-}
-
-/// A user invocation that already passes `--settings` gets no injection.
-///
-/// Claude Code applies only the LAST `--settings` flag, so appending ours
-/// after the user's would silently discard theirs — turning an identity
-/// improvement into lost configuration, which is a strictly worse trade
-/// than offering a fresh restart when no identity has been reported.
-///
-/// The assertion is on the surviving VALUE, not on a count of one: a merge
-/// attempt that rewrote the user's settings in place would keep the count
-/// at one while losing exactly what this test exists to protect.
-#[farhelm_testtrace::test]
-async fn hook_flags_are_not_injected_when_the_invocation_already_has_settings() {
-    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    // A value that is valid JSON, uniquely the user's, and one shell word:
-    // an empty object configures nothing, so the launch behaves exactly as
-    // an unhooked one while staying trivially identifiable in the argv.
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &format!(
-                "{} --settings {{}}",
-                fixture_invocation(&fixtures, "claude", "hook-report")
-            ),
-            None,
-            WIDE_COLS,
-            ROWS,
-        )
-        .await
-        .expect("create a session whose invocation carries its own --settings");
-    // The fixture prints its argv BEFORE the ready marker, so waiting for
-    // readiness has already waited for the line.
-    let (_chan, _rx, seen) = attach_ready(&h, &session).await;
-
-    let argv = argv_marker(&seen);
-    assert_eq!(
-        settings_values(&argv),
-        ["{}"],
-        "the user's own --settings must survive unchanged and alone, or theirs is silently \
-         dropped: {argv}"
     );
 }
 
@@ -941,12 +952,17 @@ async fn hooks_can_be_disabled_by_kind() {
     // what is under test is which flags the LAUNCH appended.
     let allowed = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &fixture_invocation(&fixtures, "codex", "hook-report"),
+            hook_launch(
+                &fixtures,
+                farhelm_proto::LaunchHarness::Codex,
+                "hook-report",
+            ),
             None,
             WIDE_COLS,
             ROWS,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a codex-kind session");
@@ -1628,9 +1644,10 @@ fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Out
 /// carries `--announce`, for a fresh session created against it over its
 /// actual unix socket.
 ///
-/// A `claude`-named symlink around the record fixture is what makes the
-/// supervisor derive and hook the Claude integration exactly as it would
-/// for the genuine CLI (the same trick [`fixture_invocation`] uses), and
+/// The session is a command launch declaring Claude, which is what makes
+/// the supervisor hook the Claude integration exactly as it would for the
+/// genuine CLI; the `claude`-named symlink keeps the process looking like
+/// the real one (the same trick [`fixture_invocation`] uses). And
 /// dialling through [`farhelm_supervisor::service::connect`] plus
 /// [`SupervisorClient::start`] — rather than any in-process duplex pipe —
 /// is what makes this a client of the SPAWNED process rather than of a
@@ -1653,13 +1670,20 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
         shell_words::quote(&bin.path().join("claude").to_string_lossy()),
         shell_words::quote(&home.path().to_string_lossy())
     );
+    // A declared Claude command: an undeclared one gets no hooks at all,
+    // so it could not show whether `--announce` was suppressed.
     let session = client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &invocation,
+            declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Claude,
+                None,
+            ),
             None,
             WIDE_COLS,
             ROWS,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a claude-kind session against the real supervisor");
@@ -1824,16 +1848,31 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
     legacy.captured_conversation = Some("historical-conversation".to_string());
     legacy.conversation_source = None;
     legacy.capture_ownership_version = 0;
-    legacy.resume_template = Some(vec![
-        fixtures.bin().join("claude").to_string_lossy().into_owned(),
-        "fake-agent".into(),
-        "--script".into(),
-        "hook-report".into(),
-        "--record-home".into(),
-        fixtures.home().to_string_lossy().into_owned(),
-        "--resume".into(),
-        "{conversation}".into(),
-    ]);
+    // A session from before launch kinds: its stored command, kind and
+    // resume command as that release kept them (SPEC.md, the upgrade).
+    legacy.launch = farhelm_proto::SessionLaunch::Legacy {
+        // Without `{farhelm_args}`: no release before launch kinds wrote
+        // one, which is why a legacy session gets the old injection.
+        invocation: shell_words::join(
+            legacy
+                .launch
+                .start_argv()
+                .expect("the hook session's command splits")
+                .into_iter()
+                .filter(|word| word != farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER),
+        ),
+        agent_kind: farhelm_proto::AgentKind::Claude,
+        resume_template: Some(vec![
+            fixtures.bin().join("claude").to_string_lossy().into_owned(),
+            "fake-agent".into(),
+            "--script".into(),
+            "hook-report".into(),
+            "--record-home".into(),
+            fixtures.home().to_string_lossy().into_owned(),
+            "--resume".into(),
+            "{conversation}".into(),
+        ]),
+    };
     store
         .insert_session(legacy.clone(), None)
         .await

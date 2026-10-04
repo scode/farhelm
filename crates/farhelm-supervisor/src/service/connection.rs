@@ -1849,9 +1849,10 @@ fn apply_pause_transition(pause: &watch::Sender<Option<tokio::time::Instant>>, p
 
 #[cfg(test)]
 mod tests {
+    use super::super::core::CreateInputs;
     use super::super::core::tests::{StateDir, dummy_exe, no_uploads};
-    use super::super::core::{CreateInputs, CreateMode};
     use super::*;
+    use farhelm_proto::SessionLaunch;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
 
     /// Keep the honest supervisor's output chunk within the smallest terminal
@@ -2128,8 +2129,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -2192,8 +2192,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                 // Matches real `create_session` output: `Unknown`, not
                 // a live status (see that function's own doc comment).
                 status: SessionStatus::Unknown,
@@ -2230,8 +2229,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
@@ -2314,12 +2312,7 @@ mod tests {
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "agent".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        launch: None,
-                    },
+                    launch: SessionLaunch::plain_command("agent"),
                     title: Some("parent".to_string()),
                     cols: 80,
                     rows: 24,
@@ -2495,12 +2488,7 @@ mod tests {
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "agent".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        launch: None,
-                    },
+                    launch: SessionLaunch::plain_command("agent"),
                     title: Some("parent".to_string()),
                     cols: 80,
                     rows: 24,

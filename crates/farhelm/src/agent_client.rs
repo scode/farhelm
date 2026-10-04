@@ -360,19 +360,15 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
         req_id: REQUEST_ID,
         parent: args.parent,
         cwd,
-        invocation: None,
+        // Explicit inheritance copies the authenticated parent's stored
+        // launch, the only safe source of it.
+        launch: None,
         inherit_agent: args.inherit_agent,
         title: args.title,
         cols: 80,
         rows: 24,
         intent_key: args.idempotency_key,
         confirm_yolo: args.confirm_yolo,
-        agent_kind: None,
-        resume_template: None,
-        // Explicit inheritance has no structured selector. The
-        // supervisor copies the authenticated parent's stored launch
-        // bundle, which is the only safe source of that provenance.
-        launch: None,
         // Fresh-checkout payloads are helm-supplied only; a restricted
         // spawn never carries one (and the supervisor refuses it).
         github_checkout: None,

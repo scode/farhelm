@@ -334,7 +334,7 @@ impl AgentRequestHandler for HelmAgentRequests {
             AgentVerb::Create {
                 host,
                 cwd,
-                invocation,
+                launch,
                 title,
                 intent_key,
                 confirm_yolo,
@@ -346,7 +346,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     CreateRequest {
                         host: host.expect("validated"),
                         cwd,
-                        invocation: invocation.expect("validated"),
+                        launch: launch.expect("validated"),
                         title,
                         intent_key,
                         confirm_yolo,
@@ -586,14 +586,14 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             required(session_id.as_deref(), "--session")
         }
         AgentVerb::Create {
-            host,
-            cwd,
-            invocation,
-            ..
+            host, cwd, launch, ..
         } => {
             required(host.as_deref(), "--host")?;
             required(Some(cwd), "--cwd")?;
-            required(invocation.as_deref(), "--invocation")
+            if launch.is_none() {
+                return Err("--command is required".to_string());
+            }
+            Ok(())
         }
         AgentVerb::Clone {
             source_session_id,
@@ -690,7 +690,9 @@ fn escape_for_log(id: &str) -> String {
 struct CreateRequest {
     host: String,
     cwd: String,
-    invocation: String,
+    /// What the agent asked to run: an agent type and its choices, which
+    /// this helm composes exactly as for the launcher, or a command launch.
+    launch: farhelm_proto::LaunchRequest,
     title: Option<String>,
     intent_key: Option<String>,
     confirm_yolo: bool,
@@ -900,8 +902,9 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
     })
 }
 
-/// `create`: one session on an explicitly named host, from the raw command
-/// line the agent supplied.
+/// `create`: one session on an explicitly named host, from the launch the
+/// agent supplied: a command launch as it wrote it, or an agent type and its
+/// choices for the helm to compose.
 ///
 /// A missing command is refused by `validate_authoritative_verb` before this
 /// runs: an agent request never consults the interactive create dialog's
@@ -909,9 +912,10 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
 ///
 /// ## What a keyed retry is bound to
 ///
-/// The supervisor fingerprints the command it is sent, so a different
-/// command under one key produces the ordinary idempotency conflict rather
-/// than a replay.
+/// The supervisor fingerprints the launch it is sent, so a different
+/// launch under one key (another command, YOLO answer, agent type or resume
+/// command) produces the ordinary idempotency conflict rather than a
+/// replay.
 ///
 /// ## What this function does NOT decide
 ///
@@ -938,7 +942,7 @@ async fn create_for_agent(
     asking_session: &str,
     request: CreateRequest,
 ) -> anyhow::Result<AgentReply> {
-    let mode = crate::sessions::CreateMode::Raw(request.invocation);
+    let mode = crate::sessions::resolve_launch_request(request.launch)?;
     let (host, host_name) = resolve_host(state, origin, request.host).await?;
     // The claim and the client come from ONE read, which is what lets every
     // write the create goes on to make revalidate against the connection it
@@ -971,12 +975,6 @@ async fn create_for_agent(
                 // Agent creates never carry a fresh-checkout payload: the
                 // composer's gh: flow is a user-dialog concern.
                 github_checkout: None,
-                // Neither override is reachable from an agent: the target
-                // derives the integrated kind and its default resume
-                // command from the command line, as it does for any raw
-                // create.
-                agent_kind: None,
-                resume_template: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // `create` names a directory and an agent rather than a
                 // session, so no answer of the target's is forbidden — a
@@ -1013,10 +1011,11 @@ async fn create_for_agent(
 ///
 /// ## Agent resolution
 ///
-/// Derived by `sessions::mode_from_source`, the derivation `replace` also
-/// uses: a source made from structured choices keeps its frozen bundle, and
-/// any other source is re-created from its raw invocation — the user created
-/// that session from a command line, and a clone of it is that command line.
+/// Copied by `sessions::mode_from_source`, as plain Replace copies it: an
+/// agent or command launch is copied whole as stored (choices, composed or
+/// written commands, YOLO answer, declared type, resume command), and a
+/// legacy source (created before launch kinds) is refused with a remedy,
+/// because its launch carries no YOLO answer to copy.
 ///
 /// ## What is copied and what can be overridden
 ///
@@ -1027,28 +1026,6 @@ async fn create_for_agent(
 /// onto a machine that does not have the source's checkout is a real and
 /// expected failure, and inventing a directory would be worse.
 ///
-/// ## A KNOWN GAP: a raw source's integration overrides are not copied
-///
-/// A structured clone carries everything, because its frozen bundle states
-/// it. A RAW clone copies the invocation and nothing else, so the target
-/// re-derives the integrated kind from the invocation's first token and
-/// takes that kind's default resume template. A source created with an
-/// explicit `agent_kind` — including the explicit "no integration" the
-/// tri-state can express — or with a custom `resume_template` therefore
-/// clones into a session whose conversation capture, status classification
-/// and restart behavior may differ from the original's.
-///
-/// It is stated rather than fixed because the fix is not local.
-/// `SessionInfo` — the shape `drain_sessions` returns and the only view the
-/// helm has of another host's session — carries the recorded `agent_kind`
-/// (added for the fleet `agent` label) but not a custom resume template,
-/// and an older supervisor's rows decode as `Generic` whether or not that
-/// was the session's real kind. Copying the integration faithfully would
-/// still mean putting the template on the wire and telling an explicit
-/// `Generic` apart from an absent field.
-/// Refusing the raw clone instead is not available either: SPEC.md's agent
-/// section promises that a session created from a raw invocation "clones as
-/// that invocation".
 async fn clone_for_agent(
     state: &AppState,
     origin: AgentOrigin,
@@ -1078,7 +1055,10 @@ async fn clone_for_agent(
             })
         })?;
 
-    let mode = crate::sessions::mode_from_source(&source);
+    let mode = crate::sessions::mode_from_source(
+        &source,
+        "the user can start a copy with Clone or Replace with, which choose a launch",
+    )?;
     // The source row is authoritative only while it still belongs to the
     // same owner connection. Re-resolving closes the read/dispatch window
     // without trusting the helm's stale cache as source truth.
@@ -1118,8 +1098,6 @@ async fn clone_for_agent(
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
                 intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
-                agent_kind: None,
-                resume_template: None,
                 github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // A clone that comes back as the SOURCE or ASKING session is
@@ -1578,8 +1556,7 @@ mod tests {
             cwd: "/w".to_string(),
             canonical_cwd: None,
             invocation: "claude --dangerously".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("claude --dangerously"),
             status,
             annotation: None,
             restart_offer: RestartOffer::NotCaptured,
@@ -2813,7 +2790,10 @@ mod tests {
                 panic!("expected RestartSession");
             };
             let mut wrong = session("target", 2);
+            // In both places a session's command text travels: the derived
+            // display string and the launch itself.
             wrong.invocation = "private-launch-sentinel".to_string();
+            wrong.launch = farhelm_proto::SessionLaunch::plain_command("private-launch-sentinel");
             writer
                 .write_control(&ControlMsg::SessionRenamed {
                     req_id,
@@ -3385,11 +3365,9 @@ mod tests {
     #[derive(Debug, Clone)]
     struct SeenCreate {
         cwd: String,
-        invocation: Option<String>,
+        launch: Option<farhelm_proto::SessionLaunch>,
         title: Option<String>,
         intent_key: Option<String>,
-        agent_kind: Option<farhelm_proto::AgentKind>,
-        resume_template: Option<Vec<String>>,
     }
 
     /// Script a supervisor that answers every `CreateSession`, recording
@@ -3432,20 +3410,16 @@ mod tests {
                     ControlMsg::CreateSession {
                         req_id,
                         cwd,
-                        invocation,
+                        launch,
                         title,
                         intent_key,
-                        agent_kind,
-                        resume_template,
                         ..
                     } => {
                         recorded.lock().expect("seen mutex").push(SeenCreate {
                             cwd: cwd.clone(),
-                            invocation: invocation.clone(),
+                            launch: launch.clone(),
                             title: title.clone(),
                             intent_key,
-                            agent_kind,
-                            resume_template: resume_template.clone(),
                         });
                         match refusal.clone() {
                             Some(message) => ControlMsg::Error {
@@ -3460,7 +3434,13 @@ mod tests {
                                     session: SessionInfo {
                                         cwd,
                                         title: title.unwrap_or_default(),
-                                        invocation: invocation.unwrap_or_default(),
+                                        invocation: launch
+                                            .as_ref()
+                                            .map(farhelm_proto::SessionLaunch::display_command)
+                                            .unwrap_or_default(),
+                                        launch: launch.unwrap_or_else(|| {
+                                            farhelm_proto::SessionLaunch::plain_command("")
+                                        }),
                                         ..session(&format!("created-{created}"), 100)
                                     },
                                 }
@@ -3537,7 +3517,14 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("nowhere".to_string()),
                     cwd: "/srv/work".to_string(),
-                    invocation: Some("sh".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "sh".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,
@@ -3594,7 +3581,14 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("builder-alias".to_string()),
                     cwd: "/srv/work".to_string(),
-                    invocation: Some("sh".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "sh".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,
@@ -3665,7 +3659,14 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("user@builder".to_string()),
                     cwd: "/srv/work".to_string(),
-                    invocation: Some("sh".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "sh".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,
@@ -3696,68 +3697,93 @@ mod tests {
         }
     }
 
-    /// Spec: cloning a source that came from a typed command sends its raw
-    /// invocation to the target.
+    /// Spec: `farhelm agent clone` sends the source's stored launch to the
+    /// target verbatim, for a command launch and for an agent launch alike.
     ///
-    /// There is nothing to resolve and nothing to guess here — the user
-    /// created that session from a command line, so a copy of it is that
-    /// command line. The source deliberately differs from the caller and the
-    /// destination is another host, proving neither identity is inferred.
+    /// Why: the clone must run what the source runs, with the same YOLO
+    /// answer, declared agent type and resume command, not something the
+    /// helm rebuilds. The agent case uses a start command today's catalog
+    /// would not compose, so a clone that recompiled the selection instead
+    /// of copying would fail it. The source deliberately differs from the
+    /// caller and the destination is another host, proving neither identity
+    /// is inferred.
     #[farhelm_testtrace::test]
-    async fn clone_of_a_raw_session_sends_its_invocation() {
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let seen = spawn_create_responder(peer, None);
-
-        let source = SessionInfo {
-            cwd: "/srv/project".to_string(),
-            canonical_cwd: None,
-            invocation: "sh -c 'echo hi'".to_string(),
-            ..session("source", 1)
+    async fn clone_sends_the_source_launch_verbatim() {
+        let command = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+            command: "sh -c 'echo hi' {farhelm_args}".to_string(),
+            yolo: false,
+            agent: Some(farhelm_proto::LaunchHarness::Claude),
+            resume: Some("sh -c 'echo hi' --resume {conversation} {farhelm_args}".to_string()),
+        });
+        let agent = farhelm_proto::SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: Some(farhelm_proto::LaunchPermission::Approve),
+                workspace_trust: None,
+            },
+            start: ["claude", "--from-an-older-catalog", "{farhelm_args}"]
+                .map(String::from)
+                .to_vec(),
+            resume: None,
         };
-        let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+        for launch in [command, agent] {
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_create_responder(peer, None);
 
-        let handler = HelmAgentRequests::for_state(&h.state);
-        let outcome = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                AgentVerb::Clone {
-                    source_session_id: Some("source".to_string()),
-                    host: Some("user@builder".to_string()),
-                    cwd: None,
-                    title: None,
-                    intent_key: Some("clone-key".to_string()),
-                    confirm_yolo: false,
-                },
-            )
-            .await;
-        assert!(
-            matches!(
-                outcome,
-                AgentOutcome::Ok {
-                    reply: AgentReply::Created { .. }
-                }
-            ),
-            "a raw-invocation clone must succeed: {outcome:?}"
-        );
+            let source = SessionInfo {
+                cwd: "/srv/project".to_string(),
+                canonical_cwd: None,
+                invocation: launch.display_command(),
+                launch: launch.clone(),
+                ..session("source", 1)
+            };
+            let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
 
-        let seen = seen.lock().expect("seen mutex").clone();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].invocation.as_deref(), Some("sh -c 'echo hi'"));
-        assert_eq!(
-            seen[0].cwd, "/srv/project",
-            "the clone copies the source's directory"
-        );
-        assert_eq!(
-            seen[0].title.as_deref(),
-            Some("source"),
-            "and its title, when the request overrides neither"
-        );
-        assert_eq!(
-            seen[0].intent_key,
-            asker_scoped_intent_key("asker", Some("clone-key".to_string())),
-            "the target stores the key scoped to the asking session"
-        );
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let outcome = handler
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some("source".to_string()),
+                        host: Some("user@builder".to_string()),
+                        cwd: None,
+                        title: None,
+                        intent_key: Some("clone-key".to_string()),
+                        confirm_yolo: false,
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Created { .. }
+                    }
+                ),
+                "the clone must succeed: {outcome:?}"
+            );
+
+            let seen = seen.lock().expect("seen mutex").clone();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(
+                seen[0].launch,
+                Some(launch.clone()),
+                "the launch reaches the target whole, with nothing added"
+            );
+            assert_eq!(
+                seen[0].cwd, "/srv/project",
+                "the clone copies the source's directory"
+            );
+            assert_eq!(seen[0].title.as_deref(), Some("source"));
+            assert_eq!(
+                seen[0].intent_key,
+                asker_scoped_intent_key("asker", Some("clone-key".to_string())),
+                "the target stores the key scoped to the asking session"
+            );
+        }
     }
 
     /// A clone refuses a source row whose owner changes after the live read.
@@ -3877,7 +3903,14 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("user@builder".to_string()),
                     cwd: "/srv/absent".to_string(),
-                    invocation: Some("claude".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "claude".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,
@@ -3988,7 +4021,14 @@ mod tests {
                     AgentVerb::Create {
                         host: Some("user@builder".to_string()),
                         cwd: "/srv/work".to_string(),
-                        invocation: Some("agent".to_string()),
+                        launch: Some(farhelm_proto::LaunchRequest::Command(
+                            farhelm_proto::CommandLaunch {
+                                command: "agent".to_string(),
+                                yolo: false,
+                                agent: None,
+                                resume: None,
+                            },
+                        )),
                         title: None,
                         intent_key: None,
                         confirm_yolo: false,
@@ -4232,8 +4272,8 @@ mod tests {
         }
     }
 
-    /// Spec: `create --invocation` succeeds through the shared agent path,
-    /// sending the raw command line with no integration overrides.
+    /// Spec: `create --command` succeeds through the shared agent path,
+    /// sending the command launch exactly as the agent wrote it.
     ///
     /// The other create tests here reach the target only in refusal or
     /// host-resolution cases. A regression that dropped raw routing — or
@@ -4252,7 +4292,14 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("user@builder".to_string()),
                     cwd: "/srv/raw".to_string(),
-                    invocation: Some("sh -c 'sleep 1'".to_string()),
+                    launch: Some(farhelm_proto::LaunchRequest::Command(
+                        farhelm_proto::CommandLaunch {
+                            command: "sh -c 'sleep 1'".to_string(),
+                            yolo: false,
+                            agent: None,
+                            resume: None,
+                        },
+                    )),
                     title: Some("raw one".to_string()),
                     intent_key: Some("raw-key".to_string()),
                     confirm_yolo: false,
@@ -4274,13 +4321,64 @@ mod tests {
 
         let seen = seen.lock().expect("seen mutex").clone();
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].invocation.as_deref(), Some("sh -c 'sleep 1'"));
-        assert_eq!(seen[0].agent_kind, None);
-        assert_eq!(seen[0].resume_template, None);
+        assert_eq!(
+            seen[0].launch,
+            Some(farhelm_proto::SessionLaunch::plain_command(
+                "sh -c 'sleep 1'"
+            )),
+            "the command launch reaches the target whole, with nothing added"
+        );
         assert_eq!(
             seen[0].intent_key,
             asker_scoped_intent_key("asker", Some("raw-key".to_string())),
             "the target stores the key scoped to the asking session"
+        );
+    }
+
+    /// Spec: `farhelm agent clone` of a legacy source (created before
+    /// launch kinds) is refused with a remedy and dispatches nothing.
+    ///
+    /// Why: a legacy launch has no YOLO answer and was never classified, so
+    /// an agent copying it would start an unclassified launch on its own
+    /// authority; the remedy names what a person can do instead.
+    #[farhelm_testtrace::test]
+    async fn clone_of_a_legacy_source_is_refused_with_a_remedy() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let source = SessionInfo {
+            invocation: "claude --model opus".to_string(),
+            launch: farhelm_proto::SessionLaunch::Legacy {
+                invocation: "claude --model opus".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Claude,
+                resume_template: None,
+            },
+            ..session("source", 1)
+        };
+        let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    source_session_id: Some("source".to_string()),
+                    host: Some("user@builder".to_string()),
+                    cwd: None,
+                    title: None,
+                    intent_key: Some("clone-key".to_string()),
+                    confirm_yolo: false,
+                },
+            )
+            .await;
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(message.contains("before launch kinds"), "{message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert!(
+            seen.lock().expect("seen mutex").is_empty(),
+            "nothing may be dispatched for a refused clone"
         );
     }
 
@@ -4302,7 +4400,7 @@ mod tests {
                 AgentVerb::Create {
                     host: Some("user@builder".to_string()),
                     cwd: "/srv/work".to_string(),
-                    invocation: None,
+                    launch: None,
                     title: None,
                     intent_key: None,
                     confirm_yolo: false,
@@ -4314,7 +4412,7 @@ mod tests {
             AgentOutcome::Err { kind, message } => {
                 assert_eq!(kind, ErrorKind::InvalidRequest);
                 assert!(
-                    message.contains("--invocation is required"),
+                    message.contains("--command is required"),
                     "the refusal must name the missing command: {message}"
                 );
             }

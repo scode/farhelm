@@ -754,8 +754,7 @@ mod tests {
             cwd: format!("/srv/{id}"),
             canonical_cwd: None,
             invocation: "codex --resume retained".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("codex --resume retained"),
             status: farhelm_proto::SessionStatus::Waiting,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1521,7 +1520,7 @@ mod tests {
             let mut entry =
                 migration_session(&format!("history-{sequence}"), 1_700_000_000 + sequence);
             entry.creation_seq = Some(sequence as u64);
-            entry.launch = Some(farhelm_proto::LaunchSelection {
+            entry.launch = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some(format!("model-{sequence}")),
                 effort: None,
@@ -1536,7 +1535,7 @@ mod tests {
         let history_entry = SessionInfo {
             title: "history title".into(),
             creation_seq: Some(9_999),
-            launch: Some(farhelm_proto::LaunchSelection {
+            launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),

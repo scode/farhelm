@@ -145,6 +145,7 @@ pub(crate) fn restart_offer_cell(offer: farhelm_proto::RestartOffer) -> &'static
         farhelm_proto::RestartOffer::Resume => "resume",
         farhelm_proto::RestartOffer::NotCaptured => "not-captured",
         farhelm_proto::RestartOffer::NoConversationReporting => "no-reporting",
+        farhelm_proto::RestartOffer::NoResumeCommand => "no-resume-command",
     }
 }
 

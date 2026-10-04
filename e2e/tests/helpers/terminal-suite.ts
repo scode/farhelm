@@ -179,7 +179,7 @@ export async function resetStack(request: APIRequestContext) {
   const created = await request.post("/api/sessions", {
     data: {
       cwd: shared.cwd,
-      invocation: shared.invocation,
+      command: { command: shared.invocation, yolo: false },
       title: shared.title,
     },
   });
@@ -401,7 +401,7 @@ export async function createTabSession(
     return { id: (await createResumableSession(request, { cwd, title })).id, cwd };
   }
   const created = await request.post("/api/sessions", {
-    data: { cwd, invocation: FAKE_AGENT_INVOCATION, title },
+    data: { cwd, command: { command: FAKE_AGENT_INVOCATION, yolo: false }, title },
   });
   expect(created.status(), await created.text()).toBe(200);
   return { id: (await created.json()).id, cwd };

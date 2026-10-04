@@ -20,7 +20,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let local = rest_harness::local_id(&harness.store).await;
     let created = farhelm_proto::SessionInfo {
         creation_seq: Some(9),
-        launch: Some(farhelm_proto::LaunchSelection {
+        launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
@@ -110,13 +110,9 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
 /// request body, asserts the peer received exactly the defaults, and
 /// checks the JSON reply shape a caller actually depends on.
 ///
-/// This same minimal body is also the pre-M3 caller posture for
-/// `agent_kind`/`resume_template` (PLAN_M3.md item 7): the UI and CLI
-/// currently send neither field, so this test also pins that an
-/// absent override decodes and forwards as `None` rather than
-/// inventing a value — the fields are deliberately accepted here for
-/// non-UI API callers that basename recognition cannot classify, not
-/// because every production caller is expected to omit them forever.
+/// The body's command launch names only its command and YOLO assertion,
+/// so this also pins that the omitted agent type and resume command
+/// forward as absent rather than as invented values.
 #[farhelm_testtrace::test]
 async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -136,16 +132,14 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             req_id,
             parent: None,
             cwd,
-            invocation,
+            launch,
             title,
             cols,
             rows,
-            agent_kind,
-            resume_template,
             // Not under test here (the assertions below only check
-            // cwd/invocation/title/cols/rows/agent_kind/
-            // resume_template); PLAN_M3.md's `intent_key` is exercised
-            // by `create_session_forwards_the_bodys_extras_to_the_supervisor`
+            // cwd/launch/title/cols/rows); PLAN_M3.md's `intent_key` is
+            // exercised by
+            // `create_session_forwards_the_bodys_extras_to_the_supervisor`
             // instead.
             ..
         } = request
@@ -159,10 +153,11 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         // non-optional fields during deserialization.)
         assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
         assert_eq!(cwd, "~/project");
-        assert_eq!(invocation, Some("some-agent".to_string()));
+        assert_eq!(
+            launch,
+            Some(farhelm_proto::SessionLaunch::plain_command("some-agent"))
+        );
         assert_eq!(title, None);
-        assert_eq!(agent_kind, None);
-        assert_eq!(resume_template, None);
         writer
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
@@ -181,8 +176,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                     cwd: "/canonical/home/project".into(),
                     canonical_cwd: None,
                     invocation: "some-agent".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("some-agent"),
                     // Matches real `create_session` output: `Unknown`,
                     // not a live status (creation does not establish the
                     // agent's later exec succeeded).
@@ -207,7 +201,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
-            serde_json::json!({"cwd": "~/project", "invocation": "some-agent"}).to_string(),
+            serde_json::json!({"cwd": "~/project", "command": {"command": "some-agent", "yolo": false}}).to_string(),
         ))
         .unwrap();
 
@@ -268,13 +262,13 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
             .unwrap();
         for id in ["sess-confirmed", "sess-safe"] {
             let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::CreateSession {
-                req_id, invocation, ..
-            } = request
-            else {
+            let ControlMsg::CreateSession { req_id, launch, .. } = request else {
                 panic!("expected CreateSession, got {request:?}");
             };
-            assert_eq!(invocation.as_deref(), Some("codex --yolo"));
+            assert_eq!(
+                launch.as_ref().map(|launch| launch.display_command()),
+                Some("codex --yolo".to_string())
+            );
             writer
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
@@ -290,8 +284,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
                         cwd: "/project".into(),
                         canonical_cwd: None,
                         invocation: "codex --yolo".into(),
-                        resume_template: None,
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::plain_command("codex --yolo"),
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -324,7 +317,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
     let refused = harness
         .router()
         .oneshot(post(
-            serde_json::json!({"cwd": "/project", "invocation": "codex --yolo"}),
+            serde_json::json!({"cwd": "/project", "command": {"command": "codex --yolo", "yolo": true}}),
         ))
         .await
         .unwrap();
@@ -342,7 +335,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
         .router()
         .oneshot(post(serde_json::json!({
             "cwd": "/project",
-            "invocation": "codex --yolo",
+            "command": {"command": "codex --yolo", "yolo": true},
             "confirm_yolo": true,
         })))
         .await
@@ -358,7 +351,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
     let safe = harness
         .router()
         .oneshot(post(
-            serde_json::json!({"cwd": "/project", "invocation": "codex --yolo"}),
+            serde_json::json!({"cwd": "/project", "command": {"command": "codex --yolo", "yolo": true}}),
         ))
         .await
         .unwrap();
@@ -367,16 +360,16 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
     peer.await.unwrap();
 }
 
-/// Spec: a create whose command line spells Codex's no-approvals, no-sandbox mode as
-/// options (`-a never` with `-s danger-full-access`, in either spelling) is refused on a
-/// host that asks before YOLO launches with the helm's YOLO-confirmation header, like
-/// `codex --yolo`.
+/// Spec: a command launch asserted YOLO is refused on a host that asks
+/// before YOLO launches, with the helm's YOLO-confirmation header, whatever
+/// its command line spells: a plain `sleep` and Codex's no-approvals mode
+/// alike.
 ///
-/// Why: the classifier's table is only useful if the guard consults it on the real create
-/// path; this pins that the option form reaches the same refusal rather than starting on a
-/// host that asks before YOLO launches unasked.
+/// Why: SPEC.md makes a command launch's YOLO verdict the assertion alone,
+/// with no command-line parsing; a guard that still read the command would
+/// let an asserted YOLO launch through when its spelling looked harmless.
 #[farhelm_testtrace::test]
-async fn a_codex_option_spelled_yolo_create_on_a_host_that_asks_is_refused() {
+async fn an_asserted_yolo_command_on_a_host_that_asks_is_refused_whatever_it_spells() {
     use tower::ServiceExt;
 
     let harness = rest_harness::idle_helm().await;
@@ -385,10 +378,7 @@ async fn a_codex_option_spelled_yolo_create_on_a_host_that_asks_is_refused() {
         !host_yolo_without_asking(&harness.store, local).await,
         "premise: the local host starts asking before YOLO launches"
     );
-    for invocation in [
-        "codex -a never -s danger-full-access",
-        "codex --sandbox=danger-full-access --ask-for-approval=never",
-    ] {
+    for command in ["sleep 300", "codex -a never -s danger-full-access"] {
         let refused = harness
             .router()
             .oneshot(
@@ -398,7 +388,7 @@ async fn a_codex_option_spelled_yolo_create_on_a_host_that_asks_is_refused() {
                     .header("host", "127.0.0.1:7433")
                     .header("content-type", "application/json")
                     .body(axum::body::Body::from(
-                        serde_json::json!({"cwd": "/project", "invocation": invocation})
+                        serde_json::json!({"cwd": "/project", "command": {"command": command, "yolo": true}})
                             .to_string(),
                     ))
                     .unwrap(),
@@ -408,12 +398,12 @@ async fn a_codex_option_spelled_yolo_create_on_a_host_that_asks_is_refused() {
         assert_eq!(
             refused.status(),
             axum::http::StatusCode::CONFLICT,
-            "{invocation}"
+            "{command}"
         );
         assert_eq!(
             refused.headers()[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
             farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED,
-            "{invocation}"
+            "{command}"
         );
     }
 }
@@ -504,14 +494,15 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         cwd: "/home/person/work/project".into(),
                         canonical_cwd: Some("/srv/repo/project".into()),
                         invocation: "codex --model gpt-6-astra".into(),
-                        resume_template: None,
-                        launch: Some(farhelm_proto::LaunchSelection {
-                            harness: farhelm_proto::LaunchHarness::Codex,
-                            model: Some("gpt-6-astra".into()),
-                            effort: Some(farhelm_proto::LaunchEffort::High),
-                            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
-                            workspace_trust: None,
-                        }),
+                        launch: crate::launches::test_agent_launch(
+                            farhelm_proto::LaunchSelection {
+                                harness: farhelm_proto::LaunchHarness::Codex,
+                                model: Some("gpt-6-astra".into()),
+                                effort: Some(farhelm_proto::LaunchEffort::High),
+                                permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                                workspace_trust: None,
+                            },
+                        ),
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -670,8 +661,11 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                         cwd: "/work".into(),
                         canonical_cwd: None,
                         invocation: "codex".into(),
-                        resume_template: None,
-                        launch,
+                        launch: launch
+                            .map(crate::launches::test_agent_launch)
+                            .unwrap_or_else(|| {
+                                farhelm_proto::SessionLaunch::plain_command("codex")
+                            }),
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -712,7 +706,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
     let (status, _) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/work", "invocation": "codex" }),
+        serde_json::json!({ "cwd": "/work", "command": {"command": "codex", "yolo": false} }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -793,7 +787,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
             };
             let mut session = rest_harness::session(id, 1_700_000_000);
             session.creation_seq = Some(index as u64 + 1);
-            session.launch = Some(LaunchSelection {
+            session.launch = crate::launches::test_agent_launch(LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -833,10 +827,15 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
         "the reply's workspace trust must not become the default: {preferences}"
     );
 
+    // An asserted-YOLO command is the strong case: the launch IS YOLO, but
+    // the user said so about a command, not about the launcher's agent
+    // choices, so it must not become the launcher's remembered default.
+    // The host is made safe for YOLO so the guard does not refuse first.
+    allow_yolo_here(&harness.store).await;
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/work", "invocation": "codex" }),
+        serde_json::json!({ "cwd": "/work", "command": {"command": "codex", "yolo": true} }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -844,7 +843,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
     assert_eq!(
         preferences.get("remembered_permissions"),
         None,
-        "a raw create's reply must not move the defaults: {preferences}"
+        "a command launch, even an asserted-YOLO one, must not move the defaults: {preferences}"
     );
 
     peer.await.expect("join scripted supervisor");
@@ -863,7 +862,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
 #[farhelm_testtrace::test]
 async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{AgentKind, ControlMsg, Frame, SessionInfo};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -879,8 +878,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             req_id,
             parent: None,
             intent_key,
-            agent_kind,
-            resume_template,
+            launch,
             ..
         } = request
         else {
@@ -891,10 +889,17 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             Some("intent-from-the-browser"),
             "the key belongs to whoever can retry, so it must arrive unaltered"
         );
-        assert_eq!(agent_kind, Some(AgentKind::Claude));
         assert_eq!(
-            resume_template,
-            Some(vec!["claude".to_string(), "{conversation}".to_string()])
+            launch,
+            Some(farhelm_proto::SessionLaunch::Command(
+                farhelm_proto::CommandLaunch {
+                    command: "some-agent {farhelm_args}".to_string(),
+                    yolo: false,
+                    agent: Some(farhelm_proto::LaunchHarness::Claude),
+                    resume: Some("some-agent --resume {conversation} {farhelm_args}".to_string()),
+                }
+            )),
+            "the command launch reaches the supervisor as written"
         );
         writer
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
@@ -911,8 +916,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                     cwd: "/some/dir".into(),
                     canonical_cwd: None,
                     invocation: "some-agent".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("some-agent"),
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -935,10 +939,13 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
         .body(axum::body::Body::from(
             serde_json::json!({
                 "cwd": "/some/dir",
-                "invocation": "some-agent",
+                "command": {
+                    "command": "some-agent {farhelm_args}",
+                    "yolo": false,
+                    "agent": "claude",
+                    "resume": "some-agent --resume {conversation} {farhelm_args}",
+                },
                 "intent_key": "intent-from-the-browser",
-                "agent_kind": "claude",
-                "resume_template": ["claude", "{conversation}"],
             })
             .to_string(),
         ))
@@ -1890,7 +1897,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
         workspace_trust: Some(true),
     };
     let mut source = rest_harness::session("yolo-src", 1_700_000_000);
-    source.launch = Some(yolo.clone());
+    source.launch = crate::launches::test_agent_launch(yolo.clone());
     source.invocation = "codex --dangerously-bypass-approvals-and-sandbox".to_string();
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
@@ -1910,7 +1917,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
             panic!("expected CreateSession, got {request:?}");
         };
         let mut created = rest_harness::session("yolo-new", 1_700_000_500);
-        created.launch = Some(yolo);
+        created.launch = crate::launches::test_agent_launch(yolo);
         fleet.edit(local, |script| script.sessions.push(created.clone()));
         writer
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
@@ -2161,22 +2168,21 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             req_id,
             parent: None,
             cwd,
-            invocation,
+            launch,
             title,
             intent_key,
-            agent_kind,
-            resume_template,
             ..
         } = request
         else {
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(cwd, "/sess-1");
-        assert_eq!(invocation, Some("agent".to_string()));
+        assert_eq!(
+            launch,
+            Some(farhelm_proto::SessionLaunch::plain_command("agent"))
+        );
         assert_eq!(title, Some("sess-1".to_string()));
         assert_eq!(intent_key, None);
-        assert_eq!(agent_kind, None);
-        assert_eq!(resume_template, None);
         let created = SessionInfo {
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
@@ -2189,8 +2195,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -2340,8 +2345,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                     cwd: "/sess-1".into(),
                     canonical_cwd: None,
                     invocation: "agent".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                     status: farhelm_proto::SessionStatus::Running,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -2381,14 +2385,53 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
     peer.await.unwrap();
 }
 
-/// Replacing a structured session reuses its stored resume argv, rather than
-/// asking today's integration defaults to reconstruct an older launch.
+/// Spec: plain Replace of a legacy session (one created before launch
+/// kinds) is refused with a remedy naming Replace with, and nothing is
+/// created or deleted.
 ///
-/// A template is durable launch behavior: replacing a session after catalog
-/// or integration changes must retain the source's exact conversation-resume
-/// contract along with its declarative composer selection.
+/// Why: a legacy launch carries no YOLO answer and was never classified,
+/// so copying it as a new session would launch something nobody described
+/// under the new rules (SPEC.md's launch-kinds upgrade). The refusal must
+/// come before the create, or the user would be left with two sessions.
 #[farhelm_testtrace::test]
-async fn replace_of_a_structured_session_preserves_its_resume_template() {
+async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let source = farhelm_proto::SessionInfo {
+        invocation: "claude --model opus".to_string(),
+        launch: farhelm_proto::SessionLaunch::Legacy {
+            invocation: "claude --model opus".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Claude,
+            resume_template: None,
+        },
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let peer = tokio::spawn(silent_supervisor(peer_side));
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body.contains("before launch kinds") && body.contains("Replace with"),
+        "{body}"
+    );
+    drop(harness);
+    peer.await.unwrap();
+}
+
+/// Plain Replace of an agent launch copies its stored launch exactly —
+/// selection, composed start and resume commands — rather than composing
+/// anew through today's catalog.
+///
+/// Why: SPEC.md has plain Replace copy the launch as stored; recompiling
+/// could change an older choice (a catalog change, a retired flag) behind
+/// a confirmation that promised the same settings.
+#[farhelm_testtrace::test]
+async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{
         ControlMsg, Frame, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
@@ -2403,15 +2446,28 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
         permissions: Some(LaunchPermission::Yolo),
         workspace_trust: None,
     };
-    let resume_template = vec![
-        "claude".to_string(),
-        "--resume".to_string(),
-        "{conversation}".to_string(),
-    ];
+    // A launch an older catalog composed: the start command carries a flag
+    // today's compiler would not write, which a recompile would lose.
+    let stored = farhelm_proto::SessionLaunch::Agent {
+        selection: selection.clone(),
+        start: vec![
+            "claude".to_string(),
+            "--model".to_string(),
+            "claude-opus-4-6".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+            "--older-flag".to_string(),
+            "{farhelm_args}".to_string(),
+        ],
+        resume: Some(vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "{conversation}".to_string(),
+            "{farhelm_args}".to_string(),
+        ]),
+    };
     let source = SessionInfo {
-        invocation: "claude --model claude-opus-4-6 --dangerously-skip-permissions".to_string(),
-        launch: Some(selection.clone()),
-        resume_template: Some(resume_template.clone()),
+        invocation: stored.display_command(),
+        launch: stored.clone(),
         ..rest_harness::session("sess-1", 1_700_000_000)
     };
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
@@ -2428,28 +2484,14 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id,
-            invocation,
-            agent_kind,
-            resume_template: actual_template,
-            launch,
-            ..
-        } = request
-        else {
+        let ControlMsg::CreateSession { req_id, launch, .. } = request else {
             panic!("expected CreateSession, got {request:?}");
         };
-        assert_eq!(
-            invocation,
-            Some("claude --model claude-opus-4-6 --dangerously-skip-permissions".to_string())
-        );
-        assert_eq!(agent_kind, Some(farhelm_proto::AgentKind::Claude));
-        assert_eq!(actual_template, Some(resume_template));
-        assert_eq!(launch, Some(selection.clone()));
+        assert_eq!(launch.as_ref(), Some(&stored));
 
         let created = SessionInfo {
             id: "sess-2".to_string(),
-            launch: Some(selection),
+            launch: stored,
             ..rest_harness::session("sess-2", 1_700_000_500)
         };
         fleet.edit(local, |script| script.sessions.push(created.clone()));
@@ -2584,8 +2626,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -2719,8 +2760,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -2870,8 +2910,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3040,7 +3079,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             req_id,
             parent: None,
             cwd,
-            invocation,
+            launch,
             title,
             intent_key,
             ..
@@ -3049,7 +3088,12 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(cwd, "/replaced-with");
-        assert_eq!(invocation, Some("new-agent --flag".to_string()));
+        assert_eq!(
+            launch,
+            Some(farhelm_proto::SessionLaunch::plain_command(
+                "new-agent --flag"
+            ))
+        );
         assert_eq!(title, Some("replaced-with-title".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
@@ -3064,8 +3108,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             cwd: "/replaced-with".into(),
             canonical_cwd: None,
             invocation: "new-agent --flag".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("new-agent --flag"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3107,7 +3150,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         serde_json::json!({
             "with": {
                 "cwd": "/replaced-with",
-                "invocation": "new-agent --flag",
+                "command": {"command": "new-agent --flag", "yolo": false},
                 "title": "replaced-with-title",
             }
         }),
@@ -3161,7 +3204,7 @@ async fn a_replace_with_body_naming_another_host_is_refused_before_anything_is_c
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({
-            "with": { "cwd": "/sess-1", "invocation": "agent", "host": other }
+            "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "host": other }
         }),
     )
     .await;
@@ -3216,7 +3259,7 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/replace",
-        serde_json::json!({ "with": { "cwd": "/does-not-exist", "invocation": "agent" } }),
+        serde_json::json!({ "with": { "cwd": "/does-not-exist", "command": {"command": "agent", "yolo": false} } }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
@@ -3257,14 +3300,19 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         let ControlMsg::CreateSession {
             req_id,
             cwd,
-            invocation,
+            launch,
             ..
         } = request
         else {
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(cwd, "/override-delete-fails");
-        assert_eq!(invocation, Some("override-agent".to_string()));
+        assert_eq!(
+            launch,
+            Some(farhelm_proto::SessionLaunch::plain_command(
+                "override-agent"
+            ))
+        );
         let created = SessionInfo {
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
@@ -3277,8 +3325,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             cwd: "/override-delete-fails".into(),
             canonical_cwd: None,
             invocation: "override-agent".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("override-agent"),
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3322,7 +3369,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({
-            "with": { "cwd": "/override-delete-fails", "invocation": "override-agent" }
+            "with": { "cwd": "/override-delete-fails", "command": {"command": "override-agent", "yolo": false} }
         }),
     )
     .await;
@@ -3374,7 +3421,7 @@ async fn a_replace_with_mismatched_intent_key_is_refused_as_a_bad_request() {
         "/api/sessions/does-not-exist/replace",
         serde_json::json!({
             "intent_key": "top-level-key",
-            "with": { "cwd": "/x", "invocation": "agent", "intent_key": "a-different-key" }
+            "with": { "cwd": "/x", "command": {"command": "agent", "yolo": false}, "intent_key": "a-different-key" }
         }),
     )
     .await;
@@ -3409,7 +3456,7 @@ async fn a_replace_with_body_shape_problem_is_refused_before_routing() {
         serde_json::json!({
             "with": {
                 "cwd": "/x",
-                "invocation": "agent",
+                "command": {"command": "agent", "yolo": false},
                 "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null }
             }
         }),
@@ -3448,7 +3495,7 @@ async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created(
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({
-            "with": { "cwd": "/sess-1", "invocation": "agent", "expected_incarnation": current - 1 }
+            "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "expected_incarnation": current - 1 }
         }),
     )
     .await;
@@ -3507,8 +3554,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                     cwd: "/sess-1".into(),
                     canonical_cwd: None,
                     invocation: "agent".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("agent"),
                     status: farhelm_proto::SessionStatus::Running,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3529,7 +3575,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
         "/api/sessions/sess-1/replace",
         serde_json::json!({
             "intent_key": "reused-key",
-            "with": { "cwd": "/sess-1", "invocation": "agent", "title": "sess-1" }
+            "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "title": "sess-1" }
         }),
     )
     .await;
@@ -3949,7 +3995,7 @@ async fn create_session_error_reply_maps_to_bad_request_status() {
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
-            serde_json::json!({"cwd": "/nope", "invocation": "some-agent"}).to_string(),
+            serde_json::json!({"cwd": "/nope", "command": {"command": "some-agent", "yolo": false}}).to_string(),
         ))
         .unwrap();
 
@@ -4020,8 +4066,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
                     cwd: "/some/dir".into(),
                     canonical_cwd: None,
                     invocation: "some-agent".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("some-agent"),
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::Resume,
@@ -4078,25 +4123,29 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::RestartSession {
-            req_id,
-            invocation,
-            launch,
-            resume_template,
-            ..
-        } = request
-        else {
+        let ControlMsg::RestartSession { req_id, with, .. } = request else {
             panic!("expected restart request");
         };
+        let with = with.expect("restart with carries a launch");
         assert_eq!(
-            invocation.as_deref(),
-            Some("claude --dangerously-skip-permissions")
+            with.display_command(),
+            "claude --dangerously-skip-permissions"
         );
         assert_eq!(
-            launch.expect("structured launch").permissions,
+            with.agent_selection().expect("an agent launch").permissions,
             Some(farhelm_proto::LaunchPermission::Yolo)
         );
-        assert!(resume_template.is_none());
+        assert_eq!(
+            with.resume_argv().unwrap(),
+            Some(vec![
+                "claude".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+                "{farhelm_args}".to_string(),
+            ]),
+            "the helm composes the resume command from the same choices"
+        );
         writer
             .write_control(&ControlMsg::SessionRestarted {
                 req_id,
@@ -4121,6 +4170,159 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
         harness.router().oneshot(request).await.unwrap().status(),
         axum::http::StatusCode::OK
     );
+    peer.await.unwrap();
+}
+
+/// POST a JSON body to `uri` through the router, returning the status, the
+/// headers and the body text.
+async fn post_json(
+    harness: &rest_harness::Harness,
+    uri: &str,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+    post_text_headers(harness, uri, body).await
+}
+
+/// Spec: Restart with of a command launch sends the edited command launch
+/// (`with_command`) to the supervisor whole, refuses a body naming both an
+/// agent selection and a command, and holds an asserted-YOLO command to
+/// the host's YOLO question like any other YOLO launch.
+///
+/// Why: this is the API the changelog advertises for changing a command
+/// launch's command, resume command and YOLO answer. A body naming both
+/// shapes has no single meaning, and an asserted-YOLO restart that skipped
+/// the guard would be the one YOLO launch a host that asks never asked
+/// about. Both refusals happen before anything reaches the supervisor.
+#[farhelm_testtrace::test]
+async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+    let edited = farhelm_proto::CommandLaunch {
+        command: "claude --model sonnet {farhelm_args}".to_string(),
+        yolo: false,
+        agent: Some(farhelm_proto::LaunchHarness::Claude),
+        resume: Some("claude --model sonnet --resume {conversation} {farhelm_args}".to_string()),
+    };
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let expected = edited.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::RestartSession { req_id, with, .. } = request else {
+            panic!("expected restart request, got {request:?}");
+        };
+        assert_eq!(with, Some(farhelm_proto::SessionLaunch::Command(expected)));
+        writer
+            .write_control(&ControlMsg::SessionRestarted {
+                req_id,
+                session: rest_harness::session("sess-1", 1),
+            })
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, _, body) = post_json(
+        &harness,
+        "/api/sessions/sess-1/restart",
+        serde_json::json!({ "with_command": edited }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, _, body) = post_json(
+        &harness,
+        "/api/sessions/sess-1/restart",
+        serde_json::json!({
+            "with": {"harness":"claude","model":null,"effort":null,"permissions":null,"workspace_trust":null},
+            "with_command": edited,
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    let local = rest_harness::local_id(&harness.store).await;
+    assert!(
+        !host_yolo_without_asking(&harness.store, local).await,
+        "premise: the local host starts asking before YOLO launches"
+    );
+    let (status, headers, body) = post_json(
+        &harness,
+        "/api/sessions/sess-1/restart",
+        serde_json::json!({ "with_command": farhelm_proto::CommandLaunch { yolo: true, ..edited.clone() } }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        headers[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
+        farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED
+    );
+    drop(harness);
+    peer.await.unwrap();
+}
+
+/// Spec: a create or replace-with body still carrying a field launch kinds
+/// retired (`invocation`, `agent_kind`, `resume_template`) is refused with
+/// a 400 naming that field and what replaced it, before anything is sent
+/// to a supervisor.
+///
+/// Why: a client written before launch kinds would otherwise have its old
+/// field silently ignored, launching something other than what it asked
+/// for; naming the replacement lets its author fix it from the message.
+#[farhelm_testtrace::test]
+async fn bodies_naming_a_retired_launch_field_are_refused_by_name() {
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let command = serde_json::json!({"command": "agent", "yolo": false});
+    for (field, value, replacement) in [
+        ("invocation", serde_json::json!("agent"), "command"),
+        ("agent_kind", serde_json::json!("claude"), "command.agent"),
+        (
+            "resume_template",
+            serde_json::json!(["agent", "{conversation}"]),
+            "command.resume",
+        ),
+    ] {
+        let mut create = serde_json::json!({"cwd": "/project", "command": command});
+        create[field] = value.clone();
+        let (status, _, body) = post_json(&harness, "/api/sessions", create).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{field}: {body}"
+        );
+        assert!(
+            body.contains(&format!("{field} was replaced by {replacement}")),
+            "{field}: {body}"
+        );
+        let mut with = serde_json::json!({"cwd": "/project", "command": command});
+        with[field] = value;
+        let (status, _, body) = post_json(
+            &harness,
+            "/api/sessions/sess-1/replace",
+            serde_json::json!({ "with": with }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{field}: {body}"
+        );
+        assert!(
+            body.contains(&format!("{field} was replaced")),
+            "{field}: {body}"
+        );
+    }
+    drop(harness);
     peer.await.unwrap();
 }
 
@@ -4274,8 +4476,7 @@ async fn rename_session_forwards_the_title_verbatim() {
             cwd: "/distinctive/dir".into(),
             canonical_cwd: None,
             invocation: "distinctive-agent --flag".into(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("distinctive-agent --flag"),
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::Resume,
@@ -4451,8 +4652,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                         cwd: "/some/dir".into(),
                         canonical_cwd: None,
                         invocation: "some-agent".into(),
-                        resume_template: None,
-                        launch: None,
+                        launch: farhelm_proto::SessionLaunch::plain_command("some-agent"),
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -4852,14 +5052,11 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id, invocation, ..
-        } = request
-        else {
+        let ControlMsg::CreateSession { req_id, launch, .. } = request else {
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(
-            invocation.as_deref(),
+            launch.map(|launch| launch.display_command()).as_deref(),
             Some("claude"),
             "the only create that may reach a supervisor is the current-connection one"
         );
@@ -4878,8 +5075,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                     cwd: "/work".into(),
                     canonical_cwd: None,
                     invocation: "claude".into(),
-                    resume_template: None,
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::plain_command("claude"),
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -4905,7 +5101,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "invocation": "claude",
+            "command": {"command": "claude", "yolo": false},
             "expected_incarnation": current - 1,
         }),
     )
@@ -4924,7 +5120,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "invocation": "claude",
+            "command": {"command": "claude", "yolo": false},
             "expected_incarnation": current,
         }),
     )
@@ -5550,7 +5746,7 @@ async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
         "/api/sessions",
         serde_json::json!({
             "cwd": "/tmp",
-            "invocation": "agent",
+            "command": {"command": "agent", "yolo": false},
             "host": down,
         }),
     )
@@ -5634,7 +5830,8 @@ async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
         harness.await_refreshed(local).await;
         harness.await_refreshed(remote).await;
 
-        let mut body = serde_json::json!({ "cwd": "/tmp", "invocation": "agent" });
+        let mut body =
+            serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false} });
         if explicit {
             body["host"] = serde_json::json!(remote);
         }
@@ -5847,7 +6044,7 @@ async fn a_session_created_here_is_routable_before_any_refresh() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "invocation": "agent" }),
+        serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false} }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -6076,7 +6273,7 @@ async fn a_create_reply_naming_another_hosts_session_id_is_refused() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({"host": creator, "cwd": "/work", "invocation": "agent"}),
+        serde_json::json!({"host": creator, "cwd": "/work", "command": {"command": "agent", "yolo": false}}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
@@ -6434,7 +6631,7 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "invocation": "agent" }),
+        serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false} }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -6491,7 +6688,7 @@ async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": 9999 }),
+        serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false}, "host": 9999 }),
     )
     .await;
     assert_eq!(
@@ -6757,7 +6954,7 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": host }),
+        serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false}, "host": host }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -6858,7 +7055,7 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
     let (status, body) = post_text(
         &harness,
         "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": host }),
+        serde_json::json!({ "cwd": "/tmp", "command": {"command": "agent", "yolo": false}, "host": host }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -7928,7 +8125,7 @@ async fn create_with_invalid_github_repo_names_the_parse_error() {
         .body(axum::body::Body::from(
             serde_json::json!({
                 "cwd": "/tmp/whatever",
-                "invocation": "some-agent",
+                "command": {"command": "some-agent", "yolo": false},
                 "github_checkout": {"repo": "no separator here", "title": null}
             })
             .to_string(),
@@ -7982,7 +8179,7 @@ async fn create_with_valid_github_repo_without_a_root_names_the_set_root_command
         .body(axum::body::Body::from(
             serde_json::json!({
                 "cwd": "",
-                "invocation": "some-agent",
+                "command": {"command": "some-agent", "yolo": false},
                 "github_checkout": {"repo": "acme/bar", "title": null, "preview": preview}
             })
             .to_string(),
@@ -8044,7 +8241,7 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
                 "the initial lookup must not spend an unknown key"
             );
             let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
-            assert_eq!(identity[0], "github_create_request_v1");
+            assert_eq!(identity[0], "github_create_request_v2");
             assert!(client_identity.contains("recorded-agent"));
             assert!(client_identity.contains("local-identity"));
             let session = if expected_key == "recorded-key" {
@@ -8099,7 +8296,7 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
         .unwrap();
     let current = harness.store.resolve_checkout_config(None).await.unwrap();
     let mut body = serde_json::json!({
-        "cwd": "", "invocation": "recorded-agent", "intent_key": "recorded-key",
+        "cwd": "", "command": {"command": "recorded-agent", "yolo": false}, "intent_key": "recorded-key",
         "expected_incarnation": claim.incarnation + 100,
         "github_checkout": { "repo": "acme/bar", "title": null, "preview": {
             "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
@@ -8272,7 +8469,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         "harness": "grok", "model": "grok-x", "effort": null, "permissions": null
                     });
                 } else {
-                    request["invocation"] = serde_json::json!("claude");
+                    request["command"] = serde_json::json!({"command": "claude", "yolo": false});
                 }
                 let (route, body) = if replacing {
                     (
@@ -8467,7 +8664,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
         let config = harness.store.resolve_checkout_config(None).await.unwrap();
         let (claim, _) = super::create_target(&harness.state, None).unwrap();
         let mut request = serde_json::json!({
-            "cwd": "", "invocation": "agent",
+            "cwd": "", "command": {"command": "agent", "yolo": false},
             "github_checkout": {"repo": "acme/bar", "preview": {
                 "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
                 "config_revision": config.config_revision, "host": claim.host.to_string(),
@@ -8571,7 +8768,10 @@ async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
         let config = harness.store.resolve_checkout_config(None).await.unwrap();
         let (claim, _) = super::create_target(&harness.state, None).unwrap();
         for (selector, value) in [
-            ("invocation", serde_json::json!("agent")),
+            (
+                "command",
+                serde_json::json!({"command": "agent", "yolo": false}),
+            ),
             ("launch", serde_json::json!({"harness": "codex"})),
         ] {
             let mut request = serde_json::json!({
@@ -8767,7 +8967,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
         .config_revision;
     let mut body = serde_json::json!({
         "intent_key": "original",
-        "with": { "cwd": "/original-root/bar-fix", "invocation": "agent", "expected_incarnation": claim.incarnation,
+        "with": { "cwd": "/original-root/bar-fix", "command": {"command": "agent", "yolo": false}, "expected_incarnation": claim.incarnation,
             "github_checkout": { "repo": "acme/bar", "title": "Fix", "preview": {
                 "canonical_root": "/original-root", "basename": "bar-fix", "cwd": "/original-root/bar-fix",
                 "config_revision": revision, "host": claim.host.to_string(), "incarnation": claim.incarnation,
@@ -9332,26 +9532,27 @@ fn repository_discovery_failure_names_a_busy_host_and_nothing_else() {
     );
 }
 
-/// Spec: the fresh-create request identity of a typed-command create is
-/// exactly the string earlier releases produced for the same body, with
-/// `null` in the fourth slot where the removed `profile_id` selector sat.
+/// Spec: the fresh-create request identity of a command-launch create is
+/// pinned byte for byte: `github_create_request_v2`, then the cwd, the agent
+/// launch choices (null here), the command launch whole, the title, host,
+/// expected incarnation and checkout request.
 ///
 /// Why: the identity is the key's binding across a lost reply, and the
-/// supervisor compares it by string equality. Removing profiles kept the
-/// slot so a fresh-checkout create retried across the upgrade still matches
-/// its own reservation (SPEC_impl.md, "Launch-kinds reservations"); a later
-/// edit that dropped or moved the slot would compile and pass every other
-/// test while quietly turning such retries into conflicts.
+/// supervisor compares it by string equality, so any change to its shape
+/// turns every in-flight fresh-checkout retry into a conflict. Launch kinds
+/// made that change once, deliberately (SPEC_impl.md, "Launch-kinds
+/// reservations"); a later edit that reordered or renamed a slot would
+/// compile and pass every other test while doing it again by accident.
 #[farhelm_testtrace::test]
-fn a_typed_command_keeps_its_pre_removal_request_identity() {
+fn a_command_launch_request_identity_is_pinned() {
     let req: super::CreateReq = serde_json::from_value(serde_json::json!({
         "cwd": "/w",
-        "invocation": "agent",
+        "command": {"command": "agent", "yolo": false},
         "title": "t",
     }))
-    .expect("a typed-command create body decodes");
+    .expect("a command-launch create body decodes");
     assert_eq!(
         super::fresh_create_request_identity(&req),
-        r#"["github_create_request_v1","/w","agent",null,null,"t",null,null,null,null,null]"#
+        r#"["github_create_request_v2","/w",null,{"command":"agent","yolo":false,"agent":null,"resume":null},"t",null,null,null]"#
     );
 }

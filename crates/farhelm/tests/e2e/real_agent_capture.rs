@@ -412,7 +412,14 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     let sock = state.path().join("tmux.sock");
 
     let session = client
-        .create_session(&work.path().to_string_lossy(), "claude", None, 100, 30)
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            real_agent_launch("claude", farhelm_proto::LaunchHarness::Claude),
+            None,
+            100,
+            30,
+            farhelm_helm::CreateExtras::default(),
+        )
         .await
         .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
     let tmux_name = format!("fh-{}", session.id);
@@ -605,12 +612,16 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     std::fs::write(work.path().join("child.sh"), script).expect("child.sh");
 
     let session = client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            "claude --dangerously-skip-permissions --model haiku",
+            real_agent_launch(
+                "claude --dangerously-skip-permissions --model haiku",
+                farhelm_proto::LaunchHarness::Claude,
+            ),
             None,
             100,
             30,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
@@ -707,8 +718,7 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
 /// The synthetic `CODEX_HOME` is not a convenience; see
 /// [`real_codex_session_captures_its_conversation_identity`] for why the
 /// folder-trust modal makes it the only path that works, and for the shim
-/// that carries the variable into the launch while keeping basename
-/// derivation honest.
+/// that carries the variable into the launch.
 #[farhelm_testtrace::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_reports_its_identity_across_new() {
@@ -720,7 +730,14 @@ async fn real_codex_session_reports_its_identity_across_new() {
     let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let session = client
-        .create_session(&work.path().to_string_lossy(), &agent, None, 100, 30)
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            real_agent_launch(&agent, farhelm_proto::LaunchHarness::Codex),
+            None,
+            100,
+            30,
+            farhelm_helm::CreateExtras::default(),
+        )
         .await
         .unwrap_or_else(|e| panic!("launching the real codex: {e:#}"));
     let (chan, _replay, mut rx) = client
@@ -971,6 +988,32 @@ async fn submit_prompt(
         // sleep-ok: pace conditional Enter retries and poll the answer marker in this manual audit.
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
+}
+
+/// A command launch declaring `harness` around the real agent's `command`,
+/// with that agent's resume command, the way a user would type it.
+///
+/// Declaring the agent is what turns on Farhelm's hooks for a command
+/// launch; an undeclared command gets none, so these tests would launch
+/// the real agent and then wait for a report that is never sent.
+fn real_agent_launch(
+    command: &str,
+    harness: farhelm_proto::LaunchHarness,
+) -> farhelm_proto::SessionLaunch {
+    let resume = match harness {
+        farhelm_proto::LaunchHarness::Claude => {
+            format!("{command} --resume {{conversation}} {{farhelm_args}}")
+        }
+        farhelm_proto::LaunchHarness::Codex => {
+            format!("{command} resume {{conversation}} {{farhelm_args}}")
+        }
+        other => panic!("no real-agent capture test runs {other:?}"),
+    };
+    declared_command(
+        &format!("{command} {{farhelm_args}}"),
+        harness,
+        Some(&resume),
+    )
 }
 
 /// A private `CODEX_HOME` with the working directory already trusted, plus

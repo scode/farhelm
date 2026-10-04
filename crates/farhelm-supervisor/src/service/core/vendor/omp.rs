@@ -96,7 +96,7 @@ impl Supervisor {
             .ok_or_else(|| {
                 RequestError::new(ErrorKind::NotFound, "the OMP session no longer exists")
             })?;
-        if row.generation != generation || row.agent_kind != kind {
+        if row.generation != generation || row.agent_kind() != kind {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "this session has moved on to another launch",

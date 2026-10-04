@@ -75,7 +75,7 @@ fn focus_restart_with_trigger() {
 /// generic integrations are named only in the explanation; the actual
 /// availability rule does not maintain a harness capability list.
 fn restart_with_unavailable(session: &Session) -> Option<String> {
-    let launch = session.launch.as_ref()?;
+    let launch = session.agent_selection()?;
     if session.restart_offer == RestartOffer::Resume {
         return None;
     }
@@ -91,12 +91,20 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     }
 }
 
-/// Preserve the legacy-session explanation when there is no saved selection.
+/// Why this dialog cannot change the session's launch, when it cannot: a
+/// legacy session's launch is never changed (SPEC.md refuses Restart with
+/// for it, naming Replace with), and this dialog edits agent launches only.
 fn restart_with_reason(session: &Session) -> Option<String> {
-    if session.launch.is_none() {
-        Some("restart with needs a session launched from structured settings".to_string())
-    } else {
-        restart_with_unavailable(session)
+    match &session.launch {
+        Some(crate::SessionLaunch::Agent { .. }) => restart_with_unavailable(session),
+        Some(crate::SessionLaunch::Command(_)) => {
+            Some("this dialog changes agent launches; replace with changes a command".to_string())
+        }
+        Some(crate::SessionLaunch::Legacy { .. }) | None => Some(
+            "this session was created before launch kinds, so its launch cannot be changed; use \
+             replace with"
+                .to_string(),
+        ),
     }
 }
 
@@ -1351,7 +1359,7 @@ pub(crate) fn SessionView(
                                 .clone()
                                 .unwrap_or_else(|| "this host".to_string()),
                             reason: crate::yolo_confirm::YoloReason::of_launch(
-                                source.launch.as_ref(),
+                                source.agent_selection(),
                             ),
                         },
                         source: source.clone(),
@@ -1859,6 +1867,15 @@ pub(crate) fn SessionView(
     };
     let header_session = shown.clone();
     let header_replace_session = shown.clone();
+    // A legacy session's launch cannot be copied as it is, so plain Replace
+    // refuses it; the interrupted card offers Replace with in its place
+    // (SPEC.md, the launch-kinds upgrade). Only a row that SAYS it is legacy
+    // gets that: every helm this build talks to sends a launch, so a row
+    // without one is a test stub or a decode gap, and plain Replace is the
+    // ordinary offer the helm itself refuses if it is wrong.
+    let card_offers_replace_with =
+        matches!(shown.launch, Some(crate::SessionLaunch::Legacy { .. }));
+    let card_replace_with_session = shown.clone();
     rsx! {
         div { class: "layout",
             // The one header row. Identity on the left, status in the
@@ -2275,7 +2292,7 @@ pub(crate) fn SessionView(
                             restart_with_error.set(Some("this session's launch settings changed; close and reopen restart with".to_string()));
                             return;
                         }
-                        if opening.launch.as_ref().is_none_or(|saved| selection.harness != saved.harness) {
+                        if opening.agent_selection().is_none_or(|saved| selection.harness != saved.harness) {
                             restart_with_error.set(Some("the session harness cannot be changed here".to_string()));
                             return;
                         }
@@ -2434,7 +2451,7 @@ pub(crate) fn SessionView(
             // (SPEC.md, Durability and resume).
             if interrupted_card_shown() {
                 div { class: "interrupted-card",
-                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer)}" }
+                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with)}" }
                     if restart_available {
                         button {
                             r#type: "button",
@@ -2454,17 +2471,27 @@ pub(crate) fn SessionView(
                             "restart"
                         }
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-primary replace-from-notice",
-                        disabled: lifecycle.busy(),
-                        "aria-expanded": "{confirming_replace.is_open()}",
-                        onclick: move |_| {
-                            if let Some(claim) = lifecycle.claim_guard() {
-                                confirming_replace.open((), claim);
-                            }
-                        },
-                        "replace"
+                    if card_offers_replace_with {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-primary replace-with-from-notice",
+                            disabled: lifecycle.busy(),
+                            onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone()))),
+                            "replace with"
+                        }
+                    } else {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-primary replace-from-notice",
+                            disabled: lifecycle.busy(),
+                            "aria-expanded": "{confirming_replace.is_open()}",
+                            onclick: move |_| {
+                                if let Some(claim) = lifecycle.claim_guard() {
+                                    confirming_replace.open((), claim);
+                                }
+                            },
+                            "replace"
+                        }
                     }
                     if confirming_replace.is_open() {
                         div { class: "replace-confirm",
@@ -2888,6 +2915,10 @@ fn offer_clause(offer: RestartOffer) -> &'static str {
             "Farhelm has no conversation reporting for this session's agent, so replace starts it \
              over"
         }
+        RestartOffer::NoResumeCommand => {
+            "this command launch did not opt into Resume, so it has no resume command and replace \
+             starts it over"
+        }
     }
 }
 
@@ -2941,7 +2972,26 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
 /// terminal and the safe next step without implying automatic recovery. A
 /// session that cannot resume is offered only Replace, so its notice names
 /// only that choice.
-fn interrupted_surface_text(offer: RestartOffer) -> String {
+///
+/// `replace_with` names Replace with instead of Replace, for a legacy
+/// session, whose card offers it in Replace's place.
+fn interrupted_surface_text(offer: RestartOffer, replace_with: bool) -> String {
+    // A legacy session's card offers Replace with, never plain Replace, so
+    // its text must not promise that "replace starts it over".
+    if replace_with {
+        return if offer.can_restart() {
+            format!(
+                "a host restart paused this session; it needs an intentional restart. Farhelm \
+                 will wait for you to choose Restart or Replace with — {}.",
+                offer_clause(offer)
+            )
+        } else {
+            "a host restart paused this session. Farhelm will wait for you to choose Replace \
+             with — this session was created before launch kinds, so it cannot resume, and \
+             Replace with opens the launcher with its command to start it over."
+                .to_string()
+        };
+    }
     if offer.can_restart() {
         format!(
             "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {}.",
@@ -3058,25 +3108,39 @@ mod tests {
         assert_eq!(copy_warning("command", "claude --resume"), None);
     }
 
-    /// Restart-with needs both saved structured settings and a captured
-    /// conversation; the disabled explanation must identify which fact is
-    /// missing without treating a generic integration as resumable.
+    /// This dialog changes an agent launch with a captured conversation;
+    /// the disabled explanation must identify which fact is missing
+    /// without treating a generic integration as resumable, and a legacy
+    /// session is pointed at Replace with.
     #[farhelm_testtrace::test]
     fn restart_with_availability_explains_each_unavailable_case() {
         let mut session = live_session();
         session.restart_offer = RestartOffer::Resume;
-        assert_eq!(
-            restart_with_reason(&session).as_deref(),
-            Some("restart with needs a session launched from structured settings")
+        session.launch = Some(crate::SessionLaunch::Legacy {
+            invocation: "agent".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        });
+        assert!(
+            restart_with_reason(&session).is_some_and(|reason| reason.contains("replace with")),
+            "{:?}",
+            restart_with_reason(&session)
         );
 
-        session.launch = Some(LaunchSelection {
-            harness: LaunchHarness::Claude,
-            model: None,
-            effort: None,
-            permissions: None,
-            workspace_trust: None,
-        });
+        let agent = |harness| {
+            Some(crate::SessionLaunch::Agent {
+                selection: LaunchSelection {
+                    harness,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    workspace_trust: None,
+                },
+                start: Vec::new(),
+                resume: None,
+            })
+        };
+        session.launch = agent(LaunchHarness::Claude);
         assert_eq!(restart_with_reason(&session), None);
         for offer in [
             RestartOffer::NotCaptured,
@@ -3088,7 +3152,7 @@ mod tests {
                 Some("no captured conversation to resume")
             );
         }
-        session.launch.as_mut().unwrap().harness = LaunchHarness::Muse;
+        session.launch = agent(LaunchHarness::Muse);
         assert_eq!(
             restart_with_reason(&session).as_deref(),
             Some("muse sessions can't be resumed")
@@ -3265,8 +3329,9 @@ mod tests {
             RestartOffer::Resume,
             RestartOffer::NotCaptured,
             RestartOffer::NoConversationReporting,
+            RestartOffer::NoResumeCommand,
         ] {
-            let card = interrupted_surface_text(offer);
+            let card = interrupted_surface_text(offer, false);
             let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
             assert!(
                 card.starts_with("a host restart paused this session"),
@@ -3284,6 +3349,32 @@ mod tests {
                 card.contains("Restart or Replace"),
                 offer.can_restart(),
                 "only a resumable session's card offers Restart: {card}"
+            );
+        }
+    }
+
+    /// Spec: a legacy session's interrupted card names Replace with, never
+    /// plain Replace, and never says "replace starts it over", whether or
+    /// not it can restart.
+    ///
+    /// Why: plain Replace refuses a legacy session (SPEC.md's launch-kinds
+    /// upgrade), so the card shows a Replace with button instead; text
+    /// naming the other choice would send the user to a button that is not
+    /// there.
+    #[farhelm_testtrace::test]
+    fn a_legacy_interrupted_card_names_replace_with() {
+        for offer in [RestartOffer::Resume, RestartOffer::NotCaptured] {
+            let card = interrupted_surface_text(offer, true);
+            assert!(
+                card.starts_with("a host restart paused this session"),
+                "{card}"
+            );
+            assert!(card.contains("Replace with"), "{card}");
+            assert!(!card.contains("replace starts it over"), "{card}");
+            assert_eq!(
+                card.contains("Restart or Replace with"),
+                offer.can_restart(),
+                "{card}"
             );
         }
     }

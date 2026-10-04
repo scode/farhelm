@@ -8,7 +8,7 @@ use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
 };
-use crate::structured_launches::{FakeHarness, fake_harness, observed_argv};
+use crate::structured_launches::{FakeHarness, fake_agent_launch, fake_harness, observed_argv};
 
 /// Give compiled vendor names an owned executable and a private fixture home.
 ///
@@ -45,11 +45,10 @@ async fn restart_with_harness() -> (Harness, FakeHarness, ServeTask) {
     (h, fixture, accepting)
 }
 
-/// Create a Claude session whose stored selection can be changed on resume.
+/// Create a Claude agent launch whose choices can be changed on resume.
 ///
-/// The executable wrapper carries real argv through tmux; the explicit kind
-/// and selection model the structured create path rather than inferring a
-/// launch selection from an invocation string.
+/// The executable wrapper carries real argv through tmux; the launch is the
+/// shape the helm's compiler composes, around the fixture's program.
 async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> SessionInfo {
     let selection = farhelm_proto::LaunchSelection {
         harness: farhelm_proto::LaunchHarness::Claude,
@@ -61,15 +60,11 @@ async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> Sessio
     h.client
         .create_session_with_extras(
             &fixture.work().to_string_lossy(),
-            &fixture.hook_invocation(&selection),
+            fake_agent_launch(&fixture.hook_invocation(&selection), selection),
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Claude),
-                launch: Some(selection),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create structured Claude session")
@@ -79,22 +74,21 @@ async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> Sessio
 ///
 /// A visible reply alone cannot prove a refusal left SQLite untouched, and
 /// the live entry can differ from the row while a relaunch is in progress.
-async fn durable_launch_bundle(
-    h: &Harness,
-    id: &str,
-) -> (
-    String,
-    Option<farhelm_proto::LaunchSelection>,
-    Option<Vec<String>>,
-) {
-    let row = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+async fn durable_launch_bundle(h: &Harness, id: &str) -> farhelm_proto::SessionLaunch {
+    SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open durable store")
         .session(id)
         .await
         .expect("read durable session")
-        .expect("session remains stored");
-    (row.invocation, row.launch, row.resume_template)
+        .expect("session remains stored")
+        .launch
+}
+
+/// The agent launch the helm composes for `selection`, as Restart with
+/// sends it.
+fn composed(selection: farhelm_proto::LaunchSelection) -> farhelm_proto::SessionLaunch {
+    farhelm_helm::compile_agent_launch(selection).expect("the catalog composes the selection")
 }
 
 /// Establish the reported identity before any restart-with assertion uses it.
@@ -123,12 +117,13 @@ async fn captured_claude_conversation(h: &Harness, session: &SessionInfo) -> Str
 async fn assert_restart_with_refused(
     h: &Harness,
     session: &SessionInfo,
-    selection: farhelm_proto::LaunchSelection,
+    launch: farhelm_proto::SessionLaunch,
+    says: &str,
 ) {
     let before = durable_launch_bundle(h, &session.id).await;
     let error = h
         .client
-        .restart_session_with(&session.id, true, Some(selection))
+        .restart_session_with(&session.id, true, Some(launch))
         .await
         .expect_err("invalid restart-with must be refused");
     assert_eq!(
@@ -138,9 +133,15 @@ async fn assert_restart_with_refused(
             .kind,
         ErrorKind::Conflict
     );
+    // Every refusal here is a Conflict, so the message is what tells WHICH
+    // rule refused: a kind change, a type change, or the offer.
+    assert!(
+        error.to_string().contains(says),
+        "the refusal must be the one this case is about ({says:?}): {error:#}"
+    );
     assert_eq!(durable_launch_bundle(h, &session.id).await, before);
     let live = listed(&h.client, &session.id).await;
-    assert_eq!((live.invocation, live.launch, live.resume_template), before);
+    assert_eq!(live.launch, before);
 }
 
 /// A successful override must become both this run's metadata and the next run's default.
@@ -153,15 +154,19 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     let conversation = captured_claude_conversation(&h, &session).await;
-    let mut yolo = session.launch.clone().expect("structured premise");
+    let mut yolo = session
+        .launch
+        .agent_selection()
+        .cloned()
+        .expect("agent launch premise");
     yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
 
     let restarted = h
         .client
-        .restart_session_with(&session.id, true, Some(yolo.clone()))
+        .restart_session_with(&session.id, true, Some(composed(yolo.clone())))
         .await
         .expect("restart with new permissions");
-    assert_eq!(restarted.launch, Some(yolo.clone()));
+    assert_eq!(restarted.launch.agent_selection(), Some(&yolo));
     assert_eq!(
         restarted.invocation,
         "claude --dangerously-skip-permissions"
@@ -176,18 +181,18 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
     );
 
     let listed = listed(&h.client, &session.id).await;
-    assert_eq!(listed.launch, Some(yolo.clone()));
+    assert_eq!(listed.launch.agent_selection(), Some(&yolo));
     assert_eq!(listed.invocation, restarted.invocation);
     let stored = durable_launch_bundle(&h, &session.id).await;
-    assert_eq!(stored.0, restarted.invocation);
-    assert_eq!(stored.1, Some(yolo.clone()));
+    assert_eq!(stored.display_command(), restarted.invocation);
+    assert_eq!(stored.agent_selection(), Some(&yolo));
 
     let second = h
         .client
         .restart_session(&session.id, true)
         .await
         .expect("plain restart uses saved settings");
-    assert_eq!(second.launch, Some(yolo));
+    assert_eq!(second.launch.agent_selection(), Some(&yolo));
     assert_eq!(second.invocation, restarted.invocation);
     let second_words =
         shell_words::split(&observed_argv(&h, &session.id, 3).await).expect("second resumed argv");
@@ -199,43 +204,57 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
     );
 }
 
-/// A legacy session can resume but has no structured selection to edit.
+/// Restart with keeps the launch kind: a command launch that can resume is
+/// refused an agent launch, and its stored launch is left alone.
 ///
-/// The refusal must leave its original invocation and template durable even
-/// after the captured conversation makes a normal Resume legal.
+/// Why: SPEC.md keeps the launch kind, agent type, host and folder fixed
+/// across Restart with; Replace with is how a session changes kind. The
+/// refusal must leave the durable row untouched even after the captured
+/// conversation makes a normal Resume legal.
 #[farhelm_testtrace::test]
-async fn restart_with_refuses_legacy_session_without_changing_settings() {
+async fn restart_with_refuses_a_launch_kind_change_without_changing_settings() {
     let (h, fixture, _accepting) = restart_with_harness().await;
-    let work = farhelm_teststate::tempdir().expect("legacy workdir");
+    let work = farhelm_teststate::tempdir().expect("command workdir");
+    let selection = farhelm_proto::LaunchSelection {
+        harness: farhelm_proto::LaunchHarness::Claude,
+        model: None,
+        effort: None,
+        permissions: None,
+        workspace_trust: None,
+    };
+    let invocation = fixture.hook_invocation(&selection);
     let session = h
         .client
-        .create_session(
+        .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &fixture.hook_invocation(&farhelm_proto::LaunchSelection {
-                harness: farhelm_proto::LaunchHarness::Claude,
-                model: None,
-                effort: None,
-                permissions: None,
-                workspace_trust: None,
-            }),
+            declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(&format!(
+                    "{invocation} --resume {{conversation}} {{farhelm_args}}"
+                )),
+            ),
             None,
             WIDE_COLS,
             ROWS,
+            farhelm_helm::CreateExtras::default(),
         )
         .await
-        .expect("create legacy Claude session");
-    assert!(session.launch.is_none());
+        .expect("create a Claude command launch");
+    assert_eq!(
+        session.launch.launch_kind(),
+        farhelm_proto::LaunchKind::Command,
+        "premise: the session is a command launch"
+    );
     captured_claude_conversation(&h, &session).await;
     assert_restart_with_refused(
         &h,
         &session,
-        farhelm_proto::LaunchSelection {
-            harness: farhelm_proto::LaunchHarness::Claude,
-            model: None,
-            effort: None,
+        composed(farhelm_proto::LaunchSelection {
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
-            workspace_trust: None,
-        },
+            ..selection
+        }),
+        "keeps the launch kind",
     )
     .await;
 }
@@ -249,9 +268,19 @@ async fn restart_with_refuses_a_harness_mismatch() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     captured_claude_conversation(&h, &session).await;
-    let mut wrong_harness = session.launch.clone().expect("structured premise");
+    let mut wrong_harness = session
+        .launch
+        .agent_selection()
+        .cloned()
+        .expect("agent launch premise");
     wrong_harness.harness = farhelm_proto::LaunchHarness::Codex;
-    assert_restart_with_refused(&h, &session, wrong_harness).await;
+    assert_restart_with_refused(
+        &h,
+        &session,
+        composed(wrong_harness),
+        "keeps the agent type",
+    )
+    .await;
 }
 
 /// Restart-with needs an actual captured conversation, not merely a structured launch.
@@ -268,24 +297,26 @@ async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::NotCaptured
     );
-    let mut yolo = session.launch.clone().expect("structured premise");
+    let mut yolo = session
+        .launch
+        .agent_selection()
+        .cloned()
+        .expect("agent launch premise");
     yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
-    assert_restart_with_refused(&h, &session, yolo).await;
+    assert_restart_with_refused(&h, &session, composed(yolo), "cannot be restarted").await;
 }
 
-/// Send one restart-with bundle exactly as given, over a connection of its
+/// Send one Restart with launch exactly as given, over a connection of its
 /// own, and return the supervisor's answer.
 ///
-/// The helm compiles every bundle it sends from a catalog selection, so it
-/// cannot produce the malformed bundles a broken or hostile client could;
-/// this writes the `RestartSession` frame directly, the way the rename
-/// tests drive their verb.
+/// The helm composes every agent launch it sends from a catalog selection,
+/// so it cannot produce the malformed launches a broken or hostile client
+/// could; this writes the `RestartSession` frame directly, the way the
+/// rename tests drive their verb.
 async fn raw_restart_with(
     sup: &Arc<Supervisor>,
     session_id: &str,
-    invocation: &str,
-    launch: farhelm_proto::LaunchSelection,
-    resume_template: Option<Vec<String>>,
+    launch: farhelm_proto::SessionLaunch,
 ) -> ControlMsg {
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(sup);
@@ -303,9 +334,7 @@ async fn raw_restart_with(
             req_id: 1,
             session_id: session_id.to_string(),
             stop_if_running: true,
-            invocation: Some(invocation.to_string()),
-            launch: Some(launch),
-            resume_template,
+            with: Some(launch),
         })
         .await
         .expect("write restart-with");
@@ -323,15 +352,15 @@ async fn raw_restart_with(
     }
 }
 
-/// Why: restart-with saved its new bundle without create's checks, while
-/// loading refuses a row that fails them, so one bad bundle would have left
-/// the supervisor unable to load its sessions after its next restart.
-/// Spec (SPEC_impl.md "Restart-with backend wire and persistence"): on a
-/// session where restart-with is otherwise allowed (structured, same
-/// harness, Resume offer with a captured conversation), a bundle whose
-/// supplied template, or the template the kind derives from its
-/// invocation, has `{conversation}` as its program is refused as
-/// `InvalidRequest`; the running agent is not stopped, the stored bundle is
+/// Why: Restart with stores its new launch, and loading refuses a row that
+/// fails create's checks, so one bad launch would have left the supervisor
+/// unable to load its sessions after its next restart. Spec (SPEC.md,
+/// Restart with: "The edited launch is validated exactly as a create
+/// validates it before anything is stopped"): on a session where Restart
+/// with is otherwise allowed (an agent launch, same agent type, Resume
+/// offer with a captured conversation), a launch whose resume or start
+/// command has `{conversation}` as its program is refused as
+/// `InvalidRequest`; the running agent is not stopped, the stored launch is
 /// unchanged, and a fresh supervisor over the same state loads the session.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() {
@@ -339,40 +368,52 @@ async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() 
     let session = structured_claude_session(&h, &fixture).await;
     captured_claude_conversation(&h, &session).await;
     let before = durable_launch_bundle(&h, &session.id).await;
-    let launch = session.launch.clone().expect("structured premise");
-    let refused = format!(
-        "resume template's first element is {}",
-        farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER
-    );
-    for (invocation, template) in [
-        // A supplied template with the placeholder as its program.
+    let selection = session
+        .launch
+        .agent_selection()
+        .cloned()
+        .expect("agent launch premise");
+    let conversation = farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER;
+    let argv = |words: &[&str]| {
+        words
+            .iter()
+            .map(|word| word.to_string())
+            .collect::<Vec<_>>()
+    };
+    for (label, start, resume) in [
         (
-            "claude",
-            Some(vec![
-                farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                "--resume".to_string(),
-            ]),
+            "resume program",
+            argv(&["claude", "{farhelm_args}"]),
+            argv(&[conversation, "--resume", "{farhelm_args}"]),
         ),
-        // No template: Claude derives one from the invocation's program.
         (
-            farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER,
-            None,
+            "start program",
+            argv(&[conversation, "{farhelm_args}"]),
+            argv(&["claude", "--resume", conversation, "{farhelm_args}"]),
         ),
     ] {
-        match raw_restart_with(&h.sup, &session.id, invocation, launch.clone(), template).await {
+        let launch = farhelm_proto::SessionLaunch::Agent {
+            selection: selection.clone(),
+            start,
+            resume: Some(resume),
+        };
+        match raw_restart_with(&h.sup, &session.id, launch).await {
             ControlMsg::Error { kind, message, .. } => {
-                assert_eq!(kind, ErrorKind::InvalidRequest, "{invocation}: {message}");
-                assert!(message.contains(&refused), "{invocation}: {message}");
+                assert_eq!(kind, ErrorKind::InvalidRequest, "{label}: {message}");
+                assert!(
+                    message.contains(conversation),
+                    "{label}: the refusal names the placeholder: {message}"
+                );
             }
-            other => panic!("{invocation}: expected a refusal, got {other:?}"),
+            other => panic!("{label}: expected a refusal, got {other:?}"),
         }
         assert_eq!(
             durable_launch_bundle(&h, &session.id).await,
             before,
-            "{invocation}: the stored bundle is unchanged"
+            "{label}: the stored launch is unchanged"
         );
         let live = listed(&h.client, &session.id).await;
-        assert!(live.status.is_live(), "{invocation}: nothing was stopped");
+        assert!(live.status.is_live(), "{label}: nothing was stopped");
         assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::Resume);
     }
 
@@ -863,8 +904,8 @@ const FAKE_AGENT_RESUME_ENV: &str = "FARHELM_FAKE_AGENT_RESUME";
 /// string, which is exactly what keeps an id from ever becoming part of a
 /// different command.
 ///
-/// `argv0` must stay the kind-named symlink so the session still derives
-/// its integration from its own invocation, as a real one would.
+/// `argv0` is the kind-named symlink so the resumed process reports as the
+/// same agent the session declared.
 fn fixture_resume_template(
     argv0: &std::path::Path,
     kind: &str,
@@ -963,24 +1004,33 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         .expect("first supervisor");
         let accepting = ServeTask::spawn(&sup, state.path()).await;
         let client = connect_client(&sup).await;
+        let invocation = format!(
+            "{} fake-agent --script hook-report --record-home {} {}",
+            shell_words::quote(&bin.path().join(kind).to_string_lossy()),
+            shell_words::quote(&home.path().to_string_lossy()),
+            structured_options.as_deref().unwrap_or("")
+        );
+        // The structured branch is an agent launch; the other a command
+        // launch declaring Claude with the fixture's own resume command.
+        let launch = match &selection {
+            Some(selection) => fake_agent_launch(&invocation, selection.clone()),
+            None => declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(&format!(
+                    "{} {{farhelm_args}}",
+                    shell_words::join(resume_template.as_ref().expect("command branch"))
+                )),
+            ),
+        };
         let session = client
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
-                &format!(
-                    "{} fake-agent --script hook-report --record-home {} {}",
-                    shell_words::quote(&bin.path().join(kind).to_string_lossy()),
-                    shell_words::quote(&home.path().to_string_lossy()),
-                    structured_options.as_deref().unwrap_or("")
-                ),
+                launch,
                 None,
                 80,
                 24,
-                farhelm_helm::CreateExtras {
-                    agent_kind: structured.then_some(farhelm_proto::AgentKind::Claude),
-                    launch: selection.clone(),
-                    resume_template: resume_template.clone(),
-                    ..farhelm_helm::CreateExtras::default()
-                },
+                farhelm_helm::CreateExtras::default(),
             )
             .await
             .expect("create the hook-reporting session");
@@ -1035,9 +1085,16 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         );
         assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
         if let Some(template) = &resume_template {
+            // The declared resume command is the fixture's template with
+            // `{farhelm_args}` appended, exactly as created.
+            let declared: Vec<String> = template
+                .iter()
+                .cloned()
+                .chain([farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.to_string()])
+                .collect();
             assert_eq!(
                 snapshot.resume_template.as_deref(),
-                Some(template.as_slice()),
+                Some(declared.as_slice()),
                 "the resume template stored at creation must survive until reconstruction"
             );
         } else {
@@ -1058,7 +1115,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
                 .expect("read structured session")
                 .expect("structured session stored");
             assert_eq!(
-                stored.launch, selection,
+                stored.launch.agent_selection().cloned(),
+                selection,
                 "the nondefault structured selection is durable before reconstruction"
             );
         }
@@ -1103,7 +1161,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         "the identity is the conversation's, not the run's — it survives the relaunch too"
     );
     assert_eq!(
-        restarted.launch, selection,
+        restarted.launch.agent_selection().cloned(),
+        selection,
         "restart response retains the frozen structured selection"
     );
 
@@ -1139,7 +1198,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         .await;
         let live = listed(&client, &session.id).await;
         assert_eq!(
-            live.launch, selection,
+            live.launch.agent_selection().cloned(),
+            selection,
             "live reconstruction projection retains the selected structured fields"
         );
         let stored = SessionStore::open(&state.path().join("supervisor.db"), false)
@@ -1150,7 +1210,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             .expect("read reconstructed session")
             .expect("session stored");
         assert_eq!(
-            stored.launch, selection,
+            stored.launch.agent_selection().cloned(),
+            selection,
             "stored reconstruction projection retains the selected structured fields"
         );
         return;
@@ -1298,14 +1359,18 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         let session = client
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
-                &invocation,
+                declared_command(
+                    &format!("{invocation} {{farhelm_args}}"),
+                    farhelm_proto::LaunchHarness::Claude,
+                    Some(&format!(
+                        "{} {{farhelm_args}}",
+                        shell_words::join(&template)
+                    )),
+                ),
                 None,
                 200,
                 24,
-                farhelm_helm::CreateExtras {
-                    resume_template: Some(template),
-                    ..farhelm_helm::CreateExtras::default()
-                },
+                farhelm_helm::CreateExtras::default(),
             )
             .await
             .expect("create the hook-reporting session");
@@ -1559,22 +1624,22 @@ async fn a_restart_clears_a_previous_launch_error() {
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &missing_binary.to_string_lossy(),
+            // Goose, for the reasons `create_resumable_session` gives.
+            declared_command(
+                &format!(
+                    "{} {{farhelm_args}}",
+                    shell_words::quote(&missing_binary.to_string_lossy())
+                ),
+                farhelm_proto::LaunchHarness::Goose,
+                Some(
+                    "sh -c 'echo RELAUNCHED-OK; sleep 300' farhelm-test-resume {conversation} \
+                     {farhelm_args}",
+                ),
+            ),
             None,
             80,
             24,
-            farhelm_helm::CreateExtras {
-                // Goose, for the reasons `create_resumable_session` gives.
-                agent_kind: Some(farhelm_proto::AgentKind::Goose),
-                resume_template: Some(vec![
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "echo RELAUNCHED-OK; sleep 300".to_string(),
-                    "farhelm-test-resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a session whose invocation cannot exec");

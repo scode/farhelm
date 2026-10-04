@@ -173,7 +173,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             }
         };
         if row.generation != entry.generation
-            || row.agent_kind != entry.snapshot.kind
+            || row.agent_kind() != entry.snapshot.kind
             || row.conversation_source.as_deref() != Some("hook")
         {
             continue;
@@ -189,10 +189,11 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
                 continue;
             }
         }
+        let kind = row.agent_kind();
         let Some(conversation) = row.captured_conversation else {
             continue;
         };
-        if !crate::agent_kind::accepts_reported_conversation(row.agent_kind, &conversation) {
+        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             continue;
         }
         let ownership_version = row.capture_ownership_version;

@@ -477,7 +477,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     expect(replacedId).not.toBe(sourceId);
     expect(replaced.title).toBe(title);
     expect(replaced.cwd).toBe(cwd);
-    expect(replaced.launch).toMatchObject({ harness: "claude", effort: "medium" });
+    expect(replaced.launch.selection).toMatchObject({ harness: "claude", effort: "medium" });
 
     // The source id is gone; the edited replacement exists — both read back
     // through the API listing, independent of the create reply and of
@@ -487,7 +487,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     expect(replacement, "the edited replacement must be listed").toBeTruthy();
     expect(replacement?.title).toBe(title);
     expect(replacement?.cwd).toBe(cwd);
-    expect(replacement?.launch).toMatchObject({ harness: "claude", effort: "medium" });
+    expect(replacement?.launch?.selection).toMatchObject({ harness: "claude", effort: "medium" });
     expect(
       listing.some((session) => session.id === sourceId),
       "the source id must no longer be listed",

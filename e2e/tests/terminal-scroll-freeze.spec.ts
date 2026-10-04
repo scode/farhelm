@@ -99,7 +99,8 @@ async function createSession(
   invocation: string,
 ): Promise<string> {
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", invocation, title },
+    // A command launch, asserted not YOLO, which the create API requires.
+    data: { cwd: "/tmp", command: { command: invocation, yolo: false }, title },
   });
   expect(created.status(), await created.text()).toBe(200);
   return (await created.json()).id;

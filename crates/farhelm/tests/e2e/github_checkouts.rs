@@ -559,7 +559,10 @@ fn create_body(
     let object = body.as_object_mut().expect("create body is an object");
     match selector {
         Selector::Raw => {
-            object.insert("invocation".into(), json!("codex --yolo"));
+            object.insert(
+                "command".into(),
+                json!({"command": "codex --yolo", "yolo": true}),
+            );
         }
         Selector::Structured(selection) => {
             object.insert("launch".into(), serde_json::to_value(selection).unwrap());
@@ -754,10 +757,10 @@ fn assert_case_metadata(session: &SessionInfo, case: &AcceptedCase) {
     match &case.selector {
         Selector::Raw => {
             assert_eq!(session.invocation, "codex --yolo");
-            assert!(session.launch.is_none());
+            assert!(session.launch.agent_selection().is_none());
         }
         Selector::Structured(selection) => {
-            assert_eq!(session.launch.as_ref(), Some(selection));
+            assert_eq!(session.launch.agent_selection(), Some(selection));
             assert!(session.invocation.starts_with("codex "));
         }
     }

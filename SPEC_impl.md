@@ -218,17 +218,16 @@ to back. The 2026-08-23 rule's weaker promise survives underneath: unknown local
 host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second promise on top
 rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless — locality
 answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs: structured
-launch metadata decides the harness when present. The sidebar's YOLO mark and the helm's YOLO confirmation must agree on
-every launch by calling the same `farhelm_proto::yolo` functions: `selection_is_yolo` for structured launches and
-`invocation_is_yolo` for command lines. No other code re-derives that answer. Raw launches the guard would ask about are
-marked YOLO, including uninterpretable `env` prefixes naming a known agent. The classifier recognizes documented vendor
-flags and option-spelled modes, including Codex's `-a never` with `-s danger-full-access`, while preserving the rule
-that Codex's sandboxed `--full-auto` is not YOLO. Unknown command lines remain unknown rather than being inferred as
-safe. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with older snapshots. The
-full invocation remains in its accessible text and tooltip. The working directory is tilde-folded against the
-`/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of
-those abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the
-full truth stays one hover away.
+launch metadata decides the harness: an agent launch's agent type, a command launch's declared one, or a legacy
+session's stored kind, and the terminal glyph otherwise. The sidebar's YOLO mark and the helm's YOLO confirmation must
+agree on every launch by reading the same verdict, `SessionLaunch::yolo`: `farhelm_proto::yolo::selection_is_yolo` for
+an agent launch and the user's (or agent's) assertion for a command launch. Nothing reads a command line for it. A
+legacy session has no verdict and carries the unclassified mark; nothing that can create a launch holds one, so the
+guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with
+older snapshots. The full invocation remains in its accessible text and tooltip. The working directory is tilde-folded
+against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly.
+Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a
+summary, and the full truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use three hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`)
@@ -1339,8 +1338,13 @@ machine nobody chose. A registered name carrying a control character can never b
 refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an agent has no rename
 verb for hosts.
 
-An agent's create names its command line with `--invocation`, which the helm forwards to the target supervisor as a raw
-create. A clone copies its source's launch: a structured source's frozen bundle, or another source's raw invocation.
+An agent's create sends a `LaunchRequest`: a command launch (`--command`, the required `--yolo`/`--no-yolo` assertion,
+an optional declared `--agent` and `--resume-command`), which the relay's doorway checks by the command-launch rules
+before forwarding. The type also has an agent variant (an agent type and its choices, composed by the helm exactly as
+for the launcher) for the agent CLI's launch flags; it never carries composed commands, so an agent cannot hand the helm
+arbitrary start and resume commands under an agent launch's YOLO verdict. A clone copies its source's stored launch
+exactly; a legacy source is refused with a remedy, because SPEC.md has agent clone refuse a session from before launch
+kinds.
 
 `Clone` resolves the explicitly named source's live owner, drains that owner's pinned connection, and rechecks the owner
 before dispatching to the destination. It does not use the helm's cache: a clone built from a cached row could copy a
@@ -1349,9 +1353,9 @@ is either the SOURCE or the ASKING session: a keyed replay must never be reporte
 fence on `agent_request_locks` that the lifecycle verbs take, since a create that completes while the asking credential
 is being invalidated would otherwise leave a session running that nobody was told about.
 
-A KEYED RETRY IS BOUND TO THE RESOLVED BUNDLE SENT TO THE SUPERVISOR. The fingerprint covers the invocation, agent kind,
-and resume template, so a clone whose source metadata changes between two attempts under one key makes the second
-request different and produces a conflict rather than replaying the first outcome under changed settings.
+A KEYED RETRY IS BOUND TO THE RESOLVED LAUNCH SENT TO THE SUPERVISOR. The fingerprint covers the whole launch, so a
+clone whose source launch changes between two attempts under one key makes the second request different and produces a
+conflict rather than replaying the first outcome under changed settings.
 
 The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
 number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
@@ -1377,18 +1381,6 @@ supervisor, as `spawn-<asking session>-<SHA-256 of the key>`; create's and clone
 ever replays for the session that used it. Spawn requires explicit `--inherit-agent`, which copies the asking session's
 exact stored launch bundle on its own supervisor and therefore works offline; the supervisor refuses a
 session-authenticated create without it, naming the flag. Agent create likewise requires an explicit command line.
-
-One divergence is worth stating rather than discovering later. A RAW clone — one whose source has no structured launch —
-copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
-and takes that kind's default resume template. A source created with an explicit `agent_kind` (including the explicit
-"no integration" the tri-state can express) or a custom `resume_template` therefore clones into a session whose
-conversation capture, status classification and restart behavior may differ from the original's. `SessionInfo` — the
-shape `drain_sessions` returns and the helm's only view of another host's session — now carries the recorded
-`agent_kind` (for the fleet `agent` label), but not the custom resume template, and an older supervisor's rows report
-`generic` without saying whether that was chosen or merely absent. Copying the integration faithfully would still mean
-putting the template on the wire and telling an explicit `generic` apart from a missing field; the invocation-only clone
-contract stands until something needs more. Refusing the raw clone instead is not available: SPEC.md promises a raw
-session "clones as that invocation".
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -1726,13 +1718,13 @@ evidence, but cannot authorize another directory move.
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
   vendors fire a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line
-  for a single launch, so farhelm appends itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting
-  over the supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch
-  already carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's
-  discriminator, sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies
-  its own value internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass
-  theirs on the spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it
-  as `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
+  for a single launch, so farhelm passes itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting over
+  the supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch already
+  carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's discriminator,
+  sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies its own value
+  internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
+  spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it as
+  `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
   Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
   (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
   they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
@@ -1747,14 +1739,16 @@ evidence, but cannot authorize another directory move.
   becomes an explicit step surfaced to the user, where the user is told what is being installed and accepts specific
   hooks; after that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt
   rather than at process start, so a Codex session's identity arrives only once the user has typed something, where
-  Claude's arrives at startup. And three invocation shapes disqualify a launch, which is skipped with a logged reason
-  rather than made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting
-  ours would silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag
-  risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and —
-  for either vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
-  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
-  once at supervisor start and carried as a seam value. Without an accepted report, a new session keeps the
-  uncaptured-identity fallback; no nearby record can supply a substitute identity.
+  Claude's arrives at startup. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved
+  launch"); nothing reads the rest of the command. Only a legacy session, from before launch kinds, still gets the
+  previous release's injection, appended after its argv, and for it three invocation shapes disqualify a launch, which
+  is skipped with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors
+  only the last one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook
+  configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the
+  user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
+  text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
+  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted
+  report, a new session keeps the uncaptured-identity fallback; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
   hook has one 30 s budget covering stdin and the round trip under 60 s outer timers where Farhelm sets or documents
   them; it retries a refused or missing socket for about 4 s. A connection that lived for at least about a second before
@@ -1774,9 +1768,11 @@ evidence, but cannot authorize another directory move.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
-  reporter and only supply current-launch enablement, executable, and instruction controls. The persisted command
-  contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume; it is part
-  of the surface newer binaries keep accepting (see "What running sessions hold across versions"). Its empty MCP
+  reporter and only supply current-launch enablement, executable, and instruction controls. Those controls, like Pi's
+  and OMP's reporter executable, ride in the launch spec's environment (`LaunchSpec.env`), which the shim sets on the
+  agent process alone; a legacy session still receives them as an `env NAME=value` prefix on its argv. The persisted
+  command contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume; it
+  is part of the surface newer binaries keep accepting (see "What running sessions hold across versions"). Its empty MCP
   interface reports `AGENT_SESSION_ID` when current Farhelm credentials enable it and carries the instruction pointer in
   the initialize result. Pi loads a versioned TypeScript artifact materialized with private permissions under Farhelm's
   state directory. The extension serializes `session_start` and `agent_end` reports, including the exact absolute
@@ -1805,21 +1801,15 @@ evidence, but cannot authorize another directory move.
   first-record rule, which stays exactly as strict as it was: one vendor's tolerance must not become the other's
   loosening. The cost of the separation is stated in SPEC.md — a title-less OMP version-3 header is
   byte-indistinguishable from a Pi-shaped file, so the vendor boundary is enforced by per-kind locator and report
-  acceptance, not by file bytes. OMP's resume template strips OMP's own session selectors before appending
-  `--resume <verified-file>`, because unlike Pi's, OMP's `--resume`/`-r`/`--session` consume optional values (and its
-  `--fork`, `--continue`, and import flags have their own shapes), so Pi's valueless-flag classification would leave an
-  old session source standing between the user and the verified target. An OMP argv containing a GENUINE end-of-options
-  delimiter (an unconsumed `--`, walked with the same argument grammar the stripper and the classifier share) refuses
-  the DERIVED template: everything after `--` is prompt text in OMP, so an appended resume target can never be read as
-  one, and refusing the create fails closed rather than persisting a template that cannot work. A `--` consumed as an
-  option value (`--system-prompt --`, a prompt spelled `--`) is not a delimiter and creates normally, and an explicit
-  template override — filled verbatim, never appended — creates normally behind a genuine delimiter too. Which OMP
-  launches get the extension is decided by an OMP-specific interactive-shape classifier following OMP's own command and
-  flag-consumption tables; Pi's classifier is untouched. The gated extension asset is materialized per vendor under
-  Farhelm's state directory (`integrations/omp/farhelm-conversation-v2.ts`, sourced from `assets/omp-conversation-v1.ts`
-  — the published name is versioned past the gateless `v1` bytes, published beside them never over them) with the same
-  exact-bytes, private-file, no-follow rules Pi's had, loaded with `-e <materialized path>` and pointed at the reporter
-  through `FARHELM_OMP_REPORTER_EXE` (scrubbed from preparation children like the Goose/Pi reporter variables; its only
+  acceptance, not by file bytes. An OMP agent launch's resume command is composed by the helm from the same choices as
+  its start command, with `--resume <verified-file>` after them; OMP's selector stripping and its end-of-options refusal
+  went with resume derivation in protocol 39. For a legacy session, which OMP launches get the extension is still
+  decided by an OMP-specific interactive-shape classifier following OMP's own command and flag-consumption tables; Pi's
+  classifier is untouched. The gated extension asset is materialized per vendor under Farhelm's state directory
+  (`integrations/omp/farhelm-conversation-v2.ts`, sourced from `assets/omp-conversation-v1.ts` — the published name is
+  versioned past the gateless `v1` bytes, published beside them never over them) with the same exact-bytes,
+  private-file, no-follow rules Pi's had, loaded with `-e <materialized path>` and pointed at the reporter through
+  `FARHELM_OMP_REPORTER_EXE` (scrubbed from preparation children like the Goose/Pi reporter variables; its only
   in-support consumer is the asset itself). The extension reports the current conversation id ONLY from the interactive
   context (`hasUI === true && mode === "tui"`, checked before identity, queueing, or any state): a child-shaped callback
   — native task, workpool, revived child, or throwing context — is a complete no-op that never touches parent state, and
@@ -2128,26 +2118,24 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   confirmation choices) every client shares.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
-  keep listing without a rewrite. When a raw create's resume template is absent for Claude or Codex, the supervisor
-  derives it by retaining the parsed original invocation argv and appending that kind's resume arguments; the argv is
-  captured before per-launch Farhelm hook injection. This deliberately assumes original arguments are reusable and has
-  no parser for initial prompts or launch-only options. OpenCode is a structured harness only: its release catalog holds
-  verified Zen model IDs, accepts an omitted model for OpenCode's configured default, passes explicit bare custom Zen
-  names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its empty effort vocabulary, generic activity
-  classifier, and absent resume template deliberately avoid claiming a provider-specific effort or conversation
-  lifecycle contract. Cursor likewise maps its structured harness to the existing Generic kind, with no resume template
-  or capture machinery. The structured harness launches `cursor-agent`: the YOLO classifier ignores the generic name
-  `agent`, so a launch spelled `agent --force` would escape the YOLO confirmation guard. Models use `--model`, with no
-  separate effort flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking
-  and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as
-  both a structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to
-  `--always-approve`, refuses model and effort choices, and stores
-  `grok --no-leader [--always-approve] --resume {conversation}` as argv elements. The dedicated kind preserves the
-  ownership policy across helm and supervisor storage. It uses the generic activity classifier while the manually
-  configured reporter supplies ownership-proven conversation capture. OMP is also a structured harness only at launch
-  time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the harness
-  default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a
-  literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
+  keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one
+  resolved launch"). Nothing derives a resume command since protocol 39: the helm composes an agent launch's start and
+  resume commands, a command launch carries its own, and a legacy session keeps what it stored. OpenCode is a structured
+  harness only: its release catalog holds verified Zen model IDs, accepts an omitted model for OpenCode's configured
+  default, passes explicit bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its
+  empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
+  provider-specific effort or conversation lifecycle contract. Cursor likewise maps its structured harness to the
+  existing Generic kind, with no resume template or capture machinery. The structured harness launches `cursor-agent`.
+  Models use `--model`, with no separate effort flag. The UI preserves its harness in launch intent while explicitly
+  disclosing the lack of tracking and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration
+  kind. Protocol 29 adds Grok as both a structured harness and a durable agent kind. Its compiler emits
+  `grok --no-leader`, maps YOLO to `--always-approve`, refuses model and effort choices, and stores
+  `grok --no-leader [--always-approve] --resume {conversation} {farhelm_args}` as argv elements. The dedicated kind
+  preserves the ownership policy across helm and supervisor storage. It uses the generic activity classifier while the
+  manually configured reporter supplies ownership-proven conversation capture. OMP is also a structured harness only at
+  launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the
+  harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit;
+  a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
   upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
   id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
   seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
@@ -2429,22 +2417,22 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - `POST /api/sessions/{id}/replace` (SPEC.md's "replace") is a composition of the create and delete this section already
   describes, not a third code path: it routes the source by owner lookup exactly like any other lifecycle operation,
   reads the source's row live from the owning host (the same live read `clone_for_agent`'s agent-CLI clone performs, and
-  for the same reason — the cache is for the stale list, never a source for a fresh mutation), derives a `CreateMode`
-  from that row through a function (`sessions::mode_from_source`) shared with `clone_for_agent`, then calls
-  `do_create_session` followed by a delete, reusing the ONE `(claim, client)` pair the owner lookup produced for both
-  calls rather than re-routing before the delete. The create half carries the same idempotency-replay veto
-  `clone_for_agent` gives its own create: a same-host replace with no overrides can reconstruct the source's own
-  creation fingerprint, so a caller reusing the source's key would otherwise receive the source row BACK as the
-  "replacement" — this route refuses that reply with `Conflict` before any bookkeeping runs, rather than deleting the
-  session it was just handed back. Create runs before delete so a failed create leaves the source untouched. A delete
-  that fails AFTER a successful create is reported one of two ways depending on whether the failure is a DEFINITE
-  answer: an explicit supervisor refusal, or a delete that never reached the wire at all, means the source was not
-  removed, and the reply names both ids and says both sessions still exist; a delete that reached the wire and then lost
-  its answer (the connection dying after the frame was sent, or any other post-send ending this client cannot interpret)
-  is NOT definite — the supervisor may have completed it — so the reply instead says the replacement exists and that the
-  source's fate is unknown and must be checked before deleting it again or retrying. Neither shape ever rolls the create
-  back (killing an agent the caller just asked for) or claims success (hiding a session, or an uncertainty, the caller
-  needs to see).
+  for the same reason — the cache is for the stale list, never a source for a fresh mutation), copies that row's stored
+  launch through a function (`sessions::mode_from_source`, which refuses a legacy session) shared with
+  `clone_for_agent`, then calls `do_create_session` followed by a delete, reusing the ONE `(claim, client)` pair the
+  owner lookup produced for both calls rather than re-routing before the delete. The create half carries the same
+  idempotency-replay veto `clone_for_agent` gives its own create: a same-host replace with no overrides can reconstruct
+  the source's own creation fingerprint, so a caller reusing the source's key would otherwise receive the source row
+  BACK as the "replacement" — this route refuses that reply with `Conflict` before any bookkeeping runs, rather than
+  deleting the session it was just handed back. Create runs before delete so a failed create leaves the source
+  untouched. A delete that fails AFTER a successful create is reported one of two ways depending on whether the failure
+  is a DEFINITE answer: an explicit supervisor refusal, or a delete that never reached the wire at all, means the source
+  was not removed, and the reply names both ids and says both sessions still exist; a delete that reached the wire and
+  then lost its answer (the connection dying after the frame was sent, or any other post-send ending this client cannot
+  interpret) is NOT definite — the supervisor may have completed it — so the reply instead says the replacement exists
+  and that the source's fate is unknown and must be checked before deleting it again or retrying. Neither shape ever
+  rolls the create back (killing an agent the caller just asked for) or claims success (hiding a session, or an
+  uncertainty, the caller needs to see).
 - "Replace with" (SPEC.md's bullet of that name) reuses the same endpoint through `ReplaceReq`'s optional `with` field —
   a whole `CreateReq`, the same type an ordinary create's body decodes into — rather than a second route or a second
   override type: present, its cwd/title/dimensions/mode selector are resolved exactly as an ordinary create's own body
@@ -2721,24 +2709,26 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting (see "What running
   sessions hold across versions"), as are the `farhelm agent` verbs below. The `--agent <name>` and `--profile-id <id>`
   selectors were removed with profiles; both are still parsed, hidden, only so they can be refused with a message saying
-  so and naming `--inherit-agent` or `farhelm agent create --invocation`.
+  so and naming `--inherit-agent` or `farhelm agent create --command`.
 - `farhelm agent hosts|sessions [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected credential
   spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a refusal on
   stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a model
-  quoting its own shell output. The JSON form uses schema version 4, includes exact IDs, caller identity, and
+  quoting its own shell output. The JSON form uses schema version 5, includes exact IDs, caller identity, and
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
   Version 3 is the restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while
   `resume` kept its spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent
-  type's word or `custom`, never a profile name, and the profiles listing is gone. `farhelm agent profiles` is still
-  parsed, hidden, only so it can be refused with a message saying profiles were removed. A session row's non-secret
-  `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it cannot
-  (`not-captured`, `no-reporting`; `not_captured` and `no_conversation_reporting` in JSON); it does not disclose the
-  template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is escaped to one
-  printable line and every non-final column is capped at 48 characters: these values are fleet-wide user text printed
-  straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title would otherwise
-  be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so a script
-  capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the relay and
-  is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
+  type's word or `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds:
+  `restart_offer` gained `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is
+  still parsed, hidden, only so it can be refused with a message saying profiles were removed. A session row's
+  non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it cannot
+  (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
+  `no_resume_command` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
+  recommendation. Every dynamic table cell is escaped to one printable line and every non-final column is capped at 48
+  characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an
+  ESC drives the terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its
+  rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no
+  timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see
+  the transport section's version-20 paragraph).
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
   credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
@@ -2751,10 +2741,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   restart resumes and to drop the flag. An explicit self-stop or self-restart may terminate the CLI before its line is
   printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
   warning before dispatch and treats a lost reply as unknown rather than success.
-- `farhelm agent create --host <name> --cwd <dir> --invocation <cmd> [--title ...] [--idempotency-key ...]` and
-  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
-  [--idempotency-key ...]` — the
-  in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
+- `farhelm agent create --host <name> --cwd <dir> --command <cmd> (--yolo | --no-yolo) [--agent <type>] [--resume-command <cmd>] [--title ...] [--idempotency-key ...]`
+  and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` —
+  the in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
   The id is the one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as
@@ -2769,12 +2759,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
   every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
   characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
-  ambiguous targets. `--cwd`, `--host` and `--invocation` are required on `create`; `--source-session` and `--host` are
-  required on clone. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can be
-  refused naming `--invocation`. Every value-taking option on both verbs carries `allow_hyphen_values`, because every
-  one of these values is judged downstream — by the registry, by the target filesystem — and every one of them may
-  legally begin with `-`; refusing such a value locally would be this CLI declining to carry a name the far end would
-  have explained.
+  ambiguous targets. `--cwd`, `--host`, `--command` and exactly one of `--yolo` and `--no-yolo` are required on
+  `create`, so a command launch's YOLO assertion is always stated; `--source-session` and `--host` are required on
+  clone. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can be refused
+  naming `--command`, and the retired `--invocation` is parsed, hidden, only to be refused naming `--command` and the
+  YOLO flags. Every free-text value option on both verbs carries `allow_hyphen_values` (`--agent` does not: it takes an
+  agent type's word, and an unknown one is refused listing them all), because every one of these values is judged
+  downstream — by the registry, by the target filesystem — and every one of them may legally begin with `-`; refusing
+  such a value locally would be this CLI declining to carry a name the far end would have explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer
@@ -3278,10 +3270,15 @@ unchanged), agent profiles are removed with no conversion (SPEC.md's launch-kind
 `farhelm agent profiles`, `farhelm agent create --profile` and `--profile-id`, and `farhelm spawn --agent <name>` and
 `--profile-id` are refused with a message naming what to use instead, a session's `agent` in `farhelm agent sessions` no
 longer carries a profile name and the JSON envelope moved to schema version 4, and a profile-backed create's idempotency
-key from before the removal is refused rather than replayed, see "Launch-kinds reservations"), and OMP admission accepts
-only the current binary's reporter asset. The last one keeps biting: any change to the OMP asset's bytes or name makes
-every OMP session started before it lose conversation tracking until relaunched, so such a change is exactly the kind of
-retirement this section asks to be surfaced.
+key from before the removal is refused rather than replayed, see "Launch-kinds reservations"), launch kinds retire
+`farhelm agent create --invocation` and the REST create body's `invocation`, `agent_kind` and `resume_template` (each is
+refused naming `--command` or `command` and its fields; `farhelm agent sessions` may report the new offer
+`no_resume_command`, and its JSON envelope moved to schema version 5), plain Replace, `farhelm agent clone`,
+`farhelm spawn --inherit-agent` and Restart with refuse a session from before launch kinds with a remedy, and every
+create-idempotency key from before launch kinds is refused rather than replayed (see "Launch-kinds reservations"), and
+OMP admission accepts only the current binary's reporter asset. The last one keeps biting: any change to the OMP asset's
+bytes or name makes every OMP session started before it lose conversation tracking until relaunched, so such a change is
+exactly the kind of retirement this section asks to be surfaced.
 
 ### Restart only resumes
 
@@ -3289,9 +3286,10 @@ SPEC.md makes Restart mean resuming the session's own conversation, so the wire 
 `RestartOffer` is `resume` when the supervisor can fill the session's resume command with a captured conversation it
 accepts, and otherwise names why it cannot: `not_captured` for an agent type that reports conversations but has no
 usable identity (nothing reported yet, an identity from before ownership proofs, a Pi or OMP file that no longer
-matches), and `no_conversation_reporting` for a session with no integration at all. `resume` kept its spelling because
-agents in running sessions read it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the
-`mode` field from `RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose
+matches), `no_conversation_reporting` for a session with no integration at all, and `no_resume_command` (protocol 39)
+for a command launch that declared an agent type without opting into Resume. `resume` kept its spelling because agents
+in running sessions read it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode`
+field from `RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose
 current offer is not `resume` is refused with a `Conflict` naming the reason, before anything is stopped, and the fresh
 relaunch of the stored invocation and the verbatim run of a placeholder-free template are gone. Such a template is still
 accepted at create on a non-integrated kind and stored, but never run.
@@ -3310,35 +3308,88 @@ create-idempotency reservations already on disk were written for the old shapes.
 compatibility added for them. A key is matched by plain string equality between the stored fingerprint and the
 fingerprint of the retry, so a retry that crosses the upgrade with an old key whose shape changed is refused as key
 reuse (`Conflict`) and never runs a second launch, while one whose shape did not (a raw create into an existing
-directory, whose fingerprint is a frozen tuple) still replays; deleting the rows instead would let one intended create
-start two sessions, which SPEC.md forbids. The frozen fingerprint encoder for a helm-resolved profile bundle
-(`"resolved_profile"`, added in protocol 15) was deleted with profiles: nothing produces that shape any more, and its
-stored rows need no encoder to stay unmatchable.
+directory, whose fingerprint is a frozen tuple) still replayed until launch kinds; deleting the rows instead would let
+one intended create start two sessions, which SPEC.md forbids. The frozen fingerprint encoder for a helm-resolved
+profile bundle (`"resolved_profile"`, added in protocol 15) was deleted with profiles: nothing produces that shape any
+more, and its stored rows need no encoder to stay unmatchable.
+
+Launch kinds (protocol 39, supervisor schema 26) change every create's shape: each now fingerprints as
+`("session_launch_v1", parent, cwd, title, launch)` with the resolved launch whole, and the raw, parented and structured
+encoders were deleted. So every key stored before launch kinds, raw ones included, is refused as key reuse on a retry
+that crosses the upgrade, never replayed and never run twice; a pending claim from before the upgrade stays pending, its
+row not launched, until the session is deleted. The fresh-checkout snapshot moved to `github_checkout_v4`, carrying the
+resolved launch; a `github_checkout_v3` row no longer decodes and is refused with the explicit message below. The helm's
+own fresh-create request identity moved to `github_create_request_v2` for the same reason, so a lost-reply
+fresh-checkout retry across the upgrade is refused as a different request.
 
 A fresh-checkout reservation stores a serialized create mode so recovery can relaunch the accepted request after a lost
-reply. Every one stored before the upgrade carries the removed `source_profile` member, null or not. It still decodes,
-because the decoder ignores the removed member, so recovery from such a row still works; it never re-encodes to its
-stored string, so a retry of it under the same key is refused as key reuse rather than matched. The helm's fresh-create
-retry looks the key up first and reuses the stored string, so a lost reply from before the upgrade is still recovered
-rather than refused. A stored mode that fails to decode under the current types is refused explicitly ("no compatible
-fresh-checkout recovery snapshot") rather than treated as an unknown key, which would otherwise allocate a second
-checkout.
+reply. Under profile removal alone (protocol 38) a row stored before it still decoded, because the decoder ignored the
+removed `source_profile` member, and the helm's fresh-create retry reused the stored string, so such a lost reply was
+still recovered. Launch kinds end that: every row from before them is `github_checkout_v3`, and a stored mode that fails
+to decode under the current types is refused explicitly ("no compatible fresh-checkout recovery snapshot") rather than
+treated as an unknown key, which would otherwise allocate a second checkout. A deleted session's tombstone keeps the
+digest of its client identity for both encodings, so a retry after Delete is still told the session was deleted, or that
+the key belongs to another request, whichever encoding its reservation was written in.
+
+The 64 KiB create bound counts the launch as the JSON it is stored and fingerprinted as, so quotes and backslashes in a
+command count twice and the field names count too; this is slightly stricter than counting the text the user typed.
+Restart with applies the same bound to its replacement launch.
 
 ### Restart-with backend wire and persistence
 
-`RestartSession` optionally carries the compiled structured launch bundle: `invocation`, `launch`, and
-`resume_template`. Protocol 30 adds these fields; the exact-version handshake refuses an older peer, because one that
-ignored them would relaunch with the old settings and still report success. A selection the catalog refuses is a 400
-from the helm and never reaches the supervisor. The helm compiles a supplied `LaunchSelection` and passes those fields
-through without checking cached offer or harness state; attached-session relay calls omit them. The supervisor
-revalidates the current stored structured selection, fixed harness, and `Resume` offer immediately before destructive
-work, then resolves and fills the supplied template using the same executable and integration checks as create. After
-the new process spawns, one generation-fenced store write updates invocation, launch, and the resolved resume template
-while leaving the integration kind and working directory fixed. A compiler-omitted template is resolved before this
-write, so the saved row retains the concrete template required to resume. A spawn failure leaves the prior bundle
-untouched. If the post-spawn write fails after an otherwise successful relaunch, the restart still reports success
-because the new process is already running; the failure is logged, and the reply and live session retain the old stored
-settings. A relaunch that published its new process but hit an independent cleanup or reply error still attempts the
-bundle write and retains that error reply. A later restart uses the saved settings, or the old settings if the write
-failed, as it would after a crash between spawn and the write. This is the only exception to the ordinary create-time
-immutability of those launch columns, and the fixed kind avoids PATH-dependent kind re-derivation.
+`RestartSession` optionally carries `with`, the replacement launch (protocol 39; protocol 30 carried a compiled
+structured bundle instead), and the exact-version handshake refuses an older peer, because one that ignored it would
+relaunch with the old settings and still report success. The helm resolves what the caller sent before routing: an agent
+type and its choices composed by the catalog (a refused choice is a 400 that never reaches the supervisor), or a command
+launch checked by the command-launch rules; the REST body names one of `with` (choices) or `with_command`.
+Attached-session relay calls omit it. The supervisor validates the launch exactly as create does before it looks the
+session up, then, before destructive work, checks it against the stored launch (same launch kind and agent type, a
+resume command, no legacy session) and the current `Resume` offer, and fills the new resume command with the captured
+conversation. After the new process spawns, one generation-fenced store write replaces the stored launch while the
+working directory stays fixed. A spawn failure leaves the prior launch untouched. If the post-spawn write fails after an
+otherwise successful relaunch, the restart still reports success because the new process is already running; the failure
+is logged, and the reply and live session retain the old stored launch. A relaunch that published its new process but
+hit an independent cleanup or reply error still attempts the write and retains that error reply. A later restart uses
+the saved launch, or the old one if the write failed, as it would after a crash between spawn and the write. This is the
+only exception to the ordinary create-time immutability of a session's launch.
+
+### Launch kinds: one resolved launch
+
+SPEC.md's launch kinds are one type end to end, `farhelm_proto::SessionLaunch`: an agent launch (the agent type's
+selection with the start and resume argv the helm composed from it), a command launch (`CommandLaunch`: the command,
+YOLO assertion, optional declared agent type and resume command, as written), or a legacy launch (a pre-existing
+session's stored invocation, agent kind and resume template, untouched). The helm resolves every create to one before
+contacting a supervisor; the supervisor validates it (`SessionLaunch::validate_new`, which refuses a legacy launch),
+stores it whole in the `sessions.session_launch` JSON column, and every later operation reads that value: restart and
+Restart with, clone and replace, inheritance, the YOLO guard and mark, and the integration snapshot capture uses
+(`IntegrationSnapshot::of`, the kind and resume argv, derived and never re-guessed). An agent's create carries a
+`LaunchRequest` instead (see the agent relay above), which never holds composed argv.
+
+The helm composes an agent launch's start command with `{farhelm_args}` last, and for an agent type with conversation
+reporting a resume command that adds the type's resume selector after the start command's choices and then
+`{farhelm_args}`; Muse, Cursor and OpenCode get none. `{farhelm_args}` sits where the previous release appended
+Farhelm's arguments, so an upgraded session and a new one spawn alike. At spawn the supervisor fills `{cwd}` (and the
+compiler's Codex trust markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch kinds and are
+filled in any launch that contains one, a command launch included, so a command copied from a composed Codex launch
+keeps working; SPEC.md's list of a command launch's placeholders does not name them), then replaces `{farhelm_args}`
+with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume and never shown
+the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the agent process alone,
+after scrubbing inherited reporter variables. Goose is the one kind whose integration the environment still switches:
+its reporter is persisted in the resumed session, so a resume carries no argument and only
+`FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
+(`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
+OMP's process attribution (`classify_omp_launch`), which reads the program word of every OMP launch, new ones included,
+to choose how the running process is matched to the session; it decides nothing about YOLO, agent type or resume. The
+`env`-prefix helpers in `farhelm_proto::yolo` stay for these two. The command-line YOLO classifier, resume derivation
+(`default_resume_template`, the ambiguous-selector refusals, the selector strippers) and kind derivation from the
+program's basename are gone.
+
+Supervisor schema 26 converts each row in one transaction by `SessionLaunch::from_pre_launch_kinds`: a row with a stored
+structured selection becomes an agent launch whose stored start and resume commands gain `{farhelm_args}` at the end,
+and every other row, or a structured one that would not make a valid agent launch, becomes legacy. A row whose old
+columns no longer decode fails the upgrade rather than being guessed at, since the load path already refused it. The
+`invocation`, `agent_kind`, `resume_template` and `launch` columns are dropped; `SessionInfo` keeps `invocation` (the
+launch's display command) and `agent_kind` (its integration kind) as derived conveniences for its readers. Helm schema
+37 rewrites each cached session row by the same rule, adding `launch` and dropping `resume_template`, so a host that is
+down at the upgrade keeps its sessions listed until it returns; a cached row with no string `invocation` is left for the
+reader's skip-and-log policy.

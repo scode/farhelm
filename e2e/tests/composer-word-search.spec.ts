@@ -17,6 +17,7 @@
 import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext } from "@playwright/test";
 import { cleanupSession, FAKE_AGENT, SESSION_LISTING } from "./helpers/fleet";
+import { answerYolo } from "./helpers/term";
 
 type CatalogModel = {
   id: string;
@@ -134,8 +135,10 @@ test("composer word search drives a structured launch", async ({ page, request }
 
   let created: ListedSession | undefined;
   await expect.poll(async () => {
-    created = (await listedSessions(request)).find((session) => !before.has(session.id) && session.launch);
-    return created?.launch ?? null;
+    created = (await listedSessions(request)).find(
+      (session) => !before.has(session.id) && session.launch?.kind === "agent",
+    );
+    return created?.launch?.selection ?? null;
   }, { message: "the ordinary Launch path must persist the structured selection" }).toMatchObject({
     harness: "codex",
     model: model.id,
@@ -302,12 +305,14 @@ test("New selects other command explicitly and preserves the raw invocation", as
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
   await expect(search, "folder acceptance keeps focus in shared search").toBeFocused();
 
+  // A command launch needs its YOLO answer before it can be submitted.
+  await answerYolo(form);
   const [response] = await Promise.all([
     page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions")),
     form.locator(".create-session-submit").click(),
   ]);
   const body = response.request().postDataJSON();
-  expect(body).toMatchObject({ invocation: FAKE_AGENT });
+  expect(body).toMatchObject({ command: { command: FAKE_AGENT, yolo: false } });
   expect(body).not.toHaveProperty("launch");
   const created = await response.json() as ListedSession;
   await cleanupSession(request, created.id);

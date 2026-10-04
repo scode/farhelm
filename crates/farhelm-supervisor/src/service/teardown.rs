@@ -1176,10 +1176,11 @@ mod tests {
     use tokio::sync::{mpsc, oneshot, watch};
 
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, test_admission};
-    use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
+    use super::super::core::{CreateInputs, SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::{SessionSinkHandle, SessionSinkLease, SinkRegistryState};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
+    use farhelm_proto::SessionLaunch;
 
     /// Seed a terminal-less, scoped session so teardown tests can isolate the
     /// cgroup verdict from tmux discovery and pane ownership.
@@ -1234,13 +1235,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 0,
@@ -2133,13 +2135,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
                     generation: 4,
@@ -2195,13 +2198,14 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.to_string(),
-                    invocation: "agent".to_string(),
-                    launch: None,
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".to_string(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
                     canonical_cwd: Some(cwd.to_string()),
                     captured_conversation: None,
                     generation: 0,
@@ -3658,12 +3662,7 @@ mod tests {
             cwd,
             parent: None,
             github_checkout: None,
-            mode: CreateMode::Raw {
-                invocation: "agent".into(),
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
-            },
+            launch: SessionLaunch::plain_command("agent"),
             title: None,
             cols: 80,
             rows: 24,

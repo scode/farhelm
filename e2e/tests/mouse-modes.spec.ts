@@ -588,15 +588,17 @@ test("drag-copy notice: a Codex session gets Codex's own instruction", async ({
     title: `drag-notice-codex-${Date.now()}`,
     cwd: "/tmp",
     invocation: stub,
+    // Declared, since Farhelm no longer reads the program's name to decide
+    // which agent it is.
+    agent_kind: "codex",
   });
   try {
-    // The premise everything below rests on: the supervisor classified the
-    // stub as Codex from its basename.
+    // The premise everything below rests on: the session runs as Codex.
     await expect
       .poll(
         async () =>
           (await listSessions(request)).sessions.find((row) => row.id === session.id)?.agent_kind,
-        { timeout: 15_000, message: "the stub named codex must be classified as a Codex session" },
+        { timeout: 15_000, message: "the stub declared as Codex must list as a Codex session" },
       )
       .toBe("codex");
     await page.goto("/");

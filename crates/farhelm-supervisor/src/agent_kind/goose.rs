@@ -51,8 +51,7 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
     if enabled && !shape.resuming {
         argv.extend([
             "--with-extension".to_string(),
-            "farhelm-reporter:sh -c 'exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook'"
-                .to_string(),
+            REPORTER_EXTENSION.to_string(),
         ]);
     }
     let controls = [
@@ -78,6 +77,63 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
         log: super::HookLog::Silent,
     }
 }
+
+/// Goose's `{farhelm_args}` (the Goose arm of
+/// [`super::AgentIntegration::farhelm_args`]).
+///
+/// A start gets the `farhelm-reporter` extension as an argument. A resume
+/// gets no argument: Goose persisted that extension in the session it
+/// resumes, so the reporter is switched on or off only through
+/// `FARHELM_GOOSE_REPORTER_ENABLED`, which is why both phases carry the
+/// reporter's environment even with hooks disabled. That is SPEC.md's one
+/// accepted use of the environment to control integration. An agent launch
+/// already names Goose's `session` subcommand, so nothing is inserted.
+pub(crate) fn farhelm_args(
+    phase: super::LaunchPhase,
+    policy: &HookPolicy<'_>,
+) -> super::FarhelmArgs {
+    let Some(exe) = policy.exe else {
+        return super::FarhelmArgs::skipped("farhelm executable path is not utf-8");
+    };
+    let enabled = policy.hooks.allows(farhelm_proto::AgentKind::Goose);
+    let resuming = phase == super::LaunchPhase::Resume;
+    if !enabled && !resuming {
+        return super::FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+    }
+    let args = if enabled && !resuming {
+        vec![
+            "--with-extension".to_string(),
+            REPORTER_EXTENSION.to_string(),
+        ]
+    } else {
+        Vec::new()
+    };
+    super::FarhelmArgs {
+        args,
+        env: vec![
+            (
+                crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR.to_string(),
+                u8::from(enabled).to_string(),
+            ),
+            (
+                crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR.to_string(),
+                u8::from(enabled && policy.instructions.announces()).to_string(),
+            ),
+            (
+                crate::launch::GOOSE_REPORTER_EXE_ENV_VAR.to_string(),
+                exe.to_string(),
+            ),
+        ],
+        hooked: enabled,
+        log: super::HookLog::Silent,
+    }
+}
+
+/// The `--with-extension` value that declares Farhelm's reporter: an MCP
+/// stdio server that runs `farhelm internal goose-hook` through the
+/// executable the launch environment names.
+pub(crate) const REPORTER_EXTENSION: &str =
+    "farhelm-reporter:sh -c 'exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook'";
 
 #[derive(Clone, Copy)]
 /// Facts needed to inject once on fresh Goose launches and reuse its saved

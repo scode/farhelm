@@ -195,7 +195,7 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
             &format!("{}/api/sessions", helm.base),
             serde_json::json!({
                 "cwd": work.path().to_string_lossy(),
-                "invocation": fixture_cmd("fake-agent --script basic"),
+                "command": {"command": fixture_cmd("fake-agent --script basic"), "yolo": false},
                 "title": title,
                 "host": host,
             }),

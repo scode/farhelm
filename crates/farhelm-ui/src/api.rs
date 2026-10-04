@@ -58,7 +58,9 @@ use crate::github_checkout::{
     FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
 };
 use crate::skew;
-use crate::{Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Session, Tab};
+use crate::{
+    CommandLaunch, Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Session, Tab,
+};
 use serde::Deserialize;
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
@@ -1504,8 +1506,8 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 /// about to send, and a create is one request rather than something stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CreateAgent<'a> {
-    /// A raw invocation, shell-split by the supervisor.
-    Command(&'a str),
+    /// A command launch, sent as the user wrote it.
+    Command(&'a CommandLaunch),
     /// Structured intent compiled by the helm into one safe invocation.
     Structured(&'a LaunchSelection),
 }
@@ -1776,7 +1778,7 @@ async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<Strin
 ///
 /// Split from the request purely so the two rules it has to keep can be
 /// exercised without a helm: the title's absent-versus-empty distinction, and
-/// the creation mode's exclusivity — a body carrying both `invocation` and
+/// the launch kind's exclusivity — a body carrying both `command` and
 /// `launch`, or neither, is a 400 rather than a create, and the failure
 /// would arrive at the moment a user pressed the button.
 fn create_body(
@@ -1803,7 +1805,7 @@ fn create_body(
     // each caller has to remember, and there is no honest merge to fall back
     // on.
     match agent {
-        CreateAgent::Command(invocation) => body["invocation"] = serde_json::json!(invocation),
+        CreateAgent::Command(command) => body["command"] = serde_json::json!(command),
         CreateAgent::Structured(selection) => body["launch"] = serde_json::json!(selection),
     }
     // The connection this create was prepared against: the directory and the
@@ -3715,28 +3717,42 @@ mod tests {
         );
     }
 
-    /// A create names exactly ONE of the two modes, never both and never
-    /// neither.
+    /// A create names exactly ONE of the two launch kinds, never both and
+    /// never neither, and a command launch travels whole under `command`.
     ///
     /// The helm refuses both illegal shapes with a 400, so getting this wrong
     /// fails at the moment a user presses create — and the "both" shape is
-    /// the one a client reaches by accident, by keeping a stale invocation
-    /// beside a freshly chosen structured launch. Asserting the ABSENCE of
-    /// the other key is therefore the load-bearing half of each case.
+    /// the one a client reaches by accident, by keeping a stale command
+    /// beside a freshly chosen agent. Asserting the ABSENCE of the other key
+    /// is therefore the load-bearing half of each case. The retired
+    /// `invocation` key must not reappear either: the helm refuses it by
+    /// name.
     #[farhelm_testtrace::test]
     fn a_create_body_carries_one_creation_mode_and_not_the_other() {
         let raw = create_body(
             "/tmp",
-            CreateAgent::Command("claude"),
+            CreateAgent::Command(&crate::CommandLaunch {
+                command: "claude".to_string(),
+                yolo: false,
+                agent: None,
+                resume: None,
+            }),
             "",
             "key-1",
             Some(7),
             Some(11),
         );
-        assert_eq!(raw["invocation"], serde_json::json!("claude"));
+        assert_eq!(
+            raw["command"],
+            serde_json::json!({"command": "claude", "yolo": false, "agent": null, "resume": null})
+        );
         assert!(
             raw.get("launch").is_none(),
-            "a raw create must not also name a structured launch"
+            "a command launch must not also name an agent launch"
+        );
+        assert!(
+            raw.get("invocation").is_none(),
+            "the retired field stays out"
         );
         assert_eq!(
             raw["title"],
@@ -3763,8 +3779,8 @@ mod tests {
         );
         assert_eq!(structured["launch"], serde_json::json!(selection));
         assert!(
-            structured.get("invocation").is_none(),
-            "a structured launch states what to run, and a body naming both is refused outright"
+            structured.get("command").is_none(),
+            "an agent launch states what to run, and a body naming both is refused outright"
         );
         assert_eq!(structured["title"], serde_json::json!("named"));
     }
@@ -3793,7 +3809,15 @@ mod tests {
             workspace_trust: None,
         };
         for (agent, selector) in [
-            (CreateAgent::Command("agent"), "invocation"),
+            (
+                CreateAgent::Command(&crate::CommandLaunch {
+                    command: "agent".to_string(),
+                    yolo: false,
+                    agent: None,
+                    resume: None,
+                }),
+                "command",
+            ),
             (CreateAgent::Structured(&selection), "launch"),
         ] {
             let body = fresh_create_body(agent, "intent", 3, &checkout);
@@ -3803,7 +3827,7 @@ mod tests {
             assert_eq!(body["host"], 3);
             assert_eq!(body["expected_incarnation"], 5);
             assert!(body["title"].is_null());
-            for key in ["invocation", "launch"] {
+            for key in ["command", "launch"] {
                 assert_eq!(body.get(key).is_some(), key == selector);
             }
         }
@@ -3820,7 +3844,12 @@ mod tests {
     fn a_create_names_the_connection_it_was_prepared_against() {
         let body = create_body(
             "/tmp",
-            CreateAgent::Command("claude"),
+            CreateAgent::Command(&crate::CommandLaunch {
+                command: "claude".to_string(),
+                yolo: false,
+                agent: None,
+                resume: None,
+            }),
             "",
             "key",
             Some(3),
@@ -3829,7 +3858,12 @@ mod tests {
         assert_eq!(body["expected_incarnation"], serde_json::json!(12));
         let unguarded = create_body(
             "/tmp",
-            CreateAgent::Command("claude"),
+            CreateAgent::Command(&crate::CommandLaunch {
+                command: "claude".to_string(),
+                yolo: false,
+                agent: None,
+                resume: None,
+            }),
             "",
             "key",
             Some(3),

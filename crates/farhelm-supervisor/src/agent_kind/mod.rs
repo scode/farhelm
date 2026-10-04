@@ -7,25 +7,21 @@
 //! buys three different things:
 //!
 //! 1. **The kind seam and its per-session snapshot** (PLAN_M3.md item 7).
-//!    At create time a session records its agent kind and how a resume
-//!    would be invoked. The kind stays fixed; restart-with can replace the
-//!    resume template after a new process spawns. Kind derivation is honestly
-//!    dumb — the basename of the invocation's first token — and is done
-//!    ONCE, never re-guessed later. Doing it once is not caching but stability:
-//!    re-deriving later would consult a PATH, a filesystem, and a heuristic
-//!    that may all have changed since, so a session could silently become a
-//!    different kind between two restarts and resume through a template
-//!    that never matched the agent actually running. A RESUME TEMPLATE may
-//!    carry both placeholders; a launch invocation carries only
-//!    [`CWD_PLACEHOLDER`], because nothing ever substitutes
-//!    [`CONVERSATION_PLACEHOLDER`] into an invocation — written there it
-//!    survives as literal text on the agent's command line. The two obey
-//!    the same whole-element rule and are filled at different moments:
-//!    [`CONVERSATION_PLACEHOLDER`] when the resume argv is built
-//!    ([`IntegrationSnapshot::filled_resume_argv`]), and
-//!    [`CWD_PLACEHOLDER`] at spawn time in `Supervisor::spawn_agent`,
-//!    which is the only place the launch's working directory is known on
-//!    every path.
+//!    A session's kind and resume command come from its launch
+//!    ([`farhelm_proto::SessionLaunch`]), never from reading its command:
+//!    an agent launch's agent type, a command launch's DECLARED type (none
+//!    means [`AgentKind::Generic`]), or a legacy session's stored kind.
+//!    [`IntegrationSnapshot::of`] derives the snapshot from the launch, so
+//!    it cannot drift from what the session was created with. A resume
+//!    command carries [`CONVERSATION_PLACEHOLDER`] and, for a new launch,
+//!    [`FARHELM_ARGS_PLACEHOLDER`]; a start command never carries
+//!    [`CONVERSATION_PLACEHOLDER`], which nothing would fill. Every
+//!    placeholder obeys the same whole-element rule and is filled at its own
+//!    moment: [`CONVERSATION_PLACEHOLDER`] when the resume argv is built
+//!    ([`IntegrationSnapshot::filled_resume_argv`]), and [`CWD_PLACEHOLDER`]
+//!    and [`FARHELM_ARGS_PLACEHOLDER`] at spawn time in
+//!    `Supervisor::spawn_agent`, the only place the launch's working
+//!    directory and this launch's hook policy are known on every path.
 //! 2. **Conversation identity from reports.** Each integrated agent names its
 //!    own conversation through a hook, plugin, or extension. Exact-file checks
 //!    verify a reported target; they never discover an identity. Locator
@@ -66,15 +62,21 @@
 //!   harnesses to their marks in `icons.rs`. One exception keeps a direct
 //!   comparison: the new-session form's Cursor support notice
 //!   (`list/create_form.rs`). The browser's per-agent facts are keyed on the
-//!   agent KIND rather than the harness, so they also cover raw launches:
+//!   agent KIND rather than the harness, so they also cover command and
+//!   legacy launches:
 //!   they live in the exhaustive functions of `SessionAgentKind` in
 //!   `farhelm-ui/src/lib.rs`, the browser's tolerant mirror of
 //!   [`farhelm_proto::AgentKind`] (today the copy instruction the terminal's
 //!   "this drag did not copy" notice offers).
+//! - **What an agent launch runs and resumes with.** The helm's compiler
+//!   (`farhelm-helm/src/launches.rs`): the start command from the choices,
+//!   and `resume_arguments`, the per-harness resume selector the resume
+//!   command adds (none for Muse, Cursor and OpenCode).
 //! - **Pure per-kind decisions in the supervisor.** This module: one
-//!   [`AgentIntegration`] impl per kind (resume template, record parsing,
-//!   hook argv, [`AgentIntegration::inject_hooks`],
-//!   [`AgentIntegration::ambiguous_derived_resume`]), the exhaustive
+//!   [`AgentIntegration`] impl per kind (record parsing, hook argv,
+//!   [`AgentIntegration::farhelm_args`] for what a new launch's
+//!   `{farhelm_args}` expands to on start and on resume, and the legacy
+//!   [`AgentIntegration::inject_hooks`]), the exhaustive
 //!   per-kind functions below (ownership, locators, resume verification,
 //!   report vocabularies, executable names), and one file per kind
 //!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `omp.rs`, `pi.rs`) for
@@ -142,7 +144,7 @@
 //! can never participate in a deadlock. Replies never run a reader; they
 //! read the stored result.
 
-use farhelm_proto::{AgentKind, RestartOffer};
+use farhelm_proto::{AgentKind, RestartOffer, SessionLaunch};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -171,31 +173,18 @@ pub(crate) use records::{
     read_complete as read_complete_bounded_regular_file, read_prefix as read_bounded_regular_file,
 };
 
-/// The one argv element a resume template may use to mean "substitute the
-/// captured conversation identity here".
-///
-/// Matched by EXACT, whole-element equality — never as a substring — which
-/// is PR3's wire contract (`ControlMsg::CreateSession::resume_template`'s
-/// own docs) and is what keeps `--resume={conversation}` from silently
-/// looking like it works. A structural argv vector is also why quoting
-/// never enters into it: a path with spaces survives as one element.
-pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
-
-/// The one argv element an invocation or resume template may use to mean
-/// "substitute the session's working directory here" — the directory the
-/// launch hands tmux as the pane's cwd, spelled exactly as tmux gets it.
-///
-/// Exists for wrapper launchers shaped like `wrapper run <dir> <agent...>`,
-/// which need the directory as an ARGUMENT rather than as an ambient
-/// value. Without it, one command line could only ever launch into a single
-/// hardcoded directory. `{cwd}` keeps that argument aligned with the launch's
-/// actual working directory, including when one command serves many projects.
-///
-/// Same rules as [`CONVERSATION_PLACEHOLDER`], for the same reasons: EXACT
-/// whole-element equality (`--dir={cwd}` is literal text, not a match),
-/// substitution into the element's own slot so the path is never quoted
-/// or word-split, and never as `argv[0]` (see [`ensure_no_cwd_program`]).
-pub const CWD_PLACEHOLDER: &str = "{cwd}";
+/// The launch placeholders, defined beside [`SessionLaunch`] because the
+/// helm composes and checks them too; re-exported here because this module
+/// fills them. Each is matched by EXACT whole-element equality, never as a
+/// substring (`--dir={cwd}` is literal text), so a value is substituted into
+/// its own argv slot and never quoted or word-split, and none may stand as
+/// `argv[0]` (see [`ensure_no_cwd_program`]). `{conversation}` is filled when
+/// the resume argv is built ([`IntegrationSnapshot::filled_resume_argv`]),
+/// `{cwd}` and `{farhelm_args}` at spawn in `Supervisor::spawn_agent`, the
+/// only place the launch's working directory is known on every path.
+pub use farhelm_proto::session_launch::{
+    CONVERSATION_PLACEHOLDER, CWD_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER,
+};
 
 /// Structured Codex launches defer their project-trust override until the
 /// target supervisor knows the final working directory. Each marker is one
@@ -216,6 +205,7 @@ pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
 pub const RESERVED_PLACEHOLDERS: &[&str] = &[
     CWD_PLACEHOLDER,
     CONVERSATION_PLACEHOLDER,
+    FARHELM_ARGS_PLACEHOLDER,
     CODEX_TRUSTED_CWD_PLACEHOLDER,
     CODEX_UNTRUSTED_CWD_PLACEHOLDER,
 ];
@@ -377,25 +367,6 @@ fn validate_locator(vendor: LocatorVendor, locator: &SessionLocator) -> anyhow::
 /// [`screen_reader`], so a kind can have one without an integration and the
 /// reverse.
 pub trait AgentIntegration: Send + Sync {
-    /// The resume invocation this kind gets by default, preserving the
-    /// complete original launch argv before Farhelm appends per-launch hook
-    /// arguments. Resume arguments are deliberately appended as argv
-    /// elements so the user's argument boundaries survive without shell
-    /// reconstruction.
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String>;
-
-    /// Why a DERIVED resume template cannot work for this invocation, or
-    /// `None` when it can.
-    ///
-    /// `original_argv` is the whole launch argv, program first; only kinds
-    /// with such a case look past the program. Only consulted when the
-    /// create supplied no explicit template: an override is filled verbatim
-    /// rather than appended to, so the ambiguity this guards against (where
-    /// [`AgentIntegration::default_resume_template`]'s appended selector would
-    /// land) does not arise for it. Required rather than defaulted so a new
-    /// kind decides whether its derived shape has such a case.
-    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError>;
-
     /// Parse the bounded header of an exact reported record.
     ///
     /// Pi and OMP use this seam to verify their file locators; kinds without that
@@ -457,6 +428,132 @@ pub trait AgentIntegration: Send + Sync {
     /// [`inject_hook_argv_tail`]. Required so a new kind states its
     /// decision rather than inheriting another kind's.
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection;
+
+    /// What `{farhelm_args}` expands to for a launch of this kind: the
+    /// arguments that turn on its conversation reporting (and the
+    /// instructions pointer), plus the settings its reporter reads from the
+    /// environment once an argument has turned it on.
+    ///
+    /// The launch says where the arguments go, by where it put the
+    /// placeholder, and `phase` says which of its commands is starting;
+    /// nothing here reads the command (SPEC.md forbids Farhelm parsing a
+    /// command line). Environment variables never turn integration on
+    /// (SPEC.md: every process the agent starts inherits them, nested
+    /// agents included); the one exception is Goose, whose reporter
+    /// extension is persisted in its own session and can only be switched
+    /// off on resume through the environment. Pure like
+    /// [`AgentIntegration::inject_hooks`]: the caller logs and applies the
+    /// result. Legacy sessions never reach this; they keep
+    /// [`AgentIntegration::inject_hooks`].
+    fn farhelm_args(&self, phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs;
+}
+
+/// Which of a launch's two commands a spawn runs. Only Goose's arguments
+/// differ between them: its reporter extension, once added, persists in the
+/// resumed session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchPhase {
+    Start,
+    Resume,
+}
+
+/// One kind's expansion of `{farhelm_args}` for one spawn (see
+/// [`AgentIntegration::farhelm_args`]): the arguments placed at the
+/// placeholder, the environment the agent process gets on top of the shim's
+/// own, whether this launch is HOOKED (what the caller's tripwire records),
+/// and what to log.
+pub struct FarhelmArgs {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub hooked: bool,
+    pub log: HookLog,
+}
+
+impl FarhelmArgs {
+    /// Nothing to add and nothing to log: a kind with no integration
+    /// arguments.
+    pub(crate) fn none() -> Self {
+        FarhelmArgs {
+            args: Vec::new(),
+            env: Vec::new(),
+            hooked: false,
+            log: HookLog::Silent,
+        }
+    }
+
+    /// Nothing added, with the reason logged: a skip that silently degrades
+    /// identity capture.
+    pub(crate) fn skipped(reason: &'static str) -> Self {
+        FarhelmArgs {
+            log: HookLog::Skipped(reason),
+            ..FarhelmArgs::none()
+        }
+    }
+}
+
+/// `{farhelm_args}` for the kinds whose integration is one tail of hook
+/// arguments from [`AgentIntegration::hook_argv`] (Claude, Codex, Grok): the
+/// opt-out, then the executable path, then the tail. Unlike
+/// [`inject_hook_argv_tail`] nothing here looks at the user's command; a
+/// command launch puts `{farhelm_args}` where its command can take them.
+fn hook_tail_args(
+    integration: &dyn AgentIntegration,
+    kind: AgentKind,
+    policy: &HookPolicy<'_>,
+) -> FarhelmArgs {
+    if !policy.hooks.allows(kind) {
+        return FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+    }
+    let Some(exe) = policy.exe else {
+        return FarhelmArgs::skipped("farhelm executable path is not utf-8");
+    };
+    let tail = integration.hook_argv(exe, policy.instructions);
+    // Grok reports through its own configured callbacks and has no tail;
+    // claiming it hooked would arm the tripwire against nothing.
+    if tail.is_empty() {
+        return FarhelmArgs::none();
+    }
+    FarhelmArgs {
+        args: tail,
+        env: Vec::new(),
+        hooked: true,
+        log: HookLog::Injected,
+    }
+}
+
+/// `{farhelm_args}` for the kinds that load Farhelm's reporter extension
+/// (Pi, OMP): the extension and, when announcing, the instructions pointer
+/// as arguments, and the executable the reporter calls in `exe_env_var`.
+/// The same for start and resume, because these agents load extensions per
+/// process.
+pub(crate) fn reporter_extension_args(
+    kind: AgentKind,
+    policy: &HookPolicy<'_>,
+    unavailable: &'static str,
+    exe_env_var: &str,
+) -> FarhelmArgs {
+    if !policy.hooks.allows(kind) {
+        return FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+    }
+    let Some(exe) = policy.exe else {
+        return FarhelmArgs::skipped("farhelm executable path is not utf-8");
+    };
+    let Some(extension) = policy.vendor_extension else {
+        return FarhelmArgs::skipped(unavailable);
+    };
+    let mut args = vec!["-e".to_string(), extension.to_string()];
+    if policy.instructions.announces() {
+        args.extend([
+            "--append-system-prompt".to_string(),
+            INSTRUCTIONS_POINTER.to_string(),
+        ]);
+    }
+    FarhelmArgs {
+        args,
+        env: vec![(exe_env_var.to_string(), exe.to_string())],
+        hooked: true,
+        log: HookLog::Silent,
+    }
 }
 
 /// The resolved launch-time inputs a hook decision works within (see
@@ -699,25 +796,12 @@ struct OmpIntegration;
 struct GrokIntegration;
 
 impl AgentIntegration for GooseIntegration {
+    fn farhelm_args(&self, phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        goose::farhelm_args(phase, policy)
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         goose::inject_hooks(argv, policy)
-    }
-
-    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
-        None
-    }
-
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = strip_goose_selectors(original_argv);
-        if effective_program_index(&template).is_some_and(|index| index + 1 == template.len()) {
-            template.push("session".to_string());
-        }
-        template.extend([
-            "--resume".to_string(),
-            "--session-id".to_string(),
-            CONVERSATION_PLACEHOLDER.to_string(),
-        ]);
-        template
     }
 
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -726,21 +810,17 @@ impl AgentIntegration for GooseIntegration {
 }
 
 impl AgentIntegration for PiIntegration {
+    fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        reporter_extension_args(
+            AgentKind::Pi,
+            policy,
+            "Pi extension artifact is unavailable",
+            crate::launch::PI_REPORTER_EXE_ENV_VAR,
+        )
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         pi::inject_hooks(argv, policy)
-    }
-
-    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
-        None
-    }
-
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = strip_pi_selectors(original_argv);
-        template.extend([
-            "--session".to_string(),
-            CONVERSATION_PLACEHOLDER.to_string(),
-        ]);
-        template
     }
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -772,26 +852,12 @@ impl AgentIntegration for PiIntegration {
 }
 
 impl AgentIntegration for GrokIntegration {
+    fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        hook_tail_args(self, AgentKind::Grok, policy)
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         inject_hook_argv_tail(self, AgentKind::Grok, argv, policy, |_| None)
-    }
-
-    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
-        grok_has_ambiguous_resume_shape(&original_argv[1..])
-            .then_some(SnapshotError::GrokAmbiguousResumeBoundary)
-    }
-
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = original_argv.to_vec();
-        let program = effective_program_index(&template).unwrap_or(0);
-        if !template[program + 1..]
-            .iter()
-            .any(|argument| argument == "--no-leader")
-        {
-            template.insert(program + 1, "--no-leader".to_string());
-        }
-        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
-        template
     }
 
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -962,198 +1028,6 @@ pub(crate) fn omp_flag_consumes_next(flag: &OmpFlagOccurrence<'_>, next: Option<
     }
 }
 
-/// Whether an OMP argv carries an UNCONSUMED end-of-options delimiter — a
-/// `--` in a position where no option claimed it as a value. Walked with the
-/// same grammar as the resume-template stripper and injection's classifier,
-/// so every boundary that cares agrees on which `--` shapes are genuine:
-/// `omp --system-prompt --` carries a prompt literally spelled `--` (no
-/// delimiter), while `omp hello --` carries one.
-pub(crate) fn omp_has_unconsumed_delimiter(args: &[String]) -> bool {
-    let mut index = 0;
-    while index < args.len() {
-        let argument = args[index].as_str();
-        let Some(flag) = omp_flag_occurrence(argument) else {
-            if argument == "--" {
-                return true;
-            }
-            index += 1;
-            continue;
-        };
-        if omp_flag_consumes_next(&flag, args.get(index + 1).map(String::as_str)) {
-            index += 2;
-        } else {
-            index += 1;
-        }
-    }
-    false
-}
-
-/// Whether appending Grok's exact `--resume <UUID>` selector would be
-/// ambiguous or land after an end-of-options boundary.
-///
-/// The structured Grok launch has neither shape. This check protects the
-/// derived-template path used by custom invocations: it refuses an existing
-/// selector instead of deleting arguments whose vendor meaning may depend on
-/// position, and treats only a whole argv element `--` as the boundary.
-fn grok_has_ambiguous_resume_shape(args: &[String]) -> bool {
-    args.iter().any(|argument| {
-        matches!(
-            argument.as_str(),
-            "--" | "--resume"
-                | "-r"
-                | "--continue"
-                | "-c"
-                | "--session-id"
-                | "-s"
-                | "--fork-session"
-        ) || argument.starts_with("--resume=")
-            || argument.starts_with("--session-id=")
-    })
-}
-
-/// Whether appending Claude's derived `--resume <id>` would collide with a
-/// conversation the launch already selects, or land behind `--`.
-///
-/// Claude's selectors are `--continue`/`-c` (the folder's most recent
-/// conversation), `--resume`/`-r`, `--session-id`, `--from-pr` and
-/// `--teleport` (checked against Claude Code 2.1.288's `--help`), plus
-/// `--fork-session`, which makes a resume fork a copy instead of continuing
-/// the conversation it names. Appended beside one of them, the derived
-/// `--resume <id>` leaves Claude two answers to "which conversation", and if
-/// it honors the original one, Resume opens a different conversation than
-/// the one Farhelm captured, whose identity then replaces the valid offer.
-/// Behind a whole-element `--`, the appended flag is prompt text, so Resume
-/// starts a fresh conversation instead.
-///
-/// Every argument is scanned, the way [`grok_has_ambiguous_resume_shape`]
-/// does, rather than mirroring Claude's option grammar. Two costs follow,
-/// of the kind Grok and Codex accept. A wrapper or launcher declared as the
-/// Claude kind whose OWN arguments include `-c` or `--` (the documented
-/// `sh -c '...' w {cwd} claude` wrapper, `mise exec -- claude`) is
-/// refused, though its derived resume would have worked; it needs an
-/// explicit resume template, the escape hatch for every refusal here. And clustered or attached short forms (`-pc`,
-/// `-r<id>`), which Claude's parser accepts, are not recognized.
-fn claude_has_ambiguous_resume_shape(args: &[String]) -> bool {
-    args.iter().any(|argument| {
-        matches!(
-            argument.as_str(),
-            "--" | "--continue"
-                | "-c"
-                | "--resume"
-                | "-r"
-                | "--session-id"
-                | "--from-pr"
-                | "--teleport"
-                | "--fork-session"
-        ) || ["--resume=", "--session-id=", "--from-pr=", "--teleport="]
-            .iter()
-            .any(|prefix| argument.starts_with(prefix))
-    })
-}
-
-/// Whether a Codex launch already selects a session, so appending the
-/// derived `resume <id>` would produce two selectors.
-///
-/// Codex selects a session with the `resume` or `fork` SUBCOMMAND, and its
-/// argument parser rejects a second one (`codex resume <old> resume <new>`
-/// fails with "unexpected argument", verified against codex-cli 0.159.3), so
-/// a Restart or Resume of a session launched as `codex resume <old>` would
-/// exit with an error instead of continuing. Every argument is scanned, the
-/// way [`grok_has_ambiguous_resume_shape`] does, so `codex --yolo resume
-/// <id>` is caught too. The cost, the same kind Grok accepts, is that any
-/// argument spelled exactly `resume` or `fork` is refused, not only the
-/// subcommand: a prompt that is that single word, or an option value such as
-/// `-p fork` (a config profile named `fork`), refuses a derived template even
-/// though it would have resumed. An explicit resume template remains the
-/// escape hatch.
-fn codex_has_session_selector(args: &[String]) -> bool {
-    args.iter()
-        .any(|argument| matches!(argument.as_str(), "resume" | "fork"))
-}
-
-/// Remove OMP's session-source flags before inserting its verified file.
-///
-/// OMP-SPECIFIC, and deliberately not shared with [`strip_pi_selectors`]:
-/// OMP's `--resume`/`-r`/`--session` take OPTIONAL values and `--fork` takes a
-/// required one (`OMP/cli/flag-tables.ts`), while Pi's equivalents are
-/// valueless or differently-shaped — a selector that consumes a value under
-/// one vendor's grammar may be valueless under the other's, so the two
-/// vendors' stripping cannot share one consumption table without one of them
-/// silently mis-stripping. OMP's own restart path
-/// (`OMP/cli/flag-tables.ts::restartArgv`) drops these same selectors plus
-/// positionals; only the selector half is mirrored here, because Farhelm's
-/// policy keeps the original argv (prompt included) intact.
-///
-/// Long options are NORMALIZED before the selector decision — the name
-/// before an inline `=value` is what matches — so every supported inline
-/// spelling of every session-source selector drops whole (`--resume=<id>`,
-/// `--fork=<id>`, `--continue=x`, `--from-claude=true`), consuming no extra
-/// element, while an inline value of a kept flag (`--model=x`) survives as
-/// the single element it is. A dropped separate selector consumes its value
-/// under its own arity; a kept flag consumes under the shared grammar, which
-/// is what keeps an opaque value spelled like a selector (`--model --resume`)
-/// from being mistaken for one.
-fn strip_omp_selectors(argv: &[String]) -> Vec<String> {
-    /// OMP's session-source selectors, by their normalized names, with the
-    /// arity each one consumes its separate-form value under.
-    fn selector_arity(name: &str) -> Option<OmpFlagArity> {
-        match name {
-            "--resume" | "-r" | "--session" => Some(OmpFlagArity::Optional),
-            "--fork" => Some(OmpFlagArity::String),
-            "--continue" | "-c" | "--from-claude" | "--from-codex" => Some(OmpFlagArity::Valueless),
-            _ => None,
-        }
-    }
-
-    let mut kept = Vec::with_capacity(argv.len());
-    let mut index = 0;
-    while index < argv.len() {
-        let argument = &argv[index];
-        if index == 0 {
-            kept.push(argument.clone());
-            index += 1;
-            continue;
-        }
-        // End-of-options: everything after is prompt text for OMP, so the
-        // scan stops here and the tail is preserved verbatim. (A genuine
-        // delimiter refuses template resolution — see [`SnapshotError`] —
-        // but the ORIGINAL argv is still preserved element for element, and
-        // a `--` consumed as an option value is just a kept value.)
-        if argument == "--" {
-            kept.extend(argv[index..].iter().cloned());
-            break;
-        }
-        let next = argv.get(index + 1).map(String::as_str);
-        match omp_flag_occurrence(argument) {
-            Some(flag) if selector_arity(flag.name).is_some() => {
-                if flag.inline_value {
-                    // The inline spelling carries its own value: drop the
-                    // single token and nothing else.
-                    index += 1;
-                } else if omp_flag_consumes_next(&flag, next) {
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-            Some(flag) => {
-                kept.push(argument.clone());
-                if omp_flag_consumes_next(&flag, next) {
-                    kept.push(argv[index + 1].clone());
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-            None => {
-                kept.push(argument.clone());
-                index += 1;
-            }
-        }
-    }
-    kept
-}
-
 /// Read an OMP session file's header id out of its bounded prefix.
 ///
 /// OMP's own parser, deliberately separate from Pi's first-record rule: an
@@ -1240,19 +1114,17 @@ fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
 }
 
 impl AgentIntegration for OmpIntegration {
+    fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        reporter_extension_args(
+            AgentKind::Omp,
+            policy,
+            "OMP extension artifact is unavailable",
+            crate::launch::OMP_REPORTER_EXE_ENV_VAR,
+        )
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         omp::inject_hooks(argv, policy)
-    }
-
-    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
-        omp_has_unconsumed_delimiter(&original_argv[1..])
-            .then_some(SnapshotError::OmpAmbiguousResumeBoundary)
-    }
-
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = strip_omp_selectors(original_argv);
-        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
-        template
     }
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1265,107 +1137,13 @@ impl AgentIntegration for OmpIntegration {
     }
 }
 
-/// Remove only Goose's documented identity selectors and their values.
-fn strip_goose_selectors(argv: &[String]) -> Vec<String> {
-    strip_selectors(
-        argv,
-        &["--name", "-n", "--session-id", "--id", "--path"],
-        &["--resume", "-r", "--fork", "--edit"],
-        &["--name=", "--session-id=", "--id=", "--path=", "-n"],
-        &[
-            "--provider",
-            "--model",
-            "--system",
-            "--max-turns",
-            "--with-extension",
-            "--with-builtin",
-            "--with-streamable-http-extension",
-            "--mode",
-        ],
-    )
-}
-
-/// Remove Pi's session-selection flags before inserting its verified file.
-fn strip_pi_selectors(argv: &[String]) -> Vec<String> {
-    strip_selectors(
-        argv,
-        &["--session", "--session-id", "--fork"],
-        &["--continue", "-c", "--resume", "-r"],
-        &["--session=", "--session-id=", "--fork="],
-        &[
-            "--provider",
-            "--model",
-            "--thinking",
-            "--append-system-prompt",
-            "--system-prompt",
-            "--tools",
-            "--exclude-tools",
-            "--session-dir",
-            "-e",
-            "--extension",
-        ],
-    )
-}
-
-/// Preserve every unrelated argv boundary while removing selector options.
-fn strip_selectors(
-    argv: &[String],
-    valued: &[&str],
-    flags: &[&str],
-    joined_prefixes: &[&str],
-    preserved_valued: &[&str],
-) -> Vec<String> {
-    let mut kept = Vec::with_capacity(argv.len());
-    let mut index = 0;
-    while index < argv.len() {
-        let argument = &argv[index];
-        if index > 0 && argument == "--" {
-            kept.extend(argv[index..].iter().cloned());
-            break;
-        }
-        if index > 0 && valued.contains(&argument.as_str()) {
-            index += usize::from(index + 1 < argv.len()) + 1;
-            continue;
-        }
-        if index > 0 && preserved_valued.contains(&argument.as_str()) {
-            kept.push(argument.clone());
-            if let Some(value) = argv.get(index + 1) {
-                kept.push(value.clone());
-                index += 2;
-            } else {
-                index += 1;
-            }
-            continue;
-        }
-        if index > 0
-            && (flags.contains(&argument.as_str())
-                || joined_prefixes
-                    .iter()
-                    .any(|prefix| argument.starts_with(prefix) && argument.len() > prefix.len()))
-        {
-            index += 1;
-            continue;
-        }
-        kept.push(argument.clone());
-        index += 1;
-    }
-    kept
-}
-
 impl AgentIntegration for ClaudeIntegration {
+    fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        hook_tail_args(self, AgentKind::Claude, policy)
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         inject_hook_argv_tail(self, AgentKind::Claude, argv, policy, claude::hook_refusal)
-    }
-
-    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
-        claude_has_ambiguous_resume_shape(&original_argv[1..])
-            .then_some(SnapshotError::ClaudeAmbiguousResumeSelector)
-    }
-
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = original_argv.to_vec();
-        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
-        template
     }
 
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1412,22 +1190,12 @@ impl AgentIntegration for ClaudeIntegration {
 }
 
 impl AgentIntegration for CodexIntegration {
+    fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
+        hook_tail_args(self, AgentKind::Codex, policy)
+    }
+
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         inject_hook_argv_tail(self, AgentKind::Codex, argv, policy, codex::hook_refusal)
-    }
-
-    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
-        codex_has_session_selector(&original_argv[1..])
-            .then_some(SnapshotError::CodexAmbiguousResumeSelector)
-    }
-
-    /// `codex resume <id>`, the audited shape — a SUBCOMMAND rather than a
-    /// flag, which is exactly why the default template is per-kind
-    /// knowledge instead of one shared string with the command swapped in.
-    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
-        let mut template = original_argv.to_vec();
-        template.extend(["resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
-        template
     }
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1876,178 +1644,36 @@ pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
 }
 
-/// The per-session integration settings (PLAN_M3.md item 7): a fixed agent
-/// kind and the template the next resume will use. Restart-with may replace
-/// the template after its new process spawns, without re-deriving the kind.
+/// What capture and restart need from a session's launch: its integration
+/// kind and the resume command a Restart fills, still holding its
+/// placeholders.
+///
+/// Derived from the stored [`SessionLaunch`] by [`IntegrationSnapshot::of`]
+/// and never decided any other way: Farhelm does not read a command line to
+/// guess a kind or derive a resume command (SPEC.md), so an agent launch's
+/// composed resume command, a command launch's own, or a legacy session's
+/// stored one is the only resume there is. Restart with replaces the whole
+/// launch, and this is derived again from the new one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegrationSnapshot {
     pub kind: AgentKind,
-    /// The resume invocation as an argv VECTOR, so a path with spaces
-    /// survives without quoting. `None` means this session has no resume
-    /// invocation at all. An active integration always has at least its
-    /// derived default; a newly introduced kind may retain an explicit
-    /// template before its capture integration is enabled.
+    /// The resume argv, so a path with spaces survives without quoting.
+    /// `None` means the launch has no resume command at all: an agent type
+    /// without conversation reporting, a command launch that did not opt
+    /// into Resume, or a generic command.
     pub resume_template: Option<Vec<String>>,
 }
 
-/// Why a create's integration snapshot could not be resolved.
-///
-/// One variant today, and it stays an enum rather than a bare string
-/// because the caller has to map it to a wire `ErrorKind` — a decision
-/// that belongs at the boundary, not here.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum SnapshotError {
-    /// A generic kind has no conversation-identity capture, so nothing can
-    /// substitute this placeholder. Refused at create time rather than
-    /// storing a restart command that can never be used. A placeholder-free
-    /// template is still accepted on a generic kind until launch kinds
-    /// replace this create path, but it is never run either: a generic
-    /// session cannot be restarted (SPEC_impl.md, "Restart only resumes").
-    #[error(
-        "a generic session cannot be restarted, so it has no use for a resume template with \
-         {CONVERSATION_PLACEHOLDER}; omit the resume template or declare an integrated agent kind"
-    )]
-    GenericTemplateHasPlaceholder,
-    /// An integrated kind (derived or overridden) was given a template
-    /// with no `{conversation}` element. Refused at create rather than at
-    /// resume, because by resume time the only honest thing left to do
-    /// would be to DISCARD a successfully captured identity — the exact
-    /// promise SPEC.md makes ("restart resumes exactly that conversation")
-    /// turned into a silent no-op.
-    #[error(
-        "an explicit resume template for the integrated agent kind {kind} must contain a \
-         {CONVERSATION_PLACEHOLDER} argv element; a placeholder-free template could only ever \
-         discard the conversation identity this session captures"
-    )]
-    IntegratedTemplateHasNoPlaceholder { kind: &'static str },
-    /// An OMP launch whose DERIVED resume template would have to be appended
-    /// behind a GENUINE end-of-options delimiter: OMP reads everything after
-    /// an unconsumed `--` as prompt text, so the appended
-    /// `--resume <verified-file>` could only ever be read as more prompt,
-    /// and the derived template would silently launch a fresh conversation
-    /// instead of resuming. Three shapes are deliberately NOT this error:
-    /// a `--` consumed as an option value (`--system-prompt --` is a prompt
-    /// spelled `--`, and appended flags are still options), an explicit
-    /// template override (filled verbatim, never appended), and every other
-    /// kind. Refusing the create is the fail-closed outcome; the error text
-    /// is what the user reads.
-    #[error(
-        "an OMP invocation containing a bare \"--\" cannot carry a verified resume: OMP reads \
-         everything after \"--\" as prompt text, so the appended --resume flag would never \
-         resume the captured conversation"
-    )]
-    OmpAmbiguousResumeBoundary,
-    /// A derived Grok template cannot safely add an exact selector beside
-    /// an existing session selector or beyond `--`.
-    #[error(
-        "a Grok invocation already contains a session selector or end-of-options boundary; \
-         Farhelm cannot append an unambiguous exact --resume target"
-    )]
-    GrokAmbiguousResumeBoundary,
-    /// A derived Codex template cannot append `resume <id>` to a launch that
-    /// already selects a session with the `resume` or `fork` subcommand (or
-    /// carries an argument spelled that way): Codex rejects a second
-    /// selector, so the Resume would fail.
-    #[error(
-        "a Codex invocation that already contains \"resume\" or \"fork\" cannot be resumed by \
-         Farhelm: Codex accepts only one session selector, so the resume command Farhelm would \
-         add could never start; launch it without that argument"
-    )]
-    CodexAmbiguousResumeSelector,
-    /// A derived Claude template cannot append `--resume <id>` to a launch
-    /// that already selects a conversation (`--continue`/`-c`,
-    /// `--resume`/`-r`, `--session-id`, `--from-pr`, `--teleport`,
-    /// `--fork-session`, or an argument spelled that way) or carries a
-    /// whole-element `--`: the first could resume a different conversation
-    /// than the captured one, the second would read the appended flag as
-    /// prompt text.
-    #[error(
-        "a Claude invocation that already contains --continue, -c, --resume, -r, --session-id, \
-         --from-pr, --teleport, --fork-session or a bare \"--\" cannot be resumed by Farhelm: \
-         the --resume flag Farhelm would add could open a different conversation or be read as \
-         prompt text; launch it without that argument"
-    )]
-    ClaudeAmbiguousResumeSelector,
-}
-
-/// This module's stable spelling of a kind for human-facing messages.
-/// Deliberately not the wire serde representation: an error string is not
-/// a protocol surface and must not start depending on one.
-#[warn(clippy::wildcard_enum_match_arm)]
-fn kind_name(kind: AgentKind) -> &'static str {
-    match kind {
-        AgentKind::Claude => "claude",
-        AgentKind::Codex => "codex",
-        AgentKind::Goose => "goose",
-        AgentKind::Pi => "pi",
-        AgentKind::Omp => "omp",
-        AgentKind::Grok => "grok",
-        AgentKind::Generic => "generic",
-    }
-}
-
 impl IntegrationSnapshot {
-    /// Resolve a create's snapshot from the parsed invocation argv and the request's
-    /// optional overrides (PLAN_M3.md item 7).
-    ///
-    /// The precedence is: an explicit override always wins over derivation,
-    /// and derivation is basename recognition of `argv0` — nothing more.
-    /// `env claude`, a wrapper script, or a shell alias all classify as
-    /// `Generic`, which is honest rather than clever: the override fields
-    /// exist precisely because this heuristic cannot be made smart without
-    /// becoming wrong in ways nobody could predict.
-    ///
-    /// The default template preserves the ORIGINAL argv, not a canonical
-    /// command name or a shell reconstruction, so `/opt/bin/claude
-    /// --dangerously-skip-permissions` resumes through that original argv
-    /// before its per-kind suffix.
-    ///
-    /// Callers must provide a non-empty executable argv. Create validation
-    /// establishes that precondition before resolution; an empty slice has
-    /// no program from which to derive a kind and is therefore invalid.
-    ///
-    /// Validation rejects templates whose conversation-identity requirements
-    /// do not match the resolved kind: integrated kinds need the placeholder,
-    /// while generic kinds cannot use it because they have no identity capture.
-    /// A derived template must also have an unambiguous place for its resume
-    /// selector. OMP refuses a genuine end-of-options delimiter; Grok and
-    /// Claude also refuse an existing selector because their derived form
-    /// owns that argument, and Codex refuses an argument spelled `resume` or
-    /// `fork` because it accepts only one session selector (see
-    /// [`SnapshotError`] for the exact cases).
-    pub fn resolve(
-        original_argv: &[String],
-        kind_override: Option<AgentKind>,
-        template_override: Option<Vec<String>>,
-    ) -> Result<IntegrationSnapshot, SnapshotError> {
-        let kind = kind_override.unwrap_or_else(|| derive_kind(&original_argv[0]));
-        let integration = integration_for(kind);
-        let explicit_override = template_override.is_some();
-        let resume_template = template_override
-            .or_else(|| integration.map(|i| i.default_resume_template(original_argv)));
-        // The refusal is scoped to the shape that cannot work: the DERIVED
-        // template appends `--resume` at the tail, which a genuine delimiter
-        // would turn into prompt text. A `--` consumed as an option value is
-        // not a delimiter (`omp --system-prompt --` carries a prompt spelled
-        // `--`, and appended flags remain options), and an explicit override
-        // is filled verbatim rather than appended, so neither refuses here.
-        if !explicit_override
-            && let Some(error) = integration.and_then(|i| i.ambiguous_derived_resume(original_argv))
-        {
-            return Err(error);
+    /// The snapshot of one launch. A command launch's resume command was
+    /// shell-split once at create ([`SessionLaunch::validate_new`]); one
+    /// that no longer splits (a hand-edited row) has no resume, so Restart
+    /// is unavailable rather than garbled.
+    pub fn of(launch: &SessionLaunch) -> IntegrationSnapshot {
+        IntegrationSnapshot {
+            kind: launch.agent_kind(),
+            resume_template: launch.resume_argv().ok().flatten(),
         }
-        if integration.is_none() && template_has_placeholder(resume_template.as_deref()) {
-            return Err(SnapshotError::GenericTemplateHasPlaceholder);
-        }
-        if integration.is_some() && !template_has_placeholder(resume_template.as_deref()) {
-            return Err(SnapshotError::IntegratedTemplateHasNoPlaceholder {
-                kind: kind_name(kind),
-            });
-        }
-        Ok(IntegrationSnapshot {
-            kind,
-            resume_template,
-        })
     }
 
     /// This session's integration, or `None` when it has none — the one
@@ -2072,6 +1698,9 @@ impl IntegrationSnapshot {
     pub fn restart_offer(&self, captured: Option<&str>, ownership_version: i64) -> RestartOffer {
         if self.integration().is_none() {
             return RestartOffer::NoConversationReporting;
+        }
+        if self.resume_template.is_none() {
+            return RestartOffer::NoResumeCommand;
         }
         // Provenance gate: kinds with an implemented ownership proof offer
         // exact Resume only for bindings admitted under this contract
@@ -2686,9 +2315,8 @@ impl AgentHooks {
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
 ///   (`claude`, `codex`, `goose`, `pi`, `omp` — the automatically configured
-///   kinds, using this module's own canonical
-///   spelling, from [`kind_name`], rather than a spelling invented for this
-///   variable). Whitespace around each token is trimmed, and matching is
+///   kinds, spelled as the protocol spells each [`AgentKind`], rather than a
+///   spelling invented for this variable). Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
 ///   types into a shell profile, not a wire format, so tolerating `Claude`
 ///   or `ALL` costs nothing and saves a support question.
@@ -2816,36 +2444,13 @@ pub fn parse_agent_instructions(value: &str) -> AgentInstructions {
     AgentInstructions::On
 }
 
-/// Recognize an agent kind from the basename of an invocation's first
-/// token — PLAN_M3.md item 7's deliberately dumb default.
+/// The executable basename this kind's agent runs as, or `None` for
+/// Generic, which names no one program.
 ///
-/// Exact basename equality, not a prefix or substring match, and the
-/// asymmetry is the point: a false NEGATIVE (`claude-wrapper` classified
-/// generic) costs only Restart, honestly unavailable, and is fixable with an
-/// explicit override, while a false POSITIVE gives a session Claude's
-/// record layout and correlators when its agent will never write them —
-/// producing either no capture at all or, worse, a correlation against
-/// some other process's records in the same directory. When in doubt this
-/// function says generic.
-pub fn derive_kind(argv0: &str) -> AgentKind {
-    let basename = Path::new(argv0)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(argv0);
-    AgentKind::ALL
-        .iter()
-        .copied()
-        .find(|kind| executable_basename(*kind) == Some(basename))
-        .unwrap_or(AgentKind::Generic)
-}
-
-/// The executable basename [`derive_kind`] recognizes as this kind, or
-/// `None` for a kind no basename derives (Generic is what everything else
-/// becomes).
-///
-/// Exhaustive so a new kind decides whether an invocation can be recognized
-/// as it; the same names are what the process-tree checks treat as another
-/// integrated agent's runtime.
+/// No session's kind is derived from it any more (a launch states its kind);
+/// what remains is the process-tree checks, which treat these names as
+/// another integrated agent's runtime. Exhaustive so a new kind decides
+/// whether it has such a name.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
     match kind {
@@ -2862,6 +2467,25 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A snapshot with exactly this kind and resume command, for tests of
+    /// capture and restart that need no launch around them. Production
+    /// snapshots come only from [`IntegrationSnapshot::of`].
+    fn test_snapshot(kind: AgentKind, resume_template: Option<Vec<String>>) -> IntegrationSnapshot {
+        IntegrationSnapshot {
+            kind,
+            resume_template,
+        }
+    }
+
+    /// The resume command an agent launch of `kind` composes from a bare
+    /// `program` (the helm's `launches::compile`), for tests that need a
+    /// realistic integrated snapshot.
+    fn composed_resume(program: &str, suffix: &[&str]) -> Option<Vec<String>> {
+        let mut resume = vec![program.to_string()];
+        resume.extend(suffix.iter().map(|element| element.to_string()));
+        Some(resume)
+    }
 
     /// Spec: a successful hook injection is logged as "injected" only for
     /// the hook-tail kinds (Claude, Codex); the reporter-extension kinds
@@ -2980,193 +2604,6 @@ mod tests {
         }
     }
 
-    /// Derivation is the DEFAULT every session gets when a caller sends no
-    /// override, so its exact reach is a product decision, not an
-    /// implementation detail: a path prefix must not defeat it (a session
-    /// launched as `/opt/bin/claude` is still claude), and a wrapper must
-    /// not accidentally acquire it (`env claude` classifies as generic, so
-    /// the user is told to override rather than silently getting a
-    /// session that looks integrated and never captures).
-    #[farhelm_testtrace::test]
-    fn kind_derivation_is_basename_equality_and_nothing_more() {
-        assert_eq!(derive_kind("claude"), AgentKind::Claude);
-        assert_eq!(derive_kind("/opt/bin/claude"), AgentKind::Claude);
-        assert_eq!(derive_kind("codex"), AgentKind::Codex);
-        assert_eq!(derive_kind("/usr/local/bin/codex"), AgentKind::Codex);
-        assert_eq!(derive_kind("pi"), AgentKind::Pi);
-        assert_eq!(derive_kind("/opt/bin/pi"), AgentKind::Pi);
-        assert_eq!(derive_kind("omp"), AgentKind::Omp);
-        assert_eq!(derive_kind("/opt/bin/omp"), AgentKind::Omp);
-        assert_eq!(derive_kind("grok"), AgentKind::Grok);
-        assert_eq!(derive_kind("/opt/bin/grok"), AgentKind::Grok);
-        assert_eq!(derive_kind("env"), AgentKind::Generic);
-        assert_eq!(derive_kind("claude-wrapper"), AgentKind::Generic);
-        assert_eq!(derive_kind("my-claude"), AgentKind::Generic);
-        assert_eq!(derive_kind("omp-format"), AgentKind::Generic);
-        assert_eq!(derive_kind(""), AgentKind::Generic);
-    }
-
-    /// A derived template preserves every original launch argument before
-    /// appending the kind's resume syntax, so permission flags survive a
-    /// restart without shell rejoining. Codex's shape is a subcommand, not a
-    /// flag — pinned here because it is audited vendor behavior, not a choice.
-    #[farhelm_testtrace::test]
-    fn default_templates_keep_the_original_launch_argv() {
-        let claude_argv = vec![
-            "/opt/bin/claude".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ];
-        let claude = IntegrationSnapshot::resolve(&claude_argv, None, None).unwrap();
-        assert_eq!(claude.kind, AgentKind::Claude);
-        assert_eq!(
-            claude.resume_template.unwrap(),
-            vec![
-                "/opt/bin/claude",
-                "--dangerously-skip-permissions",
-                "--resume",
-                "{conversation}"
-            ]
-        );
-        let codex_argv = vec!["codex".to_string(), "--yolo".to_string()];
-        let codex = IntegrationSnapshot::resolve(&codex_argv, None, None).unwrap();
-        assert_eq!(
-            codex.resume_template.unwrap(),
-            vec!["codex", "--yolo", "resume", "{conversation}"]
-        );
-        let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
-        assert_eq!(generic.kind, AgentKind::Generic);
-        assert_eq!(generic.resume_template, None);
-    }
-
-    /// A path with spaces is exactly what the structural argv template
-    /// exists for (PLAN_M3.md item 7 names this case), so it gets its own
-    /// assertion: the token stays ONE element and no quoting is invented
-    /// around it, which is also what makes the filled resume argv safe to
-    /// hand to an exec without a shell.
-    #[farhelm_testtrace::test]
-    fn a_first_token_with_spaces_survives_as_one_argv_element() {
-        let snapshot =
-            IntegrationSnapshot::resolve(&["/opt/my agents/claude".into()], None, None).unwrap();
-        assert_eq!(
-            snapshot.resume_template.as_deref().unwrap(),
-            ["/opt/my agents/claude", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            snapshot.filled_resume_argv("abc").unwrap(),
-            ["/opt/my agents/claude", "--resume", "abc"]
-        );
-    }
-
-    /// Overrides are the escape hatch for derivation's deliberate dumbness
-    /// (PLAN_M3.md item 7), so both directions have to work: a wrapper
-    /// declared claude gains the integration AND a derived default
-    /// template, and a genuinely-claude invocation declared generic loses
-    /// it. Without the second direction a user could never opt OUT of an
-    /// integration that misbehaves for them.
-    #[farhelm_testtrace::test]
-    fn explicit_overrides_win_over_derivation_in_both_directions() {
-        let promoted =
-            IntegrationSnapshot::resolve(&["my-wrapper".into()], Some(AgentKind::Claude), None)
-                .unwrap();
-        assert_eq!(promoted.kind, AgentKind::Claude);
-        assert_eq!(
-            promoted.resume_template.unwrap(),
-            vec!["my-wrapper", "--resume", "{conversation}"],
-            "an overridden kind still derives its template from the real first token"
-        );
-        let demoted =
-            IntegrationSnapshot::resolve(&["claude".into()], Some(AgentKind::Generic), None)
-                .unwrap();
-        assert_eq!(demoted.kind, AgentKind::Generic);
-        assert_eq!(
-            demoted.resume_template, None,
-            "a generic session has no resume invocation unless one is supplied"
-        );
-    }
-
-    /// Snapshot validation enforces the two directions of the kind/template
-    /// contract at CREATE. Integrated kinds require a placeholder; generic
-    /// kinds cannot use one because they cannot supply identity. Once
-    /// capture has succeeded, a placeholder-free template on an integrated
-    /// kind could only ever throw the captured identity away, which is
-    /// SPEC.md's exact-conversation restart promise quietly becoming false.
-    /// A generic placeholder-bearing template is equally unusable and must
-    /// be rejected instead of stored.
-    #[farhelm_testtrace::test]
-    fn an_integrated_kind_refuses_a_placeholder_free_template() {
-        let refused = IntegrationSnapshot::resolve(
-            &["claude".into()],
-            None,
-            Some(vec!["claude".to_string(), "--continue".to_string()]),
-        );
-        assert_eq!(
-            refused,
-            Err(SnapshotError::IntegratedTemplateHasNoPlaceholder { kind: "claude" })
-        );
-        // An EMBEDDED placeholder is not a placeholder: PR3's contract is
-        // whole-element equality, and accepting this would produce a
-        // literal `--resume={conversation}` on the command line.
-        assert!(
-            IntegrationSnapshot::resolve(
-                &["claude".into()],
-                None,
-                Some(vec![
-                    "claude".to_string(),
-                    "--resume={conversation}".to_string()
-                ]),
-            )
-            .is_err()
-        );
-        // A generic template is accepted (stored, never run) only when it
-        // does not ask Farhelm for conversation identity; embedded text is
-        // ordinary literal argv.
-        assert_eq!(
-            IntegrationSnapshot::resolve(
-                &["bash".into()],
-                None,
-                Some(vec!["bash".to_string(), "{conversation}".to_string()]),
-            ),
-            Err(SnapshotError::GenericTemplateHasPlaceholder)
-        );
-        assert!(
-            IntegrationSnapshot::resolve(
-                &["bash".into()],
-                None,
-                Some(vec![
-                    "bash".to_string(),
-                    "--resume={conversation}".to_string()
-                ]),
-            )
-            .is_ok()
-        );
-        // Generic still accepts placeholder-free templates (stored, never
-        // run) and no-template sessions; integrated kinds keep
-        // exact-placeholder templates.
-        assert!(
-            IntegrationSnapshot::resolve(
-                &["bash".into()],
-                None,
-                Some(vec!["bash".to_string(), "--restore".to_string()]),
-            )
-            .is_ok()
-        );
-        assert!(
-            IntegrationSnapshot::resolve(&["bash".into()], Some(AgentKind::Generic), None).is_ok()
-        );
-        assert!(
-            IntegrationSnapshot::resolve(
-                &["claude".into()],
-                None,
-                Some(vec![
-                    "claude".to_string(),
-                    "--resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-            )
-            .is_ok()
-        );
-    }
-
     /// The placeholder may not be the PROGRAM, and the shapes that put it
     /// anywhere else keep working.
     ///
@@ -3201,9 +2638,7 @@ mod tests {
             CONVERSATION_PLACEHOLDER.to_string(),
         ];
         ensure_resume_template(&wrapper).expect("the placeholder in an ARGUMENT slot is the point");
-        let snapshot =
-            IntegrationSnapshot::resolve(&["sh".into()], Some(AgentKind::Claude), Some(wrapper))
-                .expect("an integrated kind is satisfied by a placeholder anywhere in the vector");
+        let snapshot = test_snapshot(AgentKind::Claude, Some(wrapper));
         assert_eq!(
             snapshot
                 .filled_resume_argv("0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31")
@@ -3358,9 +2793,8 @@ mod tests {
     /// it does not drive `spawn_agent` itself.
     #[farhelm_testtrace::test]
     fn conversation_and_cwd_placeholders_coexist_in_one_template() {
-        let snapshot = IntegrationSnapshot::resolve(
-            &["w".into()],
-            Some(AgentKind::Claude),
+        let snapshot = test_snapshot(
+            AgentKind::Claude,
             Some(vec![
                 "w".to_string(),
                 "run".to_string(),
@@ -3369,8 +2803,7 @@ mod tests {
                 "--resume".to_string(),
                 CONVERSATION_PLACEHOLDER.to_string(),
             ]),
-        )
-        .expect("a template containing {conversation} satisfies an integrated kind");
+        );
 
         let after_resume = snapshot
             .filled_resume_argv("0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31")
@@ -3461,9 +2894,8 @@ mod tests {
     fn a_conversation_id_spelled_like_a_placeholder_is_refused() {
         assert!(!is_plausible_conversation_id(CWD_PLACEHOLDER));
         assert!(!is_plausible_conversation_id(CONVERSATION_PLACEHOLDER));
-        let snapshot = IntegrationSnapshot::resolve(
-            &["w".into()],
-            Some(AgentKind::Claude),
+        let snapshot = test_snapshot(
+            AgentKind::Claude,
             Some(vec![
                 "w".to_string(),
                 "run".to_string(),
@@ -3472,8 +2904,7 @@ mod tests {
                 "--resume".to_string(),
                 CONVERSATION_PLACEHOLDER.to_string(),
             ]),
-        )
-        .expect("a template containing {conversation} satisfies an integrated kind");
+        );
         assert_eq!(
             snapshot.filled_resume_argv(CWD_PLACEHOLDER),
             None,
@@ -3520,8 +2951,10 @@ mod tests {
     /// through capture's own validation again.
     #[farhelm_testtrace::test]
     fn an_option_shaped_identity_neither_fills_a_template_nor_is_offered() {
-        let snapshot =
-            IntegrationSnapshot::resolve(&["claude".into()], None, None).expect("resolve");
+        let snapshot = test_snapshot(
+            AgentKind::Claude,
+            composed_resume("claude", &["--resume", CONVERSATION_PLACEHOLDER]),
+        );
         assert_eq!(
             snapshot.filled_resume_argv("--dangerously-bypass-approvals-and-sandbox"),
             None,
@@ -3547,15 +2980,10 @@ mod tests {
         );
     }
 
-    /// Grok resume keeps the original argv, establishes a private backend,
-    /// and substitutes only the exact UUID carried by a ready locator.
+    /// A Grok resume command is filled with only the exact UUID a ready
+    /// locator carries, everything else in it left as stored.
     #[farhelm_testtrace::test]
-    fn grok_resume_argv_adds_no_leader_and_the_verified_uuid() {
-        let original =
-            ["env", "GROK_HOME=/tmp/grok", "/opt/bin/grok", "--no-plan"].map(str::to_string);
-        let snapshot = IntegrationSnapshot::resolve(&original, Some(AgentKind::Grok), None)
-            .expect("the native Grok invocation resolves");
-        assert_eq!(snapshot.kind, AgentKind::Grok);
+    fn grok_resume_argv_fills_only_the_verified_uuid() {
         let expected_template = [
             "env",
             "GROK_HOME=/tmp/grok",
@@ -3567,7 +2995,7 @@ mod tests {
         ]
         .map(str::to_string)
         .to_vec();
-        assert_eq!(snapshot.resume_template.as_ref(), Some(&expected_template));
+        let snapshot = test_snapshot(AgentKind::Grok, Some(expected_template));
 
         let mut locator = grok::GrokLocator::reported(
             "grok-session-1".to_string(),
@@ -3604,24 +3032,17 @@ mod tests {
     /// resolution and identity fill for a default-to-YOLO restart-with.
     #[farhelm_testtrace::test]
     fn grok_restart_with_permission_uses_replacement_resume_template() {
-        let previous = IntegrationSnapshot::resolve(
-            &["grok".into(), "--no-leader".into()],
-            Some(AgentKind::Grok),
+        let previous = test_snapshot(
+            AgentKind::Grok,
             Some(vec![
                 "grok".into(),
                 "--no-leader".into(),
                 "--resume".into(),
                 "{conversation}".into(),
             ]),
-        )
-        .expect("default Grok template resolves");
-        let replacement = IntegrationSnapshot::resolve(
-            &[
-                "grok".into(),
-                "--no-leader".into(),
-                "--always-approve".into(),
-            ],
-            Some(previous.kind),
+        );
+        let replacement = test_snapshot(
+            previous.kind,
             Some(vec![
                 "grok".into(),
                 "--no-leader".into(),
@@ -3629,8 +3050,7 @@ mod tests {
                 "--resume".into(),
                 "{conversation}".into(),
             ]),
-        )
-        .expect("YOLO Grok template resolves against the fixed kind");
+        );
         let mut locator = grok::GrokLocator::reported(
             "grok-session-1".to_string(),
             Some("/tmp/grok-session-1/updates.jsonl".to_string()),
@@ -3652,433 +3072,6 @@ mod tests {
             ]
         );
         assert_ne!(replacement.resume_template, previous.resume_template);
-    }
-
-    /// Spec: a Codex launch that already selects a session (`codex resume
-    /// <id>`, `codex --yolo resume <id>`, `codex fork <id>`) refuses a derived
-    /// resume template, an explicit template still resolves for it, and a
-    /// plain `codex` launch still derives `resume {conversation}`.
-    ///
-    /// Why: Codex accepts one session selector. Derivation appended a second,
-    /// so a Restart or Resume of such a session exited with "unexpected
-    /// argument" instead of continuing the conversation. Refusing at create
-    /// time, as Grok does, tells the user to supply a resume command instead.
-    #[farhelm_testtrace::test]
-    fn codex_derived_resume_refuses_an_existing_session_selector() {
-        let argv = |words: &[&str]| {
-            words
-                .iter()
-                .map(|word| word.to_string())
-                .collect::<Vec<_>>()
-        };
-        for refused in [
-            argv(&["codex", "resume", "old-id"]),
-            argv(&["codex", "--yolo", "resume", "old-id"]),
-            argv(&["codex", "fork", "old-id"]),
-        ] {
-            assert_eq!(
-                IntegrationSnapshot::resolve(&refused, None, None),
-                Err(SnapshotError::CodexAmbiguousResumeSelector),
-                "derived argv must refuse: {refused:?}"
-            );
-            let template = argv(&["codex", "resume", CONVERSATION_PLACEHOLDER]);
-            let explicit = IntegrationSnapshot::resolve(&refused, None, Some(template.clone()))
-                .unwrap_or_else(|error| {
-                    panic!("an explicit template must still resolve for {refused:?}: {error}")
-                });
-            assert_eq!(
-                explicit.resume_template,
-                Some(template),
-                "the explicit template is the one kept for {refused:?}"
-            );
-        }
-        let plain = IntegrationSnapshot::resolve(&argv(&["codex", "--yolo"]), None, None)
-            .expect("a plain codex launch derives");
-        assert_eq!(
-            plain.resume_template,
-            Some(argv(&[
-                "codex",
-                "--yolo",
-                "resume",
-                CONVERSATION_PLACEHOLDER
-            ]))
-        );
-    }
-
-    /// Spec: a Claude launch that already selects a conversation
-    /// (`--continue`/`-c`, `--resume`/`-r`, `--session-id`, `--from-pr`,
-    /// `--teleport`, `--fork-session`, inline `=` forms included) or carries a
-    /// bare `--` refuses a derived resume template;
-    /// an explicit template still resolves for each, and a plain Claude
-    /// launch, flags and prompt included, still derives `--resume
-    /// {conversation}`.
-    ///
-    /// Why: the derived template appends `--resume <id>`. Beside an existing
-    /// selector, Claude can resume a different conversation than the
-    /// captured one, which then replaces the valid Resume offer; behind
-    /// `--`, the flag becomes prompt text and Resume starts afresh. Refusing
-    /// at create time, as Grok and Codex do, tells the user to supply a
-    /// resume command instead.
-    #[farhelm_testtrace::test]
-    fn claude_derived_resume_refuses_an_existing_selector_or_boundary() {
-        let argv = |words: &[&str]| {
-            words
-                .iter()
-                .map(|word| word.to_string())
-                .collect::<Vec<_>>()
-        };
-        for refused in [
-            argv(&["claude", "--continue"]),
-            argv(&["claude", "--model", "opus", "-c"]),
-            argv(&["claude", "--resume", "old-id"]),
-            argv(&["claude", "-r", "old-id"]),
-            argv(&["claude", "--resume=old-id"]),
-            argv(&["claude", "--session-id", "old-id"]),
-            argv(&["claude", "--session-id=old-id"]),
-            argv(&["claude", "--", "fix the build"]),
-            argv(&["claude", "--from-pr", "123"]),
-            argv(&["claude", "--from-pr=123"]),
-            argv(&["claude", "--teleport"]),
-            argv(&["claude", "--fork-session"]),
-        ] {
-            assert_eq!(
-                IntegrationSnapshot::resolve(&refused, None, None),
-                Err(SnapshotError::ClaudeAmbiguousResumeSelector),
-                "derived argv must refuse: {refused:?}"
-            );
-            let template = argv(&["claude", "--resume", CONVERSATION_PLACEHOLDER]);
-            let explicit = IntegrationSnapshot::resolve(&refused, None, Some(template.clone()))
-                .unwrap_or_else(|error| {
-                    panic!("an explicit template must still resolve for {refused:?}: {error}")
-                });
-            assert_eq!(
-                explicit.resume_template,
-                Some(template),
-                "the explicit template is the one kept for {refused:?}"
-            );
-        }
-        let plain = IntegrationSnapshot::resolve(
-            &argv(&["claude", "--model", "opus", "fix the build"]),
-            None,
-            None,
-        )
-        .expect("a plain claude launch derives");
-        assert_eq!(
-            plain.resume_template,
-            Some(argv(&[
-                "claude",
-                "--model",
-                "opus",
-                "fix the build",
-                "--resume",
-                CONVERSATION_PLACEHOLDER
-            ]))
-        );
-    }
-
-    /// Derivation cannot safely append a selector after `--` or beside an
-    /// existing session choice. Explicit templates remain the escape hatch
-    /// because the user supplies their complete argv contract.
-    #[farhelm_testtrace::test]
-    fn grok_derived_resume_refuses_ambiguous_selector_boundaries() {
-        for tail in [
-            vec!["--"],
-            vec!["--resume", "old"],
-            vec!["--resume=old"],
-            vec!["--session-id", "old"],
-            vec!["--continue"],
-            vec!["--fork-session", "old"],
-        ] {
-            let mut argv = vec!["grok".to_string()];
-            argv.extend(tail.into_iter().map(str::to_string));
-            assert_eq!(
-                IntegrationSnapshot::resolve(&argv, None, None),
-                Err(SnapshotError::GrokAmbiguousResumeBoundary),
-                "derived argv must refuse: {argv:?}"
-            );
-        }
-
-        let explicit = IntegrationSnapshot::resolve(
-            &["grok".to_string(), "--".to_string()],
-            None,
-            Some(vec![
-                "wrapper".to_string(),
-                "resume-exact".to_string(),
-                CONVERSATION_PLACEHOLDER.to_string(),
-            ]),
-        )
-        .expect("an explicit complete template bypasses derivation");
-        assert_eq!(explicit.kind, AgentKind::Grok);
-    }
-
-    /// Goose's derived restart keeps the structured launcher's literal
-    /// `env` prefix and model choices while replacing every old identity
-    /// selector with the one exact session ID Farhelm captured.
-    #[farhelm_testtrace::test]
-    fn goose_resume_template_preserves_structured_launch_arguments() {
-        let original = [
-            "env",
-            "GOOSE_MODE=auto",
-            "GOOSE_THINKING_EFFORT=off",
-            "goose",
-            "session",
-            "--provider",
-            "openrouter",
-            "--model",
-            "x-ai/grok-4.6",
-            "--name",
-            "draft",
-        ]
-        .map(str::to_string);
-        let snapshot = IntegrationSnapshot::resolve(&original, Some(AgentKind::Goose), None)
-            .expect("Goose integration");
-        assert_eq!(
-            snapshot.resume_template.unwrap(),
-            [
-                "env",
-                "GOOSE_MODE=auto",
-                "GOOSE_THINKING_EFFORT=off",
-                "goose",
-                "session",
-                "--provider",
-                "openrouter",
-                "--model",
-                "x-ai/grok-4.6",
-                "--resume",
-                "--session-id",
-                "{conversation}",
-            ]
-        );
-    }
-
-    /// Fresh bare Goose is normalized during injection, but its durable argv
-    /// remains bare. Resume must add the subcommand even behind an env prefix.
-    #[farhelm_testtrace::test]
-    fn goose_resume_template_normalizes_bare_env_launches() {
-        for original in [vec!["goose"], vec!["env", "FOO=1", "/opt/bin/goose"]] {
-            let argv: Vec<String> = original.iter().map(|s| s.to_string()).collect();
-            let snapshot = IntegrationSnapshot::resolve(&argv, Some(AgentKind::Goose), None)
-                .expect("Goose integration");
-            let mut expected = argv;
-            expected.extend(
-                ["session", "--resume", "--session-id", "{conversation}"].map(str::to_string),
-            );
-            assert_eq!(snapshot.resume_template, Some(expected));
-        }
-    }
-
-    /// OMP's default resume template strips every session-source selector
-    /// under OMP'S OWN consumption rules — which differ from Pi's — and
-    /// appends `--resume {conversation}`. The subtle cases are the
-    /// optional-value selectors: a dropped `--resume`/`-r`/`--session` takes
-    /// the next token only when that token is value-like, `--fork` takes its
-    /// value unconditionally, and unrelated option values survive opaquely
-    /// even when they are themselves spelled like selectors.
-    #[farhelm_testtrace::test]
-    fn omp_resume_template_strips_session_selectors_under_omp_consumption_rules() {
-        let strip = |argv: &[&str]| -> Vec<String> {
-            IntegrationSnapshot::resolve(
-                &argv.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                Some(AgentKind::Omp),
-                None,
-            )
-            .expect("an OMP template resolves")
-            .resume_template
-            .expect("OMP has a derived template")
-        };
-
-        // Optional-value consumption: the bare form of `--resume` consumes a
-        // value-like successor, keeps a flag-looking one, and handles its own
-        // inline spelling.
-        assert_eq!(
-            strip(&["omp", "--resume", "old-id"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "--resume", "--model", "x"]),
-            vec!["omp", "--model", "x", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "--resume=old-id"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "-r", "old-id"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "--session", "old-id"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        // `--fork` takes a value unconditionally, even a flag-looking one —
-        // so `--model` is consumed as the fork value and `x` survives as the
-        // prompt, exactly as OMP's own parser reads that argv.
-        assert_eq!(
-            strip(&["omp", "--fork", "branch-1"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "--fork", "--model", "x"]),
-            vec!["omp", "x", "--resume", "{conversation}"]
-        );
-        // Valueless import selectors drop alone.
-        assert_eq!(
-            strip(&["omp", "--from-claude", "--from-codex", "--continue", "-c"]),
-            vec!["omp", "--resume", "{conversation}"]
-        );
-        // Their supported INLINE spellings drop whole too — the name before
-        // `=` is what matches — consuming no extra element, so the prompt
-        // after them survives. OMP's own equals handling makes
-        // `--from-claude=true` the same import selector as the bare flag.
-        assert_eq!(
-            strip(&["omp", "--from-claude=true", "hello"]),
-            vec!["omp", "hello", "--resume", "{conversation}"]
-        );
-        assert_eq!(
-            strip(&["omp", "--from-codex=false", "--continue=x", "hello"]),
-            vec!["omp", "hello", "--resume", "{conversation}"]
-        );
-        // Inline values of KEPT flags survive as the single elements they are.
-        assert_eq!(
-            strip(&["omp", "--model=openrouter/x", "--session-dir=/s", "hello"]),
-            vec![
-                "omp",
-                "--model=openrouter/x",
-                "--session-dir=/s",
-                "hello",
-                "--resume",
-                "{conversation}"
-            ]
-        );
-        // Unrelated option values survive opaquely, even selector-shaped.
-        assert_eq!(
-            strip(&["omp", "--system-prompt", "--continue", "--model", "x"]),
-            vec![
-                "omp",
-                "--system-prompt",
-                "--continue",
-                "--model",
-                "x",
-                "--resume",
-                "{conversation}"
-            ],
-            "a prompt value that merely looks like a selector is data, not a selector"
-        );
-        // An unknown long flag keeps a value-like successor, as OMP's own
-        // restart rewrite does.
-        assert_eq!(
-            strip(&["omp", "--ext-flag", "value"]),
-            vec!["omp", "--ext-flag", "value", "--resume", "{conversation}"]
-        );
-        // The end-of-options boundary is preserved verbatim in the ORIGINAL
-        // argv; nothing is stripped behind it. (Template resolution REFUSES
-        // this argv overall — see the test below — so this pins the stripper
-        // itself rather than going through `resolve`.)
-        assert_eq!(
-            strip_omp_selectors(
-                &["omp", "--", "--resume", "prompt-text"]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            ),
-            vec!["omp", "--", "--resume", "prompt-text"]
-        );
-    }
-
-    /// A GENUINE end-of-options delimiter refuses an OMP template: OMP reads
-    /// everything after an unconsumed `--` as prompt text, so the appended
-    /// `--resume <verified-file>` could never resume, and the honest failure
-    /// is a refused create rather than a resume that silently launches fresh.
-    /// Three neighbouring shapes deliberately do NOT refuse, each for its own
-    /// reason: a `--` consumed as an option value (the prompt is literally
-    /// spelled `--`, and appended flags remain options), an explicit template
-    /// override (filled verbatim, never appended), and every other kind.
-    #[farhelm_testtrace::test]
-    fn an_omp_argv_with_a_bare_double_dash_refuses_its_template() {
-        // A genuine delimiter with the DERIVED template refuses.
-        let argv = ["omp".to_string(), "--".to_string(), "hello".to_string()];
-        let error = IntegrationSnapshot::resolve(&argv, Some(AgentKind::Omp), None)
-            .expect_err("a genuine -- delimiter must refuse OMP template resolution");
-        assert!(format!("{error:?}").contains("OmpAmbiguousResumeBoundary"));
-
-        // A `--` consumed as an option value is not a delimiter: the prompt
-        // value is literally `--`, and appended flags are still options.
-        let consumed = [
-            "omp".to_string(),
-            "--system-prompt".to_string(),
-            "--".to_string(),
-        ];
-        let snapshot = IntegrationSnapshot::resolve(&consumed, Some(AgentKind::Omp), None)
-            .expect("a -- consumed as an option value resolves");
-        assert_eq!(
-            snapshot.resume_template.expect("derived template"),
-            vec![
-                "omp".to_string(),
-                "--system-prompt".to_string(),
-                "--".to_string(),
-                "--resume".to_string(),
-                CONVERSATION_PLACEHOLDER.to_string(),
-            ],
-            "the consumed -- survives verbatim and the resume flag lands AFTER it, in \
-             option position"
-        );
-        // Same for a consumed `--` behind a prompt.
-        let consumed_after_prompt = [
-            "omp".to_string(),
-            "hello".to_string(),
-            "--system-prompt".to_string(),
-            "--".to_string(),
-        ];
-        assert!(
-            IntegrationSnapshot::resolve(&consumed_after_prompt, Some(AgentKind::Omp), None)
-                .is_ok()
-        );
-
-        // A genuine delimiter plus an EXPLICIT, independently valid template
-        // override still resolves: the override REPLACES the derived
-        // template verbatim — the original argv (delimiter included) is not
-        // carried into it, so nothing is ever appended behind the delimiter.
-        // The override here is an exact-file resume command OMP itself
-        // honors (`--resume` with an absolute path opens that session file
-        // directly); filling it with an OMP locator yields exactly the argv
-        // OMP would run, with no delimiter and no prompt inside it.
-        let override_argv = ["omp".to_string(), "--".to_string(), "hello".to_string()];
-        let snapshot = IntegrationSnapshot::resolve(
-            &override_argv,
-            Some(AgentKind::Omp),
-            Some(vec![
-                "omp".to_string(),
-                "--resume".to_string(),
-                CONVERSATION_PLACEHOLDER.to_string(),
-            ]),
-        )
-        .expect("an explicit template override needs no appending");
-        let verified = encode_locator(
-            LocatorVendor::Omp,
-            SessionLocator {
-                version: 1,
-                session_id: "conv-b".to_string(),
-                session_file: Some("/sessions/conv-b.jsonl".to_string()),
-            },
-        )
-        .expect("a verified locator encodes");
-        assert_eq!(
-            snapshot
-                .filled_resume_argv(&verified)
-                .expect("the override fills"),
-            vec![
-                "omp".to_string(),
-                "--resume".to_string(),
-                "/sessions/conv-b.jsonl".to_string(),
-            ],
-            "the filled override is exactly the exact-file resume command, with no \
-             delimiter behind which a target could be misread"
-        );
-
-        // The refusal is OMP-specific: Pi's grammar treats `--` differently
-        // and its template derivation is unchanged.
-        let pi_argv = ["pi".to_string(), "--".to_string(), "hello".to_string()];
-        assert!(IntegrationSnapshot::resolve(&pi_argv, Some(AgentKind::Pi), None).is_ok());
     }
 
     /// A locator with a raw control character is refused even where JSON
@@ -4124,7 +3117,10 @@ mod tests {
     /// kind's acceptance.
     #[farhelm_testtrace::test]
     fn locator_round_trips_hostile_paths_and_controls_the_offer() {
-        for (vendor, argv0) in [(LocatorVendor::Pi, "pi"), (LocatorVendor::Omp, "omp")] {
+        for (vendor, argv0, kind) in [
+            (LocatorVendor::Pi, "pi", AgentKind::Pi),
+            (LocatorVendor::Omp, "omp", AgentKind::Omp),
+        ] {
             let locator = SessionLocator {
                 version: 1,
                 session_id: "session-1".to_string(),
@@ -4134,8 +3130,10 @@ mod tests {
             assert!(encoded.starts_with(vendor.prefix()), "{encoded:?}");
             assert_eq!(parse_locator(vendor, &encoded).expect("decode"), locator);
 
-            let snapshot =
-                IntegrationSnapshot::resolve(&[argv0.to_string()], None, None).expect("integrated");
+            let snapshot = test_snapshot(
+                kind,
+                composed_resume(argv0, &["--resume", CONVERSATION_PLACEHOLDER]),
+            );
             // OMP's ownership proof is implemented, so an unproven
             // (version 0) binding offers no restart until its first proven
             // report; Pi keeps today's offer until its own proof flips the
@@ -4200,13 +3198,14 @@ mod tests {
             // The OTHER vendor's snapshot refuses this token at the OFFER and
             // SUBSTITUTION boundaries too — the durable decision points, not
             // just the parser.
-            let other_argv0 = match other {
-                LocatorVendor::Pi => "pi",
-                LocatorVendor::Omp => "omp",
+            let (other_argv0, other_kind) = match other {
+                LocatorVendor::Pi => ("pi", AgentKind::Pi),
+                LocatorVendor::Omp => ("omp", AgentKind::Omp),
             };
-            let other_snapshot =
-                IntegrationSnapshot::resolve(&[other_argv0.to_string()], None, None)
-                    .expect("integrated");
+            let other_snapshot = test_snapshot(
+                other_kind,
+                composed_resume(other_argv0, &["--resume", CONVERSATION_PLACEHOLDER]),
+            );
             assert_eq!(
                 other_snapshot.restart_offer(Some(&encoded), 0),
                 RestartOffer::NotCaptured,
@@ -4559,26 +3558,26 @@ mod tests {
     /// verbatim.
     #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
-        let claude = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
+        let claude = test_snapshot(
+            AgentKind::Claude,
+            composed_resume("claude", &["--resume", CONVERSATION_PLACEHOLDER]),
+        );
         assert_eq!(claude.restart_offer(None, 0), RestartOffer::NotCaptured);
         assert_eq!(
             claude.restart_offer(Some("conv-1"), 0),
             RestartOffer::Resume
         );
 
-        let fallback = IntegrationSnapshot::resolve(
-            &["some-agent".into()],
-            None,
-            Some(vec!["some-agent".to_string(), "--continue".to_string()]),
-        )
-        .unwrap();
+        // A command launch that declared an agent type without opting into
+        // Resume has no resume command, and says so rather than reading as
+        // an uncaptured conversation.
+        let no_resume = test_snapshot(AgentKind::Claude, None);
         assert_eq!(
-            fallback.restart_offer(None, 0),
-            RestartOffer::NoConversationReporting,
-            "a placeholder-free template no longer makes a session restartable"
+            no_resume.restart_offer(Some("conv-1"), 0),
+            RestartOffer::NoResumeCommand
         );
 
-        let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
+        let generic = test_snapshot(AgentKind::Generic, None);
         assert_eq!(
             generic.restart_offer(None, 0),
             RestartOffer::NoConversationReporting

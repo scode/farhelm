@@ -323,7 +323,11 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
       expect(row.host_name).toBe(LOCAL_HOST_NAME);
       expect(row.title, "a clone copies the source's title").toBe(`relay-source-${stamp}`);
       expect(row.cwd, "a clone copies the source's directory").toBe(work);
-      expect(row.invocation, "a clone runs the source's command").toBe(relayAgentInvocation());
+      // `createSession` declared the source as Claude, which appends
+      // `{farhelm_args}`; a command launch lists its command as written.
+      expect(row.invocation, "a clone runs the source's command").toBe(
+        `${relayAgentInvocation()} {farhelm_args}`,
+      );
     } finally {
       await driver?.close();
       if (cloned) await cleanupSession(request, cloned);

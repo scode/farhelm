@@ -38,6 +38,17 @@ fn session_list_body() -> SessionListBody {
         owner: "octo".to_string(),
         name: "widgets".to_string(),
     };
+    // Composed by the real compiler, so the row's start and resume
+    // commands are the ones a session launched from these choices carries,
+    // and `invocation` is what the listing derives from them.
+    let launch = crate::launches::compile(LaunchSelection {
+        harness: LaunchHarness::Codex,
+        model: Some("gpt-5".to_string()),
+        effort: Some(LaunchEffort::High),
+        permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: Some(true),
+    })
+    .expect("a valid Codex selection compiles");
     let info = SessionInfo {
         agent_kind: farhelm_proto::AgentKind::Codex,
         id: "fh-0123abcd".to_string(),
@@ -49,19 +60,8 @@ fn session_list_body() -> SessionListBody {
         creation_seq: Some(7),
         cwd: "~/src/widgets".to_string(),
         canonical_cwd: Some("/home/user/src/widgets".to_string()),
-        invocation: "codex --model gpt-5".to_string(),
-        resume_template: Some(vec![
-            "codex".to_string(),
-            "resume".to_string(),
-            "{conversation}".to_string(),
-        ]),
-        launch: Some(LaunchSelection {
-            harness: LaunchHarness::Codex,
-            model: Some("gpt-5".to_string()),
-            effort: Some(LaunchEffort::High),
-            permissions: Some(LaunchPermission::SmartApprove),
-            workspace_trust: Some(true),
-        }),
+        invocation: launch.display_command(),
+        launch,
         status: SessionStatus::Exited { exit_code: Some(3) },
         annotation: Some("left a note".to_string()),
         restart_offer: RestartOffer::Resume,

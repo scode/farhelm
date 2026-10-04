@@ -81,7 +81,7 @@ function shellQuote(value: string): string {
 
 /**
  * Write the per-session replay script into the session's scratch working
- * directory. The session's invocation uses the wrapper name (`claude`
+ * directory. The session's command uses the wrapper name (`claude`
  * or `codex`, on PATH through the stack's private HOME) with optional
  * permission flags, and that wrapper
  * execs this file from `$PWD`, which is how sessions with identical
@@ -187,7 +187,12 @@ async function measureTerminal(page: Page, request: APIRequestContext, info: Sta
   const cwd = path.join(info.work, "probe");
   mkdirSync(cwd, { recursive: true });
   const created = await request.post("/api/sessions", {
-    data: { cwd, invocation: `${shellQuote(info.fixtures)} fake-agent --script basic`, title: "size probe", host },
+    data: {
+      cwd,
+      command: { command: `${shellQuote(info.fixtures)} fake-agent --script basic`, yolo: false },
+      title: "size probe",
+      host,
+    },
   });
   expect(created.ok(), `create the size probe: ${await created.text()}`).toBeTruthy();
   const id = ((await created.json()) as { id: string }).id;
@@ -247,8 +252,9 @@ export async function stageFleet(
   const size = await measureTerminal(page, request, info, localHost);
 
   // Sessions, in scenario order, each in its own scratch directory and at
-  // the terminal's measured size. Permission flags reach the stored invocation
-  // so the UI derives its own glyph; no listing rewrite manufactures badges.
+  // the terminal's measured size. Each is a command launch declaring its
+  // agent and stating its YOLO answer, which is what the UI's permission
+  // mark shows; no listing rewrite manufactures badges.
   // start-stack.sh resolves these names to isolated transcript wrappers.
   const ids = new Map<string, string>();
   for (const [index, session] of scenario.sessions.entries()) {
@@ -259,10 +265,13 @@ export async function stageFleet(
     const response = await request.post("/api/sessions", {
       data: {
         cwd,
-        invocation: session.yolo ? `${session.wrapper} ${permissionFlag}` : session.wrapper,
+        command: {
+          command: `${session.yolo ? `${session.wrapper} ${permissionFlag}` : session.wrapper} {farhelm_args}`,
+          yolo: session.yolo,
+          agent: session.wrapper,
+        },
         title: session.title,
         host: hostIds.get(session.host),
-        agent_kind: session.wrapper,
         cols: size.cols,
         rows: size.rows,
         // Every host starts out asking before a YOLO launch. Confirming this
@@ -326,9 +335,9 @@ export async function openStagedFleet(
   for (const session of scenario.sessions) {
     const row = page.locator(`[data-session-id="${fleet.ids.get(session.title)}"]`);
     await expect(row).toBeVisible();
-    // These are raw invocations, so ordinary rows have unknown permissions.
-    // Pin the exact mark before capture instead of merely checking for YOLO.
+    // Command launches show the YOLO answer they were created with. Pin the
+    // exact mark before capture instead of merely checking for YOLO.
     await expect(row.locator(".permission-glyph")).toHaveCount(1);
-    await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", session.yolo ? "yolo" : "unknown");
+    await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", session.yolo ? "yolo" : "shielded");
   }
 }

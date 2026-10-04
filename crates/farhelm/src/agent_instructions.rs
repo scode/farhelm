@@ -108,19 +108,27 @@ fn render(agent: &Command) -> String {
          Restart resumes the target's own conversation; there is no other kind of restart\n\
          and no --mode. It works only when the restart_offer field of sessions --json is\n\
          resume, which the table's OFFER column also spells resume. Any other value says why\n\
-         it cannot: not_captured (no conversation Farhelm can resume was captured) or\n\
-         no_conversation_reporting (Farhelm has no conversation reporting for that agent),\n\
-         spelled not-captured and no-reporting in the table. Do not restart such a session;\n\
-         tell the user instead. Restart stops an idle, waiting, or unknown-status\n\
+         it cannot: not_captured (no conversation Farhelm can resume was captured),\n\
+         no_conversation_reporting (Farhelm has no conversation reporting for that agent), or\n\
+         no_resume_command (a command launch created without a resume command), spelled\n\
+         not-captured, no-reporting and no-resume-command in the table. Do not restart such a\n\
+         session; tell the user instead. Restart stops an idle, waiting, or unknown-status\n\
          target's agent without asking; a working one is refused unless you pass\n\
          --stop-if-running. Use --stop-if-running only with deliberate permission to stop\n\
          the target. Restart uses its stored configuration; you cannot supply another\n\
          command. Self-restart can lose its acknowledgement.\n\
          \n\
-         Create requires a host, a cwd, and the command line to run as --invocation.\n\
+         Create requires a host, a cwd, the command line to run as --command, and --yolo or\n\
+         --no-yolo: your statement of whether that command runs without approval prompts.\n\
+         Farhelm believes it and never checks the command, so say it truthfully. --agent TYPE\n\
+         declares the agent type the command runs; the command must then contain\n\
+         {farhelm_args} as one argument where Farhelm adds its own. --resume-command (needs\n\
+         --agent) is the command that resumes a conversation, with {conversation} and\n\
+         {farhelm_args}; without one the session cannot be restarted.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
-         source's command or structured launch inherit. Spawn stays on this supervisor and\n\
-         requires --inherit-agent: the child runs this session's own agent.\n\
+         source's launch inherit. Spawn stays on this supervisor and requires\n\
+         --inherit-agent: the child runs this session's own agent. Both refuse a session\n\
+         created before launch kinds; use create --command for one.\n\
          \n\
          A YOLO launch (one that skips approval prompts) on a host that asks before YOLO\n\
          launches is refused, and the refusal names --confirm-yolo (older Farhelm versions\n\
@@ -185,6 +193,16 @@ fn verb_lines(agent: &Command) -> Vec<String> {
         .iter()
         .map(|verb| {
             let mut usage = format!("farhelm agent {}", verb.get_name());
+            // A required choice between flags (create's `--yolo` or
+            // `--no-yolo`) is one required token, rendered at its first
+            // member as `(--yolo | --no-yolo)`: each member alone is
+            // optional to clap, and spelling them `[--yolo] [--no-yolo]`
+            // would tell an agent it may pass neither.
+            let required_groups: Vec<&clap::ArgGroup> = verb
+                .get_groups()
+                .filter(|group| group.is_required_set())
+                .collect();
+            let mut rendered_groups = std::collections::HashSet::new();
             for arg in verb.get_arguments() {
                 // clap synthesizes these onto every subcommand; they are
                 // not part of what the verb asks for.
@@ -192,7 +210,28 @@ fn verb_lines(agent: &Command) -> Vec<String> {
                     continue;
                 }
                 usage.push(' ');
-                usage.push_str(&arg_spelling(arg));
+                match required_groups
+                    .iter()
+                    .find(|group| group.get_args().any(|id| id == arg.get_id()))
+                {
+                    Some(group) => {
+                        if rendered_groups.insert(group.get_id().clone()) {
+                            let members: Vec<String> = group
+                                .get_args()
+                                .filter_map(|id| {
+                                    verb.get_arguments().find(|member| member.get_id() == id)
+                                })
+                                .map(|member| {
+                                    arg_spelling(member).trim_matches(['[', ']']).to_string()
+                                })
+                                .collect();
+                            usage.push_str(&format!("({})", members.join(" | ")));
+                        } else {
+                            usage.pop();
+                        }
+                    }
+                    None => usage.push_str(&arg_spelling(arg)),
+                }
             }
             usage
         })
@@ -351,13 +390,15 @@ mod tests {
             RestartOffer::Resume,
             RestartOffer::NotCaptured,
             RestartOffer::NoConversationReporting,
+            RestartOffer::NoResumeCommand,
         ];
         // Exhaustive on purpose: a new RestartOffer variant must fail to
         // compile here until it is added to `offers` above.
         match offers[0] {
             RestartOffer::Resume
             | RestartOffer::NotCaptured
-            | RestartOffer::NoConversationReporting => {}
+            | RestartOffer::NoConversationReporting
+            | RestartOffer::NoResumeCommand => {}
         }
         for offer in offers {
             let json = serde_json::to_value(offer).expect("offer serializes");
@@ -535,9 +576,10 @@ mod tests {
     /// is REQUIRED and must render without brackets — a `[--cwd <DIR>]`
     /// here would tell a model the directory is optional and it would
     /// dutifully omit it. `--host <NAME>` must say NAME rather than HOST
-    /// because the value is a name from the hosts listing. `--invocation`
-    /// is required since profiles were removed, and the hidden refusals for
-    /// the removed `--profile` and `--profile-id` must not render.
+    /// because the value is a name from the hosts listing. `--command` and
+    /// the YOLO assertion are required, the assertion rendered as the one
+    /// required choice it is, and the hidden refusals for the removed
+    /// `--invocation`, `--profile` and `--profile-id` must not render.
     ///
     /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
     /// over-wide verb looks like in the REAL text rather than only in
@@ -547,8 +589,9 @@ mod tests {
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
-            "farhelm agent create --cwd <DIR> --host <NAME> --invocation <CMD> \
-             [--title <TITLE>] [--idempotency-key <KEY>] [--confirm-yolo]  \
+            "farhelm agent create --cwd <DIR> --host <NAME> --command <CMD> \
+             (--yolo | --no-yolo) [--agent <TYPE>] [--resume-command <CMD>] [--title <TITLE>] \
+             [--idempotency-key <KEY>] [--confirm-yolo]  \
              Create a session on any host; prints its id",
             "farhelm agent clone --source-session <SOURCE_SESSION> --host <NAME> [--cwd <DIR>] \
              [--title <TITLE>] [--idempotency-key <KEY>] [--confirm-yolo]  \

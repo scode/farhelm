@@ -171,7 +171,7 @@ pub(crate) fn RestartWithDialog(
     on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let Some(mut baseline) = session.launch.clone() else {
+    let Some(mut baseline) = session.agent_selection().cloned() else {
         return rsx! {};
     };
     // Old sessions can omit a permission that now means YOLO. Compare the

@@ -828,7 +828,7 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
   let revision = 1;
   try {
     const created = await request.post("/api/sessions", {
-      data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
+      data: { cwd: "/tmp", command: { command: FAKE_AGENT_INVOCATION, yolo: false }, title },
     });
     expect(created.status(), await created.text()).toBe(200);
     id = (await created.json()).id as string;
@@ -1074,7 +1074,7 @@ test("rename-refused: a control-character title shows the supervisor's words and
   let id: string | undefined;
   try {
     const created = await request.post("/api/sessions", {
-      data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
+      data: { cwd: "/tmp", command: { command: FAKE_AGENT_INVOCATION, yolo: false }, title },
     });
     expect(created.status(), await created.text()).toBe(200);
     id = (await created.json()).id as string;
@@ -1582,7 +1582,7 @@ test("rename-draft-survives-a-failed-read: the stable field keeps focus and its 
   const feed = await stubFeed(page);
   try {
     const created = await request.post("/api/sessions", {
-      data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
+      data: { cwd: "/tmp", command: { command: FAKE_AGENT_INVOCATION, yolo: false }, title },
     });
     expect(created.status(), await created.text()).toBe(200);
     id = (await created.json()).id as string;

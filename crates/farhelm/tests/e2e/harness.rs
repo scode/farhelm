@@ -1116,6 +1116,22 @@ pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststat
     (session, work)
 }
 
+/// A command launch declaring `agent`, asserted not YOLO, with its command
+/// and optional resume command as written: how these tests launch a fake
+/// agent under a real integration.
+pub(crate) fn declared_command(
+    command: &str,
+    agent: farhelm_proto::LaunchHarness,
+    resume: Option<&str>,
+) -> farhelm_proto::SessionLaunch {
+    farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+        command: command.to_string(),
+        yolo: false,
+        agent: Some(agent),
+        resume: resume.map(str::to_string),
+    })
+}
+
 /// The conversation id [`create_resumable_session`] records.
 pub(crate) const RESUMABLE_TEST_CONVERSATION: &str = "conv-test";
 
@@ -1124,15 +1140,15 @@ pub(crate) const RESUMABLE_TEST_CONVERSATION: &str = "conv-test";
 ///
 /// Restart only ever resumes a captured conversation (SPEC.md), so tests of
 /// restart mechanics need a session that offers Resume without depending on
-/// a real agent's report. The session declares itself Goose and runs
-/// `invocation` under `sh -c 'exec …'`; its resume command runs the same
-/// line and passes the conversation id as a positional argument the shell
-/// ignores. The conversation is then bound through the supervisor's
-/// `test-seams` recording seam. Goose because it has no screen reader of
-/// its own (status reads exactly as for a plain command), adds nothing to a
-/// launch whose program is not `goose`, and does not verify a resume target
-/// on disk. `invocation` must be a single command `exec` can run, such as a
-/// [`fixture_cmd`] line.
+/// a real agent's report. The session is a command launch declaring Goose
+/// that runs `invocation` under `sh -c 'exec …'`; its resume command runs
+/// the same line and passes the conversation id as a positional argument
+/// the shell ignores. The conversation is then bound through the
+/// supervisor's `test-seams` recording seam. Goose because it has no screen
+/// reader of its own (status reads exactly as for a plain command) and does
+/// not verify a resume target on disk, and its `{farhelm_args}` land as
+/// positional arguments `sh -c` hands the script unread. `invocation` must
+/// be a single command `exec` can run, such as a [`fixture_cmd`] line.
 pub(crate) async fn create_resumable_session(
     h: &Harness,
     cwd: &str,
@@ -1140,26 +1156,22 @@ pub(crate) async fn create_resumable_session(
     cols: u16,
     rows: u16,
 ) -> SessionInfo {
-    let line = format!("exec {invocation}");
+    let line = shell_words::quote(&format!("exec {invocation}")).into_owned();
     let created = h
         .client
         .create_session_with_extras(
             cwd,
-            &format!("sh -c {}", shell_words::quote(&line)),
+            declared_command(
+                &format!("sh -c {line} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Goose,
+                Some(&format!(
+                    "sh -c {line} farhelm-test-resume {{conversation}} {{farhelm_args}}"
+                )),
+            ),
             None,
             cols,
             rows,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Goose),
-                resume_template: Some(vec![
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    line,
-                    "farhelm-test-resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-                ..farhelm_helm::CreateExtras::default()
-            },
+            farhelm_helm::CreateExtras::default(),
         )
         .await
         .expect("create a resumable session");
@@ -2554,8 +2566,7 @@ mod tests {
             cwd: format!("/{id}"),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: farhelm_proto::SessionLaunch::plain_command("agent"),
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: Default::default(),

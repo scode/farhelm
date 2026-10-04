@@ -151,16 +151,57 @@ export const RESUMABLE_FAKE_AGENT = `${FAKE_AGENT} --report-conversation ${RESUM
 /**
  * The resume command for [`RESUMABLE_FAKE_AGENT`]: the same fixture, which
  * reports the resumed conversation again as it starts, so a restarted
- * session stays resumable.
+ * session stays resumable. `{farhelm_args}` last, where Farhelm adds the
+ * Claude hook that report travels through.
  */
-export const RESUMABLE_FAKE_AGENT_RESUME = [
-  FIXTURES_BIN,
-  "fake-agent",
-  "--script",
-  "basic",
-  "--report-conversation",
-  "{conversation}",
-];
+export const RESUMABLE_FAKE_AGENT_RESUME = `${FAKE_AGENT} --report-conversation {conversation} {farhelm_args}`;
+
+/**
+ * A session row's `launch` for an agent launch of `selection`, as a stubbed
+ * listing or reply carries it: the selection with a start command of the
+ * agent type's bare program and `{farhelm_args}`, and no resume command.
+ * The UI reads the selection; the commands only have to be well formed.
+ */
+export function agentLaunchRow(selection: { harness: string; [field: string]: unknown }): Record<string, unknown> {
+  return { kind: "agent", selection, start: [selection.harness, "{farhelm_args}"], resume: null };
+}
+
+/**
+ * A session row's `launch` for a command launch, as a stubbed listing or
+ * reply carries it: the command with its YOLO assertion and, optionally, a
+ * declared agent type and resume command.
+ */
+export function commandLaunchRow(
+  command: string,
+  options: { yolo?: boolean; agent?: string; resume?: string } = {},
+): Record<string, unknown> {
+  return {
+    kind: "command",
+    command,
+    yolo: options.yolo ?? false,
+    agent: options.agent ?? null,
+    resume: options.resume ?? null,
+  };
+}
+
+/**
+ * The body of a command launch, the create API's `command` field: a command
+ * line run as written, with the caller's YOLO assertion (Farhelm believes it
+ * and never reads the command to check it) and, when the command runs a
+ * known agent, its declared agent type and resume command. A declared agent
+ * type needs `{farhelm_args}` in the command, which callers add.
+ */
+export function commandLaunch(
+  command: string,
+  options: { yolo?: boolean; agent?: string; resume?: string } = {},
+): { command: string; yolo: boolean; agent?: string; resume?: string } {
+  return {
+    command,
+    yolo: options.yolo ?? false,
+    ...(options.agent === undefined ? {} : { agent: options.agent }),
+    ...(options.resume === undefined ? {} : { resume: options.resume }),
+  };
+}
 
 /**
  * The session LISTING endpoint, as a route matcher.
@@ -311,19 +352,24 @@ export async function createSession(
   body: {
     title: string;
     cwd?: string;
+    /** The command line to run, as a command launch asserted not YOLO. */
     invocation?: string;
     host?: number;
-    /** The integrated agent kind to record for the typed command, when its
-     * first word would not derive the one the spec needs. */
+    /** The agent type to declare for the command, for a spec that needs the
+     * session integrated (conversation tracking, the agent's status reader).
+     * `{farhelm_args}` is appended to the command for it. */
     agent_kind?: string;
   },
 ): Promise<SessionRow> {
+  const invocation = body.invocation ?? FAKE_AGENT;
   const response = await request.post("/api/sessions", {
     data: {
       cwd: body.cwd ?? "/tmp",
       title: body.title,
-      invocation: body.invocation ?? FAKE_AGENT,
-      ...(body.agent_kind === undefined ? {} : { agent_kind: body.agent_kind }),
+      command:
+        body.agent_kind === undefined
+          ? commandLaunch(invocation)
+          : commandLaunch(`${invocation} {farhelm_args}`, { agent: body.agent_kind }),
       ...(body.host === undefined ? {} : { host: body.host }),
     },
   });
@@ -366,10 +412,13 @@ export async function createResumableSession(
       cwd: body.cwd ?? "/tmp",
       title: body.title,
       // `invocationSuffix` lets a spec lengthen the command a header shows
-      // without losing the report flag.
-      invocation: `${RESUMABLE_FAKE_AGENT}${body.invocationSuffix ?? ""}`,
-      agent_kind: "claude",
-      resume_template: RESUMABLE_FAKE_AGENT_RESUME,
+      // without losing the report flag. It goes AFTER `{farhelm_args}`: a
+      // suffix that starts a shell comment (`#...`) would otherwise swallow
+      // the placeholder, and the create would be refused for lacking it.
+      command: commandLaunch(`${RESUMABLE_FAKE_AGENT} {farhelm_args}${body.invocationSuffix ?? ""}`, {
+        agent: "claude",
+        resume: RESUMABLE_FAKE_AGENT_RESUME,
+      }),
       ...(body.host === undefined ? {} : { host: body.host }),
     },
   });
@@ -381,17 +430,14 @@ export async function createResumableSession(
 
 /**
  * [`createResumableSession`] for a YOLO launch: `claude` from the browser
- * stack's fake harness directory, with `--dangerously-skip-permissions`, so
- * the YOLO guard treats it as one, reporting [`RESUMABLE_CONVERSATION`] as
- * it starts. The fake `claude` passes its arguments to the fake agent, whose
- * named flags must come before anything it does not know, hence the order.
+ * stack's fake harness directory, as a command launch declaring Claude and
+ * asserted YOLO, reporting [`RESUMABLE_CONVERSATION`] as it starts. The
+ * assertion is what makes it YOLO; `--dangerously-skip-permissions` only
+ * makes the command look like what it claims, since Farhelm never reads it.
+ * The fake `claude` passes its arguments to the fake agent, whose named
+ * flags must come before anything it does not know, hence the order.
  * Created with `confirm_yolo`: the session is the fixture, not the question
  * under test.
- *
- * It is YOLO only because the guard reads `--dangerously-skip-permissions`
- * from the command line, which the launch-kinds change replaces with an
- * explicit YOLO assertion on command launches; this fixture has to move to
- * that assertion then.
  */
 export async function createResumableYoloSession(
   request: APIRequestContext,
@@ -402,7 +448,14 @@ export async function createResumableYoloSession(
       cwd: body.cwd,
       title: body.title,
       host: body.host,
-      invocation: `claude --report-conversation ${RESUMABLE_CONVERSATION} --dangerously-skip-permissions`,
+      command: commandLaunch(
+        `claude --report-conversation ${RESUMABLE_CONVERSATION} --dangerously-skip-permissions {farhelm_args}`,
+        {
+          yolo: true,
+          agent: "claude",
+          resume: `claude --report-conversation ${RESUMABLE_CONVERSATION} --dangerously-skip-permissions --resume {conversation} {farhelm_args}`,
+        },
+      ),
       confirm_yolo: true,
     },
   });

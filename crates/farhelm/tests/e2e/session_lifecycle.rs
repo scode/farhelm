@@ -2406,7 +2406,10 @@ async fn unparseable_invocations_error_without_creating_a_session() {
         .await
         .expect_err("unparseable invocation must fail");
     let unterminated_text = unterminated.to_string();
-    assert!(unterminated_text.contains("parsing agent invocation"));
+    assert!(
+        unterminated_text.contains("command: "),
+        "the refusal names the field that failed to parse: {unterminated_text}"
+    );
     // `RequestError` is attached as `.context(...)` over the `shell_words`
     // parse failure specifically so its own diagnostic keeps reaching the
     // user (see that struct's docs) — pin that it actually does, not just

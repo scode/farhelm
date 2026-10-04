@@ -8,9 +8,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupSession, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText, answerYolo } from "./helpers/term";
 
 const run = promisify(execFile);
 
@@ -268,7 +268,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
     expect(first.body).toMatchObject({ cwd: named, title: "fix", launch: { harness: "codex" }, github_checkout: { repo: fixture.repo } });
     const persisted = await assertCheckout(page, request, fixture, first.session.id, named, true);
     // Requests encode an unset trust choice as null; persisted replies omit it.
-    expect(persisted.launch).toEqual(first.body.launch);
+    expect(persisted.launch.selection).toEqual(first.body.launch);
 
     form = await openComposer(page, host);
     const recent = form.locator(".launch-composer-recents").getByRole("button", { name: new RegExp(`gh:${fixture.repo}`) });
@@ -296,13 +296,14 @@ test("a typed command survives a real fresh checkout", async ({ page, request })
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await selectRepo(form, fixture.repo);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const cwd = path.join(fixture.root, `${fixture.repoName}-1`);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(cwd);
     expect(await fs.readdir(fixture.root)).toEqual([]);
     const created = await launch(page, form, ids);
-    expect(created.body.invocation).toBe(FAKE_AGENT);
+    expect(created.body.command).toEqual({ command: FAKE_AGENT, yolo: false, agent: null, resume: null });
     const persisted = await assertCheckout(page, request, fixture, created.session.id, cwd, false);
     expect(persisted.invocation).toBe(FAKE_AGENT);
   } finally {
@@ -327,6 +328,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await selectRepo(form, fixture.repo);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(`${fixture.repoName}-1`);
     const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -337,7 +339,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const created = await launch(page, form, ids);
     expect(created.body.github_checkout).toBeUndefined();
-    expect(created.body.invocation).toBe(FAKE_AGENT);
+    expect(created.body.command).toEqual({ command: FAKE_AGENT, yolo: false, agent: null, resume: null });
     expect(created.session.cwd).toBe(fixture.root);
     expect(created.session.github_repo).toBeNull();
     expect(created.session.working_copy).toBeNull();
@@ -361,6 +363,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
     const original = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
@@ -457,6 +460,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(form);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
     const owned = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
@@ -471,7 +475,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     const edited = await replace(plain.id, { host, cwd: origin.cwd, title: "changed-agent", launch: selection });
     await assertLive(page, edited.id);
     const editedState = await sessionState(request, edited.id);
-    expect(editedState.launch).toEqual({ ...selection, model: null, permissions: null });
+    expect(editedState.launch.selection).toEqual({ ...selection, model: null, permissions: null });
     expect(editedState.cwd).toBe(origin.cwd);
     expect(editedState.working_copy).toEqual(owned.working_copy);
     expect(editedState.github_repo).toBeNull();
@@ -496,7 +500,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     expect(preview.cwd).toBe(path.join(fixture.root, `${fixture.repoName}-second`));
     await expect(fs.stat(preview.cwd)).rejects.toMatchObject({ code: "ENOENT" });
     const fresh = await replace(edited.id, {
-      host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title: "second", invocation: FAKE_AGENT,
+      host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title: "second", command: commandLaunch(FAKE_AGENT),
       github_checkout: { repo: fixture.repo, title: "second", preview },
     });
     await page.goto("/");
@@ -516,7 +520,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     await fs.mkdir(unmanaged);
     await fs.writeFile(path.join(unmanaged, "foreign"), "keep unrelated directory\n");
     const freshBefore = await contents(fresh.cwd);
-    const outside = await replace(fresh.id, { host, title: "outside", cwd: unmanaged, invocation: FAKE_AGENT });
+    const outside = await replace(fresh.id, { host, title: "outside", cwd: unmanaged, command: commandLaunch(FAKE_AGENT) });
     await assertLive(page, outside.id);
     expect(outside.cwd).toBe(unmanaged);
     expect(outside.working_copy).toBeNull();
@@ -564,7 +568,7 @@ test("replace with into a fresh checkout of the source's repository gets the nex
     expect(preview.cwd).toBe(first);
     const created = await request.post("/api/sessions", {
       data: {
-        host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title: null, invocation: FAKE_AGENT,
+        host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title: null, command: { command: FAKE_AGENT, yolo: false },
         intent_key: `replace-with-source-${Date.now()}`, github_checkout: { repo: fixture.repo, title: null, preview },
       },
     });

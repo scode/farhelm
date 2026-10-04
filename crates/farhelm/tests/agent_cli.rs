@@ -311,7 +311,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 4,
+            "schema_version": 5,
             "caller": {"session_id": "session-1", "host_id": "host-local"},
             "reply": {
                 "reply": "hosts",
@@ -1496,7 +1496,14 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                invocation: Some("claude --model opus".to_string()),
+                launch: Some(farhelm_proto::LaunchRequest::Command(
+                    farhelm_proto::CommandLaunch {
+                        command: "claude --model opus {farhelm_args}".to_string(),
+                        yolo: true,
+                        agent: Some(farhelm_proto::LaunchHarness::Claude),
+                        resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
+                    }
+                )),
                 title: Some("over there".to_string()),
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
@@ -1531,8 +1538,13 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             "/srv/work",
             "--host",
             "builder",
-            "--invocation",
-            "claude --model opus",
+            "--command",
+            "claude --model opus {farhelm_args}",
+            "--yolo",
+            "--agent",
+            "claude",
+            "--resume-command",
+            "claude --resume {conversation} {farhelm_args}",
             "--title",
             "over there",
             "--idempotency-key",
@@ -1702,17 +1714,122 @@ fn create_with_the_removed_profile_flag_is_refused_before_anything_is_sent() {
             "/srv/work",
             "--profile",
             "Claude",
-            "--invocation",
+            "--command",
             "sh",
+            "--no-yolo",
         ],
     ));
     assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
     assert!(output.stdout.is_empty(), "a refused create prints no id");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("agent profiles were removed") && stderr.contains("--invocation"),
+        stderr.contains("agent profiles were removed") && stderr.contains("--command"),
         "the refusal must say why and name the replacement: {stderr}"
     );
+}
+
+/// Spec: `farhelm agent create --invocation`, replaced by `--command` with
+/// launch kinds, is refused by the CLI itself naming `--command` and the
+/// YOLO assertion; a create that makes no YOLO assertion, or both, or one
+/// twice, is refused naming the flags; and an unknown `--agent` is refused
+/// listing the agent types. Nothing is sent and nothing reaches stdout.
+///
+/// Why: SPEC_impl.md's compatibility rule has a retired spelling refused
+/// with its replacement named, so an agent following older instructions
+/// learns the new form; and the assertion has no default, because Farhelm
+/// believes it and never reads the command to check it. No mock supervisor
+/// runs, so a regression into sending would fail differently.
+#[farhelm_testtrace::test]
+fn create_refuses_retired_and_malformed_launch_flags() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    for (args, expected) in [
+        (
+            &[
+                "create",
+                "--cwd",
+                "/w",
+                "--host",
+                "h",
+                "--invocation",
+                "sh",
+                "--command",
+                "sh",
+                "--no-yolo",
+            ][..],
+            &[
+                "--invocation was replaced by --command",
+                "--yolo or --no-yolo",
+            ][..],
+        ),
+        (
+            &["create", "--cwd", "/w", "--host", "h", "--command", "sh"][..],
+            &["--yolo", "--no-yolo"][..],
+        ),
+        // The call an agent following older instructions actually makes.
+        (
+            &["create", "--cwd", "/w", "--host", "h", "--invocation", "sh"][..],
+            &["--invocation was replaced by --command"][..],
+        ),
+        // The assertion is one answer, not two.
+        (
+            &[
+                "create",
+                "--cwd",
+                "/w",
+                "--host",
+                "h",
+                "--command",
+                "sh",
+                "--yolo",
+                "--no-yolo",
+            ][..],
+            &["--yolo", "--no-yolo"][..],
+        ),
+        (
+            &[
+                "create",
+                "--cwd",
+                "/w",
+                "--host",
+                "h",
+                "--command",
+                "sh",
+                "--yolo",
+                "--yolo",
+            ][..],
+            &["--yolo"][..],
+        ),
+        // An unknown agent type lists the real ones.
+        (
+            &[
+                "create",
+                "--cwd",
+                "/w",
+                "--host",
+                "h",
+                "--command",
+                "sh {farhelm_args}",
+                "--no-yolo",
+                "--agent",
+                "bogus",
+            ][..],
+            &[
+                "\"bogus\" is not an agent type",
+                "claude",
+                "codex",
+                "open_code",
+            ][..],
+        ),
+    ] {
+        let output = output_with_timeout(agent_command_with_args(&socket, args));
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(output.stdout.is_empty(), "a refused create prints no id");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        for needle in expected {
+            assert!(stderr.contains(needle), "{args:?}: {stderr}");
+        }
+    }
 }
 
 /// Spec: `farhelm agent create` without `--cwd` is refused by clap, since
@@ -1748,7 +1865,7 @@ fn create_without_a_cwd_is_refused() {
 /// legally begin with `-`, so a local refusal here is this CLI declining to
 /// carry a value the far end would have accepted or explained.
 ///
-/// The fixture's `--invocation` is deliberately option-shaped
+/// The fixture's `--command` is deliberately option-shaped
 /// (`--weird-program`) rather than a realistic wrapper: what is under test
 /// is clap's parse of a hyphen-leading VALUE, and a value that merely
 /// contains flags after a normal program name would never have exercised
@@ -1767,7 +1884,7 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         let AgentVerb::Create {
             host,
             cwd,
-            invocation,
+            launch,
             title,
             intent_key,
             confirm_yolo: _,
@@ -1775,7 +1892,10 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         else {
             panic!("expected a Create verb, got {request:?}");
         };
-        assert_eq!(invocation.as_deref(), Some("--weird-program --flag"));
+        let Some(farhelm_proto::LaunchRequest::Command(command)) = launch else {
+            panic!("expected a command launch, got {launch:?}");
+        };
+        assert_eq!(command.command, "--weird-program --flag");
         assert_eq!(host.as_deref(), Some("-odd-host"));
         assert_eq!(cwd, "-odd-dir");
         assert_eq!(title.as_deref(), Some("-odd-title"));
@@ -1809,8 +1929,9 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
             "-odd-dir",
             "--host",
             "-odd-host",
-            "--invocation",
+            "--command",
             "--weird-program --flag",
+            "--no-yolo",
             "--title",
             "-odd-title",
             "--idempotency-key",

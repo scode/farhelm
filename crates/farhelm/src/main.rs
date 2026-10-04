@@ -260,6 +260,9 @@ enum AgentCmd {
         stop_if_running: bool,
     },
     /// Create a session on any host; prints its id.
+    #[command(group(
+        clap::ArgGroup::new("yolo_assertion").required(true).args(["yolo", "no_yolo"])
+    ))]
     Create {
         /// Working directory for the new session, on the TARGET host.
         ///
@@ -297,9 +300,35 @@ enum AgentCmd {
             value_parser = refuse_profile_id,
         )]
         profile_id: Option<String>,
-        /// Command line to run on the target host.
+        /// Replaced by `--command` with launch kinds. Kept, hidden, only so
+        /// an agent still following older instructions gets a refusal
+        /// naming the replacement; its parser refuses every value.
+        #[arg(
+            long,
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_invocation,
+        )]
+        invocation: Option<String>,
+        /// Command line to run on the target host, as written.
         #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
-        invocation: String,
+        command: String,
+        /// The command runs without approval prompts. Farhelm believes this
+        /// and never reads the command to check it.
+        #[arg(long)]
+        yolo: bool,
+        /// The command asks before acting (it is not YOLO).
+        #[arg(long)]
+        no_yolo: bool,
+        /// Agent type the command runs, such as claude or codex (an unknown
+        /// value lists them all); the command then needs {farhelm_args}.
+        #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
+        agent: Option<farhelm_proto::LaunchHarness>,
+        /// Command that resumes a conversation, with {conversation} and
+        /// {farhelm_args}; needs --agent. Without it, no Restart.
+        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+        resume_command: Option<String>,
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
         title: Option<String>,
@@ -382,7 +411,10 @@ impl AgentCmd {
             AgentCmd::Create {
                 cwd,
                 host,
-                invocation,
+                command,
+                yolo,
+                agent,
+                resume_command,
                 title,
                 idempotency_key,
                 confirm_yolo,
@@ -390,7 +422,16 @@ impl AgentCmd {
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
-                invocation: Some(invocation.clone()),
+                // `--yolo`/`--no-yolo` are a required pair, so `yolo` alone
+                // carries the assertion.
+                launch: Some(farhelm_proto::LaunchRequest::Command(
+                    farhelm_proto::CommandLaunch {
+                        command: command.clone(),
+                        yolo: *yolo,
+                        agent: *agent,
+                        resume: resume_command.clone(),
+                    },
+                )),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: *confirm_yolo,
@@ -441,7 +482,7 @@ fn refuse_spawn_agent(_value: &str) -> Result<String, String> {
     Err(
         "farhelm spawn no longer takes --agent: agent profiles were removed. Pass \
          --inherit-agent to start a child running this session's own agent, or use \
-         farhelm agent create --invocation <CMD> to run another command"
+         farhelm agent create --command <CMD> to run another command"
             .to_string(),
     )
 }
@@ -451,7 +492,7 @@ fn refuse_spawn_agent(_value: &str) -> Result<String, String> {
 fn refuse_profile_id(_value: &str) -> Result<String, String> {
     Err(
         "--profile-id is no longer accepted: agent profiles were removed. Use \
-         farhelm agent create --invocation <CMD> to run a command, or farhelm spawn \
+         farhelm agent create --command <CMD> to run a command, or farhelm spawn \
          --inherit-agent to start a child running this session's own agent"
             .to_string(),
     )
@@ -462,14 +503,43 @@ fn refuse_profile_id(_value: &str) -> Result<String, String> {
 fn refuse_create_profile(_value: &str) -> Result<String, String> {
     Err(
         "farhelm agent create no longer takes --profile: agent profiles were removed. Pass \
-         the command line to run with --invocation <CMD>"
+         the command line to run with --command <CMD>"
             .to_string(),
     )
 }
 
+/// The refusal for `farhelm agent create --invocation`, whatever value it
+/// was given: launch kinds replaced it with `--command`, which also needs
+/// the YOLO assertion the old flag never asked for.
+fn refuse_invocation(_value: &str) -> Result<String, String> {
+    Err(
+        "--invocation was replaced by --command: pass the command line with --command <CMD> \
+         and say whether it runs without approval prompts with --yolo or --no-yolo"
+            .to_string(),
+    )
+}
+
+/// Parse `--agent`'s agent type by its protocol spelling, listing every
+/// agent type when the value names none.
+fn parse_agent_type(value: &str) -> Result<farhelm_proto::LaunchHarness, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|_| {
+        let types: Vec<String> = farhelm_proto::LaunchHarness::ALL
+            .iter()
+            .filter_map(|harness| match serde_json::to_value(harness) {
+                Ok(serde_json::Value::String(name)) => Some(name),
+                _ => None,
+            })
+            .collect();
+        format!(
+            "{value:?} is not an agent type; the agent types are {}",
+            types.join(", ")
+        )
+    })
+}
+
 /// The refusal for the removed `farhelm agent profiles` listing.
 const AGENT_PROFILES_REMOVED: &str = "farhelm agent profiles was removed with agent profiles: \
-     there is no catalog to list. Create a session with farhelm agent create --invocation <CMD>";
+     there is no catalog to list. Create a session with farhelm agent create --command <CMD>";
 
 #[derive(Subcommand)]
 enum HelmCmd {
@@ -1234,9 +1304,10 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         // `fallback_template` when restart came to mean resume only; `resume`
         // kept its spelling and meaning. 4: a session's `agent` is always its
         // agent type's word or `custom`, never a profile name, and the
-        // profiles listing is gone.
+        // profiles listing is gone. 5: `restart_offer` may be
+        // `no_resume_command`, a command launch without a resume command.
         let envelope = serde_json::json!({
-            "schema_version": 4,
+            "schema_version": 5,
             "caller": {
                 "session_id": asking,
                 "host_id": caller_host_id,
@@ -1618,8 +1689,9 @@ mod tests {
                 "h",
                 "--cwd",
                 "/w",
-                "--invocation",
+                "--command",
                 "p",
+                "--no-yolo",
                 flag,
             ])
             .unwrap();
@@ -1743,10 +1815,10 @@ mod tests {
         let cases: [(&[&str], &[&str], &str); 6] = [
             (&spawn, &["--agent", "claude"], "--inherit-agent"),
             (&spawn, &["--agent"], "--inherit-agent"),
-            (&spawn, &["--profile-id", "builtin-claude"], "--invocation"),
-            (&create, &["--profile", "claude"], "--invocation"),
-            (&create, &["--profile"], "--invocation"),
-            (&create, &["--profile-id", "builtin-claude"], "--invocation"),
+            (&spawn, &["--profile-id", "builtin-claude"], "--command"),
+            (&create, &["--profile", "claude"], "--command"),
+            (&create, &["--profile"], "--command"),
+            (&create, &["--profile-id", "builtin-claude"], "--command"),
         ];
         for (base, extra, replacement) in cases {
             let args: Vec<&str> = base.iter().chain(extra).copied().collect();

@@ -122,6 +122,9 @@ pub mod text;
 /// UTC calendar arithmetic shared by the crates that print dates.
 pub mod time;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+/// What a session runs, resolved: the launch kinds of SPEC.md's Concepts.
+pub mod session_launch;
+pub use session_launch::{CommandLaunch, LaunchKind, LaunchRequest, SessionLaunch};
 
 /// Owned GitHub checkouts: validated repo identity, deterministic naming,
 /// and the preview/create payload shapes (see the module's own docs).
@@ -166,6 +169,12 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// actionable error; there is no silent degradation" is the standard, and
 /// the hello refusal is the machinery that meets it.
 ///
+/// A launch ([`SessionLaunch`], [`CommandLaunch`]) is the exception to
+/// "optional fields are fine": it refuses unknown fields on purpose, so a
+/// peer can never run a launch while silently dropping part of what it was
+/// told (a YOLO answer, a resume command). Any new launch field therefore
+/// earns the next bump.
+///
 /// The browser edge cannot use the hello, having none: it is gated on the
 /// helm's build stamp instead (farhelm-ui's `skew` module), which refuses
 /// unattended attaches whenever the helm answering is not the build this
@@ -179,7 +188,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_38` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_39` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -190,7 +199,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 38;
+pub const PROTOCOL_VERSION: u32 = 39;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -928,32 +937,20 @@ pub struct SessionInfo {
     /// rather than canonically resolving it on another machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_cwd: Option<String>,
+    /// The start command as text, for display only ([`SessionLaunch::
+    /// display_command`]). Every decision reads [`SessionInfo::launch`]
+    /// instead; this exists so a reader that only shows the command does not
+    /// have to know the launch kinds.
     pub invocation: String,
-    /// Immutable resume argv recorded when this session was created.
-    ///
-    /// A structured selection records its requested initial choices; this
-    /// separately records the stored lifecycle bundle so replace and
-    /// explicit inherited spawn cannot derive a different resume command
-    /// after an integration or catalog change. Legacy rows and senders that
-    /// predate the field leave it absent.
-    #[serde(default)]
-    pub resume_template: Option<Vec<String>>,
-    /// Explicit structured choices used to compile this session's invocation.
-    ///
-    /// `None` means the session was created from a raw command line (or,
-    /// before protocol 38, a profile) or predates the launch composer. It
-    /// never asks a reader to infer a harness from `invocation`; absent
-    /// provenance is more honest than a plausible-looking guess from a
-    /// mutable command line.
-    #[serde(default)]
-    pub launch: Option<LaunchSelection>,
+    /// What this session runs, resolved (SPEC.md's launch kinds): the value
+    /// restart, clone, replace, inherit and the YOLO mark all read.
+    pub launch: SessionLaunch,
     /// The integrated agent kind the supervisor recorded for this session,
     /// or [`AgentKind::Generic`] when it has none.
     ///
-    /// This is the supervisor's own classification, fixed at creation (the
-    /// helm-resolved kind, an explicit override, or basename recognition of
-    /// the program) and the same value that drives hook injection and
-    /// resume. It exists on the wire so a reader that must NOT look at
+    /// This is the supervisor's own classification, fixed at creation from
+    /// the launch ([`SessionLaunch::agent_kind`]) and the same value that
+    /// drives hook injection and resume. It exists on the wire so a reader that must NOT look at
     /// `invocation` still has a closed-vocabulary answer to "what is
     /// running": `farhelm agent sessions`' fleet-wide `agent` label is built
     /// from it (see [`AgentSession::agent`]) precisely because anything
@@ -982,11 +979,13 @@ pub struct SessionInfo {
     /// Either way, this field is never trusted from an older sender.
     /// `#[serde(default)]` is what makes this field additive within
     /// `PROTOCOL_VERSION` 3: an old peer's JSON has no `status` at all and
-    /// decodes to `SessionStatus::Unknown` rather than failing, and this
-    /// crate carries no `deny_unknown_fields` anywhere on this path, so a
-    /// NEW `status` reaching an OLD decoder is silently ignored rather
-    /// than rejected. Both directions must keep holding for any later
-    /// M2 wire addition, per `PROTOCOL_VERSION`'s own docs.
+    /// decodes to `SessionStatus::Unknown` rather than failing, and
+    /// `SessionInfo` itself carries no `deny_unknown_fields`, so a NEW
+    /// `status` reaching an OLD decoder is silently ignored rather than
+    /// rejected. Both directions must keep holding for any later M2 wire
+    /// addition, per `PROTOCOL_VERSION`'s own docs. The one strict member is
+    /// `launch` ([`SessionLaunch`] refuses unknown fields), so a new launch
+    /// field is never additive: it needs a protocol bump.
     #[serde(default)]
     pub status: SessionStatus,
     /// User-legible qualifier shown alongside an `Exited` status — SPEC.md's
@@ -1206,6 +1205,10 @@ pub enum RestartOffer {
     /// agent type is one Farhelm cannot resume (Cursor, Muse, OpenCode), or
     /// the session runs a command Farhelm does not know as an agent type.
     NoConversationReporting,
+    /// The session's agent type reports conversations, but its launch has
+    /// no resume command: a command launch that declared the type without
+    /// opting into Resume. Farhelm never derives one from the start command.
+    NoResumeCommand,
 }
 
 impl RestartOffer {
@@ -1233,6 +1236,10 @@ impl RestartOffer {
                 "Restart needs this session's own conversation, and Farhelm has no conversation \
                  reporting for its agent; Replace starts the session over",
             ),
+            RestartOffer::NoResumeCommand => Some(
+                "Restart resumes through the launch's resume command, and this command launch \
+                 did not opt into Resume; Replace starts the session over",
+            ),
         }
     }
 }
@@ -1243,20 +1250,14 @@ crate::enum_with_all! {
     /// everything else: a launch that names no kind gets generic
     /// treatment.
     ///
-    /// This is a genuine three-state override on `CreateSession::agent_kind`,
-    /// not two states plus an absent field: `None` means "derive it from
-    /// `invocation`'s basename (or fail to)"; `Some(Claude)`/`Some(Codex)`
-    /// forces integration on for an invocation basename recognition would
-    /// otherwise miss (`env claude`, a wrapper script); `Some(Generic)`
-    /// forces integration OFF even when the basename WOULD have matched —
-    /// the case absence cannot express, because a caller has no way to tell
-    /// "let it derive" apart from "I checked, and it must not integrate"
-    /// without a real third value. A user running a personal script also
-    /// named `claude` that is not Anthropic's CLI is the motivating case:
-    /// without `Generic`, there is no way to stop basename recognition from
-    /// misclassifying it and running Claude-Code-specific status heuristics
-    /// and identity capture against a process that was never going to
-    /// produce Claude Code's on-disk records.
+    /// A session's kind comes from its launch, never from reading its
+    /// command ([`SessionLaunch::agent_kind`]): an agent launch's agent
+    /// type, a command launch's declared type, or a legacy session's
+    /// stored kind. `Generic` is what a command launch that declares no
+    /// type gets, and what Muse, Cursor and OpenCode run as: a personal
+    /// script named `claude` that is not Anthropic's CLI stays generic
+    /// unless the user says otherwise, so Claude-Code-specific status
+    /// heuristics and identity capture never run against it.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum AgentKind {
@@ -1279,8 +1280,8 @@ crate::enum_with_all! {
         /// but this identity must survive launch snapshots now.
         Grok,
         /// Explicitly non-integrated: no status heuristics beyond the
-        /// generic ones, no conversation-identity capture, regardless of
-        /// what basename recognition would have concluded on its own.
+        /// generic ones and no conversation-identity capture, whatever the
+        /// command's program is called.
         Generic,
     }
 }
@@ -1519,10 +1520,12 @@ pub enum AgentVerb {
     /// Create a session on any host in the fleet — SPEC.md's creation verb
     /// reached from inside a session. Answered with [`AgentReply::Created`].
     ///
-    /// The agent is the raw `invocation`, which is required: an absent one
-    /// is refused rather than filled from a remembered default. Profiles,
-    /// which this verb once also selected by name or id, are gone
-    /// (protocol 38); the agent CLI refuses their flags itself.
+    /// What to run is `launch`, which is required: an absent one is refused
+    /// rather than filled from a remembered default. It is a
+    /// [`LaunchRequest`], never a composed launch: for an agent type the
+    /// helm composes the commands exactly as it does for the launcher, and
+    /// a command launch is checked with [`CommandLaunch::validate`] before
+    /// a target is chosen.
     Create {
         /// The target host's display NAME. `None` is retained only so an old
         /// wire shape can be decoded and refused.
@@ -1531,9 +1534,9 @@ pub enum AgentVerb {
         /// directory, and inheriting the asking session's would make
         /// `create` a silent `clone`.
         cwd: String,
-        /// The command line to launch. Required; `None` is decoded only so
-        /// it can be refused with a message.
-        invocation: Option<String>,
+        /// What the new session runs. Required; `None` is decoded only so it
+        /// can be refused with a message.
+        launch: Option<LaunchRequest>,
         /// Optional display title; absent lets the target host derive one
         /// from the directory exactly as an interactive create does.
         title: Option<String>,
@@ -2018,11 +2021,12 @@ pub enum ControlMsg {
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     ///
-    /// ## Resolved launch bundle, or inherited spawn
+    /// ## Resolved launch, or inherited spawn
     ///
-    /// `invocation` with its accompanying integration values is a resolved
-    /// launch bundle. A session-authenticated spawn may instead set
-    /// `inherit_agent` to copy its asking session's stored bundle.
+    /// `launch` is the resolved launch the session will run (an agent
+    /// launch the helm composed, or a command launch as the user wrote it;
+    /// never a legacy one). A session-authenticated spawn may instead set
+    /// `inherit_agent` to copy its asking session's stored launch.
     ///
     /// **A request naming both, or neither, is refused with
     /// [`ErrorKind::InvalidRequest`]**: inheritance is an explicit selector
@@ -2050,39 +2054,12 @@ pub enum ControlMsg {
         /// where. SPEC.md's session identity is an agent in a
         /// directory, and the directory is always the caller's choice.
         cwd: String,
-        /// The resolved agent command line. `None` is valid only for an
-        /// explicit inherited spawn — see this variant's own exclusivity
-        /// contract. A word equal to `{cwd}` in full is
-        /// replaced at launch with the directory that launch hands tmux,
-        /// under the same whole-element rule `{conversation}` obeys in
-        /// `resume_template` below; it is for launchers that take the
-        /// directory as an argument, and it may not be the first word.
-        /// That directory is this request's `cwd` after `~` expansion on
-        /// a create, and the VERIFIED resolved path on a restart or on
-        /// the retry of an interrupted create WHERE the session has a
-        /// recorded canonical identity — the supervisor re-canonicalizes
-        /// against that identity and launches into what it checked,
-        /// closing the check-then-repoint window. A row predating that
-        /// recorded identity has nothing to check and launches into the
-        /// spelling, as a create does. What holds on every path is that
-        /// the wrapper is handed the SAME string tmux is, which is the
-        /// property this placeholder exists to preserve; on a create that
-        /// string is still a spelling each side resolves for itself, so a
-        /// symlink repointed between the two resolutions can separate
-        /// them.
-        ///
-        /// Was a required `String` before `PROTOCOL_VERSION` 10, which is
-        /// part of what forced that bump. A request without an invocation (an
-        /// inheriting spawn) reaches a v9 peer as `"invocation": null` — the
-        /// key is PRESENT, since this crate's encoder never omits an
-        /// `Option` — and a required
-        /// `String` refuses a null outright. (Absence would have been the
-        /// lenient case; this is not that case, which is what makes the
-        /// refusal dependable.) The other direction is safe: a v9 request
-        /// decoded here is a raw create exactly as it always was. The
-        /// handshake is what keeps the unsafe direction from happening at
-        /// all.
-        invocation: Option<String>,
+        /// What the new session runs (SPEC.md's launch kinds), resolved by
+        /// the helm: an agent launch it composed or a command launch the user
+        /// wrote. Absent exactly when `inherit_agent` is set, which copies the
+        /// authenticated parent's stored launch instead. A legacy launch is
+        /// refused: nothing creates one.
+        launch: Option<SessionLaunch>,
         /// Explicit opt-in for a restricted spawn to copy the authenticated
         /// parent's stored launch bundle. Omission is not inheritance.
         #[serde(default)]
@@ -2095,8 +2072,8 @@ pub enum ControlMsg {
         /// every session-shaping field (this struct's fields below
         /// included, but never `cols`/`rows` — those shape the
         /// attachment, not the session) replays the original outcome
-        /// instead of launching a second process. The resolved launch bundle
-        /// joins the fingerprint, and version 11 adds `parent`; a retry cannot
+        /// instead of launching a second process. The resolved launch joins
+        /// the fingerprint, and version 11 adds `parent`; a retry cannot
         /// change any of them under cover of the same key. An explicit
         /// inherited spawn is resolved before that fingerprint is built. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
@@ -2111,62 +2088,6 @@ pub enum ControlMsg {
         /// other create is checked by the helm before it is sent.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
-        /// Explicit override of the integrated-agent kind PLAN_M3.md item
-        /// 7 would otherwise derive from `invocation`'s first token by
-        /// basename recognition. A genuine tri-state via [`AgentKind`]'s
-        /// three variants: `None` means "let the supervisor derive it
-        /// (or fail to)"; `Some(Claude)`/`Some(Codex)` forces integration
-        /// on for a basename recognition would miss (`env claude`, a
-        /// wrapper script); `Some(Generic)` forces it OFF even when the
-        /// basename would have matched — see `AgentKind::Generic`'s own
-        /// docs for why that direction needs an explicit value rather
-        /// than reusing absence.
-        ///
-        /// This field must be absent with inherited spawn, which copies the
-        /// parent's stored bundle instead.
-        agent_kind: Option<AgentKind>,
-        /// Explicit override of the resume invocation template PLAN_M3.md
-        /// item 7 would otherwise default from `invocation`'s first
-        /// token. This field must be absent with inherited spawn, for the
-        /// same reason as `agent_kind` above.
-        /// Structured as an argv vector, not a shell string, so a
-        /// path containing spaces survives without quoting heroics, and
-        /// `{conversation}` substitutes into its own argv slot rather
-        /// than into a string that would need escaping.
-        ///
-        /// The placement rule is exact, not "somewhere in the template":
-        /// an argv ELEMENT must equal the literal string `{conversation}`
-        /// in full — `--resume={conversation}` or any other embedded
-        /// form does not count as a placeholder occurrence under this
-        /// rule, because substitution replaces a whole element, never
-        /// splices into part of one. `{cwd}` is a second placeholder
-        /// under the identical rule: an element equal to it in full is
-        /// replaced with the session's working directory at launch, for
-        /// launchers that take the directory as an argument. Neither
-        /// placeholder may be the template's FIRST element, where
-        /// substitution would make the value the program the session
-        /// tries to run. A session with an integrated
-        /// `agent_kind` (derived or overridden) must have a template
-        /// containing a `{conversation}` element under that
-        /// exact-equality rule — `{cwd}` does not satisfy it, since a
-        /// template that cannot name the conversation could only discard
-        /// the identity the session captured. A template with no
-        /// `{conversation}` is still accepted on a non-integrated kind and
-        /// stored, but never run: restart only ever resumes a captured
-        /// conversation, and a non-integrated kind captures none (protocol
-        /// 37 removed the fallback restart that once ran it verbatim). This
-        /// crate does not enforce the invariant itself (it is vocabulary,
-        /// not validation); the supervisor's create handler checks it, and
-        /// this exact-equality wording is what keeps that validator from
-        /// having to guess which reading was intended.
-        resume_template: Option<Vec<String>>,
-        /// The explicit structured choices the helm compiled into
-        /// `invocation`. A raw create leaves this absent.
-        ///
-        /// This travels beside the resolved command rather than replacing it:
-        /// the supervisor executes and resumes the saved bundle, while the
-        /// session launcher later uses its current selection for clone and history.
-        launch: Option<LaunchSelection>,
         /// An owned fresh GitHub checkout this create must perform before
         /// launching: which repository to clone, where, and what runs after
         /// the clone. Absent (`None`) is the entire pre-checkout behavior, and
@@ -2526,16 +2447,12 @@ pub enum ControlMsg {
         /// authorization to skip it.
         #[serde(default)]
         stop_if_running: bool,
-        /// Compiled structured launch overrides for restart-with. Invocation
-        /// and launch are present together; the explicit template is optional
-        /// because some harnesses derive it from the invocation. All absent
-        /// means the historical restart path with the stored launch bundle.
+        /// Restart with: the changed launch to store and resume under (SPEC.md,
+        /// Lifecycle operations). Its launch kind and agent type must match
+        /// the stored launch's, and it is validated before anything is
+        /// stopped. Absent means a plain restart with the stored launch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        invocation: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        launch: Option<LaunchSelection>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        resume_template: Option<Vec<String>>,
+        with: Option<SessionLaunch>,
     },
     /// Success reply to `RestartSession`, shaped like `SessionCreated`:
     /// `session` carries the session's resulting state (including its
@@ -3960,8 +3877,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: Some("/resolved/tmp".to_string()),
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -4098,8 +4014,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -4163,16 +4078,13 @@ mod tests {
             req_id: 30,
             parent: None,
             cwd: "/checkouts/bar".to_string(),
-            invocation: Some("claude".to_string()),
+            launch: Some(SessionLaunch::plain_command("claude")),
             inherit_agent: false,
             title: None,
             cols: 80,
             rows: 24,
             intent_key: None,
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: Some(resolved.clone()),
         };
         let decoded: ControlMsg =
@@ -4245,8 +4157,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_38() {
-        assert_eq!(PROTOCOL_VERSION, 38);
+    fn protocol_version_is_pinned_at_39() {
+        assert_eq!(PROTOCOL_VERSION, 39);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -4917,7 +4829,11 @@ mod tests {
     /// Unlike wire messages, which never cross a protocol version (SPEC.md),
     /// these rows also persist: the helm caches `SessionInfo` JSON in
     /// helm.db, and after an upgrade it decodes rows an older build wrote.
-    /// That durable path is why this old-shape decode stays pinned.
+    /// That durable path is why this old-shape decode stays pinned. The one
+    /// exception is `launch`, required since protocol 39: an older cached
+    /// row never decodes without it, so the helm's schema migration writes
+    /// one into every cached row (`SessionLaunch::from_pre_launch_kinds`)
+    /// before anything reads them.
     #[farhelm_testtrace::test]
     fn old_shape_session_info_rows_decode_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
@@ -4930,6 +4846,7 @@ mod tests {
                     "title": "demo",
                     "cwd": "/tmp",
                     "invocation": "agent",
+                    "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null},
                 }
             ],
         });
@@ -4981,8 +4898,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "goose session".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("goose session"),
             agent_kind: AgentKind::Goose,
             status: SessionStatus::default(),
             annotation: None,
@@ -5039,8 +4955,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -5060,14 +4975,20 @@ mod tests {
                 "creation_seq": null,
                 "cwd": "/tmp",
                 "invocation": "agent",
+                "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null},
                 "status": { "state": "unknown" },
                 "annotation": null,
                 "restart_offer": "not_captured",
                 "tabs": [],
                 "github_repo": null,
                 "working_copy": null,
-                "resume_template": null,
-                "launch": null,
+                "launch": {
+                    "kind": "command",
+                    "command": "agent",
+                    "yolo": false,
+                    "agent": null,
+                    "resume": null,
+                },
                 "agent_kind": "generic",
             })
         );
@@ -5130,6 +5051,7 @@ mod tests {
             "title": "demo",
             "cwd": "/tmp",
             "invocation": "agent",
+            "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null},
             "status": { "state": "running" },
         });
         let decoded: SessionInfo = serde_json::from_value(old_shape).unwrap();
@@ -5181,8 +5103,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -5223,8 +5144,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -5268,8 +5188,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
+            launch: SessionLaunch::plain_command("agent"),
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -5316,6 +5235,7 @@ mod tests {
                         "title": "demo",
                         "cwd": "/tmp",
                         "invocation": "agent",
+                        "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null},
                         "status": { "state": "running" },
                         "future_field_inside_session": "value from tomorrow",
                     }
@@ -5472,6 +5392,7 @@ mod tests {
                         "title": "demo",
                         "cwd": "/tmp",
                         "invocation": "agent",
+                        "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null},
                         "status": { "state": "running" },
                         "tabs": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}],
                     }
@@ -5555,11 +5476,13 @@ mod tests {
             RestartOffer::Resume,
             RestartOffer::NotCaptured,
             RestartOffer::NoConversationReporting,
+            RestartOffer::NoResumeCommand,
         ] {
             let expected = match offer {
                 RestartOffer::Resume => "resume",
                 RestartOffer::NotCaptured => "not_captured",
                 RestartOffer::NoConversationReporting => "no_conversation_reporting",
+                RestartOffer::NoResumeCommand => "no_resume_command",
             };
             assert_eq!(
                 serde_json::to_value(offer).unwrap(),
@@ -5586,73 +5509,102 @@ mod tests {
         }
     }
 
-    /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
-    /// `agent_kind`, `resume_template`) golden-pinned with every one of
-    /// them present, matching the treatment every other message shape in
-    /// this file gets — in the raw resolved-bundle shape.
+    /// An agent launch create, golden-pinned in both directions: the
+    /// helm-composed start and resume argv ride inside the tagged launch
+    /// object with their placeholders still unexpanded, because the
+    /// supervisor fills `{farhelm_args}` and `{conversation}` per run. A
+    /// serde attribute change here would compile and round-trip while
+    /// producing bytes an unmodified peer cannot parse.
     #[farhelm_testtrace::test]
-    fn create_session_snapshot_override_fields_json_shape_is_pinned() {
+    fn create_session_agent_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 1,
             parent: None,
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
-            invocation: Some("/opt/bin/claude".to_string()),
+            launch: Some(SessionLaunch::Agent {
+                selection: crate::LaunchSelection {
+                    harness: crate::LaunchHarness::Claude,
+                    model: Some("opus".to_string()),
+                    effort: None,
+                    permissions: None,
+                    workspace_trust: None,
+                },
+                start: vec![
+                    "/opt/bin/claude".to_string(),
+                    "--model".to_string(),
+                    "opus".to_string(),
+                    "{farhelm_args}".to_string(),
+                ],
+                resume: Some(vec![
+                    "/opt/bin/claude".to_string(),
+                    "--model".to_string(),
+                    "opus".to_string(),
+                    "--resume".to_string(),
+                    "{conversation}".to_string(),
+                    "{farhelm_args}".to_string(),
+                ]),
+            }),
             title: None,
             cols: 80,
             rows: 24,
             intent_key: Some("intent-abc".to_string()),
             confirm_yolo: false,
-            agent_kind: Some(AgentKind::Claude),
-            resume_template: Some(vec![
-                "/opt/bin/claude".to_string(),
-                "--resume".to_string(),
-                "{conversation}".to_string(),
-            ]),
-            launch: None,
             github_checkout: None,
         };
-        assert_eq!(
-            serde_json::to_value(&msg).unwrap(),
-            serde_json::json!({
-                "type": "create_session",
-                "req_id": 1,
-                "parent": null,
-                "inherit_agent": false,
-                "cwd": "/some/dir",
-                "invocation": "/opt/bin/claude",
-                "title": null,
-                "cols": 80,
-                "rows": 24,
-                "intent_key": "intent-abc",
-                "agent_kind": "claude",
-                "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
-                "launch": null,
-                "github_checkout": null,
-            })
-        );
+        let expected = serde_json::json!({
+            "type": "create_session",
+            "req_id": 1,
+            "parent": null,
+            "inherit_agent": false,
+            "cwd": "/some/dir",
+            "launch": {
+                "kind": "agent",
+                "selection": {
+                    "harness": "claude",
+                    "model": "opus",
+                    "effort": null,
+                    "permissions": null,
+                },
+                "start": ["/opt/bin/claude", "--model", "opus", "{farhelm_args}"],
+                "resume": [
+                    "/opt/bin/claude", "--model", "opus", "--resume", "{conversation}",
+                    "{farhelm_args}",
+                ],
+            },
+            "title": null,
+            "cols": 80,
+            "rows": 24,
+            "intent_key": "intent-abc",
+            "github_checkout": null,
+        });
+        assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
+        assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
     }
 
-    /// A resolved launch bundle with an explicit agent kind, golden-pinned
-    /// in both directions: encode must produce exactly this, and this must
-    /// decode back. A serde attribute change here would compile and
-    /// round-trip while producing bytes an unmodified peer cannot parse.
+    /// A command launch create, golden-pinned in both directions and
+    /// through the real frame parser: the user's command text, the YOLO
+    /// assertion the user made about it, the declared agent type, and the
+    /// resume command all travel verbatim, since the supervisor (not the
+    /// helm) shell-splits and validates them.
     #[farhelm_testtrace::test]
-    fn create_session_resolved_bundle_json_shape_is_pinned() {
+    fn create_session_command_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 2,
             parent: None,
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
-            invocation: Some("claude".to_string()),
+            launch: Some(SessionLaunch::Command(CommandLaunch {
+                command: "claude {farhelm_args}".to_string(),
+                yolo: true,
+                agent: Some(crate::LaunchHarness::Claude),
+                resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
+            })),
             title: Some("demo".to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("intent-abc".to_string()),
             confirm_yolo: false,
-            agent_kind: Some(AgentKind::Claude),
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
         let expected = serde_json::json!({
@@ -5661,14 +5613,17 @@ mod tests {
             "parent": null,
             "inherit_agent": false,
             "cwd": "/some/dir",
-            "invocation": "claude",
+            "launch": {
+                "kind": "command",
+                "command": "claude {farhelm_args}",
+                "yolo": true,
+                "agent": "claude",
+                "resume": "claude --resume {conversation} {farhelm_args}",
+            },
             "title": "demo",
             "cols": 80,
             "rows": 24,
             "intent_key": "intent-abc",
-            "agent_kind": "claude",
-            "resume_template": null,
-            "launch": null,
             "github_checkout": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
@@ -5692,16 +5647,13 @@ mod tests {
             req_id: 4,
             parent: Some("parent-1".to_string()),
             cwd: "/some/dir".to_string(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: Some("child".to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("spawn-copy".to_string()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         };
         let expected = serde_json::json!({
@@ -5709,15 +5661,12 @@ mod tests {
             "req_id": 4,
             "parent": "parent-1",
             "cwd": "/some/dir",
-            "invocation": null,
+            "launch": null,
             "inherit_agent": true,
             "title": "child",
             "cols": 80,
             "rows": 24,
             "intent_key": "spawn-copy",
-            "agent_kind": null,
-            "resume_template": null,
-            "launch": null,
             "github_checkout": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
@@ -5734,26 +5683,27 @@ mod tests {
     /// place: a decoder that rejected this shape would move the refusal
     /// from a correlated `InvalidRequest` a client can display into a
     /// decode error that tears down the whole connection, taking every
-    /// unrelated session on it along. The neither-selector case is a
-    /// handler refusal; the inherited-spawn golden above pins the explicit
-    /// restricted form.
+    /// unrelated session on it along. "Both" here is a launch together
+    /// with `inherit_agent`; "neither" is a create with no launch and no
+    /// inheritance. Both are handler refusals; the inherited-spawn golden
+    /// above pins the explicit restricted form.
     #[farhelm_testtrace::test]
     fn a_create_naming_both_modes_or_neither_still_decodes_for_the_handler_to_refuse() {
-        for invocation in [Some("agent".to_string()), None] {
+        for (launch, inherit_agent) in [
+            (Some(SessionLaunch::plain_command("agent")), true),
+            (None, false),
+        ] {
             let msg = ControlMsg::CreateSession {
                 req_id: 3,
                 parent: None,
-                inherit_agent: false,
+                inherit_agent,
                 cwd: "/some/dir".to_string(),
-                invocation,
+                launch,
                 title: None,
                 cols: 80,
                 rows: 24,
                 intent_key: None,
                 confirm_yolo: false,
-                agent_kind: None,
-                resume_template: None,
-                launch: None,
                 github_checkout: None,
             };
             let json = serde_json::to_value(&msg).unwrap();
@@ -5763,56 +5713,50 @@ mod tests {
         }
     }
 
-    /// One direction of `CreateSession`'s three new fields' additive-decode
-    /// contract, mirroring
-    /// `old_shape_session_list_json_decodes_with_defaulted_new_fields`:
-    /// JSON shaped as if these fields had not been added yet — no
-    /// `intent_key`, `agent_kind`, or `resume_template` at all — must
-    /// still decode, with every new field defaulting to `None`. As with
-    /// the `SessionInfo` sibling test above, this is intra-version-5
-    /// additive discipline, not a claim about interoperating with an
-    /// actual pre-M3 (v4) build — a real v4 peer is refused at the
-    /// handshake and never reaches this decode path. This is the
-    /// "preserving old behavior for raw API users" promise items 6
-    /// (`intent_key` idempotency) and 7 (`agent_kind`/`resume_template`
-    /// overrides) make: a caller that never learned these fields exist
-    /// must get exactly the old behavior (no idempotency, no overrides),
-    /// never a decode failure.
+    /// The additive-decode half of `CreateSession`'s contract: a create
+    /// carrying only its long-standing required keys and a launch (no
+    /// `intent_key`, `inherit_agent`, `confirm_yolo`, or `github_checkout`)
+    /// still decodes, with each later field at its "not asked for" default.
+    /// This is intra-version additive discipline, not a claim about
+    /// interoperating with an older protocol, which the handshake refuses;
+    /// what it protects is a raw API caller that never learned the
+    /// optional fields exist getting no idempotency, no inheritance, and
+    /// no checkout rather than a decode failure.
     #[farhelm_testtrace::test]
-    fn old_shape_create_session_json_decodes_with_defaulted_new_fields() {
-        let old_shape = serde_json::json!({
+    fn minimal_create_session_json_decodes_with_defaulted_optional_fields() {
+        let minimal = serde_json::json!({
             "type": "create_session",
             "req_id": 2,
             "cwd": "/some/dir",
-            "invocation": "some-agent",
+            "launch": {
+                "kind": "command",
+                "command": "some-agent",
+                "yolo": false,
+                "agent": null,
+                "resume": null,
+            },
             "title": null,
             "cols": 80,
             "rows": 24,
         });
-        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let decoded: ControlMsg = serde_json::from_value(minimal).unwrap();
         let ControlMsg::CreateSession {
             parent,
-            invocation,
+            launch,
             intent_key,
-            agent_kind,
-            resume_template,
+            inherit_agent,
+            confirm_yolo,
+            github_checkout,
             ..
         } = decoded
         else {
             panic!("expected ControlMsg::CreateSession, got {decoded:?}");
         };
-        assert_eq!(intent_key, None, "an old sender never had this field");
-        assert_eq!(agent_kind, None, "an old sender never had this field");
-        assert_eq!(resume_template, None, "an old sender never had this field");
-        assert_eq!(parent, None, "a v10 create has no spawn parent");
-        // A bare invocation remains a raw create. Version negotiation keeps
-        // incompatible peers apart, while serde defaults preserve the old
-        // request's meaning inside this decoder.
-        assert_eq!(
-            invocation,
-            Some("some-agent".to_string()),
-            "a required-then-optional field must still carry the value it always did"
-        );
+        assert_eq!(intent_key, None);
+        assert!(!inherit_agent && !confirm_yolo);
+        assert_eq!(github_checkout, None);
+        assert_eq!(parent, None, "an unparented create has no spawn parent");
+        assert_eq!(launch, Some(SessionLaunch::plain_command("some-agent")));
     }
 
     /// `RestartSession`/`SessionRestarted` round-tripped through the real
@@ -5832,9 +5776,7 @@ mod tests {
             req_id: 42,
             session_id: "s1".to_string(),
             stop_if_running: true,
-            invocation: None,
-            launch: None,
-            resume_template: None,
+            with: None,
         };
         let mut wire = Vec::new();
         Frame::control(&msg).encode(&mut wire).unwrap();
@@ -5859,8 +5801,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "claude".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: SessionLaunch::plain_command("claude"),
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
@@ -5892,9 +5833,7 @@ mod tests {
             req_id: 7,
             session_id: "s1".to_string(),
             stop_if_running: true,
-            invocation: None,
-            launch: None,
-            resume_template: None,
+            with: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -5934,43 +5873,37 @@ mod tests {
         );
     }
 
-    /// Restart-with's optional compiled bundle is omitted for legacy requests
-    /// and survives serde unchanged when supplied by a structured caller.
+    /// Restart-with's replacement launch is omitted from a plain restart
+    /// and decodes absent as `None` (a plain Restart, never a relaunch with
+    /// some default), and a supplied one survives serde unchanged under
+    /// the `with` key.
     #[farhelm_testtrace::test]
-    fn restart_session_with_bundle_roundtrips_and_absence_defaults() {
+    fn restart_session_with_launch_roundtrips_and_absence_defaults() {
         let absent = serde_json::json!({
             "type": "restart_session",
             "req_id": 1,
             "session_id": "s1"
         });
         let decoded: ControlMsg = serde_json::from_value(absent).unwrap();
-        let ControlMsg::RestartSession {
-            invocation,
-            launch,
-            resume_template,
-            ..
-        } = decoded
-        else {
+        let ControlMsg::RestartSession { with, .. } = decoded else {
             panic!("expected restart request");
         };
-        assert!(invocation.is_none() && launch.is_none() && resume_template.is_none());
+        assert!(with.is_none());
 
         let msg = ControlMsg::RestartSession {
             req_id: 2,
             session_id: "s1".into(),
             stop_if_running: false,
-            invocation: Some("claude --dangerously-skip-permissions".into()),
-            launch: Some(LaunchSelection {
-                harness: LaunchHarness::Claude,
-                model: None,
-                effort: None,
-                permissions: Some(LaunchPermission::Yolo),
-                workspace_trust: None,
-            }),
-            resume_template: None,
+            with: Some(SessionLaunch::Command(CommandLaunch {
+                command: "claude --dangerously-skip-permissions {farhelm_args}".into(),
+                yolo: true,
+                agent: Some(LaunchHarness::Claude),
+                resume: None,
+            })),
         };
-        let roundtripped: ControlMsg =
-            serde_json::from_value(serde_json::to_value(&msg).unwrap()).unwrap();
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["with"]["kind"], "command");
+        let roundtripped: ControlMsg = serde_json::from_value(json).unwrap();
         assert_eq!(roundtripped, msg);
     }
 
@@ -5998,8 +5931,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "claude".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: SessionLaunch::plain_command("claude"),
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
@@ -6029,8 +5961,13 @@ mod tests {
                     "tabs": [],
                     "github_repo": null,
                     "working_copy": null,
-                    "resume_template": null,
-                    "launch": null,
+                    "launch": {
+                        "kind": "command",
+                        "command": "claude",
+                        "yolo": false,
+                        "agent": null,
+                        "resume": null,
+                    },
                     "agent_kind": "generic",
                 },
             })
@@ -6179,9 +6116,7 @@ mod tests {
                 req_id: 9,
                 session_id: "s1".to_string(),
                 stop_if_running: false,
-                invocation: None,
-                launch: None,
-                resume_template: None,
+                with: None,
             }
         );
     }
@@ -6249,8 +6184,7 @@ mod tests {
                         cwd: "/tmp".to_string(),
                         canonical_cwd: None,
                         invocation: "claude".to_string(),
-                        resume_template: None,
-                        launch: None,
+                        launch: SessionLaunch::plain_command("claude"),
                         status: SessionStatus::Running,
                         annotation: None,
                         restart_offer: RestartOffer::Resume,
@@ -6278,8 +6212,13 @@ mod tests {
                         "tabs": [],
                         "github_repo": null,
                         "working_copy": null,
-                        "resume_template": null,
-                        "launch": null,
+                        "launch": {
+                            "kind": "command",
+                            "command": "claude",
+                            "yolo": false,
+                            "agent": null,
+                            "resume": null,
+                        },
                         "agent_kind": "generic",
                     },
                 }),
@@ -6877,8 +6816,7 @@ mod tests {
                 cwd: "/secret".to_string(),
                 canonical_cwd: None,
                 invocation: "claude --dangerously-skip-permissions".to_string(),
-                resume_template: None,
-                launch: None,
+                launch: SessionLaunch::plain_command("claude --dangerously-skip-permissions"),
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -7311,7 +7249,12 @@ mod tests {
             request: AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                invocation: Some("claude".to_string()),
+                launch: Some(LaunchRequest::Command(CommandLaunch {
+                    command: "claude {farhelm_args}".to_string(),
+                    yolo: false,
+                    agent: Some(LaunchHarness::Claude),
+                    resume: None,
+                })),
                 title: Some("a title".to_string()),
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
@@ -7329,7 +7272,13 @@ mod tests {
                     "verb": "create",
                     "host": "builder",
                     "cwd": "/srv/work",
-                    "invocation": "claude",
+                    "launch": {
+                        "kind": "command",
+                        "command": "claude {farhelm_args}",
+                        "yolo": false,
+                        "agent": "claude",
+                        "resume": null,
+                    },
                     "title": "a title",
                     "intent_key": "key-1",
                 },
@@ -7344,7 +7293,7 @@ mod tests {
             request: AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                invocation: None,
+                launch: None,
                 title: None,
                 intent_key: None,
                 confirm_yolo: false,
@@ -7360,7 +7309,7 @@ mod tests {
                     "verb": "create",
                     "host": "builder",
                     "cwd": "/srv/work",
-                    "invocation": null,
+                    "launch": null,
                     "title": null,
                     "intent_key": null,
                 },

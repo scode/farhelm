@@ -14,7 +14,7 @@ impl Supervisor {
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        if row.agent_kind != AgentKind::Codex {
+        if row.agent_kind() != AgentKind::Codex {
             return Ok(true);
         }
         // The caller may have loaded its row before a report took the claim.
@@ -23,7 +23,7 @@ impl Supervisor {
         let Some(current) = self.store.session(&row.id).await? else {
             return Ok(false);
         };
-        if current.generation != row.generation || current.agent_kind != AgentKind::Codex {
+        if current.generation != row.generation || current.agent_kind() != AgentKind::Codex {
             return Ok(false);
         }
         *row = current;
@@ -139,7 +139,7 @@ impl Supervisor {
             .ok_or_else(|| {
                 RequestError::new(ErrorKind::NotFound, "the Codex session no longer exists")
             })?;
-        if row.generation != generation || row.agent_kind != kind {
+        if row.generation != generation || row.agent_kind() != kind {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "this session has moved on to another launch",

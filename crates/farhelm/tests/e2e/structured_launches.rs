@@ -12,9 +12,7 @@
 use crate::agent_relay::{SessionPeer, credential_for};
 use crate::harness::*;
 use farhelm_helm::CreateExtras;
-use farhelm_proto::{
-    AgentKind, ControlMsg, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-};
+use farhelm_proto::{ControlMsg, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// An owned named executable plus the working directory it must outlive.
 ///
@@ -262,22 +260,38 @@ pub(crate) fn fake_harness() -> FakeHarness {
     }
 }
 
-/// Return the supervisor runtime identity that a structured harness requires.
-fn agent_kind(selection: &LaunchSelection) -> AgentKind {
-    match selection.harness {
-        LaunchHarness::Codex => AgentKind::Codex,
-        LaunchHarness::Claude => AgentKind::Claude,
-        LaunchHarness::Goose => AgentKind::Goose,
-        LaunchHarness::Pi => AgentKind::Pi,
-        LaunchHarness::Omp => AgentKind::Omp,
-        LaunchHarness::Grok => AgentKind::Grok,
-        // Muse deliberately remains a Generic runtime integration: it has no
-        // conversation-resume contract for this release.
-        LaunchHarness::Muse => AgentKind::Generic,
-        LaunchHarness::Cursor => AgentKind::Generic,
-        // OpenCode has the same generic lifecycle: no captured conversation
-        // means a restart cannot honestly synthesize a resume command.
-        LaunchHarness::OpenCode => AgentKind::Generic,
+/// An agent launch of `selection` whose commands run `invocation` (a fake
+/// vendor entry point) where the helm would run the vendor's program: the
+/// start command is `invocation` then `{farhelm_args}`, and the resume
+/// command adds the agent type's resume selector before `{farhelm_args}`,
+/// exactly the shape the helm's compiler composes (its own tests pin that
+/// table) around a program this fixture controls.
+pub(crate) fn fake_agent_launch(
+    invocation: &str,
+    selection: LaunchSelection,
+) -> farhelm_proto::SessionLaunch {
+    let argv = shell_words::split(invocation).expect("a fixture invocation splits");
+    let suffix: Option<&[&str]> = match selection.harness {
+        LaunchHarness::Claude => Some(&["--resume"]),
+        LaunchHarness::Codex => Some(&["resume"]),
+        LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
+        LaunchHarness::Pi => Some(&["--session"]),
+        LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
+        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+    };
+    let resume = suffix.map(|suffix| {
+        let mut resume = argv.clone();
+        resume.extend(suffix.iter().map(|element| element.to_string()));
+        resume.push("{conversation}".to_string());
+        resume.push("{farhelm_args}".to_string());
+        resume
+    });
+    let mut start = argv;
+    start.push("{farhelm_args}".to_string());
+    farhelm_proto::SessionLaunch::Agent {
+        selection,
+        start,
+        resume,
     }
 }
 
@@ -290,15 +304,11 @@ async fn launch(
     h.client
         .create_session_with_extras(
             &fixture.work.path().to_string_lossy(),
-            &fixture.invocation(&selection),
+            fake_agent_launch(&fixture.invocation(&selection), selection),
             None,
             WIDE_COLS,
             ROWS,
-            CreateExtras {
-                agent_kind: Some(agent_kind(&selection)),
-                launch: Some(selection),
-                ..CreateExtras::default()
-            },
+            CreateExtras::default(),
         )
         .await
         .expect("structured create")
@@ -701,7 +711,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         };
         let created = launch(&h, &fixture, selection.clone()).await;
-        assert_eq!(created.launch, Some(selection.clone()));
+        assert_eq!(created.launch.agent_selection(), Some(&selection.clone()));
         let argv = observed_argv(&h, &created.id, 1).await;
         let words = shell_words::split(&argv).expect("default fake argv");
         assert!(
@@ -764,7 +774,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
     let mut explicit_opencode_id = None;
     for selection in explicit {
         let created = launch(&h, &fixture, selection.clone()).await;
-        assert_eq!(created.launch, Some(selection.clone()));
+        assert_eq!(created.launch.agent_selection(), Some(&selection.clone()));
         // OpenCode appears only in the explicit cases. Its first wrapper
         // process is therefore generation 1, while the other explicit
         // cases follow a default launch of the same harness.
@@ -779,7 +789,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         );
 
         let live = wait_for_live_status(&h.client, &created.id, 30).await;
-        assert_eq!(live.launch, Some(selection.clone()));
+        assert_eq!(live.launch.agent_selection(), Some(&selection.clone()));
         let stored = SessionStore::open(&h.state.path().join("supervisor.db"), false)
             .await
             .expect("reopen durable store")
@@ -787,7 +797,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             .await
             .expect("read durable session")
             .expect("created session remains stored");
-        assert_eq!(stored.launch, Some(selection.clone()));
+        assert_eq!(stored.launch.agent_selection(), Some(&selection.clone()));
 
         // Cursor has no conversation reporting, and the Grok fixture never
         // reports: neither may invent Resume, so Restart is unavailable
@@ -900,17 +910,14 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
             req_id: 1,
             parent: Some(parent.id.clone()),
             cwd: fixture.work.path().to_string_lossy().into_owned(),
-            invocation: None,
+            launch: None,
             inherit_agent: true,
             title: Some("structured child".to_string()),
             cols: WIDE_COLS,
             rows: ROWS,
             intent_key: Some("structured-inherited-child".to_string()),
             confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
             github_checkout: None,
-            launch: None,
         })
         .await;
     let ControlMsg::SessionCreated {
@@ -920,11 +927,11 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
     else {
         panic!("explicit structured inheritance must create a child: {reply:?}");
     };
-    assert_eq!(child.launch, Some(selection.clone()));
+    assert_eq!(child.launch.agent_selection(), Some(&selection.clone()));
     assert_forwarded(&observed_argv(&h, &child.id, 2).await, &selection);
 
     let live = wait_for_live_status(&h.client, &child.id, 30).await;
-    assert_eq!(live.launch, Some(selection.clone()));
+    assert_eq!(live.launch.agent_selection(), Some(&selection.clone()));
     let stored = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("reopen durable store")
@@ -932,7 +939,7 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
         .await
         .expect("read durable child")
         .expect("inherited child remains stored");
-    assert_eq!(stored.launch, Some(selection));
+    assert_eq!(stored.launch.agent_selection(), Some(&selection));
 }
 
 /// Restricted raw launch data is refused at the process boundary, leaving no
@@ -962,16 +969,16 @@ async fn restricted_raw_data_is_refused() {
             req_id: 1,
             parent: Some(parent.id.clone()),
             cwd: fixture.work.path().to_string_lossy().into_owned(),
-            invocation: Some(fixture.invocation(&selection)),
+            launch: Some(fake_agent_launch(
+                &fixture.invocation(&selection),
+                selection.clone(),
+            )),
             inherit_agent: false,
             title: Some("raw override".to_string()),
             cols: WIDE_COLS,
             rows: ROWS,
             intent_key: Some("structured-parent-raw-override".to_string()),
             confirm_yolo: false,
-            agent_kind: Some(AgentKind::Codex),
-            resume_template: None,
-            launch: None,
             github_checkout: None,
         })
         .await;

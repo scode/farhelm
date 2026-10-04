@@ -515,9 +515,10 @@ host="$(connected_local_host 9>&-)" || exit 1
 stack_mark "local host $host connected"
 
 # The body is built by python rather than by string interpolation because
-# the invocation carries shell quoting of its own ('$fixtures' ...) that would
-# otherwise have to survive being pasted into JSON by hand.
-# The invocation is quoted with `shlex.join` rather than by wrapping $fixtures in
+# the command carries shell quoting of its own ('$fixtures' ...) that would
+# otherwise have to survive being pasted into JSON by hand. It is a command
+# launch asserted not YOLO, which the create API requires every command to say.
+# The command is quoted with `shlex.join` rather than by wrapping $fixtures in
 # literal single quotes: the supervisor parses it with shell-words, so a
 # checkout path containing an apostrophe (or a space, or a quote) would
 # otherwise produce an invocation that parses into the wrong argv — or fails
@@ -527,7 +528,10 @@ create_body="$(python3 -c '
 import json, shlex, sys
 print(json.dumps({
     "cwd": sys.argv[1],
-    "invocation": shlex.join([sys.argv[2], "fake-agent", "--script", "basic"]),
+    "command": {
+        "command": shlex.join([sys.argv[2], "fake-agent", "--script", "basic"]),
+        "yolo": False,
+    },
     "title": "e2e-session",
     "host": int(sys.argv[3]),
 }))

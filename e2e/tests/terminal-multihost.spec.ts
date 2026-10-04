@@ -49,7 +49,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { ChildProcess, spawn, spawnSync } from "node:child_process";
 import net from "node:net";
-import { cleanupSession, fillCreateForm, waitForTermText } from "./helpers/term";
+import { cleanupSession, fillCreateForm, waitForTermText, answerYolo } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   cleanUpSessionsTitled,
@@ -2240,7 +2240,7 @@ test.describe("multi-host", () => {
       // without also writing what submit actually reads.
       const sent = response.request().postDataJSON();
       expect(sent.host).toBe(remote.id);
-      expect(sent.invocation).toBe(FAKE_AGENT_INVOCATION);
+      expect(sent.command.command).toBe(FAKE_AGENT_INVOCATION);
 
       const body = await response.json();
       cloneId = body.id as string;
@@ -2337,7 +2337,7 @@ test.describe("multi-host", () => {
       const sent = response.request().postDataJSON();
       expect(sent.host).toBe(remote.id);
       expect(
-        sent.invocation,
+        sent.command?.command,
         "the explicit edit must reach the wire, not the clone's own command",
       ).toBe(explicitCommand);
 
@@ -2373,7 +2373,7 @@ test.describe("multi-host", () => {
       const created = await request.post("/api/sessions", {
         data: {
           cwd: "/tmp",
-          invocation: "sleep 600",
+          command: { command: "sleep 600", yolo: false },
           title: staleTitle,
           host: remote.id,
         },
@@ -2783,7 +2783,7 @@ test.describe("multi-host", () => {
       const created = await request.post("/api/sessions", {
         data: {
           cwd: "/tmp",
-          invocation: "sleep 600",
+          command: { command: "sleep 600", yolo: false },
           title,
           host: remote.id,
         },
@@ -3654,6 +3654,7 @@ test.describe("multi-host", () => {
       await form.locator(".create-session-host").selectOption(String(down));
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);
+      await answerYolo(form);
       await form.getByLabel("name (optional)").fill(title);
       await page.route("**/api/sessions", async (route) => {
         if (route.request().method() === "POST") createPosts += 1;

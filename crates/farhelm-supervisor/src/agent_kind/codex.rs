@@ -295,8 +295,19 @@ fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_kind::{IntegrationSnapshot, RestartOffer};
+    use crate::agent_kind::{CONVERSATION_PLACEHOLDER, IntegrationSnapshot, RestartOffer};
     use serde_json::json;
+
+    /// A Codex session's snapshot whose resume command is `start` followed
+    /// by `resume {conversation}`, the shape the helm composes.
+    fn codex_snapshot(start: &[&str]) -> IntegrationSnapshot {
+        let mut resume: Vec<String> = start.iter().map(|element| element.to_string()).collect();
+        resume.extend(["resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
+        IntegrationSnapshot {
+            kind: farhelm_proto::AgentKind::Codex,
+            resume_template: Some(resume),
+        }
+    }
 
     /// Write the smallest root record a locator can use. The runtime id is
     /// deliberately independent from the thread id: Codex reports the former
@@ -335,17 +346,7 @@ mod tests {
         locator.verify().await.expect("verify root transcript");
         let stored = locator.encode().expect("encode verified locator");
 
-        let snapshot = IntegrationSnapshot::resolve(
-            &[
-                "codex".to_string(),
-                "--yolo".to_string(),
-                "-m".to_string(),
-                "gpt-5-codex".to_string(),
-            ],
-            None,
-            None,
-        )
-        .expect("Codex integration");
+        let snapshot = codex_snapshot(&["codex", "--yolo", "-m", "gpt-5-codex"]);
         assert_eq!(
             snapshot.restart_offer(Some(&stored), 0),
             RestartOffer::Resume
@@ -378,8 +379,7 @@ mod tests {
     /// closed (data preserved, Resume refused) until a contract knows it.
     #[farhelm_testtrace::test]
     fn codex_resume_requires_provenance_except_its_documented_v1_tokens() {
-        let snapshot = IntegrationSnapshot::resolve(&["codex".to_string()], None, None)
-            .expect("Codex integration");
+        let snapshot = codex_snapshot(&["codex"]);
         // A token exactly as a verified admission encodes one: version 1,
         // a plausible runtime id, an exact absolute record path, a
         // persistent thread, and the resumable bit verification sets.
@@ -416,8 +416,7 @@ mod tests {
     /// restart decisions fail closed instead of guessing which transcript owns it.
     #[farhelm_testtrace::test]
     fn a_legacy_bare_codex_thread_never_offers_resume() {
-        let snapshot = IntegrationSnapshot::resolve(&["codex".to_string()], None, None)
-            .expect("Codex integration");
+        let snapshot = codex_snapshot(&["codex"]);
         assert_eq!(
             snapshot.restart_offer(Some("historical-thread"), 0),
             RestartOffer::NotCaptured
