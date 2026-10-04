@@ -26,8 +26,8 @@ script's header says why, and what that costs. Use the script rather than `bun r
 pick their own port.
 
 This flow is for sessions where the maintainer is reviewing drafts with you. An unattended run (a plan being executed, a
-delegate, a reviewer in a scratch copy) starts no preview server: nobody is there to read it, and a server left behind
-by a scratch copy holds the port for every later drafting session.
+delegate, a reviewer in a scratch copy) starts no preview server: nobody is there to read it, and starting one would
+take the port from the maintainer's own drafting session.
 
 - Run `website/scripts/preview.sh` each time before you hand the maintainer a change. It starts the server if this
   checkout is not already serving, waits until it answers, and prints the docs front page URL; when the server is
@@ -42,12 +42,11 @@ by a scratch copy holds the port for every later drafting session.
   pages, or a change to these instruction files), or when in doubt, link the docs front page,
   `http://127.0.0.1:14000/docs/`. The links assume the maintainer's browser reaches 127.0.0.1:14000 on this machine,
   either because it runs here or through their port forward; give them as they are.
-- If the script refuses because something else holds the port, hand out no preview links: they would show someone else's
-  pages, not your draft. When the script says the holder's checkout no longer exists, run
-  `website/scripts/preview.sh takeover` to clear it; that server is no one's. Otherwise it is usually another checkout's
-  preview server, which belongs to whoever started it: tell the maintainer what the script reported and ask, and run
-  `takeover` only when they say to. It stops only another checkout's background preview server, never a foreground
-  `astro dev` or anything else, and then starts this one.
+- When another checkout's preview server holds the port, the script stops it and takes the port without asking: the
+  maintainer drafts in one session at a time, so that server shows a draft nobody is reading. It never stops a
+  foreground `astro dev` or anything that is not a preview server. If the script refuses because something like that
+  holds the port, hand out no preview links (they would show someone else's pages, not your draft) and tell the
+  maintainer what the script reported.
 - Leave your own server running when you finish, since the maintainer may still be reading;
   `website/scripts/preview.sh stop` stops it when asked.
 
