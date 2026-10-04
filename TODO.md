@@ -44,6 +44,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Settle Codex trust markers in command launches.** Command launches still expand the compiler's internal
+  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}` markers, although their public placeholder contract names only
+  `{cwd}`, `{conversation}` and `{farhelm_args}`. Decide whether these internal markers should expand only in agent
+  launches or be an explicit exception for command launches, then align the specification, implementation and tests.
+  Follow-up to the launch-kind redesign in PR #1563.
+
+- **Settle retry limits for template-based session creation.** A retry with the same idempotency key is promised the
+  first accepted session even after a template edit, but the helm prunes its saved launch resolutions after 30 days and
+  retains only the newest 256 per requesting session. Once a resolution is evicted, a retry resolves templates again; if
+  they changed, it can report a key conflict instead of returning the original session. Decide the lifetime of that
+  guarantee and make storage, cleanup, the specification and tests agree, including retries past both retention limits
+  after a template edit. Follow-up to the agent CLI launch change in PR #1576.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
