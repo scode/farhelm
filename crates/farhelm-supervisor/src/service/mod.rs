@@ -90,6 +90,7 @@ mod handlers;
 mod hints;
 mod launch_artifacts;
 mod listing;
+mod report_files;
 mod status;
 mod sweep;
 mod teardown;

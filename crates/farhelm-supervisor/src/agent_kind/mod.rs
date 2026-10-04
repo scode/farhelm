@@ -1576,9 +1576,9 @@ fn correlators_from(
 ///
 /// The sources are where a value first arrives from outside: the record
 /// parse above, which reads ids out of files the supervisor did not write,
-/// and the supervisor's `ReportConversation` handler
-/// (`service/handlers.rs` — plan §2.4), which takes an agent-REPORTED id
-/// off the wire before anything is retained. The re-checks are the two
+/// and the supervisor's report-file checks (`service::report_files`),
+/// which take an agent-REPORTED id out of a file a hook wrote before
+/// anything is retained. The re-checks are the two
 /// points where a stored value becomes user-facing again:
 /// [`IntegrationSnapshot::restart_offer`], so an id this build would refuse
 /// to substitute is never OFFERED, and

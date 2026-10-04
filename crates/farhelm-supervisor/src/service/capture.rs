@@ -90,12 +90,23 @@ impl CaptureState {
 const REPORT_WARNING_AFTER: Duration = Duration::from_secs(65);
 
 impl Supervisor {
-    /// Refresh report-backed readiness before replies and on the periodic ticker.
-    /// Each session's capture claim serializes its row and mirror update with
-    /// report admission. No host-wide pass lock or scan is needed.
+    /// Apply the reports hooks have dropped, then refresh report-backed
+    /// readiness, before replies and on the periodic ticker. Each session's
+    /// capture claim serializes its row and mirror update with report
+    /// admission; dropped reports are applied first so a refresh, and any
+    /// Restart that reads capture state after this pass, sees them — unless
+    /// another drain is already running, in which case that drain applies
+    /// them and this pass does not wait for it.
     pub(crate) async fn capture_now(&self) {
+        self.capture_pass(false).await;
+    }
+
+    /// [`Supervisor::capture_now`], with the choice of whether the report
+    /// drain waits for one already running (see `apply_report_files`).
+    pub(crate) async fn capture_pass(&self, wait_for_drain: bool) {
         let entries: Vec<Arc<SessionEntry>> =
             self.sessions.lock().await.values().cloned().collect();
+        self.apply_report_files(&entries, wait_for_drain).await;
         refresh_report_only_captures(self, &entries).await;
         report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, Instant::now());
     }

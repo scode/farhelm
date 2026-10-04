@@ -83,8 +83,9 @@ impl Supervisor {
         Ok(true)
     }
 
-    /// Codex admission, unchanged from the completed two-proof design: live
-    /// foreground native-runtime attribution excluding nested runtimes,
+    /// Codex admission, the completed two-proof design: foreground
+    /// native-runtime attribution over the recorded chain, excluding nested
+    /// runtimes,
     /// then exact root record validation excluding same-process vendor
     /// threads — wired through the shared claim, CAS, and mirror
     /// discipline rather than its own.
@@ -102,7 +103,8 @@ impl Supervisor {
             source,
             transcript_path,
             hook_event_name,
-            peer,
+            ancestry,
+            launch_generation: _,
         } = report;
         if !crate::agent_kind::codex::is_foreground_source(&source) {
             return Err(RequestError::new(
@@ -110,10 +112,10 @@ impl Supervisor {
                 "Codex reported an unsupported foreground transition",
             ));
         }
-        let peer = peer.ok_or_else(|| {
+        let chain = ancestry.ok_or_else(|| {
             RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex report has no kernel-attributed local process",
+                "the Codex report carries no process ancestry reaching this session's pane",
             )
         })?;
         if let Some(gate) = self.seams.faults.codex_report_gate() {
@@ -164,7 +166,12 @@ impl Supervisor {
         {
             locator.thread_id = previous.thread_id;
         }
-        let emitter = self.codex_foreground(&row, peer).await?;
+        // The recorded chain was anchored at the current pane before
+        // admission; the corridor decides which process in it emitted the
+        // report. Evidence recorded when the report was made cannot change
+        // during verification, so there is no second walk to compare.
+        let emitter = crate::procs::codex_corridor(&chain)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         locator.verify().await.map_err(|error| {
             RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -175,12 +182,6 @@ impl Supervisor {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "the Codex report has no persisted root record; the current foreground identity was not changed",
-            ));
-        }
-        if self.codex_foreground(&row, peer).await? != emitter {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the Codex foreground changed during verification",
             ));
         }
         info!(target: LOG_TARGET,
@@ -225,25 +226,5 @@ impl Supervisor {
             }
         };
         self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
-    }
-
-    /// Recover the agent pane during publication gaps, then bind the socket peer
-    /// to its native Codex process. No lifecycle lock: the reporting hook may be
-    /// running inside the launch whose publication that lock protects.
-    pub(in crate::service::core) async fn codex_foreground(
-        &self,
-        row: &StoredSession,
-        peer: crate::procs::ProcessIdentity,
-    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
-        let pid = self.owned_pane_pid(row, "Codex").await?;
-        tokio::task::spawn_blocking(move || crate::procs::foreground_codex_emitter(peer, pid))
-            .await
-            .map_err(|_| {
-                RequestError::new(
-                    ErrorKind::Internal,
-                    "Codex process attribution could not complete",
-                )
-            })?
-            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
     }
 }

@@ -16,6 +16,7 @@ use anyhow::Context;
 use std::io::{BufRead, Read, Write};
 
 mod codex_conversation;
+mod grok_conversation;
 
 /// Which terminal behavior to act out. A closed set, so clap validates it
 /// at parse time and `--help` documents it, rather than failing at
@@ -148,6 +149,11 @@ pub enum Script {
     /// peer credential inheritance and process ancestry as well as record
     /// verification. See `fake_agent/codex_conversation.rs`.
     CodexConversation,
+    /// A narrow native-Grok-shaped fixture that fires real Grok hooks
+    /// (`SessionStart` selections and `Stop` enrichments) from a process
+    /// named `grok`, for the report-file ordering tests. See
+    /// `fake_agent/grok_conversation.rs`.
+    GrokConversation,
     /// [`Script::ClaudeRecord`] plus a `report <id>` command that fires the
     /// REAL `farhelm internal hook` binary, standing in for the vendor's
     /// own `SessionStart` hook.
@@ -374,6 +380,7 @@ pub fn run(
         Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home, false),
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home, false),
         Script::CodexConversation => codex_conversation::run(record_home),
+        Script::GrokConversation => grok_conversation::run(record_home),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
         Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),

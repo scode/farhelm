@@ -38,9 +38,9 @@ impl Supervisor {
     /// asset gate alone. Launch provenance — the session's durable launch
     /// record naming the current gated asset, with the file's bytes
     /// re-verified — establishes that this launch installed the
-    /// context-gated reporter. Process attribution — the walked corridor
-    /// over the shared mechanics, repeated around the evidence —
-    /// establishes that THIS reporter descends from that launched runtime.
+    /// context-gated reporter. Process attribution — OMP's corridor over the
+    /// report's recorded chain, anchored at the current pane — establishes
+    /// that THIS reporter descends from that launched runtime.
     /// Together they imply the report passed the asset's interactive-context
     /// gate: a separately launched interactive child passes the gate but
     /// fails attribution, while an old gateless asset fails provenance
@@ -61,7 +61,8 @@ impl Supervisor {
             source,
             transcript_path: _,
             hook_event_name: _,
-            peer,
+            ancestry,
+            launch_generation: _,
         } = report;
         if !crate::agent_kind::omp::is_omp_foreground_source(&source) {
             return Err(RequestError::new(
@@ -102,10 +103,10 @@ impl Supervisor {
                 "this session has moved on to another launch",
             ));
         }
-        let peer = peer.ok_or_else(|| {
+        let chain = ancestry.ok_or_else(|| {
             RequestError::new(
                 ErrorKind::Conflict,
-                "the OMP report has no kernel-attributed local process",
+                "the OMP report carries no process ancestry reaching this session's pane",
             )
         })?;
         // Step 3a: launch provenance. The row must name the current gated
@@ -148,24 +149,38 @@ impl Supervisor {
                 ));
             }
         }
-        // Step 3b: the live runtime proof. The RETAINED launch program —
+        // Step 3b: the runtime proof. The RETAINED launch program —
         // classified from the argv this generation actually started, and
         // published beside the asset marker before the launch's first
         // process could exist — selects the installation descriptor;
-        // without it there is nothing to bind the live chain to. The
+        // without it there is nothing to bind the recorded chain to. The
         // resume template is a future resume's command and is never
         // consulted here: a supported direct launch with an independent
         // resume override still proves what it runs.
         let program = crate::agent_kind::omp::OmpLaunchProgram::from_column_value(
             row.omp_launch_program.as_deref(),
         );
-        let emitter = self.omp_foreground(&row, peer, program).await?;
-        if self.omp_foreground(&row, peer, program).await? != emitter {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the OMP foreground changed during verification",
-            ));
-        }
+        // The corridor may resolve an entry spelling on disk, so it runs on
+        // the blocking pool; the chain itself is the recorded evidence,
+        // already anchored at the current pane, and is read once.
+        let emitter =
+            tokio::task::spawn_blocking(move || crate::procs::omp_corridor(&chain, &program))
+                .await
+                // A corridor that panicked would panic again on the same
+                // recorded chain, so that refuses rather than asking the
+                // report drain to retry it every pass; a cancelled one (only
+                // at runtime shutdown) is worth another try.
+                .map_err(|error| {
+                    RequestError::new(
+                        if error.is_panic() {
+                            ErrorKind::Conflict
+                        } else {
+                            ErrorKind::Internal
+                        },
+                        "OMP process attribution could not complete",
+                    )
+                })?
+                .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         info!(target: LOG_TARGET,
             session = %id, generation, emitter_pid = emitter.pid,
             conversation = %conversation, source = %source,
@@ -200,30 +215,5 @@ impl Supervisor {
             }
         };
         self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
-    }
-
-    /// Recover the agent pane during publication gaps, then bind the socket peer
-    /// to the OMP runtime the launch installed: the Bun-executed bundle (or
-    /// source tree) or the compiled target, reached through the launch's own
-    /// launcher and trampoline shapes and nothing else. No lifecycle lock,
-    /// for the same reason as [`Supervisor::codex_foreground`].
-    pub(in crate::service::core) async fn omp_foreground(
-        &self,
-        row: &StoredSession,
-        peer: crate::procs::ProcessIdentity,
-        program: crate::agent_kind::omp::OmpLaunchProgram,
-    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
-        let pid = self.owned_pane_pid(row, "OMP").await?;
-        tokio::task::spawn_blocking(move || {
-            crate::procs::foreground_omp_emitter(peer, pid, &program)
-        })
-        .await
-        .map_err(|_| {
-            RequestError::new(
-                ErrorKind::Internal,
-                "OMP process attribution could not complete",
-            )
-        })?
-        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
     }
 }

@@ -47,12 +47,16 @@ pub mod bounded_command;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
 pub mod files;
+/// Conversation reports a hook drops as files for the supervisor to apply.
+pub mod hook_report;
 pub mod launch;
 mod pi_extension;
 pub mod repository_discovery;
 // Private, and deliberately so: `procs` is the process-table read seam
-// (`/proc` on Linux, `sysctl` on macOS) and nothing outside
-// `service::sweep` has business reading a process table at all. Its own
+// (`/proc` on Linux, `sysctl` on macOS) and nothing outside `service::sweep`
+// and hook attribution has business reading a process table at all. The
+// hook's own ancestry reaches other crates only through
+// `hook_report::record_own_ancestry`. Its own
 // module docs carry the contract; the visibility is the part worth
 // stating here. A doc comment rather than this plain one would re-home
 // the module's docs into lib.rs's link scope and break every intra-doc

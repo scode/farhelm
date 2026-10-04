@@ -210,7 +210,8 @@ async fn serving_supervisor(
 /// Records alone do not supply an identity;
 /// requiring the acknowledgement keeps either vendor from passing this audit
 /// after its hook stopped firing. An `acked` line names the runtime id the
-/// supervisor answered for, and only a hook process can have put it there.
+/// supervisor accepted, and the supervisor writes it only after picking up a
+/// report file that a hook process wrote.
 async fn wait_for_reported_identity(
     sup: &Supervisor,
     client: &SupervisorClient,
@@ -274,7 +275,7 @@ fn hook_log_lines(state: &std::path::Path, session_id: &str) -> Vec<String> {
     text.lines().map(str::to_string).collect()
 }
 
-/// Whether the hook has recorded a supervisor-accepted runtime identity for
+/// Whether the hook log records a supervisor-accepted runtime identity for
 /// this session.
 ///
 /// Tolerates a log file that does not exist yet, because it is called while
@@ -650,9 +651,12 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         .path()
         .join("hook-log")
         .join(format!("{}.log", session.id));
+    // The child's first line is the hook's own `written`; the supervisor's
+    // verdict on that report follows on its next pass, and the verdict is what
+    // this audit is about.
     let child_line = |text: &str| {
         text.lines()
-            .find(|line| !line.contains(&parent))
+            .find(|line| !line.contains(&parent) && !line.contains(" written "))
             .map(str::to_string)
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);

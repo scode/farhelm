@@ -4,8 +4,9 @@
 //! process, transcript, and hook shapes needed to prove that a nested process
 //! inheriting its parent's launch credential cannot take over foreground
 //! attribution. Everything after the fixture decides to fire a hook remains
-//! real: the shipped hook binary, its Unix-socket connection, inherited
-//! credential, peer identity, supervisor store, and restart path.
+//! real: the shipped hook binary, its inherited launch environment, the
+//! report file and process ancestry it records, the supervisor store, and
+//! the restart path.
 
 use anyhow::{Context, bail, ensure};
 use std::io::{BufRead, Read, Write};
@@ -662,8 +663,9 @@ fn load(path: &Path) -> anyhow::Result<Conversation> {
 
 /// Use the original Farhelm binary for the real hook process.
 ///
-/// The payload includes the native Codex fields production validates, rather
-/// than a direct control message that would bypass socket peer attribution.
+/// The payload includes the native Codex fields production validates, and
+/// the report goes through the real hook rather than straight into the
+/// supervisor, so its recorded ancestry is the one attribution judges.
 fn report(
     hook_binary: &Path,
     conversation: &Conversation,

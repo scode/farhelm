@@ -1149,7 +1149,9 @@ decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and
 recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not maintained
 as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversation` and `ConversationReported` — went the
 other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
-outright instead of ignoring.
+outright instead of ignoring. The pair was later removed without a bump, when reports moved to files (see "The
+per-launch identity hook"): only a hook ever sent it, a helm and a supervisor sharing a version never exchange it, and a
+hook older than its supervisor during an upgrade is the accepted gap that move describes.
 
 Protocol version 31 gives every terminal detach a code beside its reason. `ControlMsg::Detached` carries a `DetachCode`
 (`taken_over`, `stalled`, `tab_closed`, `replaced`, `other`), a non-displacing attach refused because another client
@@ -1626,11 +1628,11 @@ evidence, but cannot authorize another directory move.
   carries its identity and therefore stays silent even if its new hook never reports. The warning changes no offer or
   admission rule.
 
-  **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
-  start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
-  reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. The pane
-  anchor itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not.
-  This deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
+  **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
+  and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
+  Codex report, the anchored chain must contain exactly one native executable whose basename is `codex`. The pane anchor
+  itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not. This
+  deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
   chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter must
   spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
   still accepts older hooks), and every other non-Codex link except the pane anchor must be a narrow shell trampoline
@@ -1658,10 +1660,11 @@ evidence, but cannot authorize another directory move.
   holding it. This is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher.
   Promotion of the previous record cannot discard a legitimate clear, and a repeated report must preserve an established
   thread binding. Both writes also compare the generation and complete prior locator, including an initially absent
-  capture. Reports received before in-memory publication use the durable launching row and discover its owned pane from
-  tmux. Historical bare Codex IDs are retained but fail closed rather than being guessed into a new locator.
+  capture. A report made before in-memory publication waits on disk and is applied on the first pass after publication,
+  which discovers the owned pane from tmux when the row has not recorded it yet. Historical bare Codex IDs are retained
+  but fail closed rather than being guessed into a new locator.
 
-  **Grok attribution, ordering, and exact-record validation.** Grok uses the same peer PID, bounded ancestry walk,
+  **Grok attribution, ordering, and exact-record validation.** Grok uses the same recorded and anchored ancestry,
   capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
   one native `grok` image with `--no-leader` in the option region, followed only by the hook-shaped reporter and the
   same narrow shell trampoline. A nested Grok, foreign session runtime, missing option, or unreadable argv refuses the
@@ -1688,30 +1691,36 @@ evidence, but cannot authorize another directory move.
   either path. No history scan or path derivation participates. Grok's manual hook configuration is the deliberate
   exception to per-launch injection: Farhelm invokes no editor and writes no vendor file.
 
-  **Shared attribution framework and the five-step admission.** The ancestry walk above is shared mechanics, not Codex
-  code: at most 64 live `Running` edges from the socket peer to the owned pane, the peer's start token verified first,
-  loops and a missing pane refused, and every edge plus every image observation re-read before the walk returns (an exec
-  between the walk and the re-read refuses, since the observed process is no longer the one the walk saw). Each edge
-  captures its image (required — an unreadable image refuses, as it always did) and its argv (optional evidence: `/proc`
-  exe plus bounded NUL cmdline on Linux, a new bounded `KERN_PROCARGS2` argv reader on macOS, 64 KiB per process and 1
-  MiB per walk, with over-budget or truncated argv recorded as missing rather than prefix-matched). The per-kind step
-  applies its own restrictive corridor to the returned chain — only the reporter plus a narrow trampoline between
-  runtime and reporter; any other session-hosting runtime or unclassified intermediary refuses. Codex's instance is
-  exactly one native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only; Grok's adds the required
-  `--no-leader` option to its one native image. Admission runs five steps: cheap envelope/kind/generation gating with no
-  vendor I/O (the doorway's discriminator check re-applied against the fenced resolution, plus raw
-  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
-  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
-  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
-  mutation-free runtime and vendor-root proofs with repeat attribution around the evidence; the atomic
-  generation-plus-complete-binding CAS committing identity, locator, provenance, source, and readiness reset together;
-  and the mirror of only the committed result into the matching current-generation entry under the same claim. Rejection
-  at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation
-  passes take the same claim and reload before mirroring, carrying the row's version beside the identity, so
-  memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
-  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
-  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
-  every operation under it is local; a slow wait is logged for diagnostics, and the hook's own budget bounds the caller.
+  **Shared attribution framework and the five-step admission.** Attribution is shared mechanics in two halves, not Codex
+  code. Collection runs in the hook, when it makes its report: from the hook itself upwards, at most 64 `Running` edges,
+  the hook's own start token verified first, each edge capturing its image (an unreadable one ends collection there) and
+  its argv (optional evidence: `/proc` exe plus bounded NUL cmdline on Linux, a bounded `KERN_PROCARGS2` argv reader on
+  macOS, 64 KiB per process and 1 MiB per walk, with over-budget or truncated argv recorded as missing rather than
+  prefix-matched), plus the working directory of Bun and Node processes, whose relative entry spelling OMP attribution
+  resolves. Collection does not know the pane, so it climbs until the ancestry ends, a process cannot be read, or a
+  budget runs out, and notes why it stopped; every edge and image is then re-read, and the chain is cut below the first
+  one that changed (an exec between observation and re-read). Anchoring runs in the supervisor, when it applies the
+  report: the chain must contain the session's current pane process, by pid and start token while that process is alive
+  and by pid alone once it has exited and tmux still lists the pane, and is cut there; it must be one unbroken line of
+  parents within the depth and argv budgets, re-checked because the chain is now file input. Every launch runs a new
+  pane process, so anchoring is also what ties a report to its launch, for every vendor. The per-kind step applies its
+  own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
+  reporter; any other session-hosting runtime or unclassified intermediary refuses. Codex's instance is exactly one
+  native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only; Grok's adds the required `--no-leader`
+  option to its one native image. Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O
+  (the report file's discriminator check re-applied against the fenced resolution, plus raw event/source/agent-identity
+  validation before diagnostic sanitation); the unbounded capture claim (one shared session-keyed `capture_locks`
+  registry for report admission and readiness refresh, never the lifecycle claim; slow waits are logged for diagnostics)
+  and a reload comparing kind, generation, and the complete prior binding; the mutation-free runtime and vendor-root
+  proofs over the recorded chain (evidence recorded when the report was made cannot change during verification, so there
+  is no repeat walk); the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source,
+  and readiness reset together; and the mirror of only the committed result into the matching current-generation entry
+  under the same claim. Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh
+  and report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version
+  beside the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
+  rejected report never triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain
+  their durable generation/binding fences; they do not all acquire this capture claim. The report claim has no time
+  limit because every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL
@@ -1740,73 +1749,100 @@ evidence, but cannot authorize another directory move.
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution proofs apply to Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
   discriminator gate, and new framework entry points default to deny rather than allow. Claude stays on that legacy path
-  with one added check before the capture claim: the peer's walk to the owned pane (`procs::foreground_claude_emitter`),
-  skipping the hook's narrow `sh -c` trampolines, must end at the pane process or its direct child. It is positional on
-  purpose. Claude's native binary is named after its version and npm installs run under `node`, so an image rule would
-  have to track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the
-  closed attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below
-  the pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a
-  wrapper chain deeper than one level loses hook capture and, without a report, cannot be restarted, and a child the
-  foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash
-  tool always interposes a shell). Because this check runs before the capture claim, two nearby Claude reports may
-  attribute concurrently and a slower one may commit second within one generation. That race is accepted because two
-  session starts that close together are not a realistic sequence; the generation fence only keeps a check made before a
-  relaunch from committing into the new launch. The lifecycle does not justify another coordination layer. The check
-  writes no provenance and does not flip Claude's predicate, because flipping it would make every existing Claude
-  capture unresumable until its next proven report, and stopping replacement needs no version. The offer gate has its
-  final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer
-  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
-  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
-  that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
-  closed after the upgrade; nothing is grandfathered.
+  with one added check before the capture claim: the report's anchored chain (`procs::claude_corridor`), skipping the
+  hook's narrow `sh -c` trampolines, must end at the pane process or its direct child. It is positional on purpose.
+  Claude's native binary is named after its version and npm installs run under `node`, so an image rule would have to
+  track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the closed
+  attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below the
+  pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a wrapper
+  chain deeper than one level loses hook capture and, without a report, cannot be restarted, and a child the foreground
+  Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash tool
+  always interposes a shell). Reports reach admission one at a time, from one drain of the session's report files, so
+  two Claude reports never attribute concurrently; the generation fence keeps a check made before a relaunch from
+  committing into the new launch. The check writes no provenance and does not flip Claude's predicate, because flipping
+  it would make every existing Claude capture unresumable until its next proven report, and stopping replacement needs
+  no version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
+  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
+  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
+  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
+  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
   vendors fire a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line
-  for a single launch, so farhelm passes itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting over
-  the supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch already
-  carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's discriminator,
-  sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies its own value
-  internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
-  spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it as
-  `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
-  Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
-  (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
-  they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
-  costs are accepted deliberately, and both are scoped to the launches that actually carry the injected flags rather
-  than to Codex launches in general: on those, Codex prints a hook-trust warning line above its composer, and with trust
-  bypassed any hook the user has in that same configuration home but has not trusted runs too. The same bypass covers a
-  trusted project's own `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's
-  workspace-trust option, including for fresh checkouts, or the user's own answer to Codex's trust prompt), and on an
-  injected launch they then run without Codex's per-hook review. That is accepted because trusting a workspace already
-  hands its Codex configuration, MCP servers included, the ability to run commands, and because skipping injection there
-  would drop conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation
-  becomes an explicit step surfaced to the user, where the user is told what is being installed and accepts specific
-  hooks; after that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt
-  rather than at process start, so a Codex session's identity arrives only once the user has typed something, where
-  Claude's arrives at startup. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved
-  launch"); nothing reads the rest of the command. Only a legacy session, from before launch kinds, still gets the
-  previous release's injection, appended after its argv, and for it three invocation shapes disqualify a launch, which
-  is skipped with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors
-  only the last one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook
-  configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the
-  user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
-  text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
-  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted
-  report, a new session cannot be restarted; no nearby record can supply a substitute identity.
-  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
-  hook has one 30 s budget covering stdin and the round trip under 60 s outer timers where Farhelm sets or documents
-  them; it retries a refused or missing socket for about 4 s. A connection that lived for at least about a second before
-  dropping gets a fresh reconnect window; immediate accept-then-drop failures stay within the current window. It never
-  retries an `Error` reply or a protocol-version mismatch. Pi and OMP keep their published 2 s child timers. Replaying
-  one report is safe, but two distinct reports from Claude, Goose or Pi can both straddle a supervisor restart and
-  arrive out of order; the later arrival wins. Ordering between those reports remains a known limitation. The injected
-  command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see "What running
-  sessions hold across versions").
+  for a single launch, so farhelm passes itself as that hook (`farhelm internal hook --vendor <adapter>`, which drops
+  its report as a file for the supervisor to apply; see "Report files" below) and lets the agent state its own identity.
+  The `--vendor` flag is the report envelope's discriminator, sourced from the installed entry point rather than
+  inferred from the payload; the Goose helper supplies its own value internally so the persisted declaration keeps
+  invoking the same command, while the Pi/OMP assets pass theirs on the spawned command line and keep their JSON
+  `vendor` field purely as a consistency check. Claude takes it as `--settings <json>`; Codex takes
+  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`. Per-launch is the whole point:
+  nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set, `~/.codex`
+  otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which is what
+  keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted deliberately, and
+  both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
+  those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
+  that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own `.codex/`
+  hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's workspace-trust option, including for
+  fresh checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they then run without
+  Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex configuration, MCP
+  servers included, the ability to run commands, and because skipping injection there would drop conversation identity,
+  and so resume, for trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to
+  the user, where the user is told what is being installed and accepts specific hooks; after that, launches no longer
+  pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex
+  session's identity arrives only once the user has typed something, where Claude's arrives at startup. The flags go
+  where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing reads the rest of the
+  command. Only a legacy session, from before launch kinds, still gets the previous release's injection, appended after
+  its argv, and for it three invocation shapes disqualify a launch, which is skipped with a logged reason rather than
+  made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would
+  silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a
+  rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either
+  vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
+  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
+  once at supervisor start and carried as a seam value. Without an accepted report, a new session cannot be restarted;
+  no nearby record can supply a substitute identity. `website/src/content/docs/docs/agents/agent-hook-injection.md` is
+  the user-facing account of the same mechanism. The injected command line outlives the binary that wrote it, so it is
+  part of what newer binaries keep accepting (see "What running sessions hold across versions").
 
-  Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
-  cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each
-  for `SessionStart`, `UserPromptSubmit`, and `Stop`, all invoking `farhelm internal hook --vendor grok` without
+  **Report files.** The hook never talks to the supervisor and never waits for it. It reads the vendor's payload
+  (bounded at 30 s, for a vendor that holds stdin open, under the 60 s outer timers Farhelm sets or documents; Pi and
+  OMP keep their published 2 s child timers), records its process ancestry, writes the report atomically into
+  `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
+  complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
+  directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
+  replaced by rename: `latest.json` for every vendor but Grok, and Grok's `selection.json` (`SessionStart`) and
+  `enrichment.json` (its later events), drained selection first. Every report but Grok's carries a complete identity
+  checked against the stored binding, so keeping only the latest gives the same result as applying them all; Grok's
+  enrichment is refused without its selection, and the separate slot keeps a long outage's enrichments from evicting it.
+  The directory is therefore bounded at two files with no queue, cap, or eviction rule. Two hooks firing at once still
+  race for a slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the
+  slot of a pending report from the session's own agent and then be refused; a nested runtime that carries no such
+  marker (a second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass
+  while the supervisor runs or across an outage, and is then refused, which is an accepted gap.
+
+  The supervisor applies waiting reports at the start of every reconciliation pass (`capture_now`: the 2 s ticker, reply
+  paths, startup, reload, Restart) and does nothing while it is not recording. It takes a slot by renaming it to a
+  private name, so a hook refilling the slot meanwhile is not deleted with it, checks the report (the vendor naming the
+  session's durable kind, the conversation's size bound, the sub-agent marker, each vendor's source vocabulary), anchors
+  its chain at the current pane, and runs the five-step admission. An accepted or definitively refused report is
+  deleted; one that could not be read from disk, or was refused for an `Internal` failure (a store or tmux that could
+  not be read), or was judged while a relaunch moved the session to a new generation, is put back unless the slot was
+  refilled, in which case the newer report wins, and ends that session's pass. A report made under an earlier launch, or
+  whose pane no longer exists, fails the anchor and is discarded. Reports of a session that is not published yet wait
+  for the pass after publication. Drains never overlap; a taken slot found at the start of a drain belongs to a
+  supervisor that died mid-drain and is put back. A pass that finds another drain running skips draining rather than
+  waiting behind a slow admission; Restart is the exception and waits for it, then drains again, because a report
+  waiting on disk may name the conversation it is about to resume, and after the relaunch that report would be discarded
+  as the old launch's. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
+  `written` line: `acked`, or `refused` with the error kind and reason. Delete removes the drop directory; a pass
+  removes one whose session no longer exists, which a hook racing the delete can recreate. There is no file watcher: a
+  report is applied within one ticker interval, or at the next reply. A report made while no supervisor runs waits on
+  disk for the next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is
+  accepted.
+
+  Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
+  per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for
+  `SessionStart`, `UserPromptSubmit`, and `Stop`, all invoking `farhelm internal hook --vendor grok` without
   `--announce`. The tracked launch supplies the credential in the inherited environment; the configuration contains no
   Farhelm token or session identity. Missing configuration leaves the Grok session usable but unable to gain a new exact
   resume target.
@@ -1894,8 +1930,8 @@ evidence, but cannot authorize another directory move.
   `website/src/content/docs/docs/agents/omp.md`.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
-  `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the
-  agent that `$farhelm <request>` means the `farhelm agent` CLI and that `farhelm agent instructions` explains it. Both
+  `--announce` on its injected command line it prints one line on stdout after writing its report, telling the agent
+  that `$farhelm <request>` means the `farhelm agent` CLI and that `farhelm agent instructions` explains it. Both
   vendors were checked before this was built, and both inject a `SessionStart` hook's plain-text stdout into the model's
   context. Claude Code (<https://code.claude.com/docs/en/hooks>): "For most events, Claude Code writes stdout to the
   debug log and doesn't show it in the transcript. The exceptions are `UserPromptSubmit`, `UserPromptExpansion`,
@@ -2026,15 +2062,16 @@ evidence, but cannot authorize another directory move.
   prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
-  private tmux server, and `launch/` holding one 0600 JSON spec per LAUNCH, named `<session>.<generation>.json`. A
-  launch spec carries the agent's command line and the session credential, but nothing the session's own database row
-  does not already hold, in the same private state directory, for the session's whole lifetime (the plaintext
-  invocation, and the credential kept so a restart can inject the same one). Removing specs is therefore tidiness, not a
-  credential boundary: the shim unlinks its spec as soon as it has read it, creation removes it if the session never
-  starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and of launches a later
-  generation superseded. A current-generation spec whose launch never reached the shim (a login shell that exited in its
-  rc files, a reboot, or a stop before launch) may stay until the session is deleted, whichever path observed the
-  outcome (startup reconciliation, the runtime observers, or Stop); Delete removes it.
+  private tmux server, `hook-log/<session>.log` (each session's hook diagnostics) and `hook-reports/<session>/` (its
+  waiting report files; see "Report files"), and `launch/` holding one 0600 JSON spec per LAUNCH, named
+  `<session>.<generation>.json`. A launch spec carries the agent's command line and the session credential, but nothing
+  the session's own database row does not already hold, in the same private state directory, for the session's whole
+  lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one). Removing specs is
+  therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation removes
+  it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and
+  of launches a later generation superseded. A current-generation spec whose launch never reached the shim (a login
+  shell that exited in its rc files, a reboot, or a stop before launch) may stay until the session is deleted, whichever
+  path observed the outcome (startup reconciliation, the runtime observers, or Stop); Delete removes it.
 - Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
   and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
   dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a
@@ -3264,10 +3301,13 @@ wire format:
   injected into Claude's `--settings` and Codex's `-c hooks.…` overrides and as the user installs it for Grok (see "The
   per-launch identity hook" under Supervisor internals), and the outer timeouts those declarations carry, which bound
   how long a newer hook, and anything in front of it, may take. Sessions launched before an earlier upgrade still hold
-  Claude's or Codex's old five-second limit, which is why the hook stops retrying an absent supervisor after about four
-  seconds. The supervisor's recognition of those shapes counts too: hook attribution for Claude, Codex, Grok and OMP
-  matches the reporter's `<farhelm> internal hook …` argv and its `sh -c` trampoline syntactically, never by path, so
-  that an upgraded supervisor still accepts an older hook.
+  Claude's or Codex's old five-second limit, which a hook that only writes a file fits easily; only a vendor holding
+  stdin open could push one past it. The supervisor's recognition of those shapes counts too: hook attribution for
+  Claude, Codex, Grok and OMP matches the reporter's `<farhelm> internal hook …` argv and its `sh -c` trampoline
+  syntactically, never by path, so that an upgraded supervisor still accepts an older hook. Those command lines run
+  whatever binary is installed when they fire, so an already-running session's hooks start writing report files after an
+  update with nothing re-issued; the report file format is versioned, and a supervisor refuses a version it does not
+  read (the brief update gap described under "Report files").
 - Goose's stored reporter declaration, in full: the extension name `farhelm-reporter`, its
   `sh -c 'exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook'` command, and the fallback to `farhelm` on
   `PATH`. Goose replays it on every resume, including a manual one long after the Farhelm session is gone: Farhelm adds

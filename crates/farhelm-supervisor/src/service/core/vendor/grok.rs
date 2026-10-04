@@ -122,7 +122,8 @@ impl Supervisor {
             source,
             transcript_path,
             hook_event_name,
-            peer,
+            ancestry,
+            launch_generation: _,
         } = report;
         if transcript_path.is_some() {
             return Err(RequestError::new(
@@ -156,10 +157,10 @@ impl Supervisor {
                 "Grok selection timestamps belong only to SessionStart reports",
             ));
         }
-        let peer = peer.ok_or_else(|| {
+        let chain = ancestry.ok_or_else(|| {
             RequestError::new(
                 ErrorKind::Conflict,
-                "the Grok report has no kernel-attributed local process",
+                "the Grok report carries no process ancestry reaching this session's pane",
             )
         })?;
 
@@ -201,14 +202,12 @@ impl Supervisor {
         incoming = crate::agent_kind::grok::GrokLocator::merge_report(previous, incoming, event)
             .map_err(|error| RequestError::new(ErrorKind::Conflict, error.to_string()))?;
 
-        let emitter = self.grok_foreground(&row, peer).await?;
+        // The recorded chain is already anchored at the current pane; the
+        // corridor names its emitter once, from evidence that cannot change
+        // while the record pair is verified.
+        let emitter = crate::procs::grok_corridor(&chain)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         incoming.verify().await;
-        if self.grok_foreground(&row, peer).await? != emitter {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the Grok foreground changed during verification",
-            ));
-        }
         let conversation = incoming
             .encode()
             .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
@@ -243,25 +242,5 @@ impl Supervisor {
             }
         };
         self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
-    }
-
-    /// Apply Grok's existing corridor after the shared owned-pane lookup.
-    /// Keeping pane recovery shared preserves publication-gap handling for
-    /// every foreground proof without changing Grok's selection policy.
-    pub(in crate::service::core) async fn grok_foreground(
-        &self,
-        row: &StoredSession,
-        peer: crate::procs::ProcessIdentity,
-    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
-        let pid = self.owned_pane_pid(row, "Grok").await?;
-        tokio::task::spawn_blocking(move || crate::procs::foreground_grok_emitter(peer, pid))
-            .await
-            .map_err(|_| {
-                RequestError::new(
-                    ErrorKind::Internal,
-                    "Grok process attribution could not complete",
-                )
-            })?
-            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
     }
 }

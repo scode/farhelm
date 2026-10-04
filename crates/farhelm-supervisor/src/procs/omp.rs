@@ -264,8 +264,9 @@ pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
 /// live shape contradicts its launch refuses rather than being re-explained.
 ///
 /// Pure over the chain so the shapes are unit-testable without live
-/// processes; [`foreground_omp_emitter`] supplies the walked chain.
-pub(super) fn omp_corridor(
+/// processes; admission supplies the report's recorded chain, anchored at the
+/// session's pane.
+pub(crate) fn omp_corridor(
     chain: &[ChainLink],
     program: &crate::agent_kind::omp::OmpLaunchProgram,
 ) -> Result<ProcessIdentity, String> {
@@ -499,20 +500,4 @@ pub(super) fn omp_runtime_tui_grammar(link: &ChainLink) -> Result<(), String> {
             "the live OMP runtime no longer describes an interactive conversation: {reason}"
         )),
     }
-}
-
-/// Attribute a hook connection to the one OMP runtime under the owned pane
-/// that the launch installed.
-///
-/// The walk is the shared [`walk_to_pane`] mechanics; the corridor applied
-/// below is OMP's instance of the restrictive rule. `program` is the
-/// durable launch's program classification, so the live chain must agree
-/// with how the session was launched, not merely look like some OMP shape.
-pub(crate) fn foreground_omp_emitter(
-    peer: ProcessIdentity,
-    pane_pid: u32,
-    program: &crate::agent_kind::omp::OmpLaunchProgram,
-) -> Result<ProcessIdentity, String> {
-    let chain = walk_to_pane(peer, pane_pid)?;
-    omp_corridor(&chain, program)
 }

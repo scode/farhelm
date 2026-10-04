@@ -64,10 +64,10 @@ mod claude;
 mod codex;
 mod grok;
 mod omp;
-pub(crate) use claude::foreground_claude_emitter;
-pub(crate) use codex::foreground_codex_emitter;
-pub(crate) use grok::foreground_grok_emitter;
-pub(crate) use omp::foreground_omp_emitter;
+pub(crate) use claude::claude_corridor;
+pub(crate) use codex::codex_corridor;
+pub(crate) use grok::grok_corridor;
+pub(crate) use omp::omp_corridor;
 
 /// The only distinction the sweep draws between one live process and
 /// another.
@@ -511,25 +511,6 @@ pub(crate) fn anchor_chain<'c>(
     }
     check_walk_argv_budget(kept)?;
     Ok(kept)
-}
-
-/// Walk the live ancestry from a hook connection's process to the owned
-/// pane: [`collect_ancestry`] followed by [`anchor_chain`] at the pane's pid.
-/// The pane is matched by pid alone, as the live walk always matched it;
-/// collection has already re-verified every link it kept. It decides
-/// NOTHING about vendors — the per-kind step applies its own corridor and
-/// runtime recognition to the returned chain.
-pub(crate) fn walk_to_pane(peer: ProcessIdentity, pane_pid: u32) -> Result<Vec<ChainLink>, String> {
-    let ancestry = collect_ancestry(peer)?;
-    anchor_chain(
-        &ancestry.links,
-        ancestry.ended.as_deref(),
-        PaneAnchor {
-            pid: pane_pid,
-            start: None,
-        },
-    )
-    .map(<[ChainLink]>::to_vec)
 }
 
 /// Whether raw argv spells the supported hook invocation: the installed
@@ -1823,8 +1804,8 @@ pub(crate) mod sleeper {
 
 #[cfg(test)]
 mod tests {
+    use super::omp::*;
     use super::*;
-    use super::{claude::*, codex::*, grok::*, omp::*};
 
     /// Build a `KERN_PROCARGS2` buffer the way the Darwin kernel lays one
     /// out, so the parser is exercised against the real shape rather than
@@ -2193,19 +2174,25 @@ mod tests {
         );
     }
 
-    /// The shared walk attributes the live test process to itself as a
-    /// one-edge chain with image and argv evidence attached.
+    /// Anchoring the live test process's collected ancestry at the process
+    /// itself yields a one-edge chain with image and argv evidence attached.
     ///
-    /// Why this test matters: [`walk_to_pane`] is the mechanics every
-    /// per-kind proof builds on, and a single-edge walk exercises its
-    /// whole contract — peer token check, live-state requirement, image
-    /// capture, argv capture, pane termination — without a fixture pane
-    /// whose lifetime the test would have to defend.
+    /// Why this test matters: collecting and anchoring are the mechanics
+    /// every per-kind proof builds on, and a single-edge chain exercises
+    /// their whole contract — reporter token check, live-state requirement,
+    /// image capture, argv capture, pane termination — without a fixture
+    /// pane whose lifetime the test would have to defend.
     #[farhelm_testtrace::test]
     fn the_shared_walk_attributes_a_live_process_to_itself() {
         let me = std::process::id();
         let peer = ProcessIdentity::read(me).expect("this process is live");
-        let chain = walk_to_pane(peer, me).expect("a live process must walk to itself");
+        let ancestry = collect_ancestry(peer).expect("a live process collects its ancestry");
+        let me_alone = PaneAnchor {
+            pid: me,
+            start: Some(peer.start),
+        };
+        let chain = anchor_chain(&ancestry.links, None, me_alone)
+            .expect("a live process anchors at itself");
         assert_eq!(chain.len(), 1, "no ancestors are climbed past the pane");
         let link = &chain[0];
         assert_eq!(link.pid, me);
@@ -2253,23 +2240,34 @@ mod tests {
         assert!(error.contains("identity changed"), "{error}");
     }
 
-    /// Spec: the live walk keeps the chain from the reporter up to the named
-    /// pane process, and refuses a pid that is not among its ancestors.
+    /// Spec: collecting a live process's ancestry and anchoring it at an
+    /// ancestor keeps the chain from the reporter up to that ancestor, and
+    /// anchoring at a pid outside the ancestry refuses as unattributable.
     ///
-    /// Why: this is the composition the supervisor's live admission runs;
-    /// the split must reach the same pane the old single walk reached.
+    /// Why: this is the composition every dropped report goes through (the
+    /// hook collects, the supervisor anchors), run against real processes
+    /// rather than synthetic links.
     #[farhelm_testtrace::test]
     fn the_live_walk_stops_at_the_pane_and_refuses_strangers() {
         let me = std::process::id();
         let peer = ProcessIdentity::read(me).expect("this process is live");
         let parent = read_process(me).expect("read").expect("listed").0;
-        let chain = walk_to_pane(peer, parent).expect("the parent is in the ancestry");
+        let walk = |pane: u32| {
+            let ancestry = collect_ancestry(peer)?;
+            let anchor = PaneAnchor {
+                pid: pane,
+                start: None,
+            };
+            anchor_chain(&ancestry.links, ancestry.ended.as_deref(), anchor)
+                .map(<[ChainLink]>::to_vec)
+        };
+        let chain = walk(parent).expect("the parent is in the ancestry");
         assert_eq!(
             chain.iter().map(|link| link.pid).collect::<Vec<_>>(),
             [me, parent]
         );
         let mut stranger = crate::procs::sleeper::spawn(&[]);
-        let refused = walk_to_pane(peer, stranger.id());
+        let refused = walk(stranger.id());
         let _ = stranger.kill();
         let _ = stranger.wait();
         let error = refused.expect_err("a process outside the ancestry is not its pane");

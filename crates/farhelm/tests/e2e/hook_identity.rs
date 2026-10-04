@@ -3,45 +3,42 @@
 //!
 //! The agent reports its own identity, including a conversation created by
 //! `/clear` or `/new` inside an existing process. These tests exercise that
-//! report through the real launch credential, socket, handler, and store.
+//! report through the real launch environment, the report file the hook
+//! drops, the supervisor's reconciliation pass, and the store.
 //!
 //! ## What is real here, and the one thing that is not
 //!
 //! Everything downstream of the vendor is genuine: the `farhelm internal
-//! hook` binary runs as a real child of the supervised process, dials the
-//! supervisor's real unix socket, authenticates with the real credential
-//! the launch injected into the agent's environment, and the supervisor
-//! handles a real `ControlMsg::ReportConversation`. Only the TRIGGER is
-//! faked — `Script::HookReport` fires the hook when a test types
-//! `report <id>` instead of when a vendor decides a conversation started.
-//! The `#[ignore]`d tests in `real_agent_capture` are what keep that last
-//! step honest across vendor versions.
+//! hook` binary runs as a real child of the supervised process, finds the
+//! supervisor's state directory from the environment the launch injected,
+//! records its own process ancestry, and drops a real report file, which
+//! the supervisor attributes and applies on a real reconciliation pass.
+//! Only the TRIGGER is faked — `Script::HookReport` fires the hook when a
+//! test types `report <id>` instead of when a vendor decides a conversation
+//! started. The `#[ignore]`d tests in `real_agent_capture` are what keep
+//! that last step honest across vendor versions.
 //!
-//! ## Why these tests must `serve()`
+//! ## When a report is applied
 //!
-//! The suite's ordinary harness talks to the supervisor over an in-process
-//! duplex pipe and never binds a socket. The hook cannot: it is a separate
-//! process that only knows `FARHELM_SUPERVISOR_SOCK`. So [`hook_harness`]
-//! spawns the real accept loop and waits for the bind before creating any
-//! session — see its docs for the ordering that matters. Every suite that
-//! reports through the hook must bind an accept loop before creating its
-//! session; "these tests serve" is a property of the hook, not of this file.
+//! The hook only drops its report; the supervisor applies it on its next
+//! reconciliation pass, which its ticker runs every two seconds. Tests do
+//! not wait for the ticker: [`report`] runs a pass explicitly once the hook
+//! has exited, so "the report was accepted or refused" holds when it
+//! returns. [`hook_harness`] still starts the real accept loop, so these
+//! sessions run under a supervisor that is serving the way production's
+//! does, ticker included.
 
 use crate::harness::*;
-use farhelm_teststate::thread::FixtureThread;
 
 // ---------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------
 
-/// A capture harness whose supervisor is genuinely LISTENING on its unix
-/// socket, so a hook child process can dial it.
+/// A capture harness whose supervisor is genuinely serving: listening on
+/// its unix socket and running its ticker, as production's does.
 ///
 /// The accept loop is started before any session exists, and this returns
-/// only once it is bound — a session created against an unbound socket
-/// would launch an agent whose hook has nowhere to report, and the failure
-/// would look like a lost report rather than a race in the harness. See
-/// [`ServeTask::spawn`] for both orderings.
+/// only once it is bound. See [`ServeTask::spawn`] for both orderings.
 ///
 /// Returns the [`ServeTask`] the caller must keep alive for as long as it
 /// expects hooks to work.
@@ -193,8 +190,9 @@ pub(crate) async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, Te
     (chan, rx, seen)
 }
 
-/// Type one `report <conversation>` at the fixture and wait until the hook
-/// child it spawned has exited.
+/// Type one `report <conversation>` at the fixture, wait until the hook
+/// child it spawned has exited, then run the supervisor's reconciliation
+/// pass so the report it dropped has been judged.
 ///
 /// Asserts the silence contract on every single report rather than only in
 /// the test that is nominally about it: a hook that starts printing is a
@@ -210,11 +208,12 @@ pub(crate) async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, Te
 /// hook process had started — leaving the caller to assert against a
 /// supervisor that had not yet been told anything.
 ///
-/// Note what this does NOT prove: the hook exits 0 and silently whether the
-/// supervisor accepted the report or refused it, by design (see
-/// `crate::hook`'s contract). Only the caller's own assertion on the stored
-/// identity proves the report LANDED — which is why every failure message
-/// below quotes the hook's own log.
+/// The hook only drops its report; the supervisor applies it on its next
+/// reconciliation pass, which the ticker would run within two seconds. The
+/// explicit pass here makes "the report has been accepted or refused" true
+/// when this returns, without a timed wait. Whether it was accepted is the
+/// caller's assertion on the stored identity — which is why every failure
+/// message below quotes the hook's own log.
 pub(crate) async fn report(
     h: &Harness,
     chan: u32,
@@ -222,14 +221,16 @@ pub(crate) async fn report(
     seen: &mut Vec<u8>,
     conversation: &str,
 ) {
-    report_client(&h.client, chan, rx, seen, conversation).await;
+    report_client(&h.sup, &h.client, chan, rx, seen, conversation).await;
 }
 
-/// Send an explicit identity report through an already connected client.
+/// Send an explicit identity report through an already connected client and
+/// let `sup` apply it.
 ///
 /// This variant keeps report-driven restart tests that construct supervisors
 /// by hand on the same acceptance and silence checks as the shared harness.
 pub(crate) async fn report_client(
+    sup: &Supervisor,
     client: &SupervisorClient,
     chan: u32,
     rx: &mut TermStream,
@@ -259,6 +260,7 @@ pub(crate) async fn report_client(
         "the hook exited non-zero, which Claude shows the user as a hook error; \
          transcript:\n{text}"
     );
+    sup.reconcile_for_test().await;
 }
 
 /// [`wait_for_after`], restricted to the transcript received from `from`
@@ -362,7 +364,7 @@ fn hook_log_lines(h: &Harness, session_id: &str) -> Vec<String> {
 /// leading timestamp.
 ///
 /// Used by the silence tests, which have no `Harness` — only the state
-/// directory they pointed the hook's socket into. Asserting the line COUNT
+/// directory they pointed the hook's environment at. Asserting the line COUNT
 /// here rather than in each caller is deliberate: every one of those tests
 /// runs the binary exactly once, so a second line would mean the log had
 /// stopped being one-line-per-run and every other assertion about it would
@@ -670,19 +672,20 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         "a refused hook still finishes silently; transcript:\n{text}"
     );
 
+    h.sup.reconcile_for_test().await;
     let log = hook_log_lines(&h, &session.id);
     let child = log
         .iter()
-        .find(|line| line.contains(" conv-child "))
-        .unwrap_or_else(|| panic!("the child's hook must have left a log line: {log:?}"));
+        .find(|line| line.contains(" conv-child ") && !line.contains(" written "))
+        .unwrap_or_else(|| panic!("the supervisor must have judged the child's report: {log:?}"));
     assert!(
         child.contains(" refused conflict ") && child.contains("nested below"),
         "the supervisor must have refused the child for its ancestry: {child}"
     );
     assert!(
         log.iter()
-            .any(|line| line.contains(" acked ") && line.contains(" conv-parent ")),
-        "the foreground's own report must have been acked: {log:?}"
+            .any(|line| line.contains(" written ") && line.contains(" conv-parent ")),
+        "the foreground's own report must have been written: {log:?}"
     );
 
     let snapshot = snapshot_of(&h, &session.id).await;
@@ -710,9 +713,10 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
 /// an unchanged conversation, and the report has to remain a no-op rather
 /// than a confusion.
 ///
-/// The hook log is the second, independent witness: its contract is one
-/// line per run, so two `acked` lines for one id mean two hook processes
-/// really did dial the supervisor and be answered.
+/// The hook log is the second, independent witness: the hook writes one
+/// line per run, so two `written` lines for one id mean two hook processes
+/// really did write a report, and the supervisor's two `acked` lines mean
+/// both were judged and accepted.
 #[farhelm_testtrace::test]
 async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     let (h, fixtures, serving) = hook_harness().await;
@@ -731,14 +735,25 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     );
 
     let log = hook_log_lines(&h, &session.id);
+    let word = |line: &String| line.split_whitespace().nth(1).map(str::to_string);
+    let runs: Vec<_> = log
+        .iter()
+        .filter(|line| word(line).as_deref() == Some("written"))
+        .collect();
     assert_eq!(
-        log.len(),
+        runs.len(),
         2,
-        "one line per run is the log's whole contract, and two runs happened: {log:?}"
+        "one hook line per run is the log's contract, and two runs happened: {log:?}"
     );
+    let verdicts: Vec<_> = log
+        .iter()
+        .filter(|line| word(line).as_deref() != Some("written"))
+        .collect();
     assert!(
-        log.iter()
-            .all(|line| line.split_whitespace().nth(1) == Some("acked")),
+        verdicts.len() == 2
+            && verdicts
+                .iter()
+                .all(|line| word(line).as_deref() == Some("acked")),
         "reporting an identity a session already holds is a no-op, not a refusal: {log:?}"
     );
 
@@ -997,93 +1012,23 @@ async fn hooks_can_be_disabled_by_kind() {
 
 /// Longest any hook run may take before the test calls it hung.
 ///
-/// The child-only budget is intentionally 5 s so absent-socket cases can
-/// exercise their 4 s reconnect cap without stretching the suite by half a
-/// minute. Keep two seconds of margin here for spawning a debug binary and
-/// building its runtime under a loaded runner; the margin, rather than the
-/// hook budget, absorbs that scheduling cost.
+/// The child-only stdin budget is 5 s, which only the held-stdin case
+/// spends. Keep two seconds of margin here for spawning a debug binary
+/// under a loaded runner; the margin, rather than the hook budget, absorbs
+/// that scheduling cost.
 const SILENCE_DEADLINE: Duration = Duration::from_secs(7);
 
 /// Keep real-binary hook cases bounded without changing the test runner's
 /// environment. The override is placed on each spawned hook command below.
 const TEST_HOOK_BUDGET_MS: &str = "5000";
 
-/// Owns a silent supervisor fixture and witnesses its connection and release edges.
-struct SilentSupervisor {
-    owner: FixtureThread,
-    stop: std::sync::mpsc::Sender<()>,
-    accepted: std::sync::mpsc::Receiver<()>,
-    released: std::sync::mpsc::Receiver<()>,
-}
-
-/// Keep an accepted peer silent until cancellation or the safety deadline.
-///
-/// The listener must be nonblocking so cancellation also works before a connection arrives.
-/// Keeping the accepted peer open makes the hook wait for a handshake; closing it would
-/// turn the test into the connection-failure case covered by its sibling. The captured
-/// trace remains owned through the holder thread's cleanup.
-fn spawn_silent_supervisor(
-    listener: std::os::unix::net::UnixListener,
-    context: farhelm_testtrace::ThreadContext,
-) -> SilentSupervisor {
-    let (stop, stop_rx) = std::sync::mpsc::channel();
-    let (accepted_tx, accepted) = std::sync::mpsc::channel();
-    let (released_tx, released) = std::sync::mpsc::channel();
-    let holder = std::thread::spawn(move || {
-        context.enter(|| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            let mut held = None;
-            while std::time::Instant::now() < deadline {
-                // Cancellation can arrive before the hook dials. Poll it before
-                // every accept attempt so cleanup does not wait for the deadline.
-                match stop_rx.try_recv() {
-                    Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        drop(listener);
-                        let _ = released_tx.send(());
-                        return;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let _ = accepted_tx.send(());
-                        held = Some(stream);
-                        break;
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        // sleep-ok: retry nonblocking accept while checking cancellation and the deadline.
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("accept failed: {error}"),
-                }
-            }
-            let _ = stop_rx.recv_timeout(Duration::from_secs(30));
-            drop(held);
-            drop(listener);
-            let _ = released_tx.send(());
-        });
-    });
-    let cancellation = stop.clone();
-    let owner = FixtureThread::new("hook-silent-supervisor", holder, move || {
-        let _ = cancellation.send(());
-    })
-    .expect("start fixture join observer");
-    SilentSupervisor {
-        owner,
-        stop,
-        accepted,
-        released,
-    }
-}
-
 /// Kills and reaps the hook child on the way out, however the test leaves.
 ///
 /// The whole point of the tests below is that the hook might NOT exit —
-/// hung on a stdin nobody closes, or on a supervisor that never answers —
-/// and a failing deadline assertion unwinds past any explicit cleanup. A
-/// leaked hook child would then hold the state directory's socket path (and
-/// its own pipes) open for as long as the test binary runs, with nothing
-/// left to reap it. Killing an already-exited child is a harmless error,
+/// hung on a stdin nobody closes — and a failing deadline assertion unwinds
+/// past any explicit cleanup. A leaked hook child would then hold its own
+/// pipes open for as long as the test binary runs, with nothing left to
+/// reap it. Killing an already-exited child is a harmless error,
 /// which is why this makes no attempt to track whether the wait already
 /// happened.
 struct ChildGuard(std::process::Child);
@@ -1202,181 +1147,44 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
     started.elapsed()
 }
 
-/// A hook whose supervisor socket does not exist says nothing, exits 0,
-/// and leaves its explanation in the per-session log.
+/// A hook with no supervisor running says nothing, exits 0 at once, and
+/// leaves its report waiting on disk with a `written` line in its log.
 ///
-/// This is the ordinary failure: a supervisor that died, or a launch whose
-/// state directory has moved. The hook has no descriptor it is allowed to
-/// complain on, so silence is the only correct behaviour — and the log file
-/// is the only place the failure is ever visible, which is exactly why it
-/// is read rather than assumed.
+/// This is the case the file drop exists for: on the Mac the supervisor is
+/// not running whenever the desktop app is closed, and the agents keep
+/// running and keep firing hooks. Nothing about the hook may depend on a
+/// supervisor being there — no wait, no retry, no lost report — and the
+/// report must be in its slot for the supervisor that starts next.
 ///
-/// The payload is deliberately WELL-FORMED. The hook rejects a bad payload
-/// before it ever dials, so garbage here would produce a silent, successful
-/// run that never touched a socket — passing this test without exercising
-/// the failure it is named for. `connect-failed` in the log is what says
-/// the dial was actually attempted and actually failed. The elapsed assertion
-/// below also pins that the shipped binary used its production reconnect
-/// window rather than a zero-cap test seam.
+/// The payload is deliberately WELL-FORMED: a bad one is rejected before
+/// any report is written, so garbage here would pass without exercising
+/// the write at all. The elapsed bound pins that nothing waits on an absent
+/// supervisor any more; it is far below the old reconnect window and far
+/// above process start-up.
 #[farhelm_testtrace::test]
-fn a_hook_with_no_supervisor_is_silent_and_leaves_a_trace() {
+fn a_hook_with_no_supervisor_is_silent_and_leaves_its_report() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
     let payload =
         br#"{"session_id":"conv-missing","hook_event_name":"SessionStart","source":"startup"}"#;
-    let started = std::time::Instant::now();
-    assert_silent(hook_command(&socket, "sess-missing"), payload, false);
+    let elapsed = assert_silent(hook_command(&socket, "sess-missing"), payload, false);
     assert!(
-        started.elapsed() >= Duration::from_secs(3),
-        "a missing supervisor must consume the production reconnect window: {:?}",
-        started.elapsed()
+        elapsed < Duration::from_secs(3),
+        "a hook must not wait for a supervisor that is not there: {elapsed:?}"
     );
 
     let outcome = sole_hook_log_outcome(state.path(), "sess-missing");
+    assert_eq!(outcome, "written conv-missing startup");
+    let slot = farhelm_supervisor::hook_report::session_dir(state.path(), "sess-missing")
+        .expect("a valid session id")
+        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+    let report: farhelm_supervisor::hook_report::HookReport =
+        serde_json::from_slice(&std::fs::read(&slot).expect("the report waits in its slot"))
+            .expect("the waiting report parses");
+    assert_eq!(report.conversation, "conv-missing");
     assert!(
-        outcome.starts_with("connect-failed "),
-        "a socket that is not there must be logged as a failed dial: {outcome}"
-    );
-}
-
-/// A supervisor that accepts the connection and then never answers cannot
-/// hold the hook past its budget.
-///
-/// The nastiest reachable case, and the one a naive implementation gets
-/// wrong: the dial succeeds, so nothing errors, and a hook that simply
-/// waited for a reply would sit there until the vendor's own timeout fired
-/// and reported a hook failure to the user. A wedged or overloaded
-/// supervisor must degrade to "no identity this launch", never to a visible
-/// error in someone's agent.
-///
-/// The payload here is deliberately WELL-FORMED: the hook rejects a bad
-/// payload before it ever dials, so garbage would make this test pass
-/// without a socket ever being touched.
-///
-/// Three things together are what make the scenario real rather than
-/// merely quiet. The fixture ACCEPTS a connection, so the hook's dial
-/// succeeds and nothing errors. It then holds that connection without
-/// speaking, so the hook is waiting on a peer rather than on a closed
-/// socket. And the log outcome is required to be a `timeout` — of the dial
-/// or of the handshake — because those are the phases a wedged supervisor
-/// can strand a hook in; any other outcome means this test stopped
-/// reproducing the case it is named for.
-#[farhelm_testtrace::test]
-fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
-    let state = farhelm_teststate::tempdir().expect("state dir");
-    let socket = state.path().join("supervisor.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind a fake supervisor");
-    // Non-blocking so the accept loop below is bounded: a thread parked
-    // forever in `accept` could not be joined, and this test's own failure
-    // path (the hook never dialled) is exactly when that would happen.
-    listener
-        .set_nonblocking(true)
-        .expect("a bounded accept loop needs a non-blocking listener");
-    // The holder is a raw thread, so the wrapped test explicitly gives it
-    // ownership of this test's trace while it keeps the peer alive.
-    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-    let SilentSupervisor {
-        owner: holder,
-        stop: stop_tx,
-        accepted: dialled_rx,
-        released,
-    } = spawn_silent_supervisor(listener, context);
-
-    let payload =
-        br#"{"session_id":"conv-hung","hook_event_name":"SessionStart","source":"startup"}"#;
-    let elapsed = assert_silent(hook_command(&socket, "sess-hung"), payload, false);
-    assert!(
-        elapsed >= Duration::from_millis(4500),
-        "a connected silent supervisor must consume nearly the 5 s test budget: {elapsed:?}"
-    );
-
-    dialled_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the hook must have dialled the socket, or nothing here was silent AT it");
-    let outcome = sole_hook_log_outcome(state.path(), "sess-hung");
-    assert!(
-        outcome.starts_with("timeout "),
-        "a supervisor that accepts and then says nothing must strand the hook in a phase it \
-         times out of: {outcome}"
-    );
-
-    let _ = stop_tx.send(());
-    holder
-        .finish(Duration::from_secs(1))
-        .expect("the holding thread must not panic");
-    released
-        .recv_timeout(Duration::from_secs(1))
-        .expect("the holding thread released its listener and peer");
-}
-
-/// Assertion unwind before accept must release the real-binary fixture listener.
-#[farhelm_testtrace::test]
-fn a_silent_supervisor_cancels_before_accept_on_unwind() {
-    let state = farhelm_teststate::tempdir().expect("state dir");
-    let socket = state.path().join("supervisor.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-    listener.set_nonblocking(true).expect("nonblocking");
-    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-    let SilentSupervisor {
-        owner,
-        stop,
-        accepted,
-        released,
-    } = spawn_silent_supervisor(listener, context);
-    drop(stop);
-    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _owner = owner;
-        panic!("exercise cancellation before accept");
-    }));
-    assert!(unwind.is_err());
-    assert!(accepted.try_recv().is_err());
-    released
-        .recv_timeout(Duration::from_secs(1))
-        .expect("cancellation released the pre-accept listener");
-    // Unlinking would permit rebinding even while the original listener remained alive.
-    assert!(
-        std::os::unix::net::UnixStream::connect(&socket).is_err(),
-        "the original listener must refuse new connections"
-    );
-}
-
-/// Assertion unwind while a peer is held must close that peer and listener.
-#[farhelm_testtrace::test]
-fn a_silent_supervisor_cancels_while_holding_a_peer_on_unwind() {
-    use std::io::Read as _;
-
-    let state = farhelm_teststate::tempdir().expect("state dir");
-    let socket = state.path().join("supervisor.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-    listener.set_nonblocking(true).expect("nonblocking");
-    let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-    let SilentSupervisor {
-        owner,
-        stop,
-        accepted,
-        released,
-    } = spawn_silent_supervisor(listener, context);
-    let mut peer = std::os::unix::net::UnixStream::connect(&socket).expect("connect peer");
-    accepted
-        .recv_timeout(Duration::from_secs(1))
-        .expect("fixture accepted the peer");
-    peer.set_read_timeout(Some(Duration::from_secs(1)))
-        .expect("bound peer read");
-    drop(stop);
-    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _owner = owner;
-        panic!("exercise cancellation while holding a peer");
-    }));
-    assert!(unwind.is_err());
-    released
-        .recv_timeout(Duration::from_secs(1))
-        .expect("cancellation released the held peer");
-    let mut byte = [0; 1];
-    assert_eq!(peer.read(&mut byte).expect("peer EOF"), 0);
-    // Unlinking would permit rebinding even while the original listener remained alive.
-    assert!(
-        std::os::unix::net::UnixStream::connect(&socket).is_err(),
-        "the original listener must refuse new connections"
+        report.ancestry.is_some_and(|links| !links.is_empty()),
+        "the report carries the hook's recorded ancestry"
     );
 }
 
@@ -1385,7 +1193,7 @@ fn a_silent_supervisor_cancels_while_holding_a_peer_on_unwind() {
 ///
 /// The budget deliberately covers READING the payload, and this is the
 /// reason: a blocking read cannot be interrupted by any timeout, so an
-/// implementation that bounded only the socket round trip would hang here
+/// implementation that bounded anything but the read itself would hang here
 /// forever while every diagnostic said it had a timeout. The test holds the
 /// write end open for the whole wait, which is the only way to reproduce
 /// that from outside the process.
@@ -1518,12 +1326,11 @@ const EXPECTED_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", 
 /// hook with a timeout of their own, so a run that slows down to say
 /// something is a run they report as broken.
 ///
-/// The supervisor socket deliberately does not exist. That makes the
-/// identity half FAIL — which is the point: the pointer is not conditional
-/// on the report landing, because a session whose supervisor is wedged is
-/// exactly a session whose agent may need to ask farhelm what is going on.
-/// The log line is read to prove the run really did take the failing path
-/// rather than skipping the socket entirely.
+/// No supervisor is running, which is the point: the pointer is not
+/// conditional on a report ever being applied, because a session whose
+/// supervisor is down is exactly a session whose agent may need to ask
+/// farhelm what is going on. The log line is read to prove the identity
+/// half really ran (and wrote its report) rather than being skipped.
 #[farhelm_testtrace::test]
 fn an_announcing_hook_prints_exactly_the_pointer_line() {
     let state = farhelm_teststate::tempdir().expect("state dir");
@@ -1552,9 +1359,9 @@ fn an_announcing_hook_prints_exactly_the_pointer_line() {
     );
 
     let outcome = sole_hook_log_outcome(state.path(), "sess-announce");
-    assert!(
-        outcome.starts_with("connect-failed "),
-        "the identity half must still have run and failed on the absent socket: {outcome}"
+    assert_eq!(
+        outcome, "written conv-a startup",
+        "the identity half must still have run and written its report"
     );
 }
 
@@ -1572,8 +1379,8 @@ fn an_announcing_hook_prints_exactly_the_pointer_line() {
 /// uses, and for the same reason this now shares [`ChildGuard`] with it:
 /// wrapping the `Child` there is what makes a wedged hook (this test's own
 /// failure mode) get killed and reaped on the way out instead of leaking
-/// and holding the state directory's socket path open for the rest of the
-/// suite, whether this function returns normally or panics.
+/// for the rest of the suite, whether this function returns normally or
+/// panics.
 fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Output {
     use std::io::{Read, Write};
     let mut child = ChildGuard(cmd.spawn().expect("spawn the hook binary"));
@@ -1914,5 +1721,384 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
         argv_marker(&seen).contains("--resume historical-conversation"),
         "the actual child must receive the historical id: {}",
         argv_marker(&seen)
+    );
+}
+
+// ---------------------------------------------------------------------
+// Reports made while no supervisor is running
+// ---------------------------------------------------------------------
+//
+// On the Mac the supervisor runs inside the desktop app, so closing the app
+// stops it while sessions keep running. Hooks keep firing in that window, and
+// their reports must wait on disk for the supervisor that starts next rather
+// than being lost. These tests stop the supervisor for real, drive the
+// still-running agent through tmux directly (there is no supervisor to attach
+// through), and start a successor on the same state directory.
+// ---------------------------------------------------------------------
+
+/// Stop `h`'s supervisor for real and wait until nothing holds it, returning
+/// what the test needs to keep driving the session and to start a successor.
+///
+/// Mirrors [`a_report_survives_a_supervisor_restart`]'s teardown: the accept
+/// loop stops, the client drops, and the supervisor is dropped only once no
+/// connection task still holds a reference, so the successor really is the
+/// only supervisor on the state directory.
+async fn stop_supervisor(
+    h: Harness,
+    serving: ServeTask,
+) -> (
+    farhelm_teststate::TestDir,
+    TmuxServerGuard,
+    tokio::sync::SemaphorePermit<'static>,
+) {
+    let Harness {
+        client,
+        sup,
+        state,
+        _tmux,
+        _slot,
+    } = h;
+    serving.stop().await;
+    drop(client);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(&sup) > 1 {
+        assert!(tokio::time::Instant::now() < deadline, "connection drain");
+        // sleep-ok: observe connection-reference drain before dropping the old supervisor.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    drop(sup);
+    (state, _tmux, _slot)
+}
+
+/// Type `line` into the session's agent through tmux itself, the way a
+/// person types into a session whose supervisor is not running.
+async fn type_without_supervisor(state: &std::path::Path, session_id: &str, line: &str) {
+    let sent = tmux_query(
+        &state.join("tmux.sock"),
+        &[
+            "send-keys",
+            "-t",
+            &format!("fh-{session_id}"),
+            line,
+            "Enter",
+        ],
+    )
+    .await;
+    assert!(
+        sent.status.success(),
+        "typing into the agent through tmux failed: {}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+}
+
+/// Wait until the session's hook log holds `count` lines whose outcome word
+/// is `word`. Hook runs fired through tmux leave no other witness this test
+/// can wait on: there is no supervisor to attach a terminal through.
+async fn wait_for_hook_log_words(
+    state: &std::path::Path,
+    session_id: &str,
+    word: &str,
+    count: usize,
+) {
+    let path = state.join("hook-log").join(format!("{session_id}.log"));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let seen = text
+            .lines()
+            .filter(|line| line.split_whitespace().nth(1) == Some(word))
+            .count();
+        if seen >= count {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the hook log never reached {count} {word:?} lines:\n{text}"
+        );
+        // sleep-ok: polling interval for a file another process appends to.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A supervisor on `state` with production defaults, constructed after its
+/// predecessor is gone.
+async fn successor(state: &std::path::Path) -> Arc<Supervisor> {
+    let restarted = Supervisor::new_with_seams(
+        state,
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams::default(),
+    )
+    .await
+    .expect("successor supervisor");
+    assert!(
+        restarted.owns_state_dir(),
+        "the predecessor must be gone, or this proves nothing"
+    );
+    restarted
+}
+
+/// Spec: a conversation report a hook makes while no supervisor is running
+/// waits on disk, and the next supervisor to start applies it — through the
+/// same attribution as ever — so Restart resumes the conversation the agent
+/// switched to while the supervisor was down.
+///
+/// Why: this is the Mac case the report files exist for. With the desktop
+/// app closed the supervisor is not running, yet the agent keeps running and
+/// can start a new conversation (`/clear`). Losing that report would make the
+/// next Restart resume the discarded conversation.
+#[farhelm_testtrace::test]
+async fn a_report_made_while_no_supervisor_runs_is_applied_when_one_starts() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    report(&h, chan, &mut rx, &mut seen, "conv-before").await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("conv-before"),
+        "fixture premise: the first report landed; {}",
+        hook_log(&h, &session.id)
+    );
+    drop(rx);
+
+    let (state, _tmux, _slot) = stop_supervisor(h, serving).await;
+    type_without_supervisor(state.path(), &session.id, "report conv-offline").await;
+    wait_for_hook_log_words(state.path(), &session.id, "written", 2).await;
+    let waiting = farhelm_supervisor::hook_report::session_dir(state.path(), &session.id)
+        .expect("a session id names a drop directory")
+        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+    assert!(
+        waiting.exists(),
+        "the report waits on disk while no supervisor runs"
+    );
+
+    let restarted = successor(state.path()).await;
+    let after = restarted
+        .session_snapshot(&session.id)
+        .await
+        .expect("snapshot")
+        .expect("present");
+    assert_eq!(
+        after.captured_conversation.as_deref(),
+        Some("conv-offline"),
+        "the successor's first pass applied the waiting report; {}",
+        hook_log_at(state.path(), &session.id)
+    );
+    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(resumed_conversation(&after.resume_argv), "conv-offline");
+    assert!(
+        !waiting.exists(),
+        "the applied report is settled and removed"
+    );
+    assert!(
+        hook_log_at(state.path(), &session.id).contains(" acked conv-offline "),
+        "the supervisor's verdict sits beside the hook's line"
+    );
+}
+
+/// An executable named `grok` that runs the fixture binary: Grok attribution
+/// recognizes its native runtime by the kernel's image basename, so a
+/// symlink (which the kernel resolves) would not do; a hard link or copy
+/// does.
+fn native_grok_image(dir: &std::path::Path) -> std::path::PathBuf {
+    let image = dir.join("grok");
+    if std::fs::hard_link(fixtures_bin(), &image).is_err() {
+        std::fs::copy(fixtures_bin(), &image).expect("create the native Grok image");
+    }
+    image
+}
+
+/// Spec: when Grok selects a conversation and then enriches it twice while
+/// no supervisor is running, the next supervisor applies the selection
+/// before the latest enrichment, and the session becomes resumable to that
+/// conversation through its exact record.
+///
+/// Why: Grok is the one vendor whose reports depend on order — an
+/// enrichment is refused unless its selection came first — and it reports
+/// on every prompt, so a supervisor outage sees many enrichments after one
+/// selection. A drop directory that kept only the latest report would lose
+/// the selection to them; the separate selection slot is what prevents it.
+#[farhelm_testtrace::test]
+async fn grok_selection_survives_enrichments_made_while_no_supervisor_runs() {
+    let (h, _fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let records = farhelm_teststate::tempdir().expect("private Grok records");
+    let images = farhelm_teststate::tempdir().expect("native Grok image directory");
+    let grok = native_grok_image(images.path());
+    let invocation = format!(
+        "{} fake-agent --script grok-conversation --record-home {} --hook-binary {} --no-leader",
+        shell_words::quote(&grok.to_string_lossy()),
+        shell_words::quote(&records.path().to_string_lossy()),
+        shell_words::quote(farhelm_bin()),
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Grok,
+                Some(&format!(
+                    "{invocation} --resume {{conversation}} {{farhelm_args}}"
+                )),
+            ),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create a Grok session");
+    let (_chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach");
+    wait_for(&mut rx, &mut seen, "GROK-CONVERSATION READY", 20).await;
+    drop(rx);
+
+    let (state, _tmux, _slot) = stop_supervisor(h, serving).await;
+    let uuid = "019a0000-0000-7000-8000-00000000c0de";
+    type_without_supervisor(state.path(), &session.id, &format!("select {uuid}")).await;
+    wait_for_hook_log_words(state.path(), &session.id, "written", 1).await;
+    for runs in [2, 3] {
+        type_without_supervisor(state.path(), &session.id, &format!("enrich {uuid}")).await;
+        wait_for_hook_log_words(state.path(), &session.id, "written", runs).await;
+    }
+    let drop_dir = farhelm_supervisor::hook_report::session_dir(state.path(), &session.id)
+        .expect("a session id names a drop directory");
+    let mut waiting: Vec<String> = std::fs::read_dir(&drop_dir)
+        .expect("the drop directory exists")
+        .map(|entry| entry.expect("entry").file_name().into_string().unwrap())
+        .collect();
+    waiting.sort();
+    assert_eq!(
+        waiting,
+        ["enrichment.json", "selection.json"],
+        "two enrichments did not displace the selection"
+    );
+
+    let restarted = successor(state.path()).await;
+    let after = restarted
+        .session_snapshot(&session.id)
+        .await
+        .expect("snapshot")
+        .expect("present");
+    assert_eq!(
+        after.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "the selection and its enrichment were both applied; {}",
+        hook_log_at(state.path(), &session.id)
+    );
+    assert!(
+        after
+            .resume_argv
+            .as_ref()
+            .is_some_and(|argv| argv.iter().any(|arg| arg == uuid)),
+        "Resume targets the selected conversation: {:?}",
+        after.resume_argv
+    );
+    let acked = hook_log_at(state.path(), &session.id)
+        .lines()
+        .filter(|line| line.split_whitespace().nth(1) == Some("acked"))
+        .count();
+    assert_eq!(
+        acked, 2,
+        "the selection and the latest enrichment were each accepted"
+    );
+    assert!(
+        std::fs::read_dir(&drop_dir)
+            .expect("drop dir")
+            .next()
+            .is_none(),
+        "both reports are settled and removed"
+    );
+}
+
+/// Spec: a report made under an earlier launch of a session is discarded
+/// when the supervisor reads it after the session has been restarted: it is
+/// refused for not reaching the current launch's terminal, removed, and
+/// changes nothing about the conversation the restarted launch reported.
+///
+/// Why: report files outlive the launch that wrote them (a report can wait
+/// on disk while the supervisor is down, or race a restart). Applying an old
+/// launch's report to the new one would point Resume at a conversation the
+/// running agent is not in. The anchor at the session's current pane
+/// process is what tells the two apart, and this pins it end to end.
+#[farhelm_testtrace::test]
+async fn a_report_from_an_earlier_launch_is_discarded() {
+    // No accept loop and so no ticker: the test copies the first launch's
+    // report aside before any pass may take it, and drives every pass
+    // itself with `reconcile_for_test`.
+    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let slot = farhelm_supervisor::hook_report::session_dir(h.state.path(), &session.id)
+        .expect("a session id names a drop directory")
+        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+
+    // The first launch's report, kept aside before the supervisor takes it.
+    let from = seen.len();
+    h.client
+        .send_input(chan, b"report conv-old\r".to_vec())
+        .await;
+    wait_for_after_from(
+        &mut rx,
+        &mut seen,
+        from,
+        "HOOK-REPORTED:conv-old",
+        "HOOK-STDOUT-EMPTY",
+        30,
+    )
+    .await;
+    let stale = std::fs::read(&slot).expect("the first launch's report is waiting");
+    h.sup.reconcile_for_test().await;
+    drop(rx);
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart the session");
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    report(&h, chan, &mut rx, &mut seen, "conv-new").await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("conv-new"),
+        "fixture premise: the restarted launch's report landed; {}",
+        hook_log(&h, &session.id)
+    );
+
+    // Put it back the way a hook writes: a private name, then a rename.
+    let temp = slot.with_file_name(".tmp-latest-test");
+    std::fs::write(&temp, &stale).expect("stage the old launch's report");
+    std::fs::rename(&temp, &slot).expect("put the old launch's report back");
+    h.sup.reconcile_for_test().await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("conv-new"),
+        "the old launch's report must not replace the current one; {}",
+        hook_log(&h, &session.id)
+    );
+    assert!(
+        !slot.exists(),
+        "the old launch's report is settled and removed"
+    );
+    let log = hook_log(&h, &session.id);
+    assert!(
+        log.lines().any(|line| line.contains(" refused conflict ")
+            && line.contains("cannot be attributed")
+            && line.contains(" conv-old ")),
+        "the refusal names the launch check: {log}"
     );
 }
