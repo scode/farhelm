@@ -781,6 +781,18 @@ impl HostKind {
         }
     }
 
+    /// Whether the panel's uninstall can remove Farhelm from this row's
+    /// host: the UI's counterpart of the helm's own
+    /// `HostKind::panel_uninstalls`, which plans it only for ssh rows.
+    /// Farhelm on the helm's own machine is removed with `farhelm
+    /// uninstall`, so the local row is not offered the item at all.
+    pub(crate) fn uninstalls_from_panel(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Unrecognized => false,
+        }
+    }
+
     /// Whether this row's supervisor is set up by the local setup flow
     /// (the hand-off offered when it is not running, and the automatic
     /// setup retried after an Add), rather than provisioned over ssh.

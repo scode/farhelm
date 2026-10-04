@@ -474,8 +474,8 @@ diagnostic opens that row; authoritative success clears the automatic half for t
 commands live in the row menu, with the older-host update shortcut also inline, but active or retained progress stays
 under the row because that lifecycle owns more context than a floating menu can safely hold. Starting setup opens
 details before planning, while a running or failed retained run leaves one short trace when details are closed. The one
-exception is an update whose status is showing inline: the trace would only repeat it, so it is left out until that
-status clears.
+exception is an update or uninstall whose status is showing inline: the trace would only repeat it, so it is left out
+until that status clears.
 
 The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
 cap the backdrop below main-pane surfaces. It holds only the two app-wide host-confirmation choices, with state-specific

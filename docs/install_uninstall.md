@@ -1,7 +1,8 @@
 # Installing and uninstalling Farhelm
 
 This describes the standalone shell installer and `farhelm uninstall`. It covers the installation on your machine;
-removing software from hosts provisioned by a helm is a separate operation.
+removing Farhelm from a host the helm set up over SSH is a separate operation, the uninstall item in that host's menu in
+the hosts panel (see the docs site's Manage hosts page).
 
 ## Installation and updates
 

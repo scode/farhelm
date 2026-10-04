@@ -142,20 +142,65 @@ function configureDiscoveredProbe(
   destination: string,
   dialFarhelm: string,
   dialStateDir: string | null,
+  identity: string | null = null,
 ): void {
-  const root = stackInfo().provisioning_backend;
-  const at = path.join(root, "config.json");
-  const config = JSON.parse(fs.readFileSync(at, "utf8"));
-  config.targets ??= {};
-  config.targets[`ssh:${destination}`] = {
+  writeProbeTarget(destination, {
     probe: "supervisor",
     build_version: helmBuild(),
     dial_farhelm: dialFarhelm,
     dial_state_dir: dialStateDir,
-  };
+    identity,
+  });
+}
+
+/**
+ * One destination's current injected backend behavior, or `undefined` when
+ * it has none and falls back to the default. A test that overrides a
+ * target reads this first so it can put back exactly what it found: the
+ * remote's own override, set in this file's `beforeAll`, is what later
+ * tests' discovery depends on.
+ */
+function readProbeTarget(destination: string): object | undefined {
+  const at = path.join(stackInfo().provisioning_backend, "config.json");
+  return JSON.parse(fs.readFileSync(at, "utf8")).targets?.[`ssh:${destination}`];
+}
+
+/**
+ * Replace one destination's injected backend behavior, or drop it with
+ * `undefined` so that destination falls back to the default (`absent`).
+ * Published by rename for `configureDiscoveredProbe`'s reason.
+ */
+function writeProbeTarget(destination: string, behavior: object | undefined): void {
+  const root = stackInfo().provisioning_backend;
+  const at = path.join(root, "config.json");
+  const config = JSON.parse(fs.readFileSync(at, "utf8"));
+  config.targets ??= {};
+  if (behavior === undefined) {
+    delete config.targets[`ssh:${destination}`];
+  } else {
+    config.targets[`ssh:${destination}`] = behavior;
+  }
   const next = path.join(root, `config.${process.pid}.next`);
   fs.writeFileSync(next, `${JSON.stringify(config)}\n`, { mode: 0o600 });
   fs.renameSync(next, at);
+}
+
+/**
+ * The host actions the injected provisioning backend has recorded for one
+ * destination, oldest first: what the helm would have done to that host.
+ * Probes, inspections and other reads are left out, so an empty list means
+ * nothing on the host changed.
+ */
+function injectedHostActions(destination: string): string[] {
+  const at = path.join(stackInfo().provisioning_backend, "events.jsonl");
+  const reads = new Set(["probe", "inspect", "inspect-uninstall"]);
+  return fs
+    .readFileSync(at, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line))
+    .filter((event: any) => event.target === `ssh:${destination}` && !reads.has(event.event))
+    .map((event: any) => event.event);
 }
 
 /** Every registered host as `GET /api/hosts` currently reports it. */
@@ -485,7 +530,7 @@ async function stopRestartedRemote() {
  * Put the shared fleet's ssh row back, whatever state a test left it in, and
  * wait for it to be usable again.
  *
- * The two tests that deliberately unregister that host call this from a
+ * The tests that deliberately unregister that host call this from a
  * `finally`. Without it, a failure between the removal and the re-add leaves
  * every later fleet test — and the entire second engine's pass — running
  * against a one-host stack, which reports as a cascade of unrelated
@@ -1061,6 +1106,9 @@ test.describe("multi-host", () => {
     const adopt = row.locator(".host-adopt");
     const update = row.locator(".provisioning-update");
     const settings = row.locator(".host-settings");
+    // A remote row's menu also offers uninstall, in the destructive group
+    // right after the separator, ahead of remove.
+    const uninstall = row.locator(".provisioning-uninstall");
     const remove = row.locator(".host-remove");
     for (const [key, expected] of [
       ["Enter", retry],
@@ -1081,7 +1129,7 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     const menu = row.locator(".host-row-menu-items");
     await expect(menu).toHaveAttribute("role", "menu");
-    for (const item of [retry, adopt, update, settings, remove]) {
+    for (const item of [retry, adopt, update, settings, uninstall, remove]) {
       await expect(item).toHaveAttribute("role", "menuitem");
     }
 
@@ -1099,7 +1147,9 @@ test.describe("multi-host", () => {
     await page.keyboard.press("ArrowDown");
     await expect(settings).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(remove, "the separator is not a stop on the way to remove").toBeFocused();
+    await expect(uninstall, "the separator is not a stop on the way to uninstall").toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(remove).toBeFocused();
     // Both wrap boundaries, in the two directions that reach them.
     await page.keyboard.press("ArrowDown");
     await expect(retry).toBeFocused();
@@ -1592,10 +1642,13 @@ test.describe("multi-host", () => {
       const rerun = target.locator(".provisioning-rerun");
       const update = target.locator(".provisioning-update");
       const settings = target.locator(".host-settings");
+      // Uninstall plans and waits on a confirmation like setup, so it keeps
+      // setup's lock discipline and is disabled with the others.
+      const uninstall = target.locator(".provisioning-uninstall");
       const remove = target.locator(".host-remove");
-      const disabled = [retry, adopt, settings, remove];
+      const disabled = [retry, adopt, settings, uninstall, remove];
       const enabled = [rerun, update];
-      const items = [retry, adopt, rerun, update, settings, remove];
+      const items = [retry, adopt, rerun, update, settings, uninstall, remove];
       for (const item of disabled) {
         await expect(item).toHaveAttribute("aria-disabled", "true");
       }
@@ -3290,6 +3343,189 @@ test.describe("multi-host", () => {
     }
   });
 
+
+  /**
+   * The fleet's remote, after asserting what an uninstall of it needs: it is
+   * connected (uninstall checks its sessions through that connection) and it
+   * has no live session or terminal tab (uninstall refuses otherwise). The
+   * suite's other tests clean up their sessions; a leftover would make an
+   * uninstall test about that instead.
+   */
+  async function uninstallableRemote(request: APIRequestContext): Promise<any> {
+    const remote = await apiRemoteHost(request);
+    expect(remote?.state?.phase, "the remote is connected").toBe("connected");
+    const listing = await (await request.get("/api/sessions")).json();
+    const live = listing.sessions.filter(
+      (s: any) =>
+        s.host === remote.id &&
+        (!["exited", "interrupted", "error"].includes(s.status?.state) ||
+          (s.tabs ?? []).length > 0),
+    );
+    expect(live.map((s: any) => s.title), "no live session or tab on the remote").toEqual([]);
+    return remote;
+  }
+
+  /**
+   * Uninstall from the host's menu: the confirmation names what goes and
+   * the data directory that stays, confirming removes the host from the
+   * list, and the window that confirmed says where the data remains, even
+   * when the reply to the confirmation arrives only after the host is gone.
+   *
+   * Why it matters: this is the only supported way to remove Farhelm from
+   * a remote host (SPEC.md, Topology), and its promises are what the user
+   * reads before agreeing: nothing changes before the confirm, the data is
+   * kept, and success is visible even though the helm forgets the host and
+   * keeps no result for it. The remote here is a real, connected
+   * supervisor, so the session check and the identity check run against
+   * the real thing; the injected provisioning backend absorbs the host
+   * actions themselves, which is what keeps that supervisor running for the
+   * rest of the suite once the row is restored.
+   */
+  test("uninstall-remote-host: the plan names the kept data, confirming removes the host", async ({
+    page,
+    request,
+  }) => {
+    requireFleet();
+    test.setTimeout(120_000);
+    const info = stackInfo();
+    // The injected backend's default HOME on the "remote", so the plan's lib
+    // directory is under it; the dial path has to be inside that directory
+    // or uninstall refuses (the supervisor would not be provisioning's).
+    const lib = "/home/farhelm-e2e/.local/lib/farhelm";
+    const kept = "/var/lib/farhelm-e2e-uninstall-kept";
+    const previousProbe = readProbeTarget(info.remote_ssh);
+    try {
+      const remote = await uninstallableRemote(request);
+      configureDiscoveredProbe(info.remote_ssh, `${lib}/farhelm`, kept, remote.identity);
+      // Earlier tests' host actions for this destination are the baseline.
+      const actionsBefore = injectedHostActions(info.remote_ssh);
+
+      await page.goto("/");
+      await openHostsPanel(page);
+      const row = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(row);
+      await row.locator(".provisioning-uninstall").click();
+      const dialog = page.locator(".host-uninstall-dialog");
+      await expect(dialog).toContainText(`Farhelm will uninstall from ${info.remote_ssh}`, {
+        timeout: 30_000,
+      });
+      await expect(dialog).toContainText(lib);
+      await expect(dialog).toContainText(`Kept: the host's Farhelm data in ${kept}`);
+      // Cancel is where focus lands, so a stray Enter backs out.
+      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      // Planning changed nothing: no host action reached the backend and the
+      // row is the same one.
+      expect(injectedHostActions(info.remote_ssh), "planning acted on the host").toEqual(
+        actionsBefore,
+      );
+      expect((await apiRemoteHost(request))?.id, "planning kept the row").toBe(remote.id);
+
+      // Hold the confirmation's reply until the row has left the PAGE, and
+      // require the notice while it is still held. The row, and the panel
+      // that submitted, can unmount before that reply arrives (the injected
+      // host steps are instant), and the notice must not depend on a task
+      // that dies with the row. The request itself reaches the helm
+      // unchanged; only its answer waits, and it is released whatever the
+      // assertions inside say so the page is never left hanging.
+      let heldReply = false;
+      let noticeWhileHeld = false;
+      await page.route(`**/api/hosts/${remote.id}/uninstall`, async (route) => {
+        if (route.request().method() !== "POST" || !route.request().postData()) {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch();
+        try {
+          await expect
+            .poll(async () => await apiRemoteHost(request), {
+              timeout: 30_000,
+              message: "the helm forgets the host before its reply is released",
+            })
+            .toBeUndefined();
+          await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
+          await expect(page.locator(".uninstall-notice")).toContainText(
+            `Farhelm was removed from ${info.remote_ssh}; its data remains in ${kept}`,
+          );
+          noticeWhileHeld = true;
+        } finally {
+          heldReply = true;
+          await route.fulfill({ response });
+        }
+      });
+
+      await dialog.locator(".uninstall-confirm").click();
+      await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
+      await expect(page.locator(".uninstall-notice")).toContainText(
+        `Farhelm was removed from ${info.remote_ssh}; its data remains in ${kept}`,
+      );
+      expect(await apiRemoteHost(request)).toBeUndefined();
+      await expect.poll(() => heldReply, { timeout: 60_000 }).toBe(true);
+      expect(noticeWhileHeld, "the notice showed before the reply was released").toBe(true);
+      // The confirmed run's host actions, in the order the plan froze them:
+      // the stop comes before the reload, which is what keeps it from
+      // ending the sessions' tmux server on a real host.
+      expect(injectedHostActions(info.remote_ssh).slice(actionsBefore.length)).toEqual([
+        "disable-supervisor",
+        "remove-unit",
+        "stop-supervisor",
+        "daemon-reload",
+        "remove-directory",
+      ]);
+      await page.locator(".uninstall-notice-dismiss").click();
+      await expect(page.locator(".uninstall-notice")).toHaveCount(0);
+    } finally {
+      writeProbeTarget(info.remote_ssh, previousProbe);
+      await restoreFleetRow(request);
+    }
+  });
+
+  /**
+   * While an uninstall runs, the host row shows its progress inline, worded
+   * as uninstalling, as an update's does.
+   *
+   * Why it matters: SPEC.md asks for the row to show an uninstall's progress
+   * like Update's. Once the run stops the supervisor, the row's connection
+   * status alone would read unreachable while the removal is still going.
+   * The injected backend's host steps are slowed so the run is observable;
+   * the real remote supervisor keeps running throughout.
+   */
+  test("uninstall-progress-inline: a running uninstall shows its progress in the row", async ({
+    page,
+    request,
+  }) => {
+    requireFleet();
+    test.setTimeout(120_000);
+    const info = stackInfo();
+    const previousProbe = readProbeTarget(info.remote_ssh);
+    try {
+      const remote = await uninstallableRemote(request);
+      writeProbeTarget(info.remote_ssh, {
+        probe: "supervisor",
+        build_version: helmBuild(),
+        dial_farhelm: "/home/farhelm-e2e/.local/lib/farhelm/farhelm",
+        dial_state_dir: "/var/lib/farhelm-e2e-uninstall-kept",
+        identity: remote.identity,
+        action_delay_ms: 1_500,
+      });
+
+      await page.goto("/");
+      await openHostsPanel(page);
+      const row = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(row);
+      await row.locator(".provisioning-uninstall").click();
+      const dialog = page.locator(".host-uninstall-dialog");
+      await expect(dialog).toContainText("Farhelm will uninstall from", { timeout: 30_000 });
+      await dialog.locator(".uninstall-confirm").click();
+
+      await expect(row.locator(".host-update-running")).toContainText("uninstalling", {
+        timeout: 30_000,
+      });
+      await expect(row).toHaveCount(0, { timeout: 60_000 });
+    } finally {
+      writeProbeTarget(info.remote_ssh, previousProbe);
+      await restoreFleetRow(request);
+    }
+  });
 
   // A chosen host leaving the registry must be reconciled VISIBLY. The
   // failure this rules out is the quiet one: a selector still displaying
