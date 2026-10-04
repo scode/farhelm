@@ -11,6 +11,7 @@
       "remote_farhelm": null,
       "remote_state_dir": null,
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "build_version": "0.16.0",
         "identity": "identity1",
@@ -34,6 +35,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "attempt": 2,
         "last_error": "connection refused",
@@ -51,6 +53,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "cause": "transport-failure",
         "last_error": "timed out",
@@ -68,6 +71,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "our_build": "0.16.0",
         "our_protocol": 29,
@@ -88,6 +92,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "phase": "identity-mismatch",
         "recorded": "old",
@@ -105,6 +110,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "phase": "identity-unverified",
         "recorded": "old"
@@ -121,6 +127,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "identity": "identity2",
         "phase": "duplicate",
@@ -138,6 +145,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "phase": "retired",
         "reason": "removed"
@@ -154,6 +162,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "build_version": "0.15.0",
         "identity": null,
@@ -177,6 +186,7 @@
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
+      "commands_without_asking": false,
       "state": {
         "build_version": "0.16.0",
         "identity": null,

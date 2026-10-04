@@ -187,6 +187,16 @@ impl FleetEvents {
         *self.revision.borrow()
     }
 
+    /// How many subscriptions are open right now.
+    ///
+    /// What the agent approval prompts read as "a GUI is connected"
+    /// (`approvals::gui_connected`): every GUI holds one subscription open for
+    /// its whole life, and nothing else subscribes. A snapshot, stale the
+    /// moment it is read; the caller only decides whether to ask at all.
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribers.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// A receiver that yields every later revision, coalesced.
     ///
     /// The receiver starts out marked as having SEEN the current value, so

@@ -557,7 +557,7 @@ struct ReadOnlyPhase(&'static str);
 /// A row with no actor, or one that is not currently connected, fails this
 /// too — which is right: there is then no live connection this request
 /// could have come from, so whatever forwarded it is a corpse.
-fn origin_is_live(state: &AppState, origin: AgentOrigin) -> bool {
+pub(crate) fn origin_is_live(state: &AppState, origin: AgentOrigin) -> bool {
     state
         .manager
         .status(origin.host)
@@ -666,7 +666,7 @@ fn resolve_target(target: String, asking: &str, verb: &str) -> String {
 /// identically, line separators some viewers break on). The set is shared with
 /// every other surface that shows peer-supplied text, so none of them can fall
 /// behind the others.
-fn escape_for_log(id: &str) -> String {
+pub(crate) fn escape_for_log(id: &str) -> String {
     // The common case is an id with nothing to escape, and the borrow-free
     // early return keeps this off the allocation path for it.
     if !id.chars().any(farhelm_proto::text::is_presentation_unsafe) {
@@ -1817,6 +1817,7 @@ mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             yolo_without_asking: false,
+            commands_without_asking: false,
             state,
             incarnation: 1,
         }

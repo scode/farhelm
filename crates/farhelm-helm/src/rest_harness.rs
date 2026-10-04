@@ -1051,6 +1051,8 @@ pub(crate) struct FleetBuilder {
     /// stand-in endpoint; `None` gives the helm an offline forwarder whose
     /// every send fails, never the production one.
     feedback: Option<crate::feedback::FeedbackForwarder>,
+    /// How long agent requests wait for approval; `None` is production's.
+    approval_wait: Option<std::time::Duration>,
 }
 
 impl FleetBuilder {
@@ -1089,6 +1091,7 @@ impl FleetBuilder {
             event_subscriber_cap: None,
             clipboard_sink: None,
             feedback: None,
+            approval_wait: None,
         }
     }
 
@@ -1119,6 +1122,13 @@ impl FleetBuilder {
     /// than about the endpoint.
     pub(crate) fn event_subscriber_cap(mut self, cap: usize) -> FleetBuilder {
         self.event_subscriber_cap = Some(cap);
+        self
+    }
+
+    /// Let agent requests wait `wait` for the user's approval instead of the
+    /// production nine minutes, so a test can observe the expiry.
+    pub(crate) fn approval_wait(mut self, wait: std::time::Duration) -> FleetBuilder {
+        self.approval_wait = Some(wait);
         self
     }
 
@@ -1218,6 +1228,10 @@ impl FleetBuilder {
             feedback: self
                 .feedback
                 .unwrap_or_else(crate::feedback::FeedbackForwarder::offline),
+            approvals: crate::approvals::Approvals::new(
+                self.approval_wait
+                    .unwrap_or(farhelm_proto::approvals::APPROVAL_WAIT),
+            ),
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store,

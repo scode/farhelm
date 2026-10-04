@@ -770,6 +770,7 @@ mod tests {
                 host_identity: None,
                 cache_truncated: false,
                 yolo_without_asking: false,
+                commands_without_asking: false,
             };
             let error = layout(root.path())
                 .plan_for_row(
@@ -825,6 +826,7 @@ mod tests {
             host_identity: None,
             cache_truncated: false,
             yolo_without_asking: false,
+            commands_without_asking: false,
         };
         let plan = PlanLayout::production(root.path().join("state"))
             .plan_for_row(
@@ -929,6 +931,7 @@ mod tests {
             host_identity: None,
             cache_truncated: false,
             yolo_without_asking: false,
+            commands_without_asking: false,
         };
         let reach = Reach {
             home: root.path().join("home"),
