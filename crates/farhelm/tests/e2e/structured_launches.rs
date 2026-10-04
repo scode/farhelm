@@ -75,6 +75,14 @@ impl FakeHarness {
     /// fixture reserves its leading word for `fake-agent`; the
     /// captured process still receives every option as a distinct argv value.
     pub(crate) fn invocation(&self, selection: &LaunchSelection) -> String {
+        self.invocation_with_script(selection, "claude-record")
+    }
+
+    /// Build a launch with an explicitly selected fixture script.
+    ///
+    /// Keeping the script as an argv value avoids rewriting a shell-quoted
+    /// invocation when a test needs the report-driven fixture variant.
+    fn invocation_with_script(&self, selection: &LaunchSelection, script: &str) -> String {
         let mut argv = vec![
             self.bin
                 .path()
@@ -93,10 +101,10 @@ impl FakeHarness {
                 .into_owned(),
             "fake-agent".to_string(),
             "--script".to_string(),
-            // Record fixtures are the existing fake-agent scripts that emit
-            // ARGV_MARKER. Their private home keeps the incidental record
-            // write owned by this fixture and outside any real agent state.
-            "claude-record".to_string(),
+            // Fixture scripts emit ARGV_MARKER. Their private home keeps any
+            // incidental record write owned by this fixture and outside real
+            // agent state.
+            script.to_string(),
             "--record-home".to_string(),
             self.home.path().to_string_lossy().into_owned(),
         ];
@@ -178,6 +186,16 @@ impl FakeHarness {
             }
         }
         shell_words::join(argv)
+    }
+
+    /// Build the same launch while selecting the hook-reporting fixture.
+    ///
+    /// The report-driven restart tests need the fixture's explicit
+    /// `report <id>` command. Keeping this as a variant of the ordinary
+    /// invocation preserves the exact structured argv while changing only the
+    /// fixture script used to exercise identity admission.
+    pub(crate) fn hook_invocation(&self, selection: &LaunchSelection) -> String {
+        self.invocation_with_script(selection, "hook-report")
     }
 }
 

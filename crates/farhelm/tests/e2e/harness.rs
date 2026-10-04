@@ -38,6 +38,67 @@ pub(crate) use std::task::{Context, Poll};
 pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+/// Private files and kind-named entry points shared by tests that need to
+/// launch a realistic Claude or Codex fixture. The directory is deliberately
+/// owned by the harness so report-driven tests do not depend on the record
+/// scanner's capture module.
+pub(crate) struct CaptureFixtures {
+    home: farhelm_teststate::TestDir,
+    bin: farhelm_teststate::TestDir,
+}
+
+impl CaptureFixtures {
+    /// Private agent-home directory used by the fixture and hook process.
+    pub(crate) fn home(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    /// Directory containing the kind-named fixture entry points.
+    pub(crate) fn bin(&self) -> &std::path::Path {
+        self.bin.path()
+    }
+}
+
+/// Extract the token following a fixture marker from a terminal transcript.
+/// Markers are part of the fixture contract, so tests can assert the exact
+/// identity reported or resumed rather than merely observing that some output
+/// appeared.
+pub(crate) fn marker_value(transcript: &[u8], marker: &str) -> String {
+    let text = String::from_utf8_lossy(transcript);
+    let start = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
+        + marker.len();
+    text[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// Extract the token after the final marker occurrence in a transcript that
+/// contains output replayed from an earlier terminal generation.
+pub(crate) fn last_marker_value(transcript: &[u8], marker: &str) -> String {
+    let text = String::from_utf8_lossy(transcript);
+    let start = text
+        .rfind(marker)
+        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
+        + marker.len();
+    text[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// Read the supervisor's current durable session projection for assertions
+/// that must model what a restart will reload.
+pub(crate) async fn snapshot_of(h: &Harness, session_id: &str) -> SessionSnapshot {
+    h.sup
+        .session_snapshot(session_id)
+        .await
+        .expect("reading the snapshot")
+        .expect("the session exists")
+}
+
 mod raw_peer;
 pub(crate) use raw_peer::RawPeer;
 mod tmux_guard;
@@ -1510,6 +1571,34 @@ pub(crate) async fn harness_with_seams(
         state,
         _slot: slot,
     }
+}
+
+/// Build a harness with private kind-named fixture executables and agent home.
+///
+/// The fixture directories are neutral e2e infrastructure: callers choose
+/// whether a test drives record scanning, explicit hook reports, or another
+/// agent lifecycle. Keeping their construction here lets the scan-specific
+/// test module disappear without taking report-driven fixtures with it.
+/// The private home is forced after `adjust` so a caller that replaces the
+/// seams cannot point the still-running scan at real agent records. That
+/// override disappears when the record scan is removed.
+pub(crate) async fn fixture_harness_with_seams(
+    adjust: impl FnOnce(&mut SupervisorSeams),
+) -> (Harness, CaptureFixtures) {
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let bin = farhelm_teststate::tempdir().expect("agent bin");
+    for kind in ["claude", "codex"] {
+        std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
+            .expect("symlink the farhelm binary under an agent's own name");
+    }
+    let mut seams = SupervisorSeams {
+        scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+        ..SupervisorSeams::default()
+    };
+    adjust(&mut seams);
+    seams.agent_home = Some(home.path().to_path_buf());
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    (h, CaptureFixtures { home, bin })
 }
 
 /// Drain terminal events until `pred` accepts the accumulated transcript.

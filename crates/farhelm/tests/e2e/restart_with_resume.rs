@@ -4,20 +4,24 @@
 use crate::harness::*;
 
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
-use crate::conversation_identity_capture::{
-    capture_harness, marker_value, provoke_record, record_session, settle_past_horizon,
-    snapshot_of, test_capture_bounds,
-};
+use crate::conversation_identity_capture::test_capture_bounds;
 use crate::create_idempotency::handoff_to_new_supervisor;
+use crate::hook_identity::{
+    ServeTask, attach_ready, hook_harness, hook_log, hook_log_at, hook_session,
+    report as report_conversation, report_client,
+};
 use crate::structured_launches::{FakeHarness, fake_harness, observed_argv};
 
-/// Give compiled vendor names an owned executable and a private capture home.
+/// Give compiled vendor names an owned executable and a private fixture home.
 ///
 /// Restart-with compiles `claude` rather than the absolute fixture path used
 /// at create. The owned login profile makes that name resolve inside the
 /// launch shell without changing this test process's environment or reaching
-/// any installed vendor agent.
-async fn restart_with_harness() -> (Harness, FakeHarness) {
+/// any installed vendor agent. The returned [`ServeTask`] owns the socket
+/// accept loop needed by the hook-reporting fixture; callers must keep it
+/// alive for hook reports and stop it before handing the supervisor to a
+/// successor.
+async fn restart_with_harness() -> (Harness, FakeHarness, ServeTask) {
     let fixture = fake_harness();
     let shell = fixture.bash_shell().to_string_lossy().into_owned();
     let h = harness_with_seams(
@@ -41,7 +45,8 @@ async fn restart_with_harness() -> (Harness, FakeHarness) {
         },
     )
     .await;
-    (h, fixture)
+    let accepting = ServeTask::spawn(&h.sup, h.state.path()).await;
+    (h, fixture, accepting)
 }
 
 /// Create a Claude session whose stored selection can be changed on resume.
@@ -60,7 +65,7 @@ async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> Sessio
     h.client
         .create_session_with_extras(
             &fixture.work().to_string_lossy(),
-            &fixture.invocation(&selection),
+            &fixture.hook_invocation(&selection),
             None,
             WIDE_COLS,
             ROWS,
@@ -96,17 +101,23 @@ async fn durable_launch_bundle(
     (row.invocation, row.launch, row.resume_template)
 }
 
-/// Establish the captured identity before any restart-with assertion uses it.
+/// Establish the reported identity before any restart-with assertion uses it.
 ///
-/// The fake agent's record marker proves only that the file was written;
-/// this waits until the supervisor's durable offer names that conversation.
+/// The test chooses an id no record carries and reports it through the hook,
+/// so only an accepted report can make the session resumable.
 async fn captured_claude_conversation(h: &Harness, session: &SessionInfo) -> String {
-    let (_channel, stream, _seen, conversation) = provoke_record(h, session).await;
-    let snapshot =
-        wait_for_durable_resume_capture(&h.sup, &h.client, &session.id, &conversation).await;
+    let (channel, mut stream, mut seen) = attach_ready(h, session).await;
+    let conversation = "restart-report";
+    report_conversation(h, channel, &mut stream, &mut seen, conversation).await;
+    let snapshot = snapshot_of(h, &session.id).await;
+    assert_eq!(
+        snapshot.captured_conversation.as_deref(),
+        Some(conversation),
+        "the explicit report must supply the identity; {}",
+        hook_log(h, &session.id)
+    );
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
-    drop(stream);
-    conversation
+    conversation.to_string()
 }
 
 /// A refused override cannot change the launch settings used by later restarts.
@@ -144,7 +155,7 @@ async fn assert_restart_with_refused(
 /// the two relaunched processes receive the flag and captured resume selector.
 #[farhelm_testtrace::test]
 async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
-    let (h, fixture) = restart_with_harness().await;
+    let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     let conversation = captured_claude_conversation(&h, &session).await;
     let mut yolo = session.launch.clone().expect("structured premise");
@@ -204,13 +215,13 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
 /// after the captured conversation makes a normal Resume legal.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_legacy_session_without_changing_settings() {
-    let (h, fixture) = restart_with_harness().await;
+    let (h, fixture, _accepting) = restart_with_harness().await;
     let work = farhelm_teststate::tempdir().expect("legacy workdir");
     let session = h
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &fixture.invocation(&farhelm_proto::LaunchSelection {
+            &fixture.hook_invocation(&farhelm_proto::LaunchSelection {
                 harness: farhelm_proto::LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -246,7 +257,7 @@ async fn restart_with_refuses_legacy_session_without_changing_settings() {
 /// still resume with its original Claude settings afterwards.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_harness_mismatch_and_non_resume_mode() {
-    let (h, fixture) = restart_with_harness().await;
+    let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     captured_claude_conversation(&h, &session).await;
     let mut wrong_harness = session.launch.clone().expect("structured premise");
@@ -269,7 +280,7 @@ async fn restart_with_refuses_harness_mismatch_and_non_resume_mode() {
 /// stored selection and invocation must survive a refused override.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
-    let (h, fixture) = restart_with_harness().await;
+    let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     observed_argv(&h, &session.id, 1).await;
     assert_eq!(
@@ -344,7 +355,7 @@ async fn raw_restart_with(
 /// unchanged, and a fresh supervisor over the same state loads the session.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() {
-    let (h, fixture) = restart_with_harness().await;
+    let (h, fixture, accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     captured_claude_conversation(&h, &session).await;
     let before = durable_launch_bundle(&h, &session.id).await;
@@ -385,6 +396,7 @@ async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() 
         assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::Resume);
     }
 
+    accepting.stop().await;
     let Harness {
         client,
         sup,
@@ -492,42 +504,6 @@ async fn wait_for_new_run_below_history(sock: &std::path::Path, tmux_name: &str)
         )
         .await;
     }
-}
-
-/// Establish that a reboot can recover the exact conversation from durable supervisor state.
-///
-/// The record-writing fixture's output proves publication of its own record,
-/// not completion of capture. List requests drive capture; the store snapshot
-/// is the boundary the successor relies on. The caller separately checks the
-/// template saved at creation. Requests share the polling deadline.
-async fn wait_for_durable_resume_capture(
-    sup: &Supervisor,
-    client: &SupervisorClient,
-    session_id: &str,
-    conversation: &str,
-) -> SessionSnapshot {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut last = None;
-    let result = tokio::time::timeout_at(deadline, async {
-        loop {
-            client.list_sessions().await.expect("list drives capture");
-            let snapshot = sup
-                .session_snapshot(session_id)
-                .await
-                .expect("snapshot")
-                .expect("present");
-            if snapshot.captured_conversation.as_deref() == Some(conversation) {
-                return snapshot;
-            }
-            last = Some(snapshot);
-            // sleep-ok: record publication precedes durable capture; poll the owning supervisor's snapshot before destroying it for reboot.
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    })
-    .await;
-    result.unwrap_or_else(|_| {
-        panic!("capture never became durable; expected={conversation:?}, last snapshot={last:?}")
-    })
 }
 
 /// M3 acceptance 9, first clause: a restart on a LIVE session confirms
@@ -903,8 +879,8 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 }
 
 /// The staleness contract in the direction that actually happens
-/// (`ControlMsg::RestartSession`'s docs): conversation capture upgrades a
-/// session's offer from fresh-only to resumable AFTER a client read its
+/// (`ControlMsg::RestartSession`'s docs): an accepted identity report upgrades
+/// a session's offer from fresh-only to resumable AFTER a client read its
 /// `SessionInfo`, so the mode that client picked is no longer the one the
 /// supervisor will accept — and the refusal has to NAME the current offer,
 /// because the client's next move is to re-present it rather than retry.
@@ -915,24 +891,25 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 /// was correct a moment earlier.
 #[farhelm_testtrace::test]
 async fn a_capture_that_lands_after_the_clients_read_makes_a_fresh_restart_conflict() {
-    let (h, fixtures) = capture_harness().await;
+    let (h, fixtures, _accepting) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = record_session(&h, &fixtures, work.path(), "claude").await;
-    // What a client that listed BEFORE the first prompt would have cached.
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    // What a client that listed BEFORE the identity report would have cached.
     assert_eq!(
         session.restart_offer,
         farhelm_proto::RestartOffer::FreshOnly
     );
 
-    let (_chan, _rx, _seen, conversation) = provoke_record(&h, &session).await;
-    settle_past_horizon(&h).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    report_conversation(&h, chan, &mut rx, &mut seen, "late-report").await;
     assert_eq!(
         snapshot_of(&h, &session.id)
             .await
             .captured_conversation
             .as_deref(),
-        Some(conversation.as_str()),
-        "the capture must have landed, or there is no staleness to test"
+        Some("late-report"),
+        "the report must have landed, or there is no staleness to test; {}",
+        hook_log(&h, &session.id)
     );
 
     let err = h
@@ -1020,7 +997,7 @@ fn resumed_record_file(
 /// M3 acceptance 9 and 8 together: a session INTERRUPTED by a (simulated)
 /// reboot restarts into a FRESH terminal — there is none left to reuse —
 /// and `Resume` mode fills the snapshot's template with the identity that
-/// was captured before the reboot, so the relaunched agent picks up the
+/// was reported before the reboot, so the relaunched agent picks up the
 /// same conversation.
 ///
 /// The unstructured branch proves record adoption and append behavior. The
@@ -1029,9 +1006,9 @@ fn resumed_record_file(
 /// the test must not claim the wrapper-supplied record behavior it does not
 /// exercise.
 ///
-/// This fixture keeps its scope to Claude's record-writing path. Codex needs a
-/// foreground-attributed locator rather than the bare scan result this helper
-/// deliberately obtains, and that behavior belongs to the dedicated fixture.
+/// This fixture keeps its scope to Claude's report-and-record path. Codex needs
+/// a foreground-attributed locator, and that behavior belongs to the dedicated
+/// fixture.
 async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let kind = "claude";
     let home = farhelm_teststate::tempdir().expect("agent home");
@@ -1076,12 +1053,13 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         )
         .await
         .expect("first supervisor");
+        let accepting = ServeTask::spawn(&sup, state.path()).await;
         let client = connect_client(&sup).await;
         let session = client
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
                 &format!(
-                    "{} fake-agent --script {kind}-record --record-home {} {}",
+                    "{} fake-agent --script hook-report --record-home {} {}",
                     shell_words::quote(&bin.path().join(kind).to_string_lossy()),
                     shell_words::quote(&home.path().to_string_lossy()),
                     structured_options.as_deref().unwrap_or("")
@@ -1097,7 +1075,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
                 },
             )
             .await
-            .expect("create the record-writing session");
+            .expect("create the hook-reporting session");
 
         let (chan, initial_replay, mut rx) = client
             .attach_live(&session.id, 80, 24)
@@ -1120,20 +1098,39 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         client.send_input(chan, b"first prompt\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
+        report_client(&client, chan, &mut rx, &mut seen, &conversation).await;
 
-        // The successor supervisor can only resume an identity committed to
-        // SQLite; seeing the fixture write its record does not establish that
-        // capture has crossed that durability boundary. The template itself
-        // was stored at creation and is asserted here as setup, not treated as
-        // a later lifecycle barrier: `resume_argv` is derived synchronously
-        // from these same two columns whenever a snapshot is constructed.
-        let snapshot =
-            wait_for_durable_resume_capture(&sup, &client, &session.id, &conversation).await;
+        // An accepted report commits before the hook returns. Check both the
+        // identity and its source so the scanner cannot satisfy this premise.
+        let snapshot = sup
+            .session_snapshot(&session.id)
+            .await
+            .expect("snapshot")
+            .expect("session exists");
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some(conversation.as_str()),
+            "the explicit report must be durable before reconstruction; {}",
+            hook_log_at(state.path(), &session.id)
+        );
+        let stored = SessionStore::open(&state.path().join("supervisor.db"), false)
+            .await
+            .expect("open durable store")
+            .session(&session.id)
+            .await
+            .expect("read reported session")
+            .expect("reported session stored");
+        assert_eq!(
+            stored.conversation_source.as_deref(),
+            Some("hook"),
+            "the identity must come from the accepted report, not a scan claim"
+        );
+        assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
         if let Some(template) = &resume_template {
             assert_eq!(
                 snapshot.resume_template.as_deref(),
                 Some(template.as_slice()),
-                "the resume template stored at creation must survive until capture"
+                "the resume template stored at creation must survive until reconstruction"
             );
         } else {
             let template = snapshot
@@ -1157,6 +1154,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
                 "the nondefault structured selection is durable before reconstruction"
             );
         }
+        accepting.stop().await;
         drop(client);
         wait_for_resume_connections_to_drain(&sup).await;
         drop(sup);
@@ -1304,19 +1302,8 @@ async fn structured_claude_resume_survives_supervisor_reconstruction() {
 
 /// The same interrupted-then-resumed journey as
 /// [`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`],
-/// but for an identity the AGENT reported rather than one the scan found.
-///
-/// The two identity sources meet in exactly one place — the
-/// `captured_conversation` column — and everything downstream of it
-/// (offer, template substitution, relaunch) is supposed to be blind to
-/// which writer filled it. "Supposed to be" is why this test exists: a
-/// reported identity travels a different road to that column (a socket
-/// handler, no scan, its own provenance value, its own reload branch), and
-/// the reboot is where a difference would surface, because the successor
-/// rebuilds capture state from stored columns alone. A build that reloaded
-/// `conversation_source = 'hook'` into the wrong state, or that fenced the
-/// column so a resume could not read it, would pass every same-process test
-/// in `hook_identity` and fail here.
+/// but for a reported identity with no backing record. A supervisor restart
+/// must preserve that identity without asking the record scanner to find it.
 ///
 /// The reported id is deliberately one no record on disk carries. That is
 /// the whole point of the mechanism (`/clear` mints an id the scan can
@@ -1332,9 +1319,10 @@ async fn structured_claude_resume_survives_supervisor_reconstruction() {
 /// available here: the resumed run cannot be shown to continue a
 /// conversation that never existed on disk.
 ///
-/// The supervisor must genuinely `serve()` here, unlike its scan-driven
-/// siblings: the hook is a separate process whose only way in is the unix
-/// socket. See `hook_identity`'s module docs.
+/// This sibling reports an id no record carries and checks the fixture's
+/// missing-record resume witness. The preceding tests report a record-backed
+/// id and check adoption plus append behavior; all of them serve the hook over
+/// the supervisor's unix socket.
 #[farhelm_testtrace::test]
 async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     let home = farhelm_teststate::tempdir().expect("agent home");

@@ -9,11 +9,11 @@
 
 use crate::harness::*;
 
-use crate::conversation_identity_capture::{
-    TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE, capture_harness, provoke_record, record_session,
-    wait_for_capture, wait_for_capture_clock_past, wait_for_first_input,
-};
+use crate::conversation_identity_capture::{capture_harness, record_session, wait_for_capture};
 use crate::create_idempotency::handoff_to_new_supervisor;
+use crate::hook_identity::{
+    attach_ready, hook_harness, hook_log, hook_session, report as report_conversation,
+};
 use crate::terminal_backpressure::drain_for;
 use farhelm_proto::RestartOffer;
 
@@ -289,52 +289,30 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     );
 }
 
-/// A rename reply offers **resume** for a conversation NOTHING has
-/// captured yet — the rename's own pass is what captures it.
+/// A rename reply offers **resume** for an identity already reported by the
+/// session, rather than echoing the stale offer from session creation.
 ///
-/// Two things at once, and the ordering is what makes the second one
-/// testable. The offer moves from `FreshOnly` to `Resume` when a capture
-/// pass commits an identity, so a reply echoing
-/// `SessionEntry::info.restart_offer` would carry what it was at create —
-/// `FreshOnly` forever — and the UI would keep offering a fresh launch for
-/// a session that can be resumed.
-///
-/// But capture rides the passes the supervisor already performs, and a
-/// test that drove those passes itself (by listing until the identity
-/// landed) would leave the reply nothing to do but read a value already
-/// committed — it would pass against a reply that never ran a capture pass
-/// at all. So NOTHING here drives a pass, before or after: the record is
-/// provoked, the durable input's capture horizon is crossed, and the rename
-/// is the first pass of any kind to run afterwards. `Resume` in its reply can then only mean
-/// the rename's own pass captured the identity, which is the
-/// `ListSessions` behavior the protocol promises this reply matches.
-///
-/// The identity is then confirmed through a READ-ONLY store handle rather
-/// than through `wait_for_capture`, for the same reason: that helper polls
-/// `list_sessions`, and a list would have captured the identity itself,
-/// retroactively making the assertion above pass for the wrong reason.
+/// The report is committed before the rename, and the reply must derive its
+/// restart offer from that current session state. This keeps the test about
+/// the rename reply's projection rather than the removed record scanner.
 #[farhelm_testtrace::test]
-async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
-    let (h, fixtures) = capture_harness().await;
+async fn a_rename_reply_reflects_a_reported_identity_without_a_list_first() {
+    let (h, fixtures, _accepting) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = record_session(&h, &fixtures, work.path(), "claude").await;
+    let session = hook_session(&h, &fixtures, work.path()).await;
     assert_eq!(
         session.restart_offer,
         RestartOffer::FreshOnly,
-        "test premise: nothing is capturable until the agent writes its record"
+        "test premise: a newly created session has no reported identity"
     );
-    let (_chan, _rx, _seen, conversation) = provoke_record(&h, &session).await;
-
-    // Observe the same durable anchor and Unix clock the correlator uses,
-    // without driving a list or capture pass. An elapsed delay alone would
-    // assume that input persistence and the wall clock had advanced together.
-    let at = wait_for_first_input(&h, &session.id, 20).await;
-    wait_for_capture_clock_past(at + (TEST_CAPTURE_AFTER + TEST_CAPTURE_GRACE).as_secs() as i64)
-        .await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let conversation = "rename-conversation";
+    report_conversation(&h, chan, &mut rx, &mut seen, conversation).await;
     assert_eq!(
         stored_conversation(h.state.path(), &session.id).await,
-        None,
-        "test premise: no pass may capture the identity before the rename"
+        Some(conversation.to_string()),
+        "the report must be durable before the rename; {}",
+        hook_log(&h, &session.id)
     );
 
     let reply = renamed(rename(&h.sup, &session.id, "renamed-after-capture").await);
@@ -342,8 +320,8 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
     assert_eq!(
         reply.restart_offer,
         RestartOffer::Resume,
-        "the rename's own capture pass must have claimed the identity and the reply must \
-         reflect it, exactly as a list reply would"
+        "the rename reply must reflect the identity already reported by the session, exactly \
+         as a list reply would"
     );
     // And it is genuinely the identity the agent reported, committed
     // durably — not a `Resume` derived from something weaker.
@@ -351,9 +329,8 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
         stored_conversation(h.state.path(), &session.id)
             .await
             .as_deref(),
-        Some(conversation.as_str()),
-        "the identity the rename captured must be the one the fixture wrote, and must have \
-         been committed by that same pass"
+        Some(conversation),
+        "the rename reply must preserve the reported identity"
     );
 }
 
@@ -390,7 +367,7 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
 
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-    let conversation = crate::conversation_identity_capture::marker_value(&seen, "RECORD-WRITTEN:");
+    let conversation = marker_value(&seen, "RECORD-WRITTEN:");
 
     assert_eq!(
         wait_for_capture(&h, &session.id, 30).await,

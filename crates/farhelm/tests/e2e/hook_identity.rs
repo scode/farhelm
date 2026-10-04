@@ -28,17 +28,14 @@
 //! duplex pipe and never binds a socket. The hook cannot: it is a separate
 //! process that only knows `FARHELM_SUPERVISOR_SOCK`. So [`hook_harness`]
 //! spawns the real accept loop and waits for the bind before creating any
-//! session — see its docs for the ordering that matters. The other two
-//! places a hook has to reach a supervisor do the same thing for the same
-//! reason (`real_agent_capture`'s `serving_supervisor` and
-//! `restart_with_resume`'s hook-reported resume test), so "these tests
-//! serve" is a property of the hook, not of this file.
+//! session — see its docs for the ordering that matters. Every suite that
+//! reports through the hook must bind an accept loop before creating its
+//! session; "these tests serve" is a property of the hook, not of this file.
 
 use crate::boot_id_durable_outcome::listed;
 use crate::conversation_identity_capture::{
-    CaptureFixtures, assert_windows_disjoint, assert_windows_overlap, capture_harness,
-    capture_harness_with_seams, marker_value, settle_past_horizon, snapshot_of,
-    test_capture_bounds, wait_for_first_input, wait_until_window_disjoint_from,
+    assert_windows_disjoint, assert_windows_overlap, settle_past_horizon, test_capture_bounds,
+    wait_for_first_input, wait_until_window_disjoint_from,
 };
 use crate::harness::*;
 use farhelm_teststate::thread::FixtureThread;
@@ -58,8 +55,11 @@ use farhelm_teststate::thread::FixtureThread;
 ///
 /// Returns the [`ServeTask`] the caller must keep alive for as long as it
 /// expects hooks to work.
-async fn hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
-    let (h, fixtures) = capture_harness().await;
+pub(crate) async fn hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
+    let (h, fixtures) = fixture_harness_with_seams(|seams| {
+        seams.capture_window = test_capture_bounds();
+    })
+    .await;
     let task = ServeTask::spawn(&h.sup, h.state.path()).await;
     (h, fixtures, task)
 }
@@ -144,7 +144,7 @@ fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> S
 }
 
 /// Create a claude-kind session running the hook-reporting fixture.
-async fn hook_session(
+pub(crate) async fn hook_session(
     h: &Harness,
     fixtures: &CaptureFixtures,
     cwd: &std::path::Path,
@@ -167,7 +167,7 @@ async fn hook_session(
 /// witness. Its stream has already consumed those setup reads and the replay
 /// marker, so callers retain startup evidence without waiting for that marker
 /// again.
-async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, TermStream, Vec<u8>) {
+pub(crate) async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, TermStream, Vec<u8>) {
     let (chan, mut seen, mut rx) = h
         .client
         .attach_live(&session.id, WIDE_COLS, ROWS)
@@ -199,15 +199,29 @@ async fn attach_ready(h: &Harness, session: &SessionInfo) -> (u32, TermStream, V
 /// `crate::hook`'s contract). Only the caller's own assertion on the stored
 /// identity proves the report LANDED — which is why every failure message
 /// below quotes the hook's own log.
-async fn report(
+pub(crate) async fn report(
     h: &Harness,
     chan: u32,
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
     conversation: &str,
 ) {
+    report_client(&h.client, chan, rx, seen, conversation).await;
+}
+
+/// Send an explicit identity report through an already connected client.
+///
+/// This variant keeps report-driven restart tests that construct supervisors
+/// by hand on the same acceptance and silence checks as the shared harness.
+pub(crate) async fn report_client(
+    client: &SupervisorClient,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    conversation: &str,
+) {
     let from = seen.len();
-    h.client
+    client
         .send_input(chan, format!("report {conversation}\r").into_bytes())
         .await;
     wait_for_after_from(
@@ -298,12 +312,13 @@ pub(crate) async fn wait_for_after_from(
 /// should have landed. The hook is silent by contract, so when a report
 /// does not arrive this file is the ONLY evidence of why — whether it never
 /// ran, could not connect, or was refused and by whom.
-fn hook_log(h: &Harness, session_id: &str) -> String {
-    let path = h
-        .state
-        .path()
-        .join("hook-log")
-        .join(format!("{session_id}.log"));
+pub(crate) fn hook_log(h: &Harness, session_id: &str) -> String {
+    hook_log_at(h.state.path(), session_id)
+}
+
+/// Read a hook log when a test owns a hand-built supervisor state directory.
+pub(crate) fn hook_log_at(state: &std::path::Path, session_id: &str) -> String {
+    let path = state.join("hook-log").join(format!("{session_id}.log"));
     match std::fs::read_to_string(&path) {
         Ok(text) => format!("hook log ({}):\n{text}", path.display()),
         Err(e) => format!("no hook log at {}: {e}", path.display()),
@@ -1298,7 +1313,7 @@ async fn a_fresh_restart_is_refused_while_a_report_stands() {
 /// at one while losing exactly what this test exists to protect.
 #[farhelm_testtrace::test]
 async fn hook_flags_are_not_injected_when_the_invocation_already_has_settings() {
-    let (h, fixtures) = capture_harness().await;
+    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     // A value that is valid JSON, uniquely the user's, and one shell word:
     // an empty object configures nothing, so the launch behaves exactly as
@@ -1345,7 +1360,7 @@ async fn hook_flags_are_not_injected_when_the_invocation_already_has_settings() 
 /// as asked" is the claim, so exactly-as-asked is what is asserted.
 #[farhelm_testtrace::test]
 async fn generic_sessions_get_no_hook_flags() {
-    let (h, fixtures) = capture_harness().await;
+    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     // Launched under the binary's OWN name rather than through a
     // kind-named symlink, which is exactly what makes derivation call it
@@ -1407,7 +1422,7 @@ async fn generic_sessions_get_no_hook_flags() {
 /// supervisor, same launch path, opposite outcome.
 #[farhelm_testtrace::test]
 async fn hooks_can_be_disabled_by_kind() {
-    let (h, fixtures) = capture_harness_with_seams(|seams| {
+    let (h, fixtures) = fixture_harness_with_seams(|seams| {
         seams.agent_hooks =
             farhelm_supervisor::agent_kind::AgentHooks::Only(vec![farhelm_proto::AgentKind::Codex]);
     })
