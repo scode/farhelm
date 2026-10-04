@@ -41,6 +41,10 @@ stand-in (the one the browser tests use) as a reachable Ubuntu machine with noth
 then shows is the helm's real plan, with the scenario's invented home directory in its paths. No shot confirms that
 setup, so no host is ever added.
 
+The fleet also holds the scenario's launch templates. Staging creates them through the helm's own templates API, the one
+the templates panel uses, so they are real templates rather than a rewrite; the scenario names a template's host by its
+key, and staging swaps in that host's install identity. No shot saves or deletes a template.
+
 Statuses are never rewritten, as for the hero. Before writing each PNG the capture also checks the page's visible text
 and form values for the capturing account's name, its home directory, and the run's temporary state, and fails if any
 appears: the rewrites are supposed to keep those out, and the check is what proves they did.

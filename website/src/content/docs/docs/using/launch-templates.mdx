@@ -1,0 +1,83 @@
+---
+title: Launch templates
+description: Save launcher choices under a name, and apply them when you start a session.
+sidebar:
+  order: 2
+---
+
+import Screenshot from '../../../../components/Screenshot.astro';
+
+A launch template is a set of [session launcher](/docs/using/start-a-session/) choices saved under a name. It holds
+only the choices you put in it, so templates combine: one can pick your usual agent and model, another the host and
+directory of a project, and applying both sets up the whole launch.
+
+## Make a template
+
+<Screenshot
+  name="launch-templates/templates-button"
+  alt="The templates button beside new above the session list, which opens the templates panel."
+/>
+
+<Screenshot
+  name="launch-templates/panel"
+  alt="The templates panel: the list of templates with what each sets, and the empty new template form."
+/>
+
+The form offers every choice the launcher has, from the agent and model to the host, the directory, and the session's
+name. **set to** gives a choice a value, and **reset to default** sets it back to the agent's own default when the
+template is applied, which is different from leaving it as is. The destination can be a directory or a
+[fresh GitHub checkout](/docs/using/start-a-session/#start-from-a-fresh-github-checkout). Names must be unique; to
+change a template, edit it rather than saving a new one under its name.
+
+Templates belong to the helm, the program that shows you every host's sessions
+([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
+a command still needs that command to exist on the host you launch on.
+
+## Edit a template
+
+<Screenshot
+  name="launch-templates/edit-form"
+  alt="codex-deep open for editing: agent type Codex, model gpt-6.1-sol, effort high, the rest left as is."
+/>
+
+A session remembers the choices it was launched with, not which templates supplied them, so editing or deleting a
+template never changes a session that already started from it.
+
+## Apply templates in the launcher
+
+<Screenshot
+  name="launch-templates/apply"
+  alt="The launcher's search box with tl: typed, listing the three templates."
+/>
+
+<Screenshot
+  name="launch-templates/applied"
+  alt="The launcher after applying codex-deep and then api-repo, launching Codex on build-box in ~/src/api."
+/>
+
+Templates apply in the order you choose them, and where two set the same choice, the later one wins. A template only
+fills in what it holds, so anything the launch still needs, such as a directory, you choose by hand as usual.
+
+A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
+did not fit: a model the chosen agent does not offer, for example, or a model while the launcher is on its **command**
+tab. In **replace with**, where the host is fixed, a template that sets a host is refused the same way. **restart with**
+does not offer templates at all.
+
+## Templates and your agents
+
+Agents in your sessions can apply templates too, when they start sessions of their own with the `farhelm` command:
+
+```sh
+farhelm agent create --template codex-deep --template api-repo
+```
+
+Here `api-repo` supplies the host and directory, so the command needs neither `--host` nor `--cwd`. Other options such
+as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what
+each sets. Agents can apply templates but cannot create, edit, or delete them.
+
+NOTE: Templates are not a place for secrets. Every host your helm manages can read every template, command lines
+included.
+
+## Next
+
+[Read the session list](/docs/using/session-list/) covers keeping track of the sessions you start.
