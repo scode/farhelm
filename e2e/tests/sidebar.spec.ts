@@ -4606,8 +4606,10 @@ test("opening the create-session form closes an open row menu", async ({ page, r
     // Moving the opener into the count heading must leave the draft after
     // it in keyboard order. Otherwise forward Tab skips the newly opened
     // form entirely, even though pointer creation still works: forward Tab
-    // from New enters the form.
+    // from New visits the Templates button beside it, then enters the form.
     await page.locator(".new-session-button").focus();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".templates-button")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.locator(".create-session-form :focus")).toHaveCount(1);
 

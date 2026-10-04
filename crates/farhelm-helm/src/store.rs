@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 37;
+const SCHEMA_VERSION: i64 = 38;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -344,6 +344,22 @@ pub(crate) const PROFILE_TABLES_V15: &str = "CREATE TABLE profiles (
                  source_session_id TEXT,
                  source_creation_seq INTEGER,
                  CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
+             ) STRICT;";
+
+/// The helm's launch templates (schema version 38; SPEC.md, Launch
+/// templates): one row per uniquely named template, its fields as the JSON
+/// `farhelm_proto::launcher::TemplateFields` stores. Shared by the fresh
+/// schema and the 37→38 step so both produce the same DDL.
+///
+/// The fields stay JSON rather than one column each because a template is
+/// applied whole and never queried by field, and because the launcher's
+/// field set is the wire crate's to grow: a new field is a decode change,
+/// not a migration. Edits are last-write-wins (SPEC.md wants no
+/// optimistic-concurrency check), so there is no version column.
+const LAUNCH_TEMPLATES_SCHEMA: &str = "CREATE TABLE launch_templates (
+                 name        TEXT NOT NULL PRIMARY KEY,
+                 fields_json TEXT NOT NULL,
+                 updated_at  INTEGER NOT NULL
              ) STRICT;";
 
 /// The per-session "last seen" stamp (schema version 17): the activity
@@ -1990,10 +2006,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              ) STRICT;
               {SESSION_SEEN_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
+              {LAUNCH_TEMPLATES_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 37;",
+              PRAGMA user_version = 38;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2860,6 +2877,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 37")?;
         version = 37;
     }
+    if version == 37 {
+        // `IF NOT EXISTS` because most of the ladder's own downgrade
+        // fixtures start from a current database and only rewind
+        // `user_version` (the one that compares against frozen v26 DDL drops
+        // the table itself); SQLite stores the statement without the clause,
+        // so the schema text still matches a fresh database's. Loud failure
+        // buys nothing here: no older schema ever had a table of this name.
+        tx.execute_batch(&format!(
+            "{}
+             PRAGMA user_version = 38;",
+            LAUNCH_TEMPLATES_SCHEMA.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+        ))
+        .context("migrating helm.db to schema version 38")?;
+        version = 38;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3251,6 +3283,89 @@ impl HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
         })
+    }
+
+    /// Every stored launch template, by name.
+    ///
+    /// A row whose fields no longer decode is refused rather than skipped:
+    /// templates are applied by exact name, so a template silently missing
+    /// from the listing would make `tl:` and `--template` report it unknown
+    /// while the name stays taken. Rows are written only through
+    /// [`farhelm_proto::launcher::TemplateFields`], so this takes a hand
+    /// edit or a downgrade; `DELETE /api/templates/{name}` removes the row.
+    pub(crate) async fn launch_templates(
+        &self,
+    ) -> anyhow::Result<Vec<farhelm_proto::launcher::LaunchTemplate>> {
+        self.conn
+            .call(
+                "launch template read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<farhelm_proto::launcher::LaunchTemplate>> {
+                    let mut stmt = conn
+                        .prepare("SELECT name, fields_json FROM launch_templates ORDER BY name")
+                        .context("preparing the template read")?;
+                    let rows = stmt
+                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                        .context("reading templates")?
+                        .collect::<Result<Vec<_>, _>>()
+                        .context("reading templates")?;
+                    rows.into_iter()
+                        .map(|(name, json)| {
+                            let fields = serde_json::from_str(&json).with_context(|| {
+                                format!("launch template {name:?} has fields this build cannot read")
+                            })?;
+                            Ok(farhelm_proto::launcher::LaunchTemplate { name, fields })
+                        })
+                        .collect()
+                },
+            )
+            .await
+    }
+
+    /// Store `template` under its name, replacing any template of that name
+    /// (last write wins; SPEC.md wants no concurrency check). The caller has
+    /// checked its shape (`farhelm_proto::launcher::check_template_shape`).
+    pub(crate) async fn put_launch_template(
+        &self,
+        template: farhelm_proto::launcher::LaunchTemplate,
+    ) -> anyhow::Result<()> {
+        let json = serde_json::to_string(&template.fields).context("encoding template fields")?;
+        // Informational only (nothing orders or compares by it); a clock
+        // before the epoch records 0 rather than failing the write.
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        self.conn
+            .call(
+                "launch template write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "INSERT INTO launch_templates (name, fields_json, updated_at)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT (name) DO UPDATE SET
+                             fields_json = excluded.fields_json,
+                             updated_at = excluded.updated_at",
+                        rusqlite::params![template.name, json, updated_at],
+                    )
+                    .context("storing a launch template")?;
+                    Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Delete the template named `name`, reporting whether there was one.
+    pub(crate) async fn delete_launch_template(&self, name: String) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "launch template delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let removed = conn
+                        .execute("DELETE FROM launch_templates WHERE name = ?1", [name])
+                        .context("deleting a launch template")?;
+                    Ok(removed > 0)
+                },
+            )
+            .await
     }
 
     /// Read the recoverable web token without creating one.
@@ -9557,6 +9672,42 @@ mod tests {
                 .expect("query the schema");
             assert_eq!(count, 0, "schema 36 drops {table}");
         }
+    }
+
+    /// Spec: schema 38 adds the empty launch-templates table to a schema-37
+    /// database, which then stores and lists templates like a fresh one.
+    ///
+    /// Why: an upgraded helm must offer the Templates panel and `tl:` at
+    /// once, with no step of its own; the fresh-versus-migrated schema test
+    /// pins the DDL, and this pins that the table is usable after the step.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v37_adds_the_launch_templates_table() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            conn.execute_batch(
+                "DROP TABLE launch_templates;
+                 PRAGMA user_version = 37;",
+            )
+            .expect("rewind to schema 37");
+        }
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        assert!(store.launch_templates().await.unwrap().is_empty());
+        let template = farhelm_proto::launcher::LaunchTemplate {
+            name: "my-codex".to_string(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Codex),
+                ..Default::default()
+            },
+        };
+        store.put_launch_template(template.clone()).await.unwrap();
+        assert_eq!(store.launch_templates().await.unwrap(), vec![template]);
     }
 
     /// Schema 37 gives every cached session the launch protocol 39

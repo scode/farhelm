@@ -170,6 +170,289 @@ fn draft_reconciliation_reason(
     crate::launch_composer::reconciliation_reset_reason(&deliberate_before, after)
 }
 
+/// The host row a template's host field names: the one whose recorded
+/// install identity it is, unless that row is in the identity-mismatch
+/// phase. There its recorded identity is the PREDECESSOR's while the row
+/// reaches a different install, so matching it would aim the template at the
+/// successor, which SPEC.md rules out ("a registry row retargeted to another
+/// install makes the template's host field inapplicable"). The same
+/// exclusion the create default makes (`default_create_host`).
+fn template_host<'a>(hosts: &'a [HostOption], identity: &str) -> Option<&'a HostOption> {
+    hosts
+        .iter()
+        .find(|host| !host.identity_mismatch && host.identity.as_deref() == Some(identity))
+}
+
+/// One edit a template makes, in the order it makes them: either a search
+/// action the launcher already has (so it has exactly the effects of the
+/// same action taken by hand), or a direct setting for a field no search
+/// action covers (the launch kind, the command fields, a choice reset to
+/// its default).
+enum TemplateEdit {
+    Search(crate::launch_composer::ComposerSearchResult),
+    Set(Box<dyn FnOnce()>),
+}
+
+/// The launcher signals a template edits directly. All `Copy` handles,
+/// bundled only so [`template_edits`] has one argument for them.
+#[derive(Clone, Copy)]
+struct TemplateTargets {
+    launch_tab: Signal<LaunchTab>,
+    structured_harness: Signal<Option<LaunchHarness>>,
+    structured_model: Signal<Option<String>>,
+    structured_model_raw_seed: Signal<Option<String>>,
+    structured_model_edited: Signal<bool>,
+    custom_model_harness: Signal<Option<LaunchHarness>>,
+    composer_reset_reason: Signal<Option<String>>,
+    structured_effort: Signal<Option<LaunchEffort>>,
+    structured_permissions: Signal<Option<LaunchPermission>>,
+    structured_permissions_is_explicit: Signal<bool>,
+    structured_workspace_trust: Signal<Option<bool>>,
+    structured_workspace_trust_is_explicit: Signal<bool>,
+    invocation: Signal<String>,
+    invocation_raw_seed: Signal<Option<String>>,
+    invocation_edited: Signal<bool>,
+    command_yolo: Signal<Option<bool>>,
+    command_agent: Signal<Option<LaunchHarness>>,
+    command_resume_on: Signal<bool>,
+    command_resume: Signal<String>,
+    command_resume_raw_seed: Signal<Option<String>>,
+    command_resume_edited: Signal<bool>,
+    chosen_host: Signal<Option<HostId>>,
+    template_error: Signal<Option<String>>,
+    intent_key: Signal<Option<(String, IntentBinding)>>,
+}
+
+/// Turn an accepted search result into the edits it makes: itself, unless it
+/// is a template (`tl:name`), which becomes the edits that template contains.
+///
+/// SPEC.md: "Applying a template makes the edits it contains, in the same
+/// way and with the same effects as making them by hand, in a fixed order",
+/// all or nothing. So the template is first applied to a snapshot of the
+/// launcher with the shared rule (`farhelm_proto::launcher::apply_template`),
+/// which is also what the helm uses for `--template`; a refusal sets
+/// `template_error` and makes no edit at all. Only then is it replayed as
+/// the launcher's own actions, so remembered defaults, recent setups and a
+/// pending checkout preview react exactly as they would to the same clicks.
+/// `host_fixed` is Replace with, which keeps the source's host.
+fn template_edits(
+    result: crate::launch_composer::ComposerSearchResult,
+    templates: &[farhelm_proto::launcher::LaunchTemplate],
+    hosts: &[HostOption],
+    catalog: &[crate::api::LaunchCatalogModel],
+    host_fixed: bool,
+    t: TemplateTargets,
+) -> Vec<TemplateEdit> {
+    use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
+    use farhelm_proto::launcher::{LauncherKind, LauncherState, TemplateDestination};
+    let mut template_error = t.template_error;
+    let ComposerSearchResult::Template(name) = result else {
+        template_error.set(None);
+        return vec![TemplateEdit::Search(result)];
+    };
+    let Some(template) = templates
+        .iter()
+        .find(|template| template.name == name)
+        .cloned()
+    else {
+        template_error.set(Some(format!(
+            "no template is named {name:?}; it may have been deleted"
+        )));
+        return Vec::new();
+    };
+    let kind_now = match *t.launch_tab.peek() {
+        LaunchTab::Agent => LauncherKind::Agent,
+        LaunchTab::Command => LauncherKind::Command,
+    };
+    let state = LauncherState {
+        kind: Some(kind_now),
+        harness: *t.structured_harness.peek(),
+        model: t.structured_model.peek().clone(),
+        model_owner: *t.custom_model_harness.peek(),
+        effort: *t.structured_effort.peek(),
+        permissions: *t.structured_permissions.peek(),
+        workspace_trust: *t.structured_workspace_trust.peek(),
+        command: submitted_field(
+            &t.invocation.peek(),
+            *t.invocation_edited.peek(),
+            t.invocation_raw_seed.peek().as_deref(),
+        ),
+        yolo: *t.command_yolo.peek(),
+        command_agent: *t.command_agent.peek(),
+        resume_command: t.command_resume_on.peek().then(|| {
+            submitted_field(
+                &t.command_resume.peek(),
+                *t.command_resume_edited.peek(),
+                t.command_resume_raw_seed.peek().as_deref(),
+            )
+        }),
+        host: t.chosen_host.peek().and_then(|chosen| {
+            hosts
+                .iter()
+                .find(|host| host.id == chosen)
+                .and_then(|host| host.identity.clone())
+        }),
+        destination: None,
+        name: None,
+    };
+    let known_hosts: Vec<String> = hosts
+        .iter()
+        .filter(|host| !host.identity_mismatch)
+        .filter_map(|host| host.identity.clone())
+        .collect();
+    let context = farhelm_proto::launcher::TemplateContext {
+        catalog,
+        known_hosts: &known_hosts,
+        host_fixed,
+    };
+    let applied = match farhelm_proto::launcher::apply_template(&state, &template, &context) {
+        Ok(applied) => applied,
+        Err(refusal) => {
+            template_error.set(Some(refusal.to_string()));
+            return Vec::new();
+        }
+    };
+    // A repository the launcher cannot even parse is refused here, before
+    // any edit, to keep the template all or nothing.
+    let repository = match &template.fields.destination {
+        Some(TemplateDestination::Github(repo)) => {
+            match crate::github_checkout::GithubRepo::parse(repo) {
+                Ok(repo) => Some(repo),
+                Err(error) => {
+                    template_error.set(Some(format!(
+                        "template {name:?} was not applied: its destination {repo:?} is not a GitHub repository ({error})"
+                    )));
+                    return Vec::new();
+                }
+            }
+        }
+        _ => None,
+    };
+    template_error.set(None);
+    let fields = template.fields;
+    let kind = applied.kind.unwrap_or(LauncherKind::Agent);
+    let mut edits = Vec::new();
+    let mut t = t;
+    // 1. The launch kind.
+    if let Some(kind) = fields.kind {
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.launch_tab.set(match kind {
+                LauncherKind::Agent => LaunchTab::Agent,
+                LauncherKind::Command => LaunchTab::Command,
+            });
+        })));
+    }
+    // 2. The agent type: the agent tab's, through the same action as a
+    // click, or the command tab's declared type.
+    if let Some(agent) = fields.agent {
+        match kind {
+            LauncherKind::Agent => {
+                edits.push(TemplateEdit::Search(ComposerSearchResult::Harness(agent)))
+            }
+            LauncherKind::Command => edits.push(TemplateEdit::Set(Box::new(move || {
+                t.command_agent.set(Some(agent));
+            }))),
+        }
+    }
+    // 3. The agent launch's choices.
+    match fields.model {
+        Some(Some(id)) => edits.push(TemplateEdit::Search(ComposerSearchResult::Model {
+            id,
+            harness: applied
+                .harness
+                .expect("a model applies only with an agent type"),
+        })),
+        // As choosing "harness default" by hand: no model, no owner for one,
+        // and no notice about a choice that was cleared.
+        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_model.set(None);
+            t.structured_model_raw_seed.set(None);
+            t.structured_model_edited.set(false);
+            t.custom_model_harness.set(None);
+            t.composer_reset_reason.set(None);
+        }))),
+        None => {}
+    }
+    match fields.effort {
+        Some(Some(effort)) => {
+            edits.push(TemplateEdit::Search(ComposerSearchResult::Effort(effort)))
+        }
+        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_effort.set(None)
+        }))),
+        None => {}
+    }
+    match fields.permissions {
+        Some(Some(LaunchPermission::Yolo)) => edits.push(TemplateEdit::Search(
+            ComposerSearchResult::Permissions(ComposerPermission::Yolo),
+        )),
+        Some(None) => edits.push(TemplateEdit::Search(ComposerSearchResult::Permissions(
+            ComposerPermission::Default,
+        ))),
+        Some(Some(permission)) => edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_permissions.set(Some(permission));
+            t.structured_permissions_is_explicit.set(true);
+        }))),
+        None => {}
+    }
+    match fields.workspace_trust {
+        Some(Some(trust)) => edits.push(TemplateEdit::Search(ComposerSearchResult::Trust(trust))),
+        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_workspace_trust.set(None);
+            t.structured_workspace_trust_is_explicit.set(true);
+        }))),
+        None => {}
+    }
+    // 4. The command launch's fields, typed text the user owns from here.
+    if let Some(command) = fields.command {
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.invocation.set(command);
+            t.invocation_raw_seed.set(None);
+            t.invocation_edited.set(true);
+        })));
+    }
+    if let Some(yolo) = fields.yolo {
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.command_yolo.set(Some(yolo))
+        })));
+    }
+    if let Some(resume) = fields.resume_command {
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.command_resume_on.set(resume.is_some());
+            t.command_resume.set(resume.unwrap_or_default());
+            t.command_resume_raw_seed.set(None);
+            t.command_resume_edited.set(true);
+        })));
+    }
+    // 5. The destination and the name, through their own actions.
+    if let Some(identity) = &fields.host
+        && let Some(host) = template_host(hosts, identity)
+    {
+        edits.push(TemplateEdit::Search(ComposerSearchResult::Host(
+            crate::launch_composer::ComposerHost {
+                id: host.id,
+                name: host.name.clone(),
+                label: host.label(),
+                local: host.local,
+            },
+        )));
+    }
+    match (fields.destination, repository) {
+        (Some(TemplateDestination::Folder(folder)), _) => {
+            edits.push(TemplateEdit::Search(ComposerSearchResult::UsePath(folder)));
+        }
+        (Some(TemplateDestination::Github(_)), Some(repo)) => {
+            edits.push(TemplateEdit::Search(ComposerSearchResult::Github(repo)));
+        }
+        _ => {}
+    }
+    if let Some(name) = fields.name {
+        edits.push(TemplateEdit::Search(ComposerSearchResult::Name(name)));
+    }
+    edits.push(TemplateEdit::Set(Box::new(move || t.intent_key.set(None))));
+    edits
+}
+
 /// Apply a clicked or keyboard-selected search result without launching.
 ///
 /// Search is only a picker. Keeping its result application in one helper
@@ -237,6 +520,11 @@ fn apply_composer_search_result(
         remembered_destination.set(None);
     }
     match result {
+        // A template is expanded into the edits it contains before it gets
+        // here (`template_edits`), and none of those edits is a template.
+        ComposerSearchResult::Template(_) => {
+            unreachable!("template_edits expands every template result")
+        }
         ComposerSearchResult::Name(name) => {
             title.set(name);
             // A cloned title may have an escaped display seed. This action
@@ -1530,6 +1818,20 @@ pub(super) fn CreateSessionForm(
         let base = launch_catalog_base.clone();
         async move { api::fetch_launch_catalog(&base).await }
     });
+    // The helm's launch templates, read once per dialog, for `tl:` search. A
+    // failed read offers none; nothing else in the launcher depends on them.
+    let templates_base = base.clone();
+    // Re-read whenever the Templates dialog closes (see `TemplatesRevision`);
+    // absent outside the list view, where nothing can change them.
+    let templates_revision = try_use_context::<super::templates::TemplatesRevision>();
+    let launch_templates = use_resource(move || {
+        let base = templates_base.clone();
+        let _revision = templates_revision.map(|revision| (revision.0)());
+        async move { api::fetch_templates(&base).await.unwrap_or_default() }
+    });
+    // Why the last template accepted from search was not applied, shown
+    // under the search box until the next accepted result.
+    let template_error = use_signal(|| None::<String>);
     // Prefilled rather than empty-with-a-placeholder, deliberately: what
     // gets sent is always exactly what the field shows, and the common
     // "just give me a session in my home directory" create needs no typing
@@ -2766,6 +3068,15 @@ pub(super) fn CreateSessionForm(
         &composer_search(),
         &composer_hosts,
     ));
+    let templates_now = launch_templates.read().clone().unwrap_or_default();
+    let template_names: Vec<String> = templates_now
+        .iter()
+        .map(|template| template.name.clone())
+        .collect();
+    search_rows.extend(crate::launch_composer::template_search_results(
+        &composer_search(),
+        &template_names,
+    ));
     if search_scope == crate::launch_composer::SearchScope::Github {
         let discovered = repository_result
             .as_ref()
@@ -2780,6 +3091,35 @@ pub(super) fn CreateSessionForm(
     let search_result_groups = crate::launch_composer::grouped_search_results(search_rows);
     let catalog_models_for_search_input = catalog_models.clone();
     let composer_hosts_for_search_input = composer_hosts.clone();
+    let template_names_for_search_input = template_names.clone();
+    let templates_for_search_key = templates_now.clone();
+    let templates_for_search_click = templates_now.clone();
+    let template_targets = TemplateTargets {
+        launch_tab,
+        structured_harness,
+        structured_model,
+        structured_model_raw_seed,
+        structured_model_edited,
+        custom_model_harness,
+        composer_reset_reason,
+        structured_effort,
+        structured_permissions,
+        structured_permissions_is_explicit,
+        structured_workspace_trust,
+        structured_workspace_trust_is_explicit,
+        invocation,
+        invocation_raw_seed,
+        invocation_edited,
+        command_yolo,
+        command_agent,
+        command_resume_on,
+        command_resume,
+        command_resume_raw_seed,
+        command_resume_edited,
+        chosen_host,
+        template_error,
+        intent_key,
+    };
     let search_results_for_keys = search_result_groups
         .iter()
         .flat_map(|(_, results)| results.iter().cloned())
@@ -3787,6 +4127,11 @@ pub(super) fn CreateSessionForm(
                     },
                 }
             }
+            // Why the last template accepted from search was not applied;
+            // nothing from it was (SPEC.md: all or nothing).
+            if let Some(message) = template_error() {
+                p { class: "launch-composer-template-error", role: "status", "{display_peer(&message)}" }
+            }
             // Search belongs to the shared shell. A query can choose an
             // agent type, a model, a folder, or a saved setup; it never
             // manufactures a command from text alone, and it never chooses
@@ -3894,6 +4239,10 @@ pub(super) fn CreateSessionForm(
                                 &evt.value(),
                                 &composer_hosts_for_search_input,
                             ));
+                            rows.extend(crate::launch_composer::template_search_results(
+                                &evt.value(),
+                                &template_names_for_search_input,
+                            ));
                             let groups = crate::launch_composer::grouped_search_results(rows);
                             composer_search_index.set(
                                 crate::launch_composer::default_search_index(&groups, &evt.value()),
@@ -3991,8 +4340,20 @@ pub(super) fn CreateSessionForm(
                                         promote_fetched_history_snapshot(
                                             offered_history, create_target, fetched_history,
                                         );
-                                        let browse_path = apply_composer_search_result(
+                                        let mut browse_path = None;
+                                        for edit in template_edits(
                                             result,
+                                            &templates_for_search_key,
+                                            &action_hosts,
+                                            catalog.as_deref().unwrap_or_default(),
+                                            is_replace_with,
+                                            template_targets,
+                                        ) {
+                                            match edit {
+                                                TemplateEdit::Set(set) => set(),
+                                                TemplateEdit::Search(result) => {
+                                                    browse_path = apply_composer_search_result(
+                                                        result,
                                             title,
                                             title_edited,
                                             chosen_host,
@@ -4022,6 +4383,9 @@ pub(super) fn CreateSessionForm(
                                             catalog.as_deref(),
                                             intent_key,
                                         );
+                                                }
+                                            }
+                                        }
                                         if let Some(path) = browse_path {
                                             request_directory_browse(
                                                 browse_base.clone(),
@@ -4098,6 +4462,7 @@ pub(super) fn CreateSessionForm(
                                                         let browse_hosts = browse_hosts.clone();
                                                         let action_hosts = action_hosts_for_search_click.clone();
                                                         let history_target = current_history_target.clone();
+                                                        let templates_for_search_click = templates_for_search_click.clone();
                                                         move |_| {
                                                             if !draft_transition_allowed(ops) {
                                                                 return;
@@ -4111,8 +4476,20 @@ pub(super) fn CreateSessionForm(
                                                             promote_fetched_history_snapshot(
                                                                 offered_history, create_target, fetched_history,
                                                             );
-                                                            let browse_path = apply_composer_search_result(
-                                                                result.clone(), title, title_edited, chosen_host, &action_hosts, clone_host_state,
+                                                            let mut browse_path = None;
+                                                            for edit in template_edits(
+                                                                result.clone(),
+                                                                &templates_for_search_click,
+                                                                &action_hosts,
+                                                                catalog.as_deref().unwrap_or_default(),
+                                                                is_replace_with,
+                                                                template_targets,
+                                                            ) {
+                                                                match edit {
+                                                                    TemplateEdit::Set(set) => set(),
+                                                                    TemplateEdit::Search(result) => {
+                                                                        browse_path = apply_composer_search_result(
+                                                                            result,  title, title_edited, chosen_host, &action_hosts, clone_host_state,
                                                                 history_target.clone(),
                                                                 live_destination, remembered_destination,
                                                                 history_activation_attempts, destination_draft, preview_revision, cwd, cwd_raw_seed, cwd_edited,
@@ -4126,6 +4503,9 @@ pub(super) fn CreateSessionForm(
                                                                 composer_reset_reason,
                                                                 catalog.as_deref(), intent_key,
                                                             );
+                                                                    }
+                                                                }
+                                                            }
                                                             if let Some(path) = browse_path {
                                                                 request_directory_browse(
                                                                     browse_base.clone(), selected, &browse_hosts,
@@ -4148,6 +4528,7 @@ pub(super) fn CreateSessionForm(
                                                         | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Template(name) => rsx! { "Template: {display_peer(name)}" },
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },

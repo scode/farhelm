@@ -3402,3 +3402,43 @@ launch's display command) and `agent_kind` (its integration kind) as derived con
 37 rewrites each cached session row by the same rule, adding `launch` and dropping `resume_template`, so a host that is
 down at the upgrade keeps its sessions listed until it returns; a cached row with no string `invocation` is left for the
 reader's skip-and-log policy.
+
+### Launch templates
+
+A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
+the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
+a template is applied whole and never queried by field, and because the set of launcher fields is the wire crate's to
+grow. A field a template leaves out is absent from the JSON; for the agent-launch choices that have a default (model,
+effort, permissions, workspace trust) and for the resume command, an explicit `null` means "reset to the default", which
+is how a template can clear a choice rather than only set one. The agent type, host, destination and session name have
+no reset: a template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields
+are refused on decode, so a misspelled field is an error rather than a silently ignored edit. Writes go through
+`PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
+`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only a template's shape on
+write (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields within the 64
+KiB a create is held to); whether its fields apply is decided only when it is applied. No agent verb writes a template.
+
+Application is one pure function, `farhelm_proto::launcher::apply_template`, compiled into both the UI and the helm: a
+launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
+kind, then agent type, then the rest). Choosing an agent type on the agent launch kind runs
+`reconcile_harness_selection`, which moved from the UI into the same module together with the model-catalog row type, so
+a click, a search result and a template reconcile alike: setting a model runs the same reconciliation choosing it by
+hand does (an effort the new model does not offer goes), the custom model's owning agent type is tracked so a later
+change of agent type clears it, and with no agent type chosen a model only one agent type offers picks that type. Models
+are compared in the agent type's own catalog spelling, as the launcher and the helm's compiler compare them. The
+function refuses a field that does not apply to the launch kind then active, an agent-launch choice with no agent type
+(other than that single-owner model), a model another agent type owns, an effort or permission the agent type does not
+offer, a host the dialog holds fixed (Replace with), and a host no known install has (a host row in the
+identity-mismatch phase does not count, exactly as for the create default); any refusal leaves the launcher unchanged.
+
+In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first runs `apply_template`
+on a snapshot of the launcher, so a refusal applies nothing; then it replays the template as the launcher's own search
+actions (agent type, model, effort, permissions, trust, host, folder, repository, name) and sets directly only what has
+no such action (the launch kind, the command fields and the command launch's declared agent type, the approve, smart
+approve and chat permissions, and a choice reset to its default). That replay is what makes remembered defaults, recent
+setups and a pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking
+for templates. The Templates panel is a modal dialog opened by a button beside New; its form offers every launcher
+field, each with a "leave as is" state and, where the field has a default, a "reset to default" state. A rename saves
+the new name before deleting the old one, so a failure in between leaves both; saving under a name another template
+already has is refused in the panel rather than overwriting that template. The launcher reads templates when it opens
+and again whenever the Templates dialog closes.

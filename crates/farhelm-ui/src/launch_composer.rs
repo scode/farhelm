@@ -13,16 +13,12 @@ use crate::api::{LaunchCatalogModel, LaunchHistory, LaunchHistoryEntry};
 use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// A stable display order prevents catalog entry order from moving buttons.
-const EFFORT_ORDER: &[LaunchEffort] = &[
-    LaunchEffort::Off,
-    LaunchEffort::Minimal,
-    LaunchEffort::Low,
-    LaunchEffort::Medium,
-    LaunchEffort::High,
-    LaunchEffort::Xhigh,
-    LaunchEffort::Max,
-    LaunchEffort::Ultra,
-];
+// The effort order, the agent-type reconciliation and the effort table
+// live in the wire crate, so a template the helm applies reconciles exactly
+// as one this page applies.
+pub(crate) use farhelm_proto::launcher::{
+    EFFORT_ORDER, compatible_efforts, reconcile_harness_selection,
+};
 
 /// Return the stable lowercase word used for an effort in the composer.
 ///
@@ -228,6 +224,9 @@ pub(crate) enum ComposerSearchResult {
     /// Select one currently offered host without touching the agent draft.
     Host(ComposerHost),
     Harness(LaunchHarness),
+    /// Apply the launch template of this exact name (`tl:name`), as the
+    /// edits it contains made by hand (SPEC.md, Launch templates).
+    Template(String),
     Model {
         id: String,
         harness: LaunchHarness,
@@ -470,6 +469,7 @@ pub(crate) enum ComposerSearchGroup {
     Names,
     Hosts,
     Harnesses,
+    Templates,
     Models,
     /// Reasoning-effort words valid for the selected harness and model.
     Efforts,
@@ -487,6 +487,7 @@ impl ComposerSearchGroup {
             Self::Names => "Session name",
             Self::Hosts => "Hosts",
             Self::Harnesses => "Harnesses",
+            Self::Templates => "Templates",
             Self::Models => "Models",
             Self::Efforts => "Efforts",
             Self::Permissions => "Permissions",
@@ -509,6 +510,7 @@ pub(crate) fn grouped_search_results(
     let mut names = Vec::new();
     let mut hosts = Vec::new();
     let mut harnesses = Vec::new();
+    let mut templates = Vec::new();
     let mut models = Vec::new();
     let mut efforts = Vec::new();
     let mut permissions = Vec::new();
@@ -521,6 +523,7 @@ pub(crate) fn grouped_search_results(
             ComposerSearchResult::Name(_) => names.push(result),
             ComposerSearchResult::Host(_) => hosts.push(result),
             ComposerSearchResult::Harness(_) => harnesses.push(result),
+            ComposerSearchResult::Template(_) => templates.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
             ComposerSearchResult::Permissions(_) => permissions.push(result),
@@ -536,6 +539,7 @@ pub(crate) fn grouped_search_results(
         (ComposerSearchGroup::Names, names),
         (ComposerSearchGroup::Hosts, hosts),
         (ComposerSearchGroup::Harnesses, harnesses),
+        (ComposerSearchGroup::Templates, templates),
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
         (ComposerSearchGroup::Permissions, permissions),
@@ -666,6 +670,8 @@ pub(crate) enum SearchScope {
     Folder,
     Recent,
     Github,
+    /// `tl:`, the only scope that offers launch templates.
+    Template,
 }
 
 /// Trim a composer query and split one recognized leading scope label.
@@ -699,10 +705,30 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
         SearchScope::Recent
     } else if label.eq_ignore_ascii_case("gh") {
         SearchScope::Github
+    } else if label.eq_ignore_ascii_case("tl") {
+        SearchScope::Template
     } else {
         return (SearchScope::All, query);
     };
     (scope, value[1..].trim())
+}
+
+/// Offer the launch templates whose names contain a `tl:` query's value, in
+/// the order given (the helm lists them by name); `tl:` alone offers them
+/// all. Only the `tl:` scope offers templates: an unlabelled query is about
+/// the launch being built, and a template's name would only be noise there.
+pub(crate) fn template_search_results(query: &str, names: &[String]) -> Vec<ComposerSearchResult> {
+    let (scope, value) = scoped_query(query);
+    if scope != SearchScope::Template {
+        return Vec::new();
+    }
+    let folded = value.to_lowercase();
+    names
+        .iter()
+        .filter(|name| name.to_lowercase().contains(&folded))
+        .cloned()
+        .map(ComposerSearchResult::Template)
+        .collect()
 }
 
 /// Offer one action for a name and filtered host rows for their leading labels.
@@ -940,6 +966,7 @@ pub(crate) fn default_search_index(
         SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
         SearchScope::Permissions => vec![ComposerSearchGroup::Permissions],
         SearchScope::Trust => vec![ComposerSearchGroup::Trust],
+        SearchScope::Template => vec![ComposerSearchGroup::Templates],
         SearchScope::Folder | SearchScope::Recent | SearchScope::Github => Vec::new(),
     };
     for kind in kinds {
@@ -975,6 +1002,9 @@ fn exact_word_group(
         }
         ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
             Some(ComposerSearchGroup::Harnesses)
+        }
+        ComposerSearchResult::Template(name) if name.eq_ignore_ascii_case(folded_query) => {
+            Some(ComposerSearchGroup::Templates)
         }
         ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
             Some(ComposerSearchGroup::Models)
@@ -1338,89 +1368,6 @@ pub(crate) fn reconcile_harness_for_catalog_read(
     }
 }
 
-/// Move a structured choice to another harness without retaining impossible
-/// dependent values.
-///
-/// A model is owned either by the release catalog or, for a custom id, by the
-/// harness on which it was entered. The caller passes that ownership so a
-/// harness click and a search result make exactly the same reconciliation.
-/// Effort is independent when the new harness still offers it; only an effort
-/// the new model or harness cannot accept is cleared. Unsupported permissions
-/// fall back to the destination's default; default YOLO from the source never
-/// becomes an explicit approval preference for another harness. Callers must
-/// retain the source harness in `selection` even when picking a target model.
-/// Workspace trust clears when the destination harness has no per-run switch.
-pub(crate) fn reconcile_harness_selection(
-    mut selection: LaunchSelection,
-    model_owner: Option<LaunchHarness>,
-    harness: LaunchHarness,
-    catalog: &[LaunchCatalogModel],
-) -> (LaunchSelection, Option<LaunchHarness>) {
-    let source = selection.harness;
-    // A harness's default YOLO does not express an approval preference for a
-    // different harness. Keep explicit approval choices, and explicit YOLO
-    // from harnesses whose omitted mode is non-YOLO.
-    if selection.harness != harness
-        && selection.permissions == selection.harness.omitted_permission()
-    {
-        selection.permissions = None;
-    }
-    selection.harness = harness;
-    if !harness.offers_model() {
-        // Grok exposes neither field. Clear retained values at the harness
-        // boundary so a recent setup or prior selection cannot manufacture a
-        // launch shape that the helm must reject later.
-        selection.model = None;
-        selection.effort = None;
-        selection.permissions = normalized_permissions(harness, selection.permissions);
-        return (selection, None);
-    }
-    // Ownership is read in both harnesses' catalog spellings
-    // (`LaunchHarness::catalog_model_id`). The destination's spelling keeps
-    // a bare `gpt-6-luna` moved to OpenCode as OpenCode's model; the
-    // source's spelling still recognizes a model the source harness owns,
-    // so Claude's `claude-fable-5` moved to OpenCode (where it reads as an
-    // unknown `opencode/claude-fable-5`) is cleared rather than kept as a
-    // custom OpenCode id.
-    let known_owners = selection.model.as_ref().map(|model| {
-        let in_destination = harness.catalog_model_id(model);
-        let in_source = source.catalog_model_id(model);
-        catalog
-            .iter()
-            .filter(|candidate| {
-                candidate.id == in_destination
-                    || (candidate.harness == source && candidate.id == in_source)
-            })
-            .map(|candidate| candidate.harness)
-            .collect::<Vec<_>>()
-    });
-    let known_is_owned = known_owners
-        .as_ref()
-        .is_some_and(|owners| owners.contains(&harness));
-    let owner = known_is_owned.then_some(harness).or(model_owner);
-    let retained_owner = known_is_owned
-        .then_some(harness)
-        .or((model_owner == Some(harness)).then_some(harness));
-    if (known_owners
-        .as_ref()
-        .is_some_and(|owners| !owners.is_empty())
-        && !known_is_owned)
-        || (known_owners.as_ref().is_none_or(|owners| owners.is_empty())
-            && owner.is_some()
-            && retained_owner.is_none())
-    {
-        selection.model = None;
-    }
-    if selection.effort.is_some_and(|effort| {
-        !compatible_efforts(harness, selection.model.as_deref(), catalog).contains(&effort)
-    }) {
-        selection.effort = None;
-    }
-    selection.permissions = normalized_permissions(harness, selection.permissions);
-    selection.workspace_trust = normalized_workspace_trust(harness, selection.workspace_trust);
-    (selection, retained_owner)
-}
-
 /// Describe an explicit value cleared by a compatibility transition.
 ///
 /// The initial default state is intentionally silent; this applies only when
@@ -1456,36 +1403,6 @@ pub(crate) fn reconciliation_reset_reason(
         ));
     }
     (!notices.is_empty()).then(|| notices.join("; "))
-}
-
-/// Return the catalog-supported effort choices for a harness and optional
-/// known model.
-///
-/// A custom model has no entry of its own, so it receives the released
-/// harness vocabulary: the union of that harness's catalog entries. This is
-/// presentation metadata only; the helm validates the final selection.
-pub(crate) fn compatible_efforts(
-    harness: LaunchHarness,
-    model: Option<&str>,
-    catalog: &[LaunchCatalogModel],
-) -> Vec<LaunchEffort> {
-    if let Some(model) = model.map(|model| harness.catalog_model_id(model))
-        && let Some(entry) = catalog
-            .iter()
-            .find(|entry| entry.harness == harness && entry.id == model)
-    {
-        return entry.efforts.clone();
-    }
-
-    EFFORT_ORDER
-        .iter()
-        .copied()
-        .filter(|effort| {
-            catalog
-                .iter()
-                .any(|entry| entry.harness == harness && entry.efforts.contains(effort))
-        })
-        .collect()
 }
 
 /// The effort buttons the launch controls render: the catalog's choices for
@@ -3292,6 +3209,27 @@ mod tests {
                 ComposerSearchResult::Recent(history.launches[0].clone()),
             ]
         );
+    }
+
+    /// Spec: only the `tl:` scope offers templates, by a case-insensitive
+    /// part of their name (`tl:` alone lists them all), and an exact name
+    /// is the default selection.
+    ///
+    /// Why: SPEC.md names `tl:name` as how search offers templates; an
+    /// unlabelled query is about the launch being built, so template names
+    /// there would crowd out its agent types and models.
+    #[test]
+    fn templates_are_offered_only_under_tl() {
+        let names = vec!["my-codex".to_string(), "Web-Builder".to_string()];
+        assert_eq!(
+            template_search_results("tl:web", &names),
+            vec![ComposerSearchResult::Template("Web-Builder".into())]
+        );
+        assert_eq!(template_search_results("TL:", &names).len(), 2);
+        assert!(template_search_results("codex", &names).is_empty());
+        let groups = grouped_search_results(template_search_results("tl:my-codex", &names));
+        assert_eq!(groups[0].0, ComposerSearchGroup::Templates);
+        assert_eq!(default_search_index(&groups, "tl:my-codex"), 0);
     }
 
     /// Search never turns its text into a command, and offers no result for

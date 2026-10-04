@@ -41,6 +41,8 @@
 mod create_form;
 mod row;
 mod shared;
+/// The Templates panel beside New (SPEC.md, Launch templates).
+mod templates;
 mod view;
 
 pub(crate) use shared::{OpenDestination, with_source_host};
