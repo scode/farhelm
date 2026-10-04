@@ -2931,18 +2931,22 @@ impl SupervisorClient {
         id: &str,
         stop_if_running: bool,
     ) -> anyhow::Result<SessionInfo> {
-        self.restart_session_with(id, stop_if_running, None).await
+        self.restart_session_with(id, stop_if_running, None, None)
+            .await
     }
 
     /// Restart, or Restart with when `with` carries the replacement launch
     /// (already resolved by the caller: an agent launch composed by this
     /// helm, or a command launch as the user edited it). `None` is the
-    /// ordinary restart wire shape.
+    /// ordinary restart wire shape. `expected_launch` is the stored launch
+    /// an approval card showed, which the supervisor requires to still be
+    /// the session's (`ControlMsg::RestartSession::expected_launch`).
     pub async fn restart_session_with(
         &self,
         id: &str,
         stop_if_running: bool,
         with: Option<farhelm_proto::SessionLaunch>,
+        expected_launch: Option<farhelm_proto::SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
@@ -2953,6 +2957,7 @@ impl SupervisorClient {
                     session_id: id.to_string(),
                     stop_if_running,
                     with,
+                    expected_launch,
                 },
             )
             .await?
@@ -5779,7 +5784,7 @@ mod tests {
             "{renamed:#}"
         );
         let restarted = client
-            .restart_session_with("sess-1", false, None)
+            .restart_session_with("sess-1", false, None, None)
             .await
             .expect_err("a restart reply for another session must be refused");
         assert!(
@@ -6098,6 +6103,7 @@ mod tests {
                     session_id: "restarted".to_string(),
                     stop_if_running: false,
                     with: None,
+                    expected_launch: None,
                 },
             )
             .await

@@ -123,7 +123,7 @@ async fn assert_restart_with_refused(
     let before = durable_launch_bundle(h, &session.id).await;
     let error = h
         .client
-        .restart_session_with(&session.id, true, Some(launch))
+        .restart_session_with(&session.id, true, Some(launch), None)
         .await
         .expect_err("invalid restart-with must be refused");
     assert_eq!(
@@ -163,7 +163,7 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
 
     let restarted = h
         .client
-        .restart_session_with(&session.id, true, Some(composed(yolo.clone())))
+        .restart_session_with(&session.id, true, Some(composed(yolo.clone())), None)
         .await
         .expect("restart with new permissions");
     assert_eq!(restarted.launch.agent_selection(), Some(&yolo));
@@ -335,6 +335,7 @@ async fn raw_restart_with(
             session_id: session_id.to_string(),
             stop_if_running: true,
             with: Some(launch),
+            expected_launch: None,
         })
         .await
         .expect("write restart-with");

@@ -3,7 +3,9 @@
 // The always-on leg uses the deterministic fake-agent `spawn` script and a
 // second page as the observer. The observer never reloads or navigates while
 // the terminal creates children, so a row appearing there proves the normal
-// drain and invalidation feed carry spawn visibility end to end.
+// drain and invalidation feed carry spawn visibility end to end. Every spawn
+// asks the user first (SPEC.md, Agent-spawned sessions), so the observer is
+// also where the spec answers each approval card, exactly as a user would.
 //
 // The final leg repeats the product contract with real Claude. It is gated on
 // FARHELM_REAL_AGENT=1 because vendor credentials and network access are
@@ -14,7 +16,14 @@ import { type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { cleanupSession, createSession, listSessions, type SessionRow } from "./helpers/fleet";
+import {
+  cleanupSession,
+  createSession,
+  listSessions,
+  setLocalYoloWithoutAsking,
+  type SessionRow,
+} from "./helpers/fleet";
+import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
 import {
   CLAUDE_CODE_MARKERS,
   submitPrompt,
@@ -80,6 +89,12 @@ test("a fake agent spawns children that appear without refreshing the observer",
 
   try {
     await requireProductPageAuth(context);
+    // The fake agent's launch is a command launch, which an agent may start
+    // only on a host that starts YOLO sessions without asking (SPEC.md); the
+    // spec is about spawning, not that rule. The commands setting must start
+    // off, or no card would be asked for.
+    await setLocalYoloWithoutAsking(request, true);
+    await setLocalCommandsWithoutAsking(request, false);
     root = stackScratchDir(`farhelm-spawn-${stamp}-`);
     const unparentedDir = path.join(root, "unparented-child");
     const parentedDir = path.join(root, "parented-child");
@@ -100,8 +115,15 @@ test("a fake agent spawns children that appear without refreshing the observer",
       readyMarker: "FAKE-AGENT READY",
     });
 
-    // This is the acceptance command: inheritance is an explicit choice.
+    // This is the acceptance command: inheritance is an explicit choice. The
+    // spawn waits for the user, whose card names the folder and the inherited
+    // launch.
     await submitPrompt(driver, `spawn ${unparentedDir}`, 100);
+    await answerCard(page, "allow", [
+      "start a new session running the asking session's own launch",
+      unparentedDir,
+      "fake-agent --script spawn",
+    ]);
     await waitForReplyMarker(driver, "SPAWNED:");
     unparented = await childByTitle(request, path.basename(unparentedDir));
     expect(
@@ -112,9 +134,14 @@ test("a fake agent spawns children that appear without refreshing the observer",
     expect(page.url(), "the observer must not navigate to discover the child").toBe(observerUrl);
 
     // The second command proves an authenticated parent reaches the spawned
-    // session without changing how the observer discovers it.
+    // session without changing how the observer discovers it. Answered with
+    // "always allow", which must turn the host's setting on as well.
     await submitPrompt(driver, `spawn-parented ${parentedDir}`, 100);
+    await answerCard(page, "always-allow", [parentedDir]);
     await waitForReplyMarker(driver, "SPAWNED-PARENTED:");
+    const hosts = await request.get("/api/hosts");
+    const local = (await hosts.json()).hosts.find((host: { kind: string }) => host.kind === "local");
+    expect(local.commands_without_asking, "always allow turns the host's setting on").toBe(true);
     parented = await childByTitle(request, path.basename(parentedDir));
     await expect(row(page, parented.id)).toBeVisible({ timeout: 20_000 });
     expect(page.url()).toBe(observerUrl);
@@ -130,6 +157,55 @@ test("a fake agent spawns children that appear without refreshing the observer",
     if (unparented) await cleanupSession(request, unparented.id);
     if (parent) await cleanupSession(request, parent.id);
     if (root) fs.rmSync(root, { recursive: true, force: true });
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalYoloWithoutAsking(request, false);
+  }
+});
+
+// Spec: denying an agent's spawn on its card refuses it with a readable
+// message in the agent's terminal and creates nothing.
+//
+// Why: the card's whole point is that the user's "no" stops the agent;
+// a denied spawn that still created a child, or that left the agent with
+// no answer, would make the prompt decorative.
+test("denying a spawn's card creates nothing and tells the agent", async ({ page, context, request }) => {
+  const stamp = `${Date.now()}-${process.pid}`;
+  let root: string | undefined;
+  let parent: SessionRow | undefined;
+  let driver: Page | undefined;
+  try {
+    await requireProductPageAuth(context);
+    await setLocalYoloWithoutAsking(request, true);
+    await setLocalCommandsWithoutAsking(request, false);
+    root = stackScratchDir(`farhelm-spawn-deny-${stamp}-`);
+    const childDir = path.join(root, "denied-child");
+    fs.mkdirSync(childDir);
+    parent = await createSession(request, {
+      title: `spawn-deny-parent-${stamp}`,
+      cwd: root,
+      invocation: SPAWN_AGENT,
+    });
+    driver = await context.newPage();
+    await page.goto("/");
+    await expect(row(page, parent.id)).toBeVisible({ timeout: 20_000 });
+    await openReadyTerminal(driver, parent.id, {
+      trustDialogMarkers: [],
+      readyMarker: "FAKE-AGENT READY",
+    });
+    await submitPrompt(driver, `spawn ${childDir}`, 100);
+    await answerCard(page, "deny", [childDir]);
+    await waitForReplyMarker(driver, "declined");
+    const sessions = (await listSessions(request)).sessions;
+    expect(
+      sessions.some((session) => session.title === path.basename(childDir)),
+      "a denied spawn creates no child",
+    ).toBe(false);
+  } finally {
+    if (driver) await driver.close();
+    if (parent) await cleanupSession(request, parent.id);
+    if (root) fs.rmSync(root, { recursive: true, force: true });
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalYoloWithoutAsking(request, false);
   }
 });
 
@@ -165,6 +241,11 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
   const marker = [...probe].reverse().join("");
 
   try {
+    // As in the fake-agent leg: the parent is a command launch, which an agent
+    // may spawn from only on a host that starts YOLO sessions without asking,
+    // and the spawn's card is answered below.
+    await setLocalYoloWithoutAsking(request, true);
+    await setLocalCommandsWithoutAsking(request, false);
     scratch = stackScratchDir(`farhelm-real-spawn-${stamp}-`);
     workspace = path.join(scratch, "spawned-workspace");
     parent = await createSession(request, {
@@ -184,6 +265,7 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
       `Do not merely explain the commands. Only after both commands succeed, reply with exactly ` +
       `the characters of ${probe} in reverse order and nothing else.`;
     await submitPrompt(driver, prompt);
+    await answerCard(page, "allow", [path.basename(workspace)], 120_000);
     await waitForReplyMarker(driver, marker, 120_000);
     const workspaces = execFileSync("jj", ["workspace", "list"], {
       cwd: repository,
@@ -223,5 +305,7 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
       }
     }
     if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalYoloWithoutAsking(request, false);
   }
 });

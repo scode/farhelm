@@ -883,14 +883,19 @@ async fn assert_restart_refused(h: &Harness, id: &str) {
     );
 }
 
-/// Explicit inheritance preserves a structured parent's frozen bundle.
+/// Spec: `farhelm spawn --inherit-agent`, relayed from a structured parent
+/// session, reaches the helm carrying the parent's own stored launch, filled
+/// in by the supervisor in place of whatever the session sent.
 ///
-/// The restricted wire path cannot name a new structured selection: its only
-/// authority is the authenticated parent. This uses that actual path, then
-/// reads the child process and store rather than treating the request body as
-/// evidence that inheritance survived admission and launch.
+/// Why: inheritance now goes through the helm so the user is asked (SPEC.md,
+/// Agent-spawned sessions), and the card and the agent YOLO rule judge the
+/// launch the supervisor puts here. This drives the real relay hop at the
+/// process boundary, through a scripted helm holding the session's
+/// attachment, rather than trusting a request body built in a test.
 #[farhelm_testtrace::test]
-async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process_boundary() {
+async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
+    use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
+    use farhelm_proto::{AgentOutcome, AgentReply, AgentSession, AgentVerb, SpawnPlacement};
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
@@ -902,53 +907,97 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
     assert_forwarded(&observed_argv(&h, &parent.id, 1).await, &selection);
+    let cwd = fixture.work.path().to_string_lossy().into_owned();
 
+    let handler = crate::agent_relay::ScriptedHandler::answering(AgentReply::Created {
+        session: AgentSession {
+            id: "relayed-child".to_string(),
+            host_id: "1".to_string(),
+            host: None,
+            title: "structured child".to_string(),
+            cwd: cwd.clone(),
+            agent: "codex".to_string(),
+            status: String::new(),
+            current: false,
+            restart_offer: Default::default(),
+            stale: false,
+        },
+    });
+    let helm = crate::agent_relay::connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&parent.id, 80, 24)
+        .await
+        .expect("the scripted helm attaches to the parent");
     let token = credential_for(&h, &parent.id).await;
     let mut peer = SessionPeer::connect(&h.sup, &parent.id, &token).await;
     let reply = peer
-        .control(ControlMsg::CreateSession {
-            req_id: 1,
-            parent: Some(parent.id.clone()),
-            cwd: fixture.work.path().to_string_lossy().into_owned(),
-            launch: None,
-            inherit_agent: true,
-            title: Some("structured child".to_string()),
-            cols: WIDE_COLS,
-            rows: ROWS,
-            intent_key: Some("structured-inherited-child".to_string()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        })
+        .ask(
+            &parent.id,
+            AgentVerb::Create {
+                host: None,
+                templates: Vec::new(),
+                edits: TemplateFields {
+                    destination: Some(TemplateDestination::Folder(cwd)),
+                    name: Some("structured child".to_string()),
+                    ..Default::default()
+                },
+                intent_key: None,
+                confirm_yolo: false,
+                spawn: Some(SpawnPlacement {
+                    parent: Some(parent.id.clone()),
+                    inherit_agent: true,
+                    inherited_launch: Some(Box::new(farhelm_proto::SessionLaunch::plain_command(
+                        "forged-by-the-session",
+                    ))),
+                }),
+            },
+        )
         .await;
-    let ControlMsg::SessionCreated {
-        req_id: 1,
-        session: child,
-    } = reply
+    assert!(
+        matches!(
+            &reply,
+            ControlMsg::AgentResponse {
+                outcome: AgentOutcome::Ok { .. },
+                ..
+            }
+        ),
+        "the scripted helm's answer reaches the session: {reply:?}"
+    );
+    let asked = handler.asked.lock().unwrap().clone();
+    let [
+        (
+            asking,
+            AgentVerb::Create {
+                spawn: Some(placement),
+                ..
+            },
+        ),
+    ] = asked.as_slice()
     else {
-        panic!("explicit structured inheritance must create a child: {reply:?}");
+        panic!("exactly one relayed spawn: {asked:?}");
     };
-    assert_eq!(child.launch.agent_selection(), Some(&selection.clone()));
-    assert_forwarded(&observed_argv(&h, &child.id, 2).await, &selection);
-
-    let live = wait_for_live_status(&h.client, &child.id, 30).await;
-    assert_eq!(live.launch.agent_selection(), Some(&selection.clone()));
-    let stored = SessionStore::open(&h.state.path().join("supervisor.db"), false)
-        .await
-        .expect("reopen durable store")
-        .session(&child.id)
-        .await
-        .expect("read durable child")
-        .expect("inherited child remains stored");
-    assert_eq!(stored.launch.agent_selection(), Some(&selection));
+    assert_eq!(asking, &parent.id);
+    assert!(placement.inherit_agent);
+    assert_eq!(
+        placement.inherited_launch.as_deref(),
+        Some(&parent.launch),
+        "the supervisor's own stored launch, not the session's"
+    );
+    assert_eq!(
+        placement
+            .inherited_launch
+            .as_ref()
+            .and_then(|launch| launch.agent_selection()),
+        Some(&selection)
+    );
 }
 
-/// Restricted raw launch data is refused at the process boundary, leaving no
-/// child.
+/// Spec: a session-authenticated `CreateSession`, whatever it carries, is
+/// refused at the process boundary as unauthorized and leaves no child.
 ///
-/// A session credential can only choose explicit inheritance. It cannot
-/// declare that arbitrary invocation metadata is trusted, even from a
-/// structured parent whose own launch the request copies word for word.
+/// Why: a session's spawns all go through the helm, which asks the user. A
+/// create a session could still have its own supervisor answer would be a
+/// spawn nobody was asked about (SPEC.md, Agent-spawned sessions).
 #[farhelm_testtrace::test]
 async fn restricted_raw_data_is_refused() {
     let h = harness().await;
@@ -965,37 +1014,42 @@ async fn restricted_raw_data_is_refused() {
     let token = credential_for(&h, &parent.id).await;
     let mut peer = SessionPeer::connect(&h.sup, &parent.id, &token).await;
 
-    let raw_reply = peer
-        .control(ControlMsg::CreateSession {
-            req_id: 1,
-            parent: Some(parent.id.clone()),
-            cwd: fixture.work.path().to_string_lossy().into_owned(),
-            launch: Some(fake_agent_launch(
+    for (launch, inherit_agent) in [
+        (
+            Some(fake_agent_launch(
                 &fixture.invocation(&selection),
                 selection.clone(),
             )),
-            inherit_agent: false,
-            title: Some("raw override".to_string()),
-            cols: WIDE_COLS,
-            rows: ROWS,
-            intent_key: Some("structured-parent-raw-override".to_string()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        })
-        .await;
-    let ControlMsg::Error {
-        req_id: 1,
-        kind: farhelm_proto::ErrorKind::InvalidRequest,
-        message,
-    } = raw_reply
-    else {
-        panic!("raw restricted data must be refused: {raw_reply:?}");
-    };
-    assert!(
-        message.contains("explicit inheritance selector"),
-        "the refusal names the one selector a session may use: {message}"
-    );
+            false,
+        ),
+        (None, true),
+    ] {
+        let raw_reply = peer
+            .control(ControlMsg::CreateSession {
+                req_id: 1,
+                parent: Some(parent.id.clone()),
+                cwd: fixture.work.path().to_string_lossy().into_owned(),
+                launch,
+                inherit_agent,
+                title: Some("raw override".to_string()),
+                cols: WIDE_COLS,
+                rows: ROWS,
+                intent_key: Some("structured-parent-raw-override".to_string()),
+                confirm_yolo: false,
+                github_checkout: None,
+                key_lives_with_session: false,
+            })
+            .await;
+        let ControlMsg::Error {
+            req_id: 1,
+            kind: farhelm_proto::ErrorKind::Unauthorized,
+            message,
+        } = raw_reply
+        else {
+            panic!("a restricted create must be refused: {raw_reply:?}");
+        };
+        assert!(message.contains("asks the user"), "{message}");
+    }
     let sessions = h
         .client
         .list_sessions()

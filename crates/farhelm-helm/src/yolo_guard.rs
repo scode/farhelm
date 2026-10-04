@@ -11,8 +11,9 @@
 //!
 //! A refused launch is never dispatched. The browser answers the refusal
 //! with a loud confirmation and retries the same request with the override
-//! set; the `farhelm` command line takes an explicit flag, which the agent
-//! instructions tell agents to pass only with the user's explicit approval.
+//! set. An agent has no override: its launches go through [`check_agent`]
+//! instead, which refuses outright what [`check`] would ask about, and more
+//! (SPEC.md, Agent-spawned sessions).
 
 use crate::AppState;
 use crate::store::HostId;
@@ -26,9 +27,8 @@ use crate::store::HostId;
 #[derive(Debug, thiserror::Error)]
 #[error(
     "{host_name} asks before YOLO launches, and this launch skips approval prompts: nothing was \
-     started. Confirm the YOLO launch explicitly (the GUI asks; the farhelm command line takes \
-     --confirm-yolo), or turn on \"start YOLO sessions here without asking\" in the host's \
-     settings"
+     started. Confirm the YOLO launch explicitly in the GUI, or turn on \"start YOLO sessions here \
+     without asking\" in the host's settings"
 )]
 pub(crate) struct YoloNeedsConfirmation {
     pub(crate) host_name: String,
@@ -86,6 +86,74 @@ pub(crate) async fn check(
     }
 }
 
+/// Refuse an agent's launch on `host` when the host asks before YOLO launches
+/// and the launch is one Farhelm cannot vouch for: YOLO by its own verdict,
+/// unclassified, a command launch whatever its YOLO assertion says, or an
+/// agent launch whose command lines are not what Farhelm composes for its
+/// choices.
+///
+/// SPEC.md lets an agent start, on such a host, only what runs the way the
+/// user already approved. Farhelm never reads a command line, so a command
+/// launch's assertion is the caller's word, and an agent's word is exactly
+/// what this host's setting says not to take. An agent launch is classified
+/// by its choices, which is exact only while its stored command lines are the
+/// ones Farhelm composes from those choices: a clone copies its source's
+/// stored launch as the SOURCE host's supervisor reports it, and a
+/// compromised one could pair "default permissions" with a YOLO command line.
+/// So the launch is recomposed here (`launches::compile`) and vouched for
+/// only when it matches exactly; one composed by an older Farhelm, or forged,
+/// is refused like a command launch. The refusal comes
+/// before the approval card, so the user is never asked to approve something
+/// the host's own setting rules out, and again when the user approves (the
+/// setting can change during the wait). Reads the setting at the moment of
+/// the decision, like [`check`].
+pub(crate) async fn check_agent(
+    state: &AppState,
+    host: HostId,
+    launch: &farhelm_proto::SessionLaunch,
+) -> anyhow::Result<()> {
+    let vouched = match launch {
+        farhelm_proto::SessionLaunch::Agent { selection, .. } => {
+            launch.yolo() == Some(false)
+                && crate::launches::compile(selection.clone()).as_ref() == Ok(launch)
+        }
+        farhelm_proto::SessionLaunch::Command(_) | farhelm_proto::SessionLaunch::Legacy { .. } => {
+            false
+        }
+    };
+    if vouched {
+        return Ok(());
+    }
+    let row = state
+        .store
+        .list_hosts()
+        .await?
+        .into_iter()
+        .find(|row| row.id == host);
+    match row {
+        Some(row) if row.yolo_without_asking => Ok(()),
+        Some(row) => {
+            let host_name = crate::aggregate::host_display_name(
+                row.kind,
+                row.destination.as_deref(),
+                row.alias.as_deref(),
+            );
+            Err(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: farhelm_proto::ErrorKind::Unauthorized,
+                message: format!(
+                    "{host_name} asks before YOLO launches, so an agent may not start a YOLO \
+                     launch, a command launch, or an agent launch whose command line Farhelm \
+                     did not compose itself (such as a copy of a session an older Farhelm \
+                     started) there: nothing was started. To let agents do this, turn on \
+                     \"start YOLO sessions here without asking\" in {host_name}'s settings"
+                ),
+            }))
+        }
+        None => Err(crate::sessions::no_such_host(host)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +195,48 @@ mod tests {
         );
         assert!(check(&harness.state, missing, false, false).await.is_ok());
         assert!(check(&harness.state, missing, true, true).await.is_ok());
+    }
+
+    /// Spec: on a host that asks before YOLO launches, the agent rule allows
+    /// a non-YOLO agent launch only when its command lines are exactly what
+    /// Farhelm composes for its choices, and refuses one with the same choices
+    /// but different command lines.
+    ///
+    /// Why: a clone copies its source's stored launch as the source host's
+    /// supervisor reports it. A compromised source could pair non-YOLO
+    /// choices with a YOLO command line, and classifying by the choices alone
+    /// would let that run on a host whose user said to ask first.
+    #[farhelm_testtrace::test]
+    async fn the_agent_rule_vouches_only_for_launches_farhelm_composed() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let local = crate::rest_harness::local_id(&harness.store).await;
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        let composed = crate::launches::compile(selection.clone()).expect("compiles");
+        assert_eq!(composed.yolo(), Some(false), "premise: a non-YOLO launch");
+        check_agent(&harness.state, local, &composed)
+            .await
+            .expect("Farhelm's own composition is vouched for");
+        let farhelm_proto::SessionLaunch::Agent { resume, .. } = &composed else {
+            panic!("an agent launch");
+        };
+        let forged = farhelm_proto::SessionLaunch::Agent {
+            selection,
+            start: vec![
+                "claude".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.to_string(),
+            ],
+            resume: resume.clone(),
+        };
+        let refused = check_agent(&harness.state, local, &forged)
+            .await
+            .expect_err("forged command lines are not vouched for");
+        assert!(format!("{refused:#}").contains("may not start a YOLO launch"));
     }
 }

@@ -623,12 +623,21 @@ impl Supervisor {
             // and is released with this frame.
             return unavailable(NO_HELM_ATTACHED);
         };
+        // A verb the helm may hold for the user's approval gets the helm's
+        // whole approval wait on top of the ordinary budget, so its own "not
+        // answered" refusal arrives before this side gives up and reports an
+        // unknown outcome. Listings keep the short budget: nothing holds them.
+        let answer = if request.may_wait_for_user() {
+            self.timeouts.agent_upcall + self.timeouts.agent_approval_wait
+        } else {
+            self.timeouts.agent_upcall
+        };
         let outcome = link
             .upcall(
                 session_id.clone(),
                 request,
                 self.timeouts.agent_deliver,
-                self.timeouts.agent_upcall,
+                answer,
                 self.timeouts.agent_fence_retain,
                 fence,
             )
@@ -641,7 +650,7 @@ impl Supervisor {
             if message.contains("did not answer within") {
                 warn!(
                     session = %session_id,
-                    budget = ?self.timeouts.agent_upcall,
+                    budget = ?answer,
                     "{message}"
                 );
             } else {

@@ -1580,9 +1580,17 @@ pub(crate) async fn do_create_session(
         spawned,
     } = spec;
     // Before any bookkeeping or dispatch: a YOLO launch on a host that asks before YOLO
-    // launches is refused unless the caller confirmed it (see `yolo_guard`).
-    let is_yolo = crate::yolo_guard::create_is_yolo(&mode);
-    crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
+    // launches is refused unless the caller confirmed it (see `yolo_guard`). An agent's
+    // create has no confirmation to give and is held to the agent rule instead, here at
+    // the last step before dispatch as well as before its approval card, so a setting
+    // that changed in between is judged as it stands now.
+    match origin {
+        CreateOrigin::Agent => crate::yolo_guard::check_agent(state, claim.host, &mode).await?,
+        CreateOrigin::User => {
+            let is_yolo = crate::yolo_guard::create_is_yolo(&mode);
+            crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
+        }
+    }
     // REST carries the displayed preview cwd as part of the retained client
     // request identity. The supervisor's fresh-create destination instead
     // comes exclusively from the resolved binding; its ordinary cwd input
@@ -2228,7 +2236,16 @@ pub(crate) async fn restart_session(
                 ));
             }
         };
-        match do_restart_session(&state, &id, req.stop_if_running, with, req.confirm_yolo).await {
+        match do_restart_session(
+            &state,
+            &id,
+            req.stop_if_running,
+            with,
+            req.confirm_yolo,
+            None,
+        )
+        .await
+        {
             Ok((_claim, session)) => axum::Json(session).into_response(),
             Err(e) => http_error(e),
         }
@@ -2242,13 +2259,17 @@ pub(crate) async fn restart_session(
 /// restart has one owner-routing and post-mutation publication contract.
 /// `stop_if_running` deliberately reaches the supervisor unchanged:
 /// it alone can revalidate the current offer and liveness immediately before
-/// destructive work.
+/// destructive work. So does `expected_launch`, the stored launch an agent's
+/// approval card showed (`None` from the GUI, whose Restart dialog states no
+/// launch): only the supervisor can compare it with the stored launch under
+/// the claim that keeps a Restart with from landing in between.
 pub(crate) async fn do_restart_session(
     state: &AppState,
     id: &str,
     stop_if_running: bool,
     with: Option<LaunchRequest>,
     confirm_yolo: bool,
+    expected_launch: Option<farhelm_proto::SessionLaunch>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
@@ -2260,7 +2281,7 @@ pub(crate) async fn do_restart_session(
     let is_yolo = with.as_ref().is_some_and(crate::yolo_guard::create_is_yolo);
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let session = client
-        .restart_session_with(id, stop_if_running, with)
+        .restart_session_with(id, stop_if_running, with, expected_launch)
         .await?;
     // An ambiguity is logged and refreshed inside; this id was already
     // routed, so the reply stands.

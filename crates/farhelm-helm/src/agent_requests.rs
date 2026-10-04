@@ -66,6 +66,22 @@
 //! [`AgentRequestHandler::handle`] as part of [`AgentOrigin`] for exactly
 //! this.
 //!
+//! # Acting verbs wait for the user first
+//!
+//! Every verb that changes something (rename, stop, restart, create, clone,
+//! and `farhelm spawn` through create) is carried out only once the user has
+//! approved it on a card in the GUI, or the requesting host's "run farhelm
+//! commands from this host without asking" setting is on (SPEC.md,
+//! Agent-spawned sessions). [`approved`] is that gate: it asks
+//! (`approvals::ask`) after the verb has resolved exactly what it would do,
+//! so the card shows that, and before any of it happens; it then rechecks
+//! that the request's connection is still the one serving its host, so an
+//! approval cannot carry over to whatever replaced it during the wait. New
+//! sessions also pass the agent YOLO rule ([`approve_launch`],
+//! `yolo_guard::check_agent`) before the card and again after it. A
+//! lifecycle verb routes its target before asking, so a session no host
+//! knows is refused without a card. Listings never ask.
+//!
 //! # What this side does NOT verify, and why that is deliberate
 //!
 //! The `session_id` on an upcall, and the claim that the connection it
@@ -90,6 +106,7 @@ use std::sync::{Arc, Weak};
 
 use anyhow::Context as _;
 use async_trait::async_trait;
+use farhelm_proto::approvals::{ApprovalAction, LaunchVerb};
 use farhelm_proto::{
     AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, SessionStatus,
 };
@@ -309,36 +326,120 @@ impl AgentRequestHandler for HelmAgentRequests {
             } => {
                 let target = resolve_target(target.expect("validated"), session_id, "rename");
                 let expected_title = expected_title.expect("validated");
-                crate::sessions::do_rename_session(&state, &target, &title, Some(&expected_title))
+                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
+                    return outcome_of(Err(unroutable), mutating);
+                }
+                let action = ApprovalAction::Rename {
+                    target: crate::approvals::describe_session(&state, &target).await,
+                    title: title.clone(),
+                };
+                match approved(&state, origin, session_id, action).await {
+                    Ok(()) => crate::sessions::do_rename_session(
+                        &state,
+                        &target,
+                        &title,
+                        Some(&expected_title),
+                    )
                     .await
                     .map(|(claim, info)| {
                         agent_session_reply(&state, &claim, info, origin.host, session_id)
-                    })
+                    }),
+                    Err(refused) => Err(refused),
+                }
             }
             AgentVerb::Stop { session_id: target } => {
                 let target = resolve_target(target.expect("validated"), session_id, "stop");
-                crate::sessions::do_stop_session(&state, &target)
-                    .await
-                    .map(|()| AgentReply::Stopped {})
+                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
+                    return outcome_of(Err(unroutable), mutating);
+                }
+                let action = ApprovalAction::Stop {
+                    target: crate::approvals::describe_session(&state, &target).await,
+                };
+                match approved(&state, origin, session_id, action).await {
+                    Ok(()) => crate::sessions::do_stop_session(&state, &target)
+                        .await
+                        .map(|()| AgentReply::Stopped {}),
+                    Err(refused) => Err(refused),
+                }
             }
             AgentVerb::Restart {
                 session_id: target,
                 stop_if_running,
             } => {
                 let target = resolve_target(target.expect("validated"), session_id, "restart");
-                crate::sessions::do_restart_session(&state, &target, stop_if_running, None, false)
+                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
+                    return outcome_of(Err(unroutable), mutating);
+                }
+                // A plain restart resumes the session's own stored launch, so
+                // the YOLO rule does not apply (SPEC.md); the card shows that
+                // launch, resume command included, as the cache knows it.
+                // Without the launch there is nothing to show on the card and
+                // nothing to hold the restart to, so the user would approve a
+                // restart of whatever the session holds by then: refused, to
+                // be retried once the helm has the session's details again.
+                let Some(shown) = cached_launch(&state, &target).await else {
+                    return outcome_of(
+                        Err(anyhow::Error::new(crate::SupervisorError {
+                            origin: crate::client::ErrorOrigin::Helm,
+                            kind: ErrorKind::Unavailable,
+                            message: "Farhelm cannot read this session's launch right now, so \
+                                      it cannot show you what a restart would run; nothing was \
+                                      done, retry shortly"
+                                .to_string(),
+                        })),
+                        mutating,
+                    );
+                };
+                let action = ApprovalAction::Restart {
+                    target: crate::approvals::describe_session(&state, &target).await,
+                    stop_if_running,
+                    launch: Some(shown.clone()),
+                };
+                // The card showed `shown`; a Restart with in the GUI during the
+                // wait would make the approved restart resume a different
+                // launch. A change the cache already saw is refused here with
+                // the clearer message; the supervisor then holds the restart
+                // to `shown` under its lifecycle claim, which catches one
+                // landing after this check (`expected_launch`).
+                let approval = match approved(&state, origin, session_id, action).await {
+                    Ok(()) if cached_launch(&state, &target).await.as_ref() != Some(&shown) => {
+                        Err(anyhow::Error::new(crate::SupervisorError {
+                            origin: crate::client::ErrorOrigin::Helm,
+                            kind: ErrorKind::Conflict,
+                            message: "the session's launch changed while this restart waited \
+                                      for approval, so it was not restarted; retry to see the \
+                                      new launch on the card"
+                                .to_string(),
+                        }))
+                    }
+                    other => other,
+                };
+                match approval {
+                    Ok(()) => crate::sessions::do_restart_session(
+                        &state,
+                        &target,
+                        stop_if_running,
+                        None,
+                        false,
+                        Some(shown),
+                    )
                     .await
                     .map(|(claim, info)| {
                         agent_restarted_reply(&state, &claim, info, origin.host, session_id)
-                    })
+                    }),
+                    Err(refused) => Err(refused),
+                }
             }
             AgentVerb::Templates {} => template_listing(&state, origin.host).await,
+            // `confirm_yolo` is ignored on both creating verbs: an agent has
+            // no YOLO override (SPEC.md, Agent-spawned sessions), whatever a
+            // modified CLI sends; `yolo_guard::check_agent` decides instead.
             AgentVerb::Create {
                 host,
                 templates,
                 edits,
                 intent_key,
-                confirm_yolo,
+                confirm_yolo: _,
                 spawn,
             } => {
                 create_for_agent(
@@ -353,7 +454,6 @@ impl AgentRequestHandler for HelmAgentRequests {
                             spawn,
                         },
                         intent_key,
-                        confirm_yolo,
                     },
                 )
                 .await
@@ -364,7 +464,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 cwd,
                 title,
                 intent_key,
-                confirm_yolo,
+                confirm_yolo: _,
             } => {
                 clone_for_agent(
                     &state,
@@ -376,35 +476,12 @@ impl AgentRequestHandler for HelmAgentRequests {
                         cwd,
                         title,
                         intent_key,
-                        confirm_yolo,
                     },
                 )
                 .await
             }
         };
-        match reply {
-            Ok(reply) => AgentOutcome::Ok { reply },
-            // Classified the same way the REST surface classifies the SAME
-            // failures (`crate::error_kind`), rather than flattened to
-            // `Internal`: a lifecycle or creating verb's refusal — an unknown
-            // session, a rejected title, a non-connected host, a directory
-            // the target does not have — is exactly the kind of thing a
-            // caller can act on differently, and an agent deserves the same
-            // distinction a browser gets. The two read-only verbs above
-            // rarely produce a classifiable error at all (a listing failure
-            // has nothing upstream to classify against), so this arm falls
-            // back to `Internal` for them exactly as before.
-            //
-            // A dead target-supervisor connection is consulted FIRST,
-            // because `error_kind` has no answer for it: nothing in that
-            // chain is a `SupervisorError` (the peer never replied), so it
-            // falls through to `Internal` — the one kind that tells a caller
-            // nothing at all about retrying.
-            Err(error) => transport_outcome(&error, mutating).unwrap_or(AgentOutcome::Err {
-                kind: crate::error_kind(&error),
-                message: format!("{error:#}"),
-            }),
-        }
+        outcome_of(reply, mutating)
     }
 
     /// The same question `handle` asks on the way in, asked again for the
@@ -417,6 +494,33 @@ impl AgentRequestHandler for HelmAgentRequests {
         self.state
             .upgrade()
             .is_some_and(|state| origin_is_live(&state, origin))
+    }
+}
+
+/// Turn a verb's result into the answer the agent gets.
+///
+/// Classified the same way the REST surface classifies the SAME failures
+/// (`crate::error_kind`), rather than flattened to `Internal`: a lifecycle or
+/// creating verb's refusal (an unknown session, a rejected title, a
+/// non-connected host, a directory the target does not have, a request the
+/// user declined) is exactly the kind of thing a caller can act on
+/// differently, and an agent deserves the same distinction a browser gets.
+/// The read-only verbs rarely produce a classifiable error at all (a listing
+/// failure has nothing upstream to classify against), so this falls back to
+/// `Internal` for them.
+///
+/// A dead target-supervisor connection is consulted FIRST, because
+/// `error_kind` has no answer for it: nothing in that chain is a
+/// `SupervisorError` (the peer never replied), so it falls through to
+/// `Internal`, the one kind that tells a caller nothing at all about
+/// retrying.
+fn outcome_of(reply: anyhow::Result<AgentReply>, mutating: bool) -> AgentOutcome {
+    match reply {
+        Ok(reply) => AgentOutcome::Ok { reply },
+        Err(error) => transport_outcome(&error, mutating).unwrap_or(AgentOutcome::Err {
+            kind: crate::error_kind(&error),
+            message: format!("{error:#}"),
+        }),
     }
 }
 
@@ -688,14 +792,11 @@ pub(crate) fn escape_for_log(id: &str) -> String {
 struct CreateRequest {
     edits: LaunchEditsRequest,
     intent_key: Option<String>,
-    confirm_yolo: bool,
 }
 
 /// What an agent's create asked for, as it asked: the part a keyed retry
 /// must repeat exactly to be bound to the first attempt's resolution
-/// (`store`'s `AGENT_CREATE_BINDINGS_SCHEMA`). The YOLO override is not
-/// part of it, because a retry adding `--confirm-yolo` after the helm asked
-/// for it is the same request answered.
+/// (`store`'s `AGENT_CREATE_BINDINGS_SCHEMA`).
 #[derive(serde::Serialize)]
 struct LaunchEditsRequest {
     host: Option<String>,
@@ -736,7 +837,6 @@ struct CloneRequest {
     cwd: Option<String>,
     title: Option<String>,
     intent_key: Option<String>,
-    confirm_yolo: bool,
 }
 
 /// Resolve the exact host name a creating verb is required to carry.
@@ -943,12 +1043,12 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
 /// ## Which host
 ///
 /// A spawn creates on the asking session's own host, the one its request
-/// arrived from. Its parent, when it names one, must be the asking session,
-/// the rule the supervisor applies to `farhelm spawn --inherit-agent`; the
-/// relay already holds the asking session's delete fence for the whole
+/// arrived from. Its parent, when it names one, must be the asking session;
+/// the relay already holds the asking session's delete fence for the whole
 /// request, so the parent cannot be deleted under the create. Its key is
-/// marked to live only as long as the child, as a spawn's key does when the
-/// session's own supervisor answers it. Otherwise an explicit `--host` name
+/// marked to live only as long as the child, as every spawn's is. An
+/// inheriting spawn takes its launch from its supervisor
+/// ([`inherited_spawn_resolution`]) rather than from templates and flags. Otherwise an explicit `--host` name
 /// wins; failing that, the install a template named; failing both, the
 /// create is refused, since SPEC.md's creation contract has no default host.
 ///
@@ -997,11 +1097,7 @@ async fn create_for_agent(
     asking_session: &str,
     request: CreateRequest,
 ) -> anyhow::Result<AgentReply> {
-    let CreateRequest {
-        edits,
-        intent_key,
-        confirm_yolo,
-    } = request;
+    let CreateRequest { edits, intent_key } = request;
     let spawned = edits.spawn.is_some();
     let parent = edits.spawn.as_ref().and_then(|spawn| spawn.parent.clone());
     if let Some(parent) = &parent
@@ -1065,19 +1161,43 @@ async fn create_for_agent(
             }
         }
     };
-    let result = dispatch_agent_create(
+    let verb = match &edits.spawn {
+        Some(placement) if placement.inherit_agent => LaunchVerb::SpawnInherited,
+        Some(_) => LaunchVerb::Spawn,
+        None => LaunchVerb::Create,
+    };
+    let result = match approve_launch(
         state,
         origin,
         asking_session,
-        &stored,
-        AgentCreateDispatch {
-            intent_key: intent_key.clone(),
-            confirm_yolo,
-            parent,
-            spawned,
+        LaunchApproval {
+            verb,
+            host: stored.host,
+            host_name: stored.host_name.clone(),
+            cwd: stored.resolution.cwd.clone(),
+            title: stored.resolution.title.clone(),
+            launch: stored.resolution.launch.clone(),
+            source: None,
         },
     )
-    .await;
+    .await
+    {
+        Ok(()) => {
+            dispatch_agent_create(
+                state,
+                origin,
+                asking_session,
+                &stored,
+                AgentCreateDispatch {
+                    intent_key: intent_key.clone(),
+                    parent,
+                    spawned,
+                },
+            )
+            .await
+        }
+        Err(refused) => Err(refused),
+    };
     if let (Err(error), true, Some(key)) = (&result, bound_here, intent_key)
         && no_supervisor_holds_the_outcome(error, spawned)
         && let Err(unbind) = state.store.unbind_agent_create(key).await
@@ -1112,6 +1232,11 @@ async fn resolve_agent_create(
     edits: &LaunchEditsRequest,
 ) -> anyhow::Result<StoredResolution> {
     let views = crate::hosts::host_views(state).await?;
+    if let Some(placement) = &edits.spawn
+        && placement.inherit_agent
+    {
+        return inherited_spawn_resolution(&views, origin, edits, placement);
+    }
     let templates = state.store.launch_templates().await?;
     let resolution = crate::agent_launch::resolve(
         &templates,
@@ -1154,11 +1279,163 @@ async fn resolve_agent_create(
     })
 }
 
+/// The resolution of `farhelm spawn --inherit-agent`: the asking session's
+/// own stored launch, as its supervisor filled it in on the way up
+/// (`SpawnPlacement::inherited_launch`), in the folder and under the title
+/// the CLI gave, on the asking session's own host.
+///
+/// SPEC.md makes `--inherit-agent` exclusive with every launch flag; the CLI
+/// refuses the combination, and so does this, since only a folder and a title
+/// may ride beside it. The launch is believed as the supervisor sent it: a
+/// spawn acts only on its own host, which the threat model already trusts
+/// (SPEC.md accepts that a compromised supervisor could misreport it).
+fn inherited_spawn_resolution(
+    views: &[crate::hosts::HostView],
+    origin: AgentOrigin,
+    edits: &LaunchEditsRequest,
+    placement: &farhelm_proto::SpawnPlacement,
+) -> anyhow::Result<StoredResolution> {
+    let Some(launch) = placement.inherited_launch.as_deref().cloned() else {
+        return Err(crate::sessions::invalid_request(
+            "the asking session's supervisor did not supply the launch to inherit".to_string(),
+        ));
+    };
+    let farhelm_proto::launcher::TemplateFields {
+        destination, name, ..
+    } = &edits.edits;
+    let only_folder_and_title = farhelm_proto::launcher::TemplateFields {
+        destination: destination.clone(),
+        name: name.clone(),
+        ..Default::default()
+    };
+    if !edits.templates.is_empty() || edits.edits != only_folder_and_title || edits.host.is_some() {
+        return Err(crate::sessions::invalid_request(
+            "--inherit-agent is exclusive with every launch flag and template".to_string(),
+        ));
+    }
+    let Some(farhelm_proto::launcher::TemplateDestination::Folder(cwd)) = destination.clone()
+    else {
+        return Err(crate::sessions::invalid_request(
+            "farhelm spawn --inherit-agent needs --cwd".to_string(),
+        ));
+    };
+    let Some(host_name) = views
+        .iter()
+        .find(|view| view.id == origin.host)
+        .map(|view| view.name.clone())
+    else {
+        return Err(crate::sessions::no_such_host(origin.host));
+    };
+    Ok(StoredResolution {
+        host: origin.host,
+        host_name,
+        resolution: crate::agent_launch::Resolution {
+            cwd,
+            launch,
+            title: name.clone(),
+            template_host: None,
+        },
+    })
+}
+
+/// Everything an agent's new session would be, for the approval card and
+/// the YOLO rule.
+struct LaunchApproval {
+    verb: LaunchVerb,
+    host: HostId,
+    host_name: String,
+    cwd: String,
+    title: Option<String>,
+    launch: farhelm_proto::SessionLaunch,
+    source: Option<farhelm_proto::approvals::ApprovalSession>,
+}
+
+/// The gate in front of every new session an agent asks for: the agent YOLO
+/// rule, then the user's approval, then the rule, the request's own
+/// connection and the target host's connection all rechecked for the time the
+/// user took. The create path applies the rule once more at dispatch
+/// (`sessions::do_create_session`).
+///
+/// The YOLO rule comes first so the user is never asked to approve something
+/// the target host's own setting rules out (`yolo_guard::check_agent`), and
+/// again after the approval, because the setting can change during the wait
+/// (SPEC.md: the rule is applied again when the user approves). The origin
+/// recheck is [`approved`]'s.
+async fn approve_launch(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    approval: LaunchApproval,
+) -> anyhow::Result<()> {
+    crate::yolo_guard::check_agent(state, approval.host, &approval.launch).await?;
+    let host = approval.host;
+    let launch = approval.launch.clone();
+    // The target as the card names it: the connection serving its registry
+    // row now. A row can be retargeted or adopt a new install while the user
+    // takes their time, and the approval was for the machine on the card.
+    let target_before = state.manager.status(host).map(|status| status.incarnation);
+    let action = ApprovalAction::Launch {
+        verb: approval.verb,
+        host_name: approval.host_name,
+        cwd: approval.cwd,
+        title: approval.title,
+        launch: approval.launch,
+        source: approval.source,
+    };
+    approved(state, origin, asking_session, action).await?;
+    if state.manager.status(host).map(|status| status.incarnation) != target_before {
+        return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unavailable,
+            message: "the target host's connection changed while this request waited for \
+                      approval, so nothing was started; retry"
+                .to_string(),
+        }));
+    }
+    crate::yolo_guard::check_agent(state, host, &launch).await
+}
+
+/// Ask the user to approve `action` for `asking_session` (see
+/// `approvals::ask`) and, once approved, confirm that the connection the
+/// request arrived on is still the one serving its host.
+///
+/// The recheck is what keeps an approval from carrying over to whatever
+/// replaced or re-identified the host while the user took their time
+/// (SPEC.md: an approval holds only for the connection the request arrived
+/// on). It is the same check `handle` makes on the way in.
+async fn approved(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    action: ApprovalAction,
+) -> anyhow::Result<()> {
+    crate::approvals::ask(state, origin, asking_session, action).await?;
+    if !origin_is_live(state, origin) {
+        return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unavailable,
+            message: crate::approvals::ORIGIN_GONE_REFUSAL.to_string(),
+        }));
+    }
+    Ok(())
+}
+
+/// A session's stored launch as the helm's cache knows it, for a restart
+/// card. `None` when the cache does not know the session.
+async fn cached_launch(state: &AppState, session_id: &str) -> Option<farhelm_proto::SessionLaunch> {
+    let host = state.store.host_of_session(session_id).await.ok()??;
+    state
+        .store
+        .cached_session(host, session_id)
+        .await
+        .ok()?
+        .map(|info| info.launch)
+}
+
 /// The per-attempt inputs of an agent create's dispatch, beside the
 /// resolution it may share with an earlier attempt.
 struct AgentCreateDispatch {
     intent_key: Option<String>,
-    confirm_yolo: bool,
     parent: Option<String>,
     spawned: bool,
 }
@@ -1209,7 +1486,10 @@ async fn dispatch_agent_create(
                 // back, which is what the key is for. Contrast
                 // `clone_for_agent`, whose replay can be the ASKING session.
                 accept_result: None,
-                confirm_yolo: dispatch.confirm_yolo,
+                // Never an agent's to give: `approve_launch` applied the
+                // agent YOLO rule, which refuses everything this override
+                // would let through on a host that asks.
+                confirm_yolo: false,
                 settings_from_source: false,
                 parent: dispatch.parent,
                 spawned: dispatch.spawned,
@@ -1309,9 +1589,34 @@ async fn clone_for_agent(
         &source,
         "the user can start a copy with Clone or Replace with, which choose a launch",
     )?;
+    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    let cwd = request.cwd.unwrap_or(source.cwd);
+    // The source's title is copied VERBATIM, empty string included: a clone
+    // that let the target derive a title from the directory would silently
+    // rename the copy, which is the one thing a user reading two rows side by
+    // side would notice first.
+    let title = request.title.unwrap_or(source.title);
+    approve_launch(
+        state,
+        origin,
+        asking_session,
+        LaunchApproval {
+            verb: LaunchVerb::Clone,
+            host,
+            host_name: host_name.clone(),
+            cwd: cwd.clone(),
+            title: Some(title.clone()),
+            launch: mode.clone(),
+            source: Some(
+                crate::approvals::describe_session(state, &request.source_session_id).await,
+            ),
+        },
+    )
+    .await?;
     // The source row is authoritative only while it still belongs to the
     // same owner connection. Re-resolving closes the read/dispatch window
-    // without trusting the helm's stale cache as source truth.
+    // (which now includes the user's approval) without trusting the helm's
+    // stale cache as source truth.
     let (confirmed_claim, confirmed_client) =
         crate::sessions::route_session(state, &request.source_session_id).await?;
     if confirmed_claim != source_claim || !Arc::ptr_eq(&confirmed_client, &source_client) {
@@ -1321,7 +1626,6 @@ async fn clone_for_agent(
             message: "the source session's owner changed while it was being read; run discovery again before retrying the clone".to_string(),
         }));
     }
-    let (host, host_name) = resolve_host(state, origin, request.host).await?;
     let (claim, client) = crate::sessions::host_client(state, host)?;
     // See `create_for_agent`'s own note on why both logged values are safe.
     info!(
@@ -1337,14 +1641,9 @@ async fn clone_for_agent(
             &claim,
             &client,
             crate::sessions::CreateSpec {
-                cwd: request.cwd.unwrap_or(source.cwd),
+                cwd,
                 mode,
-                // The source's title is copied VERBATIM, empty string
-                // included: a clone that let the target derive a title from
-                // the directory would silently rename the copy, which is
-                // the one thing a user reading two rows side by side would
-                // notice first.
-                title: Some(request.title.unwrap_or(source.title)),
+                title: Some(title),
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
                 intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
@@ -1371,7 +1670,8 @@ async fn clone_for_agent(
                         reject_clone_replay(&asking, &source, created)
                     }
                 })),
-                confirm_yolo: request.confirm_yolo,
+                // Never an agent's to give; see `dispatch_agent_create`.
+                confirm_yolo: false,
                 settings_from_source: false,
                 parent: None,
                 spawned: false,
@@ -2383,6 +2683,7 @@ mod tests {
         h.fleet.take_down(remote);
         h.await_state(remote, |state| state.phase() != "connected")
             .await;
+        trust_without_asking(&h).await;
         (h, local, remote)
     }
 
@@ -3010,7 +3311,28 @@ mod tests {
     ) -> (Harness, HostId) {
         let harness = crate::rest_harness::spliced_helm_listing(client_side, sessions).await;
         let local = local_id(&harness.store).await;
+        trust_without_asking(&harness).await;
         (harness, local)
+    }
+
+    /// Turn on, for every registered host, both settings that let agent
+    /// requests through without a person: "run farhelm commands from this
+    /// host without asking" and "start YOLO sessions here without asking".
+    ///
+    /// The relay tests here are about routing, replies and refusals from the
+    /// far end, not about asking; with the settings off every acting verb would
+    /// wait for an approval card nobody answers, and every command launch would
+    /// be refused by the agent YOLO rule. Turning the real settings on, rather
+    /// than any bypass, is what the plan's R4 asks for. The gate itself is
+    /// tested separately, with the settings off.
+    async fn trust_without_asking(h: &Harness) {
+        for row in h.store.list_hosts().await.unwrap() {
+            h.store
+                .set_commands_without_asking(row.id, true)
+                .await
+                .unwrap();
+            h.store.set_yolo_without_asking(row.id, true).await.unwrap();
+        }
     }
 
     /// How long a scripted supervisor gets to finish its exchange before
@@ -3047,6 +3369,72 @@ mod tests {
                  answer, so the handler resolved without forwarding one. It answered: {outcome:?}"
             ),
         }
+    }
+
+    /// Spec: an agent's restart of a session the helm still routes but whose
+    /// cached launch it cannot read is refused as unavailable, with no card
+    /// and nothing sent to the supervisor.
+    ///
+    /// Why: the approval card shows the launch a restart would resume, and
+    /// the approved restart carries that launch to the supervisor as its
+    /// precondition (`RestartSession::expected_launch`). With no launch to
+    /// show, the user would be approving whatever the session holds by the
+    /// time the restart runs, which SPEC.md's "an approval carries out
+    /// exactly what the card showed" rules out. The owner lookup reads only
+    /// the cached row's host, so an undecodable payload still routes; that is
+    /// the state this test builds.
+    #[farhelm_testtrace::test]
+    async fn a_restart_whose_launch_cannot_be_read_is_refused_without_a_card() {
+        let (client_side, _peer) = tokio::io::duplex(64 * 1024);
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("target", 2), session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let changed = h
+            .store
+            .connection_for_test()
+            .lock()
+            .execute(
+                "UPDATE session_cache SET info_json = '{\"not\": \"a session\"}' \
+                 WHERE session_id = 'target'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            changed, 1,
+            "fixture premise: the target's cached row exists"
+        );
+        assert_eq!(
+            h.store.host_of_session("target").await.unwrap(),
+            Some(local),
+            "fixture premise: the target still routes"
+        );
+        assert_eq!(cached_launch(&h.state, "target").await, None);
+
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Restart {
+                    session_id: Some("target".to_string()),
+                    stop_if_running: true,
+                },
+            )
+            .await;
+        match outcome {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::Unavailable, "{message}");
+                assert!(
+                    message.contains("cannot read this session's launch"),
+                    "{message}"
+                );
+            }
+            other => panic!("refused, got {other:?}"),
+        }
+        assert!(h.state.approvals.list().is_empty(), "no card was shown");
     }
 
     /// A correlated wrong reply does not establish whether restart ran.
@@ -3777,6 +4165,7 @@ mod tests {
         let local = local_id(&h.store).await;
         h.await_refreshed(local).await;
         h.await_refreshed(remote).await;
+        trust_without_asking(&h).await;
         (h, local, remote)
     }
 
@@ -3987,10 +4376,15 @@ mod tests {
         );
 
         // A refusal the helm made before sending removes it: the builder host
-        // asks before YOLO launches, and no confirmation was given.
+        // asks before YOLO launches, so the agent YOLO rule refuses an agent's
+        // command launch there.
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
-        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
         let handler = HelmAgentRequests::for_state(&h.state);
         put_template(&h, "t", builder_shell("sh", true)).await;
         let first = handler
@@ -4001,9 +4395,10 @@ mod tests {
             )
             .await;
         assert!(
-            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("--confirm-yolo")),
+            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("may not start a YOLO launch")),
             "premise: the helm refused the YOLO launch: {first:?}"
         );
+        h.store.set_yolo_without_asking(remote, true).await.unwrap();
         put_template(&h, "t", builder_shell("bash", false)).await;
         let retry = handler
             .handle(
@@ -4132,9 +4527,8 @@ mod tests {
     /// with nothing sent.
     ///
     /// Why: SPEC.md keeps `farhelm spawn` to its own host whichever way its
-    /// launch is described, and the supervisor refuses `--inherit-agent`
-    /// with a foreign parent; a spawn described by flags must get the same
-    /// answers, and the helm is the one creating it here.
+    /// launch is described, and a parent may only ever be the asking session;
+    /// the helm is the one creating it here.
     #[farhelm_testtrace::test]
     async fn a_spawn_creates_on_its_own_host_with_its_parent() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
@@ -4154,6 +4548,7 @@ mod tests {
             confirm_yolo: false,
             spawn: Some(farhelm_proto::SpawnPlacement {
                 parent: Some("asker".to_string()),
+                ..Default::default()
             }),
         };
         let outcome = handler
@@ -4196,6 +4591,7 @@ mod tests {
         if let AgentVerb::Create { spawn, .. } = &mut foreign {
             *spawn = Some(farhelm_proto::SpawnPlacement {
                 parent: Some("someone-else".to_string()),
+                ..Default::default()
             });
         }
         let outcome = handler
@@ -4898,6 +5294,7 @@ mod tests {
         });
         let h = crate::rest_harness::spliced_helm_listing(client_side, vec![source]).await;
         let local = local_id(&h.store).await;
+        trust_without_asking(&h).await;
         let handler = HelmAgentRequests::for_state(&h.state);
         let listing_before = agent_sessions(&handler, origin_of(&h, local), "asker").await;
         let revision_before = h.manager.events().revision();
@@ -5104,6 +5501,467 @@ mod tests {
         assert!(
             seen.lock().expect("seen mutex").is_empty(),
             "an omitted-command request is refused before anything is sent to the host"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The approval gate (SPEC.md, Agent-spawned sessions)
+    // -----------------------------------------------------------------
+
+    /// Answer the one waiting card over the real REST route.
+    async fn answer_card(h: &Harness, answer: &str) -> axum::http::StatusCode {
+        use tower::ServiceExt;
+        let id = h
+            .state
+            .approvals
+            .list()
+            .into_iter()
+            .next()
+            .expect("premise: a card is waiting")
+            .id;
+        h.router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/approvals/{id}"))
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({ "answer": answer }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// Wait (bounded) for a card to be listed while `task` is still waiting,
+    /// failing with the task's outcome if it ended without one.
+    async fn await_card(
+        h: &Harness,
+        task: &tokio::task::JoinHandle<AgentOutcome>,
+    ) -> farhelm_proto::approvals::PendingApproval {
+        let mut changes = h.state.manager.events().subscribe();
+        let card = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if let Some(card) = h.state.approvals.list().into_iter().next() {
+                    return Some(card);
+                }
+                if task.is_finished() {
+                    return None;
+                }
+                // The feed wakes this when a card appears; the tick only notices
+                // a request that ended without one, which bumps nothing.
+                tokio::select! {
+                    _ = changes.changed() => {}
+                    // sleep-ok: polling interval for the task's own ending, beside the feed wake-up.
+                    () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                }
+            }
+        })
+        .await
+        .expect("a card or an ending within the bound");
+        card.unwrap_or_else(|| panic!("the request ended without a card"))
+    }
+
+    /// Spec: with the requesting host's "run farhelm commands without asking"
+    /// setting off and a GUI connected, an agent's create waits for a card
+    /// showing the target host, folder and whole launch. Denying it refuses
+    /// the request as declined and sends nothing to the target; allowing the
+    /// next one creates the session.
+    ///
+    /// Why: this is the guarantee the permission prompts exist for. A create
+    /// reaching the target before the user's answer, or after a denial, is an
+    /// agent acting on the fleet without the user (SPEC.md, Local authority).
+    #[farhelm_testtrace::test]
+    async fn an_agent_create_waits_for_approval_and_a_denial_sends_nothing() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let create = || command_create("user@builder", "/srv/w", "echo hi", Some("t"), None);
+
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move { asking.handle(origin, "asker", create()).await });
+        let card = await_card(&h, &task).await;
+        match &card.action {
+            ApprovalAction::Launch {
+                verb,
+                host_name,
+                cwd,
+                launch,
+                ..
+            } => {
+                assert_eq!(*verb, LaunchVerb::Create);
+                assert_eq!(host_name, "user@builder");
+                assert_eq!(cwd, "/srv/w");
+                assert_eq!(launch.display_command(), "echo hi");
+            }
+            other => panic!("a launch card, got {other:?}"),
+        }
+        assert_eq!(card.session.id, "asker");
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "nothing is sent while it waits"
+        );
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::Unauthorized);
+                assert!(message.contains("declined"), "{message}");
+            }
+            other => panic!("declined, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "a denial sends nothing");
+
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move { asking.handle(origin, "asker", create()).await });
+        await_card(&h, &task).await;
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = task.await.unwrap();
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// Spec: on a host that asks before YOLO launches, an agent's command
+    /// launch is refused at once whatever its YOLO assertion says, and so is
+    /// a YOLO agent launch, with no card and nothing sent, even when the
+    /// request carries the old `confirm_yolo` override; an agent launch that
+    /// is not YOLO gets the ordinary card.
+    ///
+    /// Why: Farhelm cannot check a command's assertion, and SPEC.md lets an
+    /// agent start on such a host only what runs the way the user approved.
+    /// The override was the agent's own word, which the rule replaces.
+    #[farhelm_testtrace::test]
+    async fn the_agent_yolo_rule_refuses_without_a_card() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+
+        let agent_launch = |permissions| AgentVerb::Create {
+            host: Some("user@builder".to_string()),
+            templates: Vec::new(),
+            edits: farhelm_proto::launcher::TemplateFields {
+                kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
+                agent: Some(farhelm_proto::LaunchHarness::Claude),
+                permissions: Some(permissions),
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                    "/srv/w".to_string(),
+                )),
+                ..Default::default()
+            },
+            intent_key: None,
+            confirm_yolo: true,
+            spawn: None,
+        };
+        let mut overridden = command_create("user@builder", "/srv/w", "sh", None, None);
+        if let AgentVerb::Create { confirm_yolo, .. } = &mut overridden {
+            *confirm_yolo = true;
+        }
+        for refused in [
+            command_create("user@builder", "/srv/w", "sh", None, None),
+            overridden,
+            agent_launch(Some(farhelm_proto::LaunchPermission::Yolo)),
+        ] {
+            match handler.handle(origin, "asker", refused).await {
+                AgentOutcome::Err { kind, message } => {
+                    assert_eq!(kind, ErrorKind::Unauthorized);
+                    assert!(message.contains("may not start a YOLO launch"), "{message}");
+                    assert!(message.contains("user@builder"), "{message}");
+                }
+                other => panic!("refused, got {other:?}"),
+            }
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "no card for a refused launch"
+            );
+        }
+        assert!(seen.lock().unwrap().is_empty());
+
+        let asking = Arc::clone(&handler);
+        let task =
+            tokio::spawn(async move { asking.handle(origin, "asker", agent_launch(None)).await });
+        let card = await_card(&h, &task).await;
+        assert!(matches!(card.action, ApprovalAction::Launch { .. }));
+        task.abort();
+    }
+
+    /// Spec: a lifecycle verb on a session no host knows is refused as not
+    /// found before any card is shown, and a stop of a known session waits
+    /// for a card naming its target, after which a denial refuses it.
+    ///
+    /// Why: a card for a session that does not exist asks the user a question
+    /// with no right answer; and the stop, like every acting verb, must wait
+    /// for the user (SPEC.md).
+    #[farhelm_testtrace::test]
+    async fn a_stop_waits_for_approval_and_an_unknown_target_gets_no_card() {
+        let (h, local, _remote) = two_host_fleet().await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        match handler
+            .handle(
+                origin,
+                "local-live",
+                AgentVerb::Stop {
+                    session_id: Some("ghost".to_string()),
+                },
+            )
+            .await
+        {
+            AgentOutcome::Err { kind, .. } => assert_eq!(kind, ErrorKind::NotFound),
+            other => panic!("not found, got {other:?}"),
+        }
+        assert!(h.state.approvals.list().is_empty());
+
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move {
+            asking
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::Stop {
+                        session_id: Some("local-old".to_string()),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        match card.action {
+            ApprovalAction::Stop { target } => {
+                assert_eq!(target.id, "local-old");
+                assert!(target.title.is_some(), "the cache knows the target");
+            }
+            other => panic!("a stop card, got {other:?}"),
+        }
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(matches!(
+            task.await.unwrap(),
+            AgentOutcome::Err {
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+    }
+
+    /// Spec: `farhelm spawn --inherit-agent`, as its supervisor relays it with
+    /// the session's stored launch filled in, creates that launch on the
+    /// asking session's own host, in the folder and with the title the CLI
+    /// gave; one that also names a template is refused.
+    ///
+    /// Why: inheritance now goes through the helm so the user is asked, and
+    /// SPEC.md keeps `--inherit-agent` exclusive with every launch flag and
+    /// on the asking host only.
+    #[farhelm_testtrace::test]
+    async fn an_inherited_spawn_creates_the_supplied_launch_on_its_own_host() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let inherited = farhelm_proto::SessionLaunch::plain_command("my-agent --flag");
+        let spawn = |templates: Vec<String>| AgentVerb::Create {
+            host: None,
+            templates,
+            edits: farhelm_proto::launcher::TemplateFields {
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                    "/srv/child".to_string(),
+                )),
+                name: Some("child".to_string()),
+                ..Default::default()
+            },
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement {
+                parent: Some("asker".to_string()),
+                inherit_agent: true,
+                inherited_launch: Some(Box::new(inherited.clone())),
+            }),
+        };
+        let outcome = handler
+            .handle(origin_of(&h, remote), "asker", spawn(Vec::new()))
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].launch.as_ref(), Some(&inherited));
+            assert_eq!(seen[0].cwd, "/srv/child");
+            assert_eq!(seen[0].title.as_deref(), Some("child"));
+            assert_eq!(seen[0].parent.as_deref(), Some("asker"));
+        }
+        match handler
+            .handle(origin_of(&h, remote), "asker", spawn(vec!["t".to_string()]))
+            .await
+        {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(message.contains("exclusive"), "{message}");
+            }
+            other => panic!("refused, got {other:?}"),
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// Spec: the agent YOLO rule is applied again when the user approves: a
+    /// command launch carded while its target allowed YOLO launches is refused,
+    /// and nothing is sent, if the target was set to ask before the answer.
+    ///
+    /// Why: SPEC.md has the helm judge the setting as it stands when the user
+    /// approves; a launch carried out on the strength of a setting the user
+    /// has since turned off would start what the host now says not to.
+    #[farhelm_testtrace::test]
+    async fn the_yolo_rule_is_applied_again_after_approval() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move {
+            asking
+                .handle(
+                    origin,
+                    "asker",
+                    command_create("user@builder", "/srv/w", "sh", None, None),
+                )
+                .await
+        });
+        await_card(&h, &task).await;
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Err { kind, message } => {
+                assert_eq!(kind, ErrorKind::Unauthorized);
+                assert!(message.contains("may not start a YOLO launch"), "{message}");
+            }
+            other => panic!("refused, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "nothing is sent");
+    }
+
+    /// Spec: an inheriting spawn is carded as one, showing the inherited
+    /// launch; on a host that asks before YOLO launches, an inheriting spawn
+    /// whose launch is a command launch is refused without a card.
+    ///
+    /// Why: `--inherit-agent` used to be answered by the session's own
+    /// supervisor with nobody asked; it now goes through the same gate and
+    /// the same agent YOLO rule as every other spawn (SPEC.md).
+    #[farhelm_testtrace::test]
+    async fn an_inherited_spawn_is_carded_and_held_to_the_yolo_rule() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, None);
+        let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(remote, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, remote);
+        let spawn = || AgentVerb::Create {
+            host: None,
+            templates: Vec::new(),
+            edits: farhelm_proto::launcher::TemplateFields {
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                    "/srv/child".to_string(),
+                )),
+                ..Default::default()
+            },
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement {
+                parent: None,
+                inherit_agent: true,
+                inherited_launch: Some(Box::new(farhelm_proto::SessionLaunch::plain_command(
+                    "inherited-agent",
+                ))),
+            }),
+        };
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move { asking.handle(origin, "asker", spawn()).await });
+        let card = await_card(&h, &task).await;
+        match card.action {
+            ApprovalAction::Launch { verb, launch, .. } => {
+                assert_eq!(verb, LaunchVerb::SpawnInherited);
+                assert_eq!(launch.display_command(), "inherited-agent");
+            }
+            other => panic!("a launch card, got {other:?}"),
+        }
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        task.await.unwrap();
+
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        match handler.handle(origin, "asker", spawn()).await {
+            AgentOutcome::Err { kind, .. } => assert_eq!(kind, ErrorKind::Unauthorized),
+            other => panic!("refused, got {other:?}"),
+        }
+        assert!(
+            h.state.approvals.list().is_empty(),
+            "no card for a refused launch"
         );
     }
 }

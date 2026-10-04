@@ -194,7 +194,9 @@ pub(crate) const REQUEST_ID: u64 = 1;
 /// upcall (`AGENT_UPCALL_TIMEOUT`) and is the only party that can tell "no
 /// helm is attached" from "a helm has it and is slow"; a deadline here would
 /// collapse the two and fire first, hiding the specific error the relay was
-/// about to send. A spawn is answered by the local supervisor alone.
+/// about to send. That holds for a spawn too, which is relayed to the helm
+/// like every other acting verb, and for a wait on the user's approval,
+/// which the supervisor's budget covers (`AgentVerb::may_wait_for_user`).
 pub(crate) async fn one_shot_request(
     dial: &SessionDial,
     request: ControlMsg,
@@ -319,14 +321,13 @@ pub(crate) struct SpawnArgs {
     pub(crate) launch: SpawnLaunch,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
-    /// See `farhelm spawn --confirm-yolo`.
-    pub(crate) confirm_yolo: bool,
 }
 
-/// What a spawned child runs, which also decides who answers the spawn.
+/// What a spawned child runs. Either way the spawn is relayed to the
+/// attached helm, which asks the user before it creates anything.
 pub(crate) enum SpawnLaunch {
-    /// `--inherit-agent`: this session's own stored launch, copied by this
-    /// host's supervisor with no helm involved.
+    /// `--inherit-agent`: this session's own stored launch, which this
+    /// host's supervisor fills in as it relays the request.
     Inherit,
     /// Launch flags and templates, which only the attached helm can resolve
     /// (it owns the templates and composes agent launches). The folder and
@@ -349,80 +350,56 @@ pub(crate) enum SpawnLaunch {
 /// carries; every refusal and protocol mismatch is an error and therefore
 /// produces no id.
 ///
-/// An inherited spawn is answered by this host's supervisor. A spawn with
-/// launch flags is relayed to the attached helm as an agent `create` placed
-/// on this session's own host (SPEC.md: "The launch flags are resolved by
-/// the attached helm ... and are refused with a remedy when no helm is
-/// attached"), which is the relay's own "no helm is attached" refusal.
+/// Every spawn is relayed to the attached helm as an agent `create` placed
+/// on this session's own host, because the helm asks the user before it
+/// creates anything (SPEC.md, Agent-spawned sessions). With launch flags the
+/// helm resolves the launch; with `--inherit-agent` this host's supervisor
+/// fills in the session's own stored launch on the way up. With no helm
+/// attached, either is the relay's own "no helm is attached" refusal.
 ///
 /// A create is a mutation, so a reply lost after the request went out
 /// carries the outcome-unknown warning: the child may already be running.
 pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::Result<String> {
     let cwd = args.cwd.map(spawn_cwd).transpose()?;
-    match args.launch {
+    let (templates, mut edits, inherit_agent) = match args.launch {
         SpawnLaunch::Inherit => {
-            let Some(cwd) = cwd else {
+            if cwd.is_none() {
                 anyhow::bail!("farhelm spawn --inherit-agent needs --cwd");
-            };
-            let dial = env.dial("farhelm spawn")?;
-            let request = ControlMsg::CreateSession {
-                req_id: REQUEST_ID,
-                parent: args.parent,
-                cwd,
-                // Explicit inheritance copies the authenticated parent's
-                // stored launch, the only safe source of it.
-                launch: None,
-                inherit_agent: true,
-                title: args.title,
-                cols: 80,
-                rows: 24,
-                intent_key: args.idempotency_key,
-                confirm_yolo: args.confirm_yolo,
-                // Fresh-checkout payloads are helm-supplied only; a
-                // restricted spawn never carries one (and the supervisor
-                // refuses it).
-                github_checkout: None,
-                key_lives_with_session: false,
-            };
-            let reply = one_shot_request(&dial, request, true, "spawn").await?;
-            match reply {
-                ControlMsg::SessionCreated {
-                    req_id: REQUEST_ID,
-                    session,
-                } => Ok(session.id),
-                other => Err(unexpected_reply("spawn", &other, true)),
             }
-        }
-        SpawnLaunch::Flags {
-            templates,
-            mut edits,
-        } => {
-            edits.destination = cwd.map(farhelm_proto::launcher::TemplateDestination::Folder);
-            edits.name = args.title;
-            let (_asking, reply) = relay_request(
-                env,
-                "farhelm spawn",
-                farhelm_proto::AgentVerb::Create {
-                    host: None,
-                    templates,
-                    edits,
-                    intent_key: args.idempotency_key,
-                    confirm_yolo: args.confirm_yolo,
-                    spawn: Some(farhelm_proto::SpawnPlacement {
-                        parent: args.parent,
-                    }),
-                },
+            (
+                Vec::new(),
+                farhelm_proto::launcher::TemplateFields::default(),
+                true,
             )
-            .await?;
-            match reply {
-                AgentReply::Created { session } => Ok(session.id),
-                // `agent_request` has already checked the reply's tag, so
-                // this is a defect rather than a peer's answer.
-                _ => {
-                    anyhow::bail!("the helm answered spawn with something other than a new session")
-                }
-            }
         }
+        SpawnLaunch::Flags { templates, edits } => (templates, edits, false),
+    };
+    edits.destination = cwd.map(farhelm_proto::launcher::TemplateDestination::Folder);
+    edits.name = args.title;
+    let (_asking, reply) = relay_request(
+        env,
+        "farhelm spawn",
+        farhelm_proto::AgentVerb::Create {
+            host: None,
+            templates,
+            edits,
+            intent_key: args.idempotency_key,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement {
+                parent: args.parent,
+                inherit_agent,
+                // Filled in by this session's supervisor on the way up; one
+                // sent from here would be refused.
+                inherited_launch: None,
+            }),
+        },
+    )
+    .await?;
+    match reply {
+        AgentReply::Created { session } => Ok(session.id),
+        // `agent_request` has already checked the reply's tag, so this is a
+        // defect rather than a peer's answer.
+        _ => anyhow::bail!("the helm answered spawn with something other than a new session"),
     }
 }
 
@@ -454,6 +431,16 @@ fn spawn_cwd(cwd: PathBuf) -> anyhow::Result<String> {
 // ---------------------------------------------------------------------------
 // `farhelm agent`
 // ---------------------------------------------------------------------------
+
+/// How long an acting verb waits quietly before the CLI says it may be
+/// waiting for the user's approval.
+const APPROVAL_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What the CLI says on stderr once an acting verb has waited
+/// [`APPROVAL_NOTICE_DELAY`]. Worded as a possibility: a host whose setting
+/// says not to ask, or a slow target, produces the same quiet spell.
+pub(crate) const APPROVAL_NOTICE: &str = "farhelm: waiting for the helm; if Farhelm is asking \
+     the user to approve this request, it waits up to 9 minutes for their answer";
 
 /// Ask the helm one question, or tell it to act, from inside a session, and
 /// return the asking session's own id alongside the answer.
@@ -505,9 +492,10 @@ pub(crate) async fn relay_request(
     // other question this function can no longer answer afterwards: whether
     // the thing that went out CHANGES something. See [`lost_reply`].
     let mutating = request.is_mutating();
+    let may_wait = request.may_wait_for_user();
     let dial = env.dial(command)?;
     let session_id = dial.session_id.clone();
-    let reply = one_shot_request(
+    let exchange = one_shot_request(
         &dial,
         ControlMsg::AgentRequest {
             req_id: REQUEST_ID,
@@ -516,8 +504,24 @@ pub(crate) async fn relay_request(
         },
         mutating,
         "agent",
-    )
-    .await?;
+    );
+    tokio::pin!(exchange);
+    // An acting verb can sit for minutes while the helm waits for the user's
+    // approval, and an agent watching a silent command cannot tell that from
+    // a hang. Said once, locally, after a short quiet spell (SPEC.md); nothing
+    // travels the relay for it, and a host that is not asked about answers
+    // before it fires.
+    let reply = if may_wait {
+        tokio::select! {
+            reply = &mut exchange => reply,
+            () = tokio::time::sleep(APPROVAL_NOTICE_DELAY) => {
+                eprintln!("{APPROVAL_NOTICE}");
+                exchange.await
+            }
+        }
+    } else {
+        exchange.await
+    }?;
     match reply {
         ControlMsg::AgentResponse {
             req_id: REQUEST_ID,

@@ -32,7 +32,7 @@ use farhelm_proto::{AgentOutcome, AgentReply, AgentVerb, SessionAuth};
 /// about two concurrent upcalls could only ever observe them one at a time.
 pub(crate) struct ScriptedHandler {
     reply: Option<AgentReply>,
-    asked: std::sync::Mutex<Vec<(String, AgentVerb)>>,
+    pub(crate) asked: std::sync::Mutex<Vec<(String, AgentVerb)>>,
     entered: Option<tokio::sync::mpsc::Sender<String>>,
     /// Per-session gates, so a test can release the two peers' upcalls in
     /// whichever order it wants to prove routing against.
@@ -113,7 +113,12 @@ impl AgentRequestHandler for ScriptedHandler {
         if let Some(entered) = &self.entered {
             let _ = entered.send(session_id.to_string()).await;
             let gate = self.gate(session_id);
-            let _permit = gate.acquire().await.expect("the gate is never closed");
+            // Consumed, not returned: each `release` lets exactly one parked
+            // call through, so a later call from the same session parks again.
+            gate.acquire()
+                .await
+                .expect("the gate is never closed")
+                .forget();
             return AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
                     caller_host_id: "host-local".to_string(),
@@ -295,16 +300,16 @@ impl SessionPeer {
     }
 
     /// Ask one question and read the single frame that answers it.
-    async fn ask(&mut self, asking_as: &str, request: AgentVerb) -> ControlMsg {
+    pub(crate) async fn ask(&mut self, asking_as: &str, request: AgentVerb) -> ControlMsg {
         self.send(asking_as, request).await;
         self.answer().await
     }
 
     /// Send a raw restricted-control message and read its correlated reply.
     ///
-    /// Spawn uses `CreateSession` directly rather than the `AgentRequest`
-    /// envelope used by `farhelm agent`. Keeping this seam raw is what lets
-    /// the forgery regression submit provenance the typed CLI never emits.
+    /// Every spawn now uses the `AgentRequest` envelope (protocol 41); this
+    /// raw seam is what lets a regression send the `CreateSession` shape a
+    /// session can no longer have answered, and see it refused.
     pub(crate) async fn control(&mut self, request: ControlMsg) -> ControlMsg {
         self.writer
             .write_control(&request)
@@ -484,6 +489,69 @@ async fn a_helm_that_never_answers_times_the_request_out() {
         }
         other => panic!("expected a timeout refusal, got {other:?}"),
     }
+}
+
+/// Spec: a verb the helm may hold for the user's approval keeps waiting past
+/// the relay's ordinary answer budget, up to the approval wait on top of it,
+/// and gets the helm's late answer; a listing held the same way still times
+/// out at the ordinary budget.
+///
+/// Why: the helm waits up to nine minutes for the user before it answers an
+/// acting verb (SPEC.md, Agent-spawned sessions). A relay that kept the
+/// 30-second budget for those would report every card answered after half a
+/// minute as an unknown outcome while the user's approval still went
+/// through, and would keep the asking session fenced besides. Listings are
+/// never held, so they keep the short budget that catches a wedged helm.
+#[farhelm_testtrace::test]
+async fn an_acting_verb_waits_for_the_users_answer_past_the_ordinary_budget() {
+    let ordinary = Duration::from_millis(300);
+    let h = harness_with_timeouts(SupervisorTimeouts {
+        agent_upcall: ordinary,
+        agent_approval_wait: Duration::from_secs(60),
+        ..SupervisorTimeouts::default()
+    })
+    .await;
+    let (session, _work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+    let (handler, mut calls) = ScriptedHandler::gated();
+    let helm = connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _replay, _stream) = helm
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("the gated client attaches");
+
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    let stop = AgentVerb::Stop {
+        session_id: Some(session.id.clone()),
+    };
+    let asking = session.id.clone();
+    let waiting = tokio::spawn(async move { peer.ask(&asking, stop).await });
+    assert_eq!(
+        calls.recv().await.as_deref(),
+        Some(session.id.as_str()),
+        "premise: the helm is holding the stop"
+    );
+    // sleep-ok: the stimulus is time itself; the user "answers" only after the ordinary budget has passed.
+    tokio::time::sleep(ordinary * 3).await;
+    assert!(
+        !waiting.is_finished(),
+        "the stop is still waiting for its answer"
+    );
+    handler.release(&session.id);
+    match outcome_of(waiting.await.unwrap()) {
+        AgentOutcome::Ok { .. } => {}
+        other => panic!("the late answer must reach the session, got {other:?}"),
+    }
+
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    let asking = session.id.clone();
+    let listing = tokio::spawn(async move { peer.ask(&asking, AgentVerb::Sessions {}).await });
+    assert_eq!(calls.recv().await.as_deref(), Some(session.id.as_str()));
+    match outcome_of(listing.await.unwrap()) {
+        AgentOutcome::Err { kind, .. } => assert_eq!(kind, ErrorKind::Timeout),
+        other => panic!("a held listing times out at the ordinary budget, got {other:?}"),
+    }
+    handler.release(&session.id);
 }
 
 /// Spec: a credential for one session is not authority to ask as another;

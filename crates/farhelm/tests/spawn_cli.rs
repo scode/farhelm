@@ -93,6 +93,77 @@ fn child_session(cwd: String) -> SessionInfo {
     }
 }
 
+/// The helm's answer to a relayed spawn, as the supervisor hands it back:
+/// a created session with `id` in `cwd`, in `status` (which the CLI never
+/// reads; a create is a success whatever its snapshot says).
+fn created_reply(req_id: u64, cwd: String, status: &str) -> ControlMsg {
+    use farhelm_proto::{AgentOutcome, AgentReply, AgentSession};
+    ControlMsg::AgentResponse {
+        req_id,
+        outcome: AgentOutcome::Ok {
+            reply: AgentReply::Created {
+                session: AgentSession {
+                    id: "child-123".to_string(),
+                    host_id: "1".to_string(),
+                    host: Some("this machine".to_string()),
+                    title: "child".to_string(),
+                    cwd,
+                    agent: "custom".to_string(),
+                    status: status.to_string(),
+                    current: false,
+                    restart_offer: Default::default(),
+                    stale: false,
+                },
+            },
+        },
+    }
+}
+
+/// An inheriting spawn's relayed request: its `req_id`, folder, title, key,
+/// and parent. Panics on anything else, so a test double cannot answer a
+/// request shape the CLI no longer sends.
+fn inheriting_spawn(
+    request: ControlMsg,
+) -> (
+    u64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    use farhelm_proto::AgentVerb;
+    use farhelm_proto::launcher::TemplateDestination;
+    let ControlMsg::AgentRequest {
+        req_id,
+        request:
+            AgentVerb::Create {
+                host,
+                templates,
+                edits,
+                intent_key,
+                confirm_yolo,
+                spawn: Some(spawn),
+            },
+        ..
+    } = request
+    else {
+        panic!("an inheriting spawn must be relayed as an agent create: {request:?}");
+    };
+    assert_eq!(host, None, "a spawn names no host");
+    assert!(templates.is_empty());
+    assert!(!confirm_yolo, "the CLI never sends the YOLO override");
+    assert!(spawn.inherit_agent);
+    assert_eq!(
+        spawn.inherited_launch, None,
+        "the supervisor fills the launch in; the CLI never sends one"
+    );
+    let cwd = match edits.destination {
+        Some(TemplateDestination::Folder(cwd)) => Some(cwd),
+        _ => None,
+    };
+    (req_id, cwd, edits.name, intent_key, spawn.parent)
+}
+
 /// Runtime preconditions use one ordinary failure status, write no stdout,
 /// and name the exact missing socket contract without dialing a fallback.
 #[farhelm_testtrace::test]
@@ -306,7 +377,7 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
             }
         );
         assert_eq!(intent_key.as_deref(), Some("retry-7"));
-        assert!(confirm_yolo);
+        assert!(!confirm_yolo, "the CLI never sends the YOLO override");
         assert_eq!(
             spawn.and_then(|spawn| spawn.parent).as_deref(),
             Some("parent-123")
@@ -348,7 +419,6 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
             "scripted child",
             "--idempotency-key",
             "retry-7",
-            "--confirm-yolo",
         ])
         .env("FARHELM_SESSION_ID", "parent-123")
         .env("FARHELM_SESSION_TOKEN", "secret")
@@ -364,8 +434,47 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
     assert_eq!(output.stdout, b"child-123\n");
 }
 
-/// A successful command emits exactly one id line and maps every scripting
-/// flag onto the authenticated CreateSession request.
+/// Spec: while a relayed spawn waits more than a couple of seconds for its
+/// answer, the CLI says once on stderr that it is waiting for the helm and
+/// that Farhelm may be asking the user, and the id still comes out alone on
+/// stdout when the answer arrives.
+///
+/// Why: an acting verb can wait minutes for the user (SPEC.md), and an agent
+/// watching a command that prints nothing cannot tell that from a hang; the
+/// line is local to the CLI, so a stdout that held it would break spawn's
+/// one-id contract.
+#[farhelm_testtrace::test]
+fn a_slow_answer_prints_one_waiting_line_on_stderr() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, server) = mock_supervisor(&socket, move |request| {
+        let (req_id, cwd, ..) = inheriting_spawn(request);
+        // sleep-ok: the stimulus is an answer slower than the CLI's notice delay (2 s).
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        created_reply(req_id, cwd.unwrap_or_default(), "running")
+    });
+    let mut command = spawn_command();
+    command
+        .args(["--cwd", "/tmp", "--inherit-agent"])
+        .env("FARHELM_SESSION_ID", "parent-123")
+        .env("FARHELM_SESSION_TOKEN", "secret")
+        .env("FARHELM_SUPERVISOR_SOCK", &socket);
+    let output = output_with_timeout(command);
+    finish_server(done, server);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"child-123\n");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr.matches("waiting for the helm").count(),
+        1,
+        "exactly one waiting line: {stderr}"
+    );
+    assert!(stderr.contains("approve this request"), "{stderr}");
+}
+
+/// A successful inheriting spawn emits exactly one id line and maps every
+/// scripting flag onto the relayed agent create, which carries no launch of
+/// its own (its supervisor fills the session's in).
 #[farhelm_testtrace::test]
 fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
     let temp = farhelm_teststate::tempdir().expect("tempdir");
@@ -379,29 +488,12 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         .to_string_lossy()
         .into_owned();
     let (done, server) = mock_supervisor(&socket, move |request| {
-        let ControlMsg::CreateSession {
-            req_id,
-            parent,
-            cwd,
-            launch,
-            inherit_agent,
-            title,
-            intent_key,
-            ..
-        } = request
-        else {
-            panic!("spawn must send CreateSession: {request:?}");
-        };
+        let (req_id, cwd, title, intent_key, parent) = inheriting_spawn(request);
         assert_eq!(parent.as_deref(), Some("parent-123"));
-        assert_eq!(cwd, expected_cwd);
-        assert_eq!(launch, None, "inheritance carries no launch of its own");
-        assert!(inherit_agent);
+        assert_eq!(cwd.as_deref(), Some(expected_cwd.as_str()));
         assert_eq!(title.as_deref(), Some("scripted child"));
         assert_eq!(intent_key.as_deref(), Some("retry-7"));
-        ControlMsg::SessionCreated {
-            req_id,
-            session: child_session(cwd),
-        }
+        created_reply(req_id, expected_cwd, "running")
     });
 
     let Output {
@@ -444,21 +536,12 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
 /// rather than reinterpret a successful create as a failed command.
 #[farhelm_testtrace::test]
 fn a_created_child_id_succeeds_even_when_its_status_is_already_terminal() {
-    for status in [
-        SessionStatus::Exited { exit_code: Some(7) },
-        SessionStatus::Error {
-            detail: "agent executable was missing".to_string(),
-        },
-    ] {
+    for status in ["exited", "error"] {
         let temp = farhelm_teststate::tempdir().unwrap();
         let socket = temp.path().join("supervisor.sock");
         let (done, server) = mock_supervisor(&socket, move |request| {
-            let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
-                panic!("spawn must send CreateSession: {request:?}");
-            };
-            let mut session = child_session(cwd);
-            session.status = status;
-            ControlMsg::SessionCreated { req_id, session }
+            let (req_id, cwd, ..) = inheriting_spawn(request);
+            created_reply(req_id, cwd.unwrap_or_default(), status)
         });
         let mut command = spawn_command();
         command
@@ -537,7 +620,7 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("unexpected spawn reply"), "{stderr}");
+    assert!(stderr.contains("unexpected agent reply"), "{stderr}");
     assert!(
         stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
         "{stderr}"
@@ -556,7 +639,7 @@ fn a_lost_reply_says_the_child_may_already_exist() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, server) = mock_supervisor_or_close(&socket, |request| {
-        assert!(matches!(request, ControlMsg::CreateSession { .. }));
+        inheriting_spawn(request);
         None
     });
     let mut command = spawn_command();
@@ -642,14 +725,13 @@ fn tilde_cwds_cross_the_wire_verbatim() {
     ] {
         let expected_wire = expected.clone();
         let (done, server) = mock_supervisor(&socket, move |request| {
-            let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
-                panic!("spawn must send CreateSession: {request:?}");
-            };
-            assert_eq!(cwd, expected_wire, "cwd for input {sent:?}");
-            ControlMsg::SessionCreated {
-                req_id,
-                session: child_session(cwd),
-            }
+            let (req_id, cwd, ..) = inheriting_spawn(request);
+            assert_eq!(
+                cwd.as_deref(),
+                Some(expected_wire.as_str()),
+                "cwd for input {sent:?}"
+            );
+            created_reply(req_id, expected_wire, "running")
         });
         let output = spawn_command()
             .current_dir(temp.path())
