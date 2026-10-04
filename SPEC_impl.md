@@ -2610,6 +2610,57 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row behind, which is accepted as
   garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
+## Feedback forwarding
+
+SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same
+device authentication as every other UI route and absent from the agent request verbs. The UI composes the whole
+submission: the message, the optional contact, the version the sidebar already shows, `desktop` or `web`, and the
+operating system the browser or webview reports. The helm validates the submission against the shared request type and
+forwards that type as JSON: it adds nothing, trims nothing, and stores nothing. Forwarding through the helm rather than
+posting from the page keeps the webview and the browser off the internet and gives one place where the outbound
+connection lives.
+
+The request type and its caps live in `farhelm-proto`, shared by the UI and the helm, so both enforce the same numbers:
+a message of at most 4,000 characters that is not empty or whitespace-only, a contact of at most 200 characters,
+machine-written version and operating-system strings that are not empty, hold no control characters, and are at most 64
+and 128 characters, and a surface of exactly `desktop` or `web`. Limits count the text as sent; nothing is trimmed in
+transit. Whitespace means the Unicode `White_Space` property (Rust's `char::is_whitespace`, JavaScript's
+`/^\p{White_Space}*$/u`), which `str::trim` in Rust and `String.prototype.trim` in JavaScript do not agree on. The user
+cannot edit the version or the operating system, so the UI makes them fit before it displays them (shortening an
+over-long value, replacing control characters, and using `unknown` for an empty one), which keeps the displayed value
+the sent value and keeps a cap from refusing a submission the user could not fix. Characters are Unicode code points
+(Rust's `chars().count()`, JavaScript's `[...text].length`), so the UI, the helm and the endpoint count alike. The helm
+posts to `https://farhelm.io/api/feedback` with a 15-second timeout, and the endpoint bounds its own call to GitHub at
+10 seconds so it answers first. The dialog's Send is disabled while a send is in flight. A send that times out at the
+helm after GitHub did create the issue can still be retried into a duplicate issue; that is accepted. That URL is a
+parameter of the helm's state construction rather than a constant, so Rust tests point it at a stand-in server they
+start themselves; there is no user-facing flag, configuration key, or environment variable for it. A failure
+(unreachable, timeout, any non-success status) comes back as one plain-text route error the dialog shows; the helm logs
+that the send failed without the message or the contact.
+
+The endpoint is a Vercel function in the docs website's project, `website/api/feedback.js`, which Vercel deploys from
+the project's `api/` directory alongside the static site. It is plain JavaScript with no runtime dependencies, split
+into a pure handler (request, configuration and a GitHub client in; response out) and a thin entry that reads
+`process.env` and passes the real client, so `node --test` tests the shipped handler with injected configuration. It
+accepts only an `application/json` body, because a browser posts a "simple" content type such as text/plain cross-origin
+without a preflight, which would let any web page make its visitors send feedback from as many IP addresses as it has
+visitors. It caps the raw request body at 64 KiB, which is above the largest submission those caps allow even fully
+JSON-escaped (about 52 KiB), so a submission the app accepts is never refused for size; it enforces the same field caps
+again because it is the public boundary, and creates one issue per accepted submission in a private GitHub repository:
+the title is `Feedback:` and the message's first non-blank line, trimmed and shortened, as plain text; the body holds
+the message, the contact and the version, surface and operating system each inside a code fence longer than any run of
+backticks in its text, so no field can close its fence early and none of them renders as Markdown or pings anyone with
+an `@` mention. The repository (`FEEDBACK_GITHUB_REPO`, as `owner/name`) and a token with Issues write on that
+repository only (`FEEDBACK_GITHUB_TOKEN`) are Vercel environment configuration, never source; when either is missing the
+function refuses, and no response or log line carries either value, nor the message or the contact. The per-IP rate
+limit is a Vercel firewall rule on `/api/feedback` rather than code in the function, so refused traffic never runs it,
+and the kill switch is revoking the token or adding a firewall deny rule, both immediate. The endpoint accepts these
+fields for as long as any released app sends them and ignores fields it does not know, so later releases can add fields
+without breaking older ones. Two deployment facts this relies on and the repository cannot show: the Vercel project's
+root directory is `website/` (where `website/vercel.json` lives), and the site keeps building as plain static Astro
+output with no Vercel adapter, as it does today; the setup document repeats both. `docs/feedback-endpoint.md` is the
+maintainer's setup and operations procedure.
+
 ## Standalone uninstall
 
 `farhelm uninstall` establishes ownership before confirmation, differently per platform. Deletion targets always come
