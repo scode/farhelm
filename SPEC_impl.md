@@ -2612,17 +2612,29 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 
 ## Standalone uninstall
 
-`farhelm uninstall` establishes ownership from the installer's adjacent NUL-separated receipts before confirmation. The
-receipts name the physical installation directory and SHA-256 digests; deletion targets come from fixed paths in the
-code, never arbitrary receipt fields. Payloads and receipts must be regular files owned by the current user, and
-receipts must not be group or world writable. App contents are checked against the fixed bundle layout. An app-local CLI
-invocation directs the operator to the flat CLI so bundle removal cannot delete the retry command prematurely.
+`farhelm uninstall` establishes ownership before confirmation, differently per platform. Deletion targets always come
+from fixed names and the layout the installer writes, never from arbitrary record fields, and every target must be a
+regular file or real directory owned by the current user; records must not be group or world writable.
 
-Removal is ordered to leave the flat CLI until the other required work succeeds. Already-absent payloads are accepted
-when the surviving receipt still proves ownership. During final bundle-directory removal, the validated app receipt is
-published without replacement at `~/Applications/.Farhelm.app.uninstall-receipt`. This preserves retry authority after
-the internal receipt is deleted. If both receipts survive, they must agree. The adjacent receipt is deleted after the
-bundle; flat receipt cleanup after CLI deletion is nonfatal and reports any retained metadata. No recursive deletion or
+On macOS (`crates/farhelm/src/uninstall/app.rs`) the installation is the app. The running CLI must be a versioned
+program inside it (`Contents/Versions/<version>/farhelm`, which is what `~/.local/bin/farhelm uninstall` reaches through
+the forwarder); anything else refuses and names that command. The app's record (`farhelm-app-v2` and the terminal link's
+path) is the ownership evidence, since it carries no checksums: every other file changes on every update. In their place
+the layout is checked exactly, at every level, so a file the installer never writes refuses the whole uninstall rather
+than being removed or skipped. The link is removed only while it is a symlink to this app's forwarder (its folder
+resolved, because the installer spells the target with `$HOME` as its shell saw it); otherwise it is retained and
+reported. The Running records of the state directories whose runtime locks uninstall holds are removed too, first, so
+that the forwarder sends any retry to the Installed version, which is removed late. The link's folder need not be
+spelled as recorded, and an installer update accepts any record of this layout, whatever link it names (the app's
+location is fixed, so it can only be this installation's), and rewrites it, so a moved `~/.local/bin` or renamed home
+does not strand the app.
+
+Removal is ordered to keep `farhelm uninstall` runnable until the other required work succeeds. On macOS the retry
+command is the link, the forwarder, `Versions/installed` and the folders of the version uninstall runs as and the
+Installed one, so other versions, the main program, the icon and Info.plist go first; a failure among them leaves the
+command and a record that still plans the rest. A failure after that point can leave no runnable CLI; what is left of
+the app then holds no data, and the report says so. On Linux the flat CLI goes last, and receipt cleanup after it is
+nonfatal and reports retained metadata. Already absent payloads are accepted as completed work. No recursive deletion or
 rollback is needed.
 
 On Linux, setup's existing managed-unit parser and removal machinery select services whose recorded executable resolves
@@ -2630,12 +2642,12 @@ to this installation. Custom and other-installation units, drop-ins and linger r
 and stopped before their unit files or executables are removed. The operation does not examine effective overrides or
 processes. Manual shutdown remains an operator prerequisite. Concurrent install, update and setup (and on macOS desktop
 startup) are excluded by locks (`crates/farhelm/src/uninstall/locks.rs` and `lock_and_recheck` in uninstall.rs), taken
-after the confirmation rather than before it: the installer's two locks are directories, which nothing removes when a
-process dies, so holding them across the prompt would turn a Ctrl-C there into stale locks. Uninstall's install lock is
-shaped like the installer's own (a 0700 directory holding only `pid`), so an installer that finds it refuses while
-uninstall runs and clears it as stale after a crash. On Linux uninstall checks no runtime locks: it stops setup's
-services itself, after which only a process the user started by hand could hold them, which stopping is already the
-operator's job.
+after the confirmation rather than before it: the installer's locks are directories, which nothing removes when a
+process dies, so holding them across the prompt would turn a Ctrl-C there into stale locks. On macOS that is the app
+lock; on Linux the install-directory lock earlier installers used, shaped like theirs (a 0700 directory holding only
+`pid`), so an installer that finds it refuses while uninstall runs and clears it as stale after a crash. On Linux
+uninstall checks no runtime locks: it stops setup's services itself, after which only a process the user started by hand
+could hold them, which stopping is already the operator's job.
 
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
 not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
@@ -2796,34 +2808,32 @@ grammar declared next to the types.
 
 ## Native app packaging
 
-Dioxus desktop (wry) wrapping farhelm-ui, shipped as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
+Dioxus desktop (wry) wrapping farhelm-ui, released as a BARE BINARY rather than a `.app` bundle: `farhelm-desktop`, a
 thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's desktop module, built by cargo-dist
-alongside `farhelm` and installed next to it. The two are one artifact pair, not one bundle — the shell embeds
-farhelm-helm from the same workspace version and reaches supervisor code by finding its CLI sibling next to its own
-executable, discovering a local supervisor that already answers or spawning `farhelm supervisor run` when none does.
-Replacing that pair never re-issues what running sessions already hold, which is why newer binaries keep accepting those
-values (see "What running sessions hold across versions").
+alongside `farhelm` and published as its own archive. The two are one artifact pair from one workspace version: the
+shell embeds farhelm-helm and reaches supervisor code through the CLI, discovering a local supervisor that already
+answers or spawning `farhelm supervisor run` when none does. Where it finds the CLI is the desktop's sibling, except in
+the side-by-side layout below. Replacing that pair never re-issues what running sessions already hold, which is why
+newer binaries keep accepting those values (see "What running sessions hold across versions").
 
-On top of that pair, `install.sh` assembles `~/Applications/Farhelm.app` on macOS: an Info.plist (bundle identifier
-`org.scode.farhelm.desktop`), the icon shipped in the desktop archive, and COPIES of both committed binaries in
-`Contents/MacOS/` — where the executable keeps the name `farhelm-desktop`, because the default case-insensitive APFS
-would make an executable named `Farhelm` the same directory entry as its required `farhelm` sibling. The bundle exists
-for LAUNCHER IDENTITY only: Spotlight/Alfred launchability, a Dock icon, a Cmd-Tab name, and Launch Services'
-single-instance activation (relaunching activates the running app instead of racing it for the embedded helm's state).
-It is a derived artifact rebuilt wholesale by every install run — the flat pair stays the source of truth and the only
-state the installer's transaction journal covers — and nothing in the app reads it, apart from finding its own version's
-`farhelm` in the side-by-side layout below: asset serving stays the embedded tree below, and outside that layout the
-sibling contract is satisfied inside `Contents/MacOS/` exactly as it is in `~/.local/bin`. The installer is macOS-only
-and always assembles the app; an archive without its icon is refused before replacement. An existing `Farhelm.app` is
-replaced only when its ownership record (`Contents/.farhelm-installation`) names this installation's directory, names a
-directory that now resolves to it or no longer holds a Farhelm installation (a legacy custom installation moved, a
-directory was replaced by a symlink, or the home was renamed), or when it is the recordless layout the installer built
-before records existed. A record naming a directory that still holds an installation belongs to that installation; the
-installer refuses it and says which directory it names. Only one run assembles the bundle at a time, including older
-installers using another directory: a run that finds `~/Applications/.farhelm-app.lock` held, or left by an interrupted
-run, refuses the bundle step. The new bundle is built in a private directory beside the old one and the old one is moved
-aside rather than deleted in place, so an interrupted run leaves the old bundle, the new one, or none under the public
-name, never a partial bundle whose record is gone.
+`install.sh`, which is macOS-only, puts the pair into `~/Applications/Farhelm.app`, which is the whole installation: the
+side-by-side layout below, an Info.plist (bundle identifier `org.scode.farhelm.desktop`) and the icon shipped in the
+desktop archive, with `~/.local/bin/farhelm` a symlink to the forwarder for terminal use. The app's executable keeps the
+name `farhelm-desktop`, because the default case-insensitive APFS would make an executable named `Farhelm` the same
+directory entry as the forwarder `farhelm`. The bundle gives Farhelm its launcher identity (Spotlight/Alfred
+launchability, a Dock icon, a Cmd-Tab name, and Launch Services' single-instance activation, so relaunching activates
+the running app instead of racing it for the embedded helm's state); asset serving stays the embedded tree below. A
+fresh install builds the bundle in a private directory beside the public name and renames it into place. An update
+changes the bundle in place, as the next section describes, because a running app survives that and does not survive
+having its bundle replaced. The installer changes an existing `Farhelm.app` only when its ownership record
+(`Contents/.farhelm-installation`, `farhelm-app-v2` and the terminal link's path) names this installation's link; the
+one-time move from the layout that copied both binaries into `~/.local/bin` and the bundle also accepts that layout's
+record naming this bin directory, or the recordless bundle installers built before records existed, and is done with
+Farhelm quit. Anything else is refused before anything changes. Only one run changes the bundle at a time: a run that
+finds `~/Applications/.farhelm-app.lock` held, or left by an interrupted run, refuses. Old releases are refused before
+anything changes: those without the icon, and those whose desktop program lacks a fixed piece of the text it prints when
+its own version folder is missing (`grep` on the downloaded binary; a test in `desktop/bundle.rs` ties the two
+together), which marks every desktop build that understands the side-by-side layout.
 
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
@@ -2883,12 +2893,24 @@ this layout ran from `Contents/MacOS/farhelm`, so sessions they started already 
 forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
 supervisor uses its own program for all of these, as it always has.
 
+An update in place, as `install.sh` performs it: the new version's folder is staged privately and renamed into
+`Versions/`, then a complete copy of the new `farhelm-desktop` is renamed over the old one, then the icon, the forwarder
+(only when its text changed), `Versions/installed` and `Info.plist` the same way, each copied beside its destination
+first so the rename is atomic. Stopping after any step leaves an app that launches the old version or the new one, and
+the next run finishes the job. Nothing is re-signed (re-signing could rewrite the running program's file in place), and
+nothing is quarantined. The bundle is then touched and re-registered with `lsregister -f`, because Spotlight and Launch
+Services otherwise keep showing the old version. Version folders other than the new one, the one it replaced, and the
+one named by the Running record in the default state directory or in the one the installer's shell's absolute
+`XDG_STATE_HOME` names are removed; a Farhelm running with an overridden state directory is protected by the "replaced"
+rule for one update only.
+
 The forwarder's contract, which a later installer may only replace by rename and only with a script that forwards every
 older invocation the same way: it resolves its own real path (it is reached through `~/.local/bin/farhelm` from a
 terminal) to find the bundle; when `FARHELM_SUPERVISOR_SOCK` is set and a `running-version` exists beside that socket,
 it runs that version, and otherwise the Installed one; it `exec`s `Contents/Versions/<version>/farhelm` with the
-arguments, environment and standard streams unchanged, and prints one line and exits non-zero if that version's folder
-is missing. It never takes or tests `supervisor.lock`.
+arguments, the caller's environment variables and the standard streams as they are (the shell itself may add `PWD`,
+`SHLVL` and `_`), and prints one line and exits non-zero if that version's folder is missing. It never takes or tests
+`supervisor.lock`.
 
 The desktop app starts its managed supervisor from `Contents/Versions/<its own compiled version>/farhelm` when its
 bundle has a `Contents/Versions/` folder, and refuses with an error naming the missing folder rather than falling back

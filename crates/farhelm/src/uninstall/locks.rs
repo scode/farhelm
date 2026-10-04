@@ -166,27 +166,59 @@ impl Drop for BundleLock {
 ///
 /// A lock file that does not exist yet is created (mode 0600, the helm's
 /// own mode for its lock) so a supervisor or helm starting meanwhile finds
-/// it held; that leaves an empty lock file in a data directory uninstall
-/// otherwise only retains.
+/// it held. A missing state directory is created with the supervisor's
+/// private 0700 rule for the same reason; uninstall otherwise retains it.
 pub(super) struct RuntimeLocks {
     _files: Vec<fs::File>,
 }
 
 impl RuntimeLocks {
     /// Take both locks in each of `state_dirs`, or refuse if any is held.
-    /// Nothing is taken (and nothing created) in a state directory that
-    /// does not exist: nothing has run there.
+    /// A missing directory is created privately before taking its locks:
+    /// otherwise a first desktop launch could create it after uninstall
+    /// skipped it and start while the app is being removed.
     ///
     /// The directories are resolved first and duplicates dropped: one
     /// directory spelled two ways (a symlinked `~/.local/state`, macOS's
     /// `/var` alias) would otherwise be locked twice, and a second flock on
     /// a new descriptor conflicts with this process's own first one.
     pub(super) fn acquire(state_dirs: &[PathBuf]) -> Result<Self> {
+        use std::os::unix::fs::PermissionsExt as _;
+
         let mut resolved: Vec<PathBuf> = Vec::new();
         for state_dir in state_dirs {
-            let Ok(physical) = fs::canonicalize(state_dir) else {
-                continue;
-            };
+            // Match the supervisor's private mode for directories we create,
+            // but leave existing paths alone: a state directory may be a
+            // symlink, and chmod would change its target even on refusal.
+            let parent = state_dir.parent().with_context(|| {
+                format!(
+                    "finding parent of state directory {}",
+                    super::path_text(state_dir)
+                )
+            })?;
+            let mut builder = fs::DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            builder.create(parent).with_context(|| {
+                format!(
+                    "creating parent of state directory {}",
+                    super::path_text(state_dir)
+                )
+            })?;
+            match fs::DirBuilder::new().mode(0o700).create(state_dir) {
+                Ok(()) => fs::set_permissions(state_dir, fs::Permissions::from_mode(0o700))
+                    .with_context(|| {
+                        format!("securing state directory {}", super::path_text(state_dir))
+                    })?,
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("creating state directory {}", super::path_text(state_dir))
+                    });
+                }
+            }
+            let physical = fs::canonicalize(state_dir).with_context(|| {
+                format!("resolving state directory {}", super::path_text(state_dir))
+            })?;
             if !resolved.contains(&physical) {
                 resolved.push(physical);
             }
@@ -201,9 +233,6 @@ impl RuntimeLocks {
     fn acquire_one(state_dir: &Path) -> Result<Vec<fs::File>> {
         use std::os::unix::fs::OpenOptionsExt as _;
         let mut files = Vec::new();
-        if !state_dir.is_dir() {
-            return Ok(files);
-        }
         for name in [SUPERVISOR_LOCK, HELM_LOCK] {
             let path = state_dir.join(name);
             let file = fs::OpenOptions::new()
@@ -304,23 +333,41 @@ mod tests {
         assert!(!applications.join(BUNDLE_LOCK).exists());
     }
 
-    /// A supervisor or helm holding its state-directory lock refuses the
-    /// uninstall; a state directory that does not exist is left alone.
+    /// Uninstall claims both runtime locks before a first desktop launch
+    /// can create its state directory and start serving.
     ///
     /// Why: on macOS the open desktop app's supervisor and helm hold these
     /// locks, and removing the app underneath them is the overlap SPEC.md's
     /// "Concurrent and interrupted runs" requires a correct outcome for;
-    /// refusing is that outcome. Spec: with another descriptor holding
-    /// either lock, acquire refuses naming it; with both free, both are
-    /// taken and released on drop; a missing state directory takes nothing
-    /// and creates nothing.
+    /// refusing is that outcome. A first launch can begin while uninstall
+    /// runs, so a missing directory must be created and locked before it
+    /// can be treated as idle. Spec: with another descriptor holding either
+    /// lock, acquire refuses naming it; with both free, both are taken and
+    /// released on drop, even when the directory was missing.
     #[test]
-    fn runtime_locks_refuse_while_held_and_skip_a_missing_state_dir() {
+    fn runtime_locks_refuse_while_held_and_lock_a_missing_state_dir() {
         let base = tempfile::tempdir().expect("base");
         let state = base.path().join("state");
-        RuntimeLocks::acquire(std::slice::from_ref(&state)).expect("no state dir");
-        assert!(!state.exists(), "nothing was created");
-        fs::create_dir(&state).expect("state");
+        assert!(!state.exists(), "the first launch has not made state yet");
+        let held = RuntimeLocks::acquire(std::slice::from_ref(&state))
+            .expect("create and lock the missing state dir");
+        let mode = fs::metadata(&state)
+            .expect("state dir")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "the new state dir is private");
+        for name in [SUPERVISOR_LOCK, HELM_LOCK] {
+            let probe = fs::OpenOptions::new()
+                .write(true)
+                .open(state.join(name))
+                .expect("first launch's lock file");
+            assert!(
+                matches!(probe.try_lock(), Err(fs::TryLockError::WouldBlock)),
+                "a first launch must not take {name} while uninstall holds it"
+            );
+        }
+        drop(held);
         for name in [SUPERVISOR_LOCK, HELM_LOCK] {
             let holder = fs::OpenOptions::new()
                 .create(true)
@@ -349,22 +396,60 @@ mod tests {
         probe.try_lock().expect("released on drop");
     }
 
-    /// One state directory reached through two spellings is locked once.
+    /// One state directory reached through two spellings is locked once,
+    /// without changing permissions on a pre-existing symlink target.
     ///
     /// Why: uninstall checks both the `XDG_STATE_HOME` state directory and
     /// the default one, and when those are the same directory (a symlinked
     /// `~/.local/state`, say) locking it twice made uninstall refuse
-    /// against its own first lock on every retry. Spec: with one entry a
-    /// symlink to the other, acquire succeeds and holds the lock.
+    /// against its own first lock on every retry. Uninstall must not chmod
+    /// a symlink target, even when a held lock makes it refuse. Spec: with
+    /// one entry a symlink to the other, acquire succeeds and holds the
+    /// lock without changing its mode.
     #[test]
     fn runtime_locks_take_one_directory_spelled_two_ways_once() {
         let base = tempfile::tempdir().expect("base");
         let state = base.path().join("state");
         fs::create_dir(&state).expect("state");
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).expect("wide state mode");
         let alias = base.path().join("alias");
         std::os::unix::fs::symlink(&state, &alias).expect("alias");
+        let holder = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(state.join(SUPERVISOR_LOCK))
+            .expect("holder");
+        holder.try_lock().expect("the holder takes the lock");
+        let refusal = RuntimeLocks::acquire(std::slice::from_ref(&alias))
+            .err()
+            .expect("a held lock refuses through the alias")
+            .to_string();
+        assert!(
+            refusal.contains(SUPERVISOR_LOCK) && refusal.contains("held by another process"),
+            "{refusal}"
+        );
+        assert_eq!(
+            fs::metadata(&state)
+                .expect("state dir")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755,
+            "refusal must not chmod the symlink target"
+        );
+        drop(holder);
         let held =
             RuntimeLocks::acquire(&[state.clone(), alias]).expect("one directory, locked once");
+        assert_eq!(
+            fs::metadata(&state)
+                .expect("state dir")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755,
+            "locking an existing directory must not chmod it"
+        );
         let probe = fs::OpenOptions::new()
             .write(true)
             .open(state.join(SUPERVISOR_LOCK))

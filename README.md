@@ -83,8 +83,9 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 See [installation and uninstall](docs/install_uninstall.md) for more detail about what installation does and how to
 uninstall.
 
-Installs `farhelm` and `farhelm-desktop` into `~/.local/bin` and builds `~/Applications/Farhelm.app`. Does NOT
-auto-upgrade (yet) — re-run the same command to update.
+Installs `~/Applications/Farhelm.app`, which is the whole installation, and a `~/.local/bin/farhelm` link into it for
+the terminal. Does NOT auto-upgrade (yet) — re-run the same command to update; that is safe while Farhelm is open, and
+quitting and reopening it finishes the update.
 
 To uninstall, stop local sessions and their additional terminals, quit the desktop app, and stop manually started
 Farhelm processes. Run `farhelm uninstall` and confirm once, or use `farhelm uninstall --dry-run` to preview removal.

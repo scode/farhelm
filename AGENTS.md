@@ -136,12 +136,12 @@ that its required systemd or SSH substrate ran.
   POSIX `sh` (it is never piped into a stranger's shell, so nothing forces the same portability constraint), which is
   why only `install.sh` goes through `sh -n`.
 - `bash scripts/test-install-sh.sh` — drives the macOS-only installer as a real child against a fixture HTTP server,
-  using a Darwin/arm64 `uname` shim on Linux and BusyBox. Covers fresh install, update, rollback, 404, checksums,
-  malformed archives, version normalization, missing prerequisites, exact closing messages and tmux advice, terminal
-  styling/progress and plain redirected output, app layout and ownership/recovery. Linux refuses before downloading or
-  writing; old releases without app resources refuse before replacement. Nothing outside `~/.local/bin` and
-  `~/Applications/Farhelm.app` changes, and no service manager runs. Every invocation uses `env -i` with an explicit
-  environment, never the harness process's own.
+  using a Darwin/arm64 `uname` shim on Linux and BusyBox. Covers fresh install, updates side by side and stopped at each
+  step, the forwarder, 404, checksums, malformed archives, version normalization, missing prerequisites, exact closing
+  messages and tmux advice, terminal styling/progress and plain redirected output, app layout and ownership/recovery.
+  Linux refuses before downloading or writing; old releases (without app resources, or from before the side-by-side
+  layout) refuse before anything changes. Nothing outside `~/.local/bin` and `~/Applications/Farhelm.app` changes, and
+  no service manager runs. Every invocation uses `env -i` with an explicit environment, never the harness process's own.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.

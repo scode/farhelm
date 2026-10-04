@@ -40,45 +40,18 @@
   CURL_PROTOCOL_MODE=default
 
   # ---------------------------------------------------------------------
-  # The install transaction, in one place
+  # What an install changes, in one place
   #
-  # Replacing binaries has to survive being interrupted at any instant,
-  # including instants no trap handler ever sees (SIGKILL, power loss), so
-  # the replacement phase writes a RECOVERY JOURNAL before each move and a
-  # later run finishes what an interrupted one started. Three properties
-  # shape how that journal is stored and spelled; each one is a bug this
-  # script has already had.
-  #
-  # It lives INSIDE the lock directory, at $LOCK_DIR/journal. The lock
-  # directory is the one path here created by an exclusive `mkdir`, so a
-  # journal underneath it cannot be a pathname someone else got to first —
-  # whereas a journal beside the binaries, at a predictable name nothing
-  # validated, could be pre-planted as a symlink and turn this script's
-  # own `>>` into an append to a file it never meant to touch. Storing the
-  # two together also makes their lifetimes one thing: the lock is only
-  # ever removed once the journal is gone (see remove_owned_lock), which
-  # is what "recovery state is preserved for the next run" reduces to.
-  #
-  # A record NAMES NO PATHS. The vocabulary is exactly `PARK cli`,
-  # `PARK desktop`, `INSTALL cli`, `INSTALL desktop`, and `UNDONE <n>`;
-  # every path rollback touches is derived at recovery time from
-  # $INSTALL_DIR plus the two fixed binary names. That keeps a legal but
-  # awkward home-directory path (one containing the field separator, or a
-  # newline, both of which a pathname may legally contain) from splitting
-  # into extra fields or extra apparent records, and it bounds what a
-  # journal can ever ask for: at most `farhelm`, `farhelm-desktop`, their
-  # `.old` backups, and nothing else, inside the install directory the
-  # caller owns. Anything outside the vocabulary makes rollback refuse
-  # rather than guess.
-  #
-  # Rollback is REPLAY-SAFE. Undo steps are not idempotent as a pair — an
-  # `INSTALL` undo removes the destination and the `PARK` undo before it
-  # puts the old binary back at that same destination — so a second pass
-  # over an unchanged journal would delete exactly what the first pass
-  # restored. Each completed undo step is therefore recorded as
-  # `UNDONE <n>`, naming the 1-based line number of the record it
-  # finished, and any later pass skips those. Line numbers stay valid
-  # because appending is the only write the journal ever takes.
+  # The app bundle ~/Applications/Farhelm.app is the whole installation,
+  # and ~/.local/bin/farhelm only a symlink into it (SPEC_impl.md,
+  # "Side-by-side versions inside Farhelm.app"). A fresh install builds the
+  # bundle in a private directory and renames it into place. An update
+  # changes it in place, possibly while Farhelm runs from it, by renaming
+  # one complete file or version folder at a time in an order where
+  # stopping after any step leaves an app that launches the old version or
+  # the new one; see step 7 of main. Nothing therefore needs a recovery
+  # journal: every intermediate state is a working installation, and
+  # running the installer again finishes the job.
   # ---------------------------------------------------------------------
 
   # TARGET|ARCHIVE|BINARY, one row per published archive. This is the single
@@ -279,55 +252,201 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
-  # Writes one ownership record for the flat installation. The record is
-  # staged beside the other verified artifacts and renamed only after the
-  # binary transaction has committed, so a reader sees either the previous
-  # complete record or the new complete record. A non-regular destination is
-  # never followed or replaced; an ordinary old record is deliberately
-  # replaceable because it may describe an interrupted earlier update.
-  publish_installation_record() {
-    pir_final=$1
-    pir_stage=$2
-    if [ -L "$pir_final" ] || { [ -e "$pir_final" ] && [ ! -f "$pir_final" ]; }; then
-      error '%s exists and is not a regular file (or is a symlink); refusing to publish installer ownership metadata\n' "$pir_final"
-      return 1
-    fi
-
-    # Keep the sentinel inside command substitution: POSIX shells strip
-    # trailing newlines from its output, while a legal installation path may
-    # itself end in one.
-    pir_canonical=$(
-      # CDPATH can redirect relative destinations and make cd print a path.
-      # Identity must describe the directory used by the file operations.
-      CDPATH='' cd -P "$INSTALL_DIR" || exit 1
-      pwd -P || exit 1
-      printf '%s' '__FARHELM_CANONICAL_PATH_END__'
-    ) || return 1
-    pir_canonical=${pir_canonical%__FARHELM_CANONICAL_PATH_END__}
-    pir_canonical=${pir_canonical%"$NEWLINE"}
-    pir_cli_sha=$(sha256_of "$INSTALL_DIR/farhelm") || return 1
-    pir_desktop_sha=$(sha256_of "$INSTALL_DIR/farhelm-desktop") || return 1
-
-    (umask 077; printf '%s\000%s\000%s\000%s\000' \
-      farhelm-standalone "$pir_canonical" "$pir_cli_sha" "$pir_desktop_sha" >"$pir_stage") || return 1
-    chmod 0600 "$pir_stage" || return 1
-    mv "$pir_stage" "$pir_final" || return 1
+  # Writes the forwarder, Contents/MacOS/farhelm, to $1. Everything that
+  # outlives a Farhelm session's supervisor names this file (hook command
+  # lines, the reporters' executable variables, the session PATH entry, and
+  # ~/.local/bin/farhelm), so its text is a contract with every session a
+  # Farhelm ever started: a later installer may replace it only by rename,
+  # and only with a script that forwards every invocation this one accepts
+  # the same way (SPEC_impl.md, "What running sessions hold across
+  # versions"). It is a shell script because scripts need no code signature
+  # on Apple silicon, so it needs no release packaging.
+  #
+  # Inside a session ($FARHELM_SUPERVISOR_SOCK set, with a running-version
+  # record beside that socket) it runs the version the session's supervisor
+  # runs; anywhere else, the Installed one. It execs, so the chosen program
+  # takes its place in the process tree (hook attribution walks that tree
+  # and treats any extra process as an intermediary), and it passes
+  # arguments, environment and standard streams through untouched. Its own
+  # variables carry a prefix nothing exports, because assigning to a name
+  # that came in exported would change the child's environment.
+  write_forwarder() {
+    cat >"$1" <<'FORWARDER_EOF'
+#!/bin/sh
+# Farhelm's forwarder: runs one of the farhelm versions kept side by side in
+# this app bundle (SPEC_impl.md, "Side-by-side versions inside Farhelm.app").
+# Inside a Farhelm session it runs the version that session's supervisor runs,
+# named by running-version beside $FARHELM_SUPERVISOR_SOCK; anywhere else it
+# runs the installed one, named by Contents/Versions/installed. Arguments,
+# the caller's environment variables and standard streams pass through as
+# they are (the shell itself may add PWD, SHLVL and _). Written by Farhelm's
+# installer; replaced only by a newer one that forwards everything this one
+# does the same way.
+farhelm_forwarder_self=$0
+case $farhelm_forwarder_self in
+  */*) ;;
+  *) farhelm_forwarder_self=./$farhelm_forwarder_self ;;
+esac
+while [ -h "$farhelm_forwarder_self" ]; do
+  farhelm_forwarder_link=$(readlink "$farhelm_forwarder_self") || break
+  case $farhelm_forwarder_link in
+    /*) farhelm_forwarder_self=$farhelm_forwarder_link ;;
+    *) farhelm_forwarder_self=${farhelm_forwarder_self%/*}/$farhelm_forwarder_link ;;
+  esac
+done
+farhelm_forwarder_versions=$(CDPATH='' cd -P -- "${farhelm_forwarder_self%/*}/../Versions" 2>/dev/null && pwd -P) || {
+  printf 'farhelm: cannot find the Versions folder beside %s\n' "$farhelm_forwarder_self" >&2
+  exit 127
+}
+farhelm_forwarder_version=
+if [ -n "${FARHELM_SUPERVISOR_SOCK:-}" ] && [ -f "${FARHELM_SUPERVISOR_SOCK%/*}/running-version" ]; then
+  IFS= read -r farhelm_forwarder_version <"${FARHELM_SUPERVISOR_SOCK%/*}/running-version" || :
+fi
+if [ -z "$farhelm_forwarder_version" ] && [ -f "$farhelm_forwarder_versions/installed" ]; then
+  IFS= read -r farhelm_forwarder_version <"$farhelm_forwarder_versions/installed" || :
+fi
+case $farhelm_forwarder_version in
+  '' | .* | */*)
+    printf 'farhelm: no installed version is recorded in %s; reinstall Farhelm\n' "$farhelm_forwarder_versions" >&2
+    exit 127
+    ;;
+esac
+if [ ! -x "$farhelm_forwarder_versions/$farhelm_forwarder_version/farhelm" ]; then
+  printf 'farhelm: version %s is not installed in %s; reinstall Farhelm\n' "$farhelm_forwarder_version" "$farhelm_forwarder_versions" >&2
+  exit 127
+fi
+exec "$farhelm_forwarder_versions/$farhelm_forwarder_version/farhelm" "$@"
+FORWARDER_EOF
   }
 
-  # Adds the app-local ownership record after all bundle inputs are staged.
-  # The record identifies the flat install that supplied the copies and
-  # carries digests of the four files a later verifier needs to compare.
-  write_bundle_record() {
-    wbr_bundle=$1
-    wbr_canonical=$2
-    wbr_cli_sha=$3
-    wbr_desktop_sha=$4
-    wbr_plist_sha=$5
-    wbr_icns_sha=$6
-    (umask 077; printf '%s\000%s\000%s\000%s\000%s\000%s\000' \
-      farhelm-app "$wbr_canonical" "$wbr_cli_sha" "$wbr_desktop_sha" \
-      "$wbr_plist_sha" "$wbr_icns_sha" >"$wbr_bundle/Contents/.farhelm-installation") || return 1
-    chmod 0600 "$wbr_bundle/Contents/.farhelm-installation" || return 1
+  # Writes the app's Info.plist to $1, naming $VERSION_NUM.
+  #
+  # Info.plist is launch configuration: its LSEnvironment key can set
+  # DYLD_INSERT_LIBRARIES or FARHELM_* for the app, so whoever can write
+  # it can run code as the user the next time Farhelm is opened. The
+  # callers give it an explicit owner-only-writable mode for that reason.
+  write_info_plist() {
+    cat >"$1" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>farhelm-desktop</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.scode.farhelm.desktop</string>
+	<key>CFBundleName</key>
+	<string>Farhelm</string>
+	<key>CFBundleDisplayName</key>
+	<string>Farhelm</string>
+	<key>CFBundleIconFile</key>
+	<string>Farhelm</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$VERSION_NUM</string>
+	<key>CFBundleVersion</key>
+	<string>$VERSION_NUM</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+</dict>
+</plist>
+PLIST_EOF
+  }
+
+  # Writes this installation's ownership record to $1: the identifier
+  # `farhelm-app-v2` and the absolute path of the Terminal link it owns ($2),
+  # each followed by a NUL. It records no checksums, because every other
+  # file in the bundle changes on every update; uninstall verifies the
+  # bundle's layout and file ownership instead.
+  write_current_record() {
+    (umask 077; printf 'farhelm-app-v2\000%s\000' "$2" >"$1") || return 1
+    chmod 0600 "$1"
+  }
+
+  # True iff $1 is a regular, non-symlink file holding exactly the record
+  # write_current_record would write for link path $2. POSIX sh cannot hold
+  # NUL in a variable, so the expected bytes are written to a file and the
+  # two are compared.
+  current_record_is_ours() {
+    if [ -L "$1" ] || [ ! -f "$1" ]; then
+      return 1
+    fi
+    write_current_record "$STAGING_DIR/current-record-expected" "$2" || return 1
+    same_bytes "$STAGING_DIR/current-record-expected" "$1"
+  }
+
+  # True iff the regular files $1 and $2 hold the same bytes, compared by
+  # checksum with the tool chosen in main rather than with cmp, which the
+  # installer does not otherwise need.
+  same_bytes() {
+    [ -f "$1" ] && [ -f "$2" ] || return 1
+    sb_first=$(sha256_of "$1") || return 1
+    sb_second=$(sha256_of "$2") || return 1
+    [ "$sb_first" = "$sb_second" ]
+  }
+
+  # True iff $1 is a well-formed record of this layout that names some other
+  # Terminal link: an absolute path to a farhelm (~/.local/bin was a
+  # symlink when it was written and is a real folder now, the home folder
+  # was renamed, and so on). The app's location is fixed and the installer
+  # only ever records this home's link, so such a record can only be this
+  # installation's; the update rewrites it.
+  current_record_moved_here() {
+    if [ -L "$1" ] || [ ! -f "$1" ]; then
+      return 1
+    fi
+    crm_magic=$(tr '\000' '\n' <"$1" | sed -n 1p) || return 1
+    crm_link=$(tr '\000' '\n' <"$1" | sed -n 2p) || return 1
+    [ "$crm_magic" = farhelm-app-v2 ] || return 1
+    case "$crm_link" in
+      /*/farhelm) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+
+  # True iff $1 is a version folder name exactly as this installer writes
+  # one: a normalized release version (X.Y.Z, optionally -rc.N or -dev.N,
+  # no leading "v") or 0.0.0-unreleased. Only such folders are ever pruned.
+  # Names holding a newline or carriage return are refused first, because
+  # grep matches line by line and would otherwise accept a name with one
+  # valid line in it (the same hazard normalize_version guards against).
+  is_version_folder_name() {
+    case "$1" in
+      *"$NEWLINE"* | *"$CR"*) return 1 ;;
+      0.0.0-unreleased) return 0 ;;
+    esac
+    printf '%s\n' "$1" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(rc|dev)\.(0|[1-9][0-9]*))?$'
+  }
+
+  # Stages the new version's folder, holding a complete copy of the staged
+  # farhelm, at $UPDATE_WORK/version, ready to be renamed into Versions/.
+  stage_version_dir() {
+    (umask 022; mkdir "$UPDATE_WORK/version") || bundle_fail "creating the $VERSION_NUM folder"
+    cp "$STAGING_DIR/farhelm" "$UPDATE_WORK/version/farhelm" || bundle_fail "copying farhelm"
+    chmod 0755 "$UPDATE_WORK/version/farhelm" || bundle_fail "setting the farhelm mode"
+  }
+
+  # Replaces the file $2 inside the bundle with a copy of $1, mode $3, by
+  # renaming a complete copy over it. The copy is made beside $2, on the
+  # bundle's own filesystem, so the rename is atomic: a running Farhelm and
+  # anything about to start it see the old file or the new one, never a
+  # partial one, and a program file's code signature is never rewritten in
+  # place. $4 names the file in a failure.
+  replace_file() {
+    REPLACE_TMP="${2%/*}/.farhelm-new.$$.${2##*/}"
+    rm -f "$REPLACE_TMP"
+    cp "$1" "$REPLACE_TMP" || bundle_fail "copying $4"
+    chmod "$3" "$REPLACE_TMP" || bundle_fail "setting the mode of $4"
+    mv -f "$REPLACE_TMP" "$2" || bundle_fail "replacing $4"
+    REPLACE_TMP=""
   }
 
   # How many members of the archive at $1 have $2 as their BASENAME. The
@@ -415,38 +534,14 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     chmod "$esm_mode" "$esm_dest"
   }
 
-  # Refuses (exit 1) unless PATH is either absent or a plain regular file.
-  # install.sh only ever creates and moves plain regular files at the paths
-  # it owns, so anything else there — a directory, a device, a symlink
-  # (dangling or not, hence the explicit -L check: -e alone is silently
-  # false for a dangling symlink and would let one slip through as
-  # "absent") — is either a user collision or a way a later `mv` could be
-  # redirected outside the install directory, and must stop the whole run
-  # before any mutation happens.
-  # NOTE on variable names throughout this file's helper functions: POSIX sh
-  # has no `local` — every assignment here is a GLOBAL, visible to (and
-  # overwritable by) any caller. Every helper below therefore uses names
-  # prefixed by its own initials rather than a generic name like `dest` or
-  # `path` a caller might also be using; an earlier revision of this script
-  # shipped exactly that bug (`journal_append`'s `dest` silently clobbering
-  # the replace loop's own `dest` mid-transaction) before it was caught.
-  refuse_unless_absent_or_regular() {
-    rufu_target=$1
-    if [ -L "$rufu_target" ] || { [ -e "$rufu_target" ] && [ ! -f "$rufu_target" ]; }; then
-      error '%s exists and is not a regular file (or is a symlink); refusing to touch it\n' "$rufu_target"
-      exit 1
-    fi
-  }
-
-  # Prints the SHA-256 the executable-directory ownership record says this
-  # installer last wrote for binary $1 ("farhelm" or "farhelm-desktop"), or
-  # nothing when there is no usable record or it names no digest for that
-  # binary. The record is NUL-separated (magic, canonical directory, CLI
+  # Prints the SHA-256 the layout before this one recorded for the copy of
+  # binary $1 ("farhelm" or "farhelm-desktop") it put in the bin directory,
+  # or nothing when there is no usable record or it names no digest for that
+  # binary. That record is NUL-separated (magic, canonical directory, CLI
   # digest, desktop digest, then a final NUL). The digests are read from the
   # END: the directory field may legally contain newlines, so counting
   # forward after `tr` would misalign on such a path, while the two digests
-  # never do. A symlinked or non-regular record is treated as absent, the
-  # same stance publish_installation_record takes toward writing one.
+  # never do. A symlinked or non-regular record is treated as absent.
   recorded_digest_of() {
     rdo_record="$INSTALL_DIR/.farhelm-installation"
     if [ -L "$rdo_record" ] || [ ! -f "$rdo_record" ]; then
@@ -465,29 +560,21 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     return 0
   }
 
-  # True iff the app bundle at $1 carries this installation's own bundle
-  # record: a regular, non-symlink Contents/.farhelm-installation that starts
-  # with the `farhelm-app` identifier followed by this install directory's
-  # canonical path ($2, as publish_installation_record computed it). That is
-  # the whole ownership test for replacing the bundle; the record's digests
-  # are deliberately NOT verified here. Uninstall verifies them, because it
-  # deletes without rebuilding, but a bundle an interrupted uninstall has
-  # already half-emptied still carries a valid record and must be rebuilt,
-  # not refused.
+  # True iff the app bundle at $1 carries the bundle record the layout
+  # before this one wrote for this installation: a regular, non-symlink
+  # Contents/.farhelm-installation that starts with the `farhelm-app`
+  # identifier followed by this bin directory's canonical path ($2). It is
+  # the ownership test for the one-time move from that layout, which
+  # replaces the bundle wholesale; the record's checksums are not verified,
+  # because a bundle an interrupted uninstall has half-emptied must still be
+  # rebuilt, not refused.
   #
   # The comparison is byte-exact on the record's leading fields. POSIX sh
   # cannot hold NUL in a variable, so the expected prefix is written to a
   # file and both prefixes are compared by checksum; `${#}` under LC_ALL=C
   # gives the canonical path's length in bytes.
   bundle_record_is_ours() {
-    record_file_is_ours "$1/Contents/.farhelm-installation" "$2"
-  }
-
-  # The test behind bundle_record_is_ours, on a record file at $1 directly.
-  # Also used on the copy of the record an interrupted uninstall leaves next
-  # to the bundle (see the bundle step), which has the same contents.
-  record_file_is_ours() {
-    brio_record=$1
+    brio_record="$1/Contents/.farhelm-installation"
     if [ -L "$brio_record" ] || [ ! -f "$brio_record" ]; then
       return 1
     fi
@@ -499,152 +586,10 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     [ "$brio_expected" = "$brio_actual" ]
   }
 
-  # Prints the installation directory the bundle record of the app bundle
-  # at $1 names; see record_file_dir, which does the work on the record file
-  # itself.
-  bundle_record_dir() {
-    record_file_dir "$1/Contents/.farhelm-installation"
-  }
-
-  # Prints the installation directory a bundle record file at $1 names (its
-  # second field, byte for byte), followed by a sentinel `/` so the caller
-  # can keep a path that ends in newlines through command substitution; see
-  # record_file_moved_here. Works on the bundle's own record and on the copy
-  # an interrupted uninstall leaves next to the bundle, which has the same
-  # contents. Fails unless the record is a regular, non-symlink file framed
-  # exactly as write_bundle_record writes it: `farhelm-app`, the directory, and four 64-hex-digit SHA-256 digests,
-  # each NUL-terminated, and nothing else.
-  #
-  # The framing is checked on the bytes, not inferred from lines: exactly
-  # six NULs, counted directly, then the fields between them. Only after
-  # that is the directory rebuilt from the NUL-to-newline translation, which
-  # is exact at that point because the magic and the digests contain no
-  # newlines: every line between the first and the last four is part of the
-  # directory, and joining them with newlines restores any the path itself
-  # held. A record this does not accept is not ownership evidence, and the
-  # bundle (or leftover receipt) it belongs to is refused.
-  record_file_dir() {
-    brd_record=$1
-    if [ -L "$brd_record" ] || [ ! -f "$brd_record" ]; then
-      return 1
-    fi
-    brd_nuls=$(tr -cd '\000' <"$brd_record" | tr '\000' x) || return 1
-    [ "$brd_nuls" = xxxxxx ] || return 1
-    # The translated record with a sentinel, so trailing newlines survive:
-    # the record must end in its sixth NUL, now a newline.
-    brd_text=$(tr '\000' '\n' <"$brd_record"; printf '#') || return 1
-    case $brd_text in
-      *"$NEWLINE#") ;;
-      *) return 1 ;;
-    esac
-    # The directory (with its `/` sentinel), then the four digests, one
-    # per line after it.
-    brd_parsed=$(tr '\000' '\n' <"$brd_record" | LC_ALL=C awk '
-      { line[NR] = $0 }
-      END {
-        if (NR < 6 || line[1] != "farhelm-app") exit 1
-        for (i = NR - 3; i <= NR; i++) {
-          if (length(line[i]) != 64 || line[i] !~ /^[0-9a-f]+$/) exit 1
-        }
-        for (i = 2; i <= NR - 4; i++) printf "%s%s", (i > 2 ? "\n" : ""), line[i]
-        printf "/"
-        for (i = NR - 3; i <= NR; i++) printf "\n%s", line[i]
-      }
-    ') || return 1
-    brd_digests=${brd_parsed##*/}
-    brd_dir=${brd_parsed%"$brd_digests"}
-    brd_dir=${brd_dir%/}
-    # The translation above cannot tell a NUL from a newline, so a record
-    # whose NULs sit in the wrong places (a newline where the NUL after the
-    # magic belongs, say) could still parse. What settles it is the bytes:
-    # the record must be exactly what write_bundle_record would write for
-    # the parsed fields.
-    # Split on purpose: four newline-separated hex digests, no glob
-    # characters possible (the awk above admitted only [0-9a-f]).
-    # shellcheck disable=SC2086
-    set -- $brd_digests
-    [ "$#" -eq 4 ] || return 1
-    (umask 077; printf 'farhelm-app\000%s\000%s\000%s\000%s\000%s\000' \
-      "$brd_dir" "$1" "$2" "$3" "$4" >"$STAGING_DIR/bundle-record-reparsed") || return 1
-    brd_expected=$(sha256_of "$STAGING_DIR/bundle-record-reparsed") || return 1
-    brd_actual=$(sha256_of "$brd_record") || return 1
-    [ "$brd_expected" = "$brd_actual" ] || return 1
-    printf '%s/' "$brd_dir"
-  }
-
-  # True iff the app bundle at $1 carries a Farhelm bundle record for an
-  # installation that has since moved to this one, whose canonical directory
-  # is $2: the record's directory now resolves to $2 (the old path became a
-  # symlink to the new location), or it no longer holds a Farhelm
-  # installation at all (no installation record there, or no directory).
-  # A record naming a directory that still holds an installation belongs to
-  # that installation, and is not this one's to replace.
-  #
-  # Without this, moving the install directory (a different
-  # legacy custom install directory, `~/.local/bin` replaced by a symlink, a
-  # renamed home directory) left every later install refusing its own
-  # bundle, and the app stuck on the old version.
-  bundle_record_moved_here() {
-    record_file_moved_here "$1/Contents/.farhelm-installation" "$2"
-  }
-
-  # bundle_record_moved_here's test on a record file at $1 directly, so the
-  # copy of the record an interrupted uninstall leaves next to the bundle
-  # gets the same moved-installation rule as the bundle's own record.
-  record_file_moved_here() {
-    brmh_dir=$(record_file_dir "$1") || return 1
-    brmh_dir=${brmh_dir%/}
-    # write_bundle_record only ever records an absolute canonical path.
-    case $brmh_dir in
-      /*) ;;
-      *) return 1 ;;
-    esac
-    # Same sentinel trick publish_installation_record uses: command
-    # substitution strips trailing newlines, which a directory name may end
-    # with.
-    brmh_canonical=$(
-      cd -P -- "$brmh_dir" 2>/dev/null || exit 1
-      pwd -P || exit 1
-      printf '__FARHELM_CANONICAL_PATH_END__'
-    ) && {
-      brmh_canonical=${brmh_canonical%__FARHELM_CANONICAL_PATH_END__}
-      brmh_canonical=${brmh_canonical%"$NEWLINE"}
-      [ "$brmh_canonical" = "$2" ] && return 0
-    }
-    path_provably_absent "$brmh_dir/.farhelm-installation"
-  }
-
-  # True iff nothing exists at path $1, established through a directory this
-  # run can search. `test -e` is also false for a path it merely cannot
-  # look up (an unsearchable directory on the way), and that must not read
-  # as "gone": here it would let a bundle recorded for an installation that
-  # is intact but unreadable be replaced. So the nearest ancestor that can
-  # be searched decides: when it is $1's own parent, $1 is absent only if
-  # that parent says so; when it is further up, some component in between
-  # is missing (absent all the way down) or unsearchable (refused).
-  path_provably_absent() {
-    ppa_path=$1
-    while :; do
-      ppa_parent=${ppa_path%/*}
-      [ -n "$ppa_parent" ] || ppa_parent=/
-      if (cd -P -- "$ppa_parent") 2>/dev/null; then
-        [ ! -e "$ppa_path" ] && [ ! -L "$ppa_path" ]
-        return
-      fi
-      # The parent cannot be searched: it is either missing, and then so is
-      # everything below it, or there and locked, and then nothing below it
-      # can be established.
-      if [ -e "$ppa_parent" ] || [ -L "$ppa_parent" ]; then
-        return 1
-      fi
-      [ "$ppa_parent" != / ] || return 1
-      ppa_path=$ppa_parent
-    done
-  }
-
   # True iff every entry of directory $1 is one of the names that follow,
   # and each of those names is present. Hidden names count; a shell glob
-  # rather than `ls` for the same reason is_our_lock gives.
+  # rather than `ls`: inherited QUOTING_STYLE and locale settings must not
+  # change what counts as present.
   dir_has_exactly() {
     dhe_dir=$1
     shift
@@ -715,386 +660,14 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     ' "$ilib_app/Contents/Info.plist"
   }
 
-  # True iff DIR has one of the only three shapes this script's own lock
-  # ever takes: empty (the brief window right after `mkdir` but before the
-  # pid file is written), just "pid", or "pid" plus the recovery "journal"
-  # a transaction in its replacement phase has created. Anything else —
-  # unrelated files, subdirectories, a wrongly-named entry — means DIR is
-  # not our lock, and every caller must refuse to touch it rather than
-  # guess.
-  #
-  # Both the complete enumeration and the per-name file tests are
-  # load-bearing. The enumeration catches an EXTRA entry; the `-f` tests
-  # stop a crafted entry whose name embeds a newline from impersonating the
-  # expected names. A shell glob is used instead of `ls`: inherited
-  # QUOTING_STYLE and locale settings must not change lock ownership.
-  # A group- or world-writable lock directory is never trusted, even when
-  # its entries have the expected names: another account could change those
-  # entries after this check and redirect recovery or ownership decisions.
-  is_our_lock() {
-    [ -d "$1" ] || return 1
-    iol_dir=$1
-    [ -z "$(find "$iol_dir" -prune -perm -020 -print 2>/dev/null)" ] || return 1
-    [ -z "$(find "$iol_dir" -prune -perm -002 -print 2>/dev/null)" ] || return 1
-    iol_count=0
-    iol_has_pid=0
-    iol_has_journal=0
-    for iol_entry in "$iol_dir"/* "$iol_dir"/.[!.]* "$iol_dir"/..?*; do
-      [ -e "$iol_entry" ] || [ -L "$iol_entry" ] || continue
-      iol_count=$((iol_count + 1))
-      case "$iol_entry" in
-        "$iol_dir/pid")
-          [ -f "$iol_entry" ] || return 1
-          iol_has_pid=1
-          ;;
-        "$iol_dir/journal")
-          [ -f "$iol_entry" ] || return 1
-          iol_has_journal=1
-          ;;
-        *) return 1 ;;
-      esac
-    done
-    case "$iol_count:$iol_has_pid:$iol_has_journal" in
-      0:0:0 | 1:1:0 | 2:1:1) return 0 ;;
-      *) return 1 ;;
-    esac
-  }
-
-  # Removes $LOCK_DIR, but only when it is safe to: the journal must
-  # already be gone, and the directory must still be shaped like our own
-  # lock. Never a blind `rm -rf` (F6) — a validated `rmdir` on an emptied,
-  # known-shape directory cannot silently destroy something else that
-  # happens to occupy the reserved pathname.
-  #
-  # The journal check makes "unfinished recovery state survives" an
-  # invariant of this one function rather than a rule every call site has
-  # to remember: releasing the lock while a journal still records
-  # un-undone moves would strand the next run with wreckage it is no
-  # longer allowed to touch. Callers that legitimately finish a
-  # transaction (commit, or a rollback that fully succeeded) remove the
-  # journal first, and only then does this release the slot.
-  remove_owned_lock() {
-    if [ -e "$LOCK_DIR/journal" ]; then
-      return 0
-    fi
-    if is_our_lock "$LOCK_DIR"; then
-      rm -f "$LOCK_DIR/pid"
-      rmdir "$LOCK_DIR" 2>/dev/null || true
-    fi
-  }
-
-  # Appends one record describing a move about to be attempted, creating
-  # $JOURNAL on the first call of a transaction. Called immediately BEFORE
-  # the move it describes, so that if the move (or anything else) is
-  # interrupted right after, the journal already contains a record telling
-  # a later rollback that this specific move needs reversing.
-  #
-  # TYPE is "PARK" (an existing destination being moved aside to its
-  # backup path) or "INSTALL" (a staged binary being moved into its
-  # destination); WHICH is "cli" or "desktop", naming which binary — never
-  # a path, for the reasons in the transaction section above.
-  #
-  # The umask dance gives the journal owner-only permissions without
-  # disturbing the mode of anything else this run creates: it is recovery
-  # instructions this script will later act on, so nobody else's account
-  # gets to append to it, and the window between "exists" and "is
-  # private" that a create-then-chmod would open is closed by not
-  # existing.
-  journal_append() {
-    ja_type=$1
-    ja_which=$2
-    if [ ! -e "$JOURNAL" ]; then
-      ja_prior_umask=$(umask)
-      umask 077
-      : >"$JOURNAL"
-      umask "$ja_prior_umask"
-    fi
-    printf '%s %s\n' "$ja_type" "$ja_which" >>"$JOURNAL"
-  }
-
-  # Records that the undo of the record at 1-based line N is COMPLETE, so
-  # no later pass repeats it. Appending is deliberately the only write the
-  # journal ever takes: rewriting it in place would need a scratch file and
-  # a rename to be crash-safe, and would invalidate the line numbers these
-  # markers refer to.
-  journal_mark_undone() {
-    printf 'UNDONE %s\n' "$1" >>"$JOURNAL"
-  }
-
-  # Undoes every not-yet-undone move recorded in $JOURNAL, in REVERSE
-  # order, restoring $INSTALL_DIR to its pre-transaction state regardless
-  # of exactly how far the transaction got before it was interrupted (F2,
-  # F3): a crash after only the first PARK, after a PARK+INSTALL pair, or
-  # after both binaries' PARK moves but before the second INSTALL, all
-  # correctly unwind to "both binaries are back to what they were before
-  # this run started" — because undoing strictly in reverse naturally
-  # composes: undoing a later INSTALL first clears the way for undoing the
-  # PARK that preceded it.
-  #
-  # Every individual undo step is written to be a safe no-op if the move it
-  # describes never actually completed (e.g. the journal record was written
-  # but the process died before the `mv` itself ran) — existence-guarded, so
-  # a conservative "journal it before attempting" write policy never causes
-  # rollback to consume or clobber something that was never touched.
-  #
-  # Safe to call again after a partial pass, and it WILL be: an explicit
-  # rollback that fails exits, and the EXIT handler immediately replays.
-  # Each finished step is marked `UNDONE <n>` before the next is attempted,
-  # and a replay skips those — without which the replay's `INSTALL` undo
-  # would delete the very binary the first pass's `PARK` undo had just put
-  # back, and then report success.
-  #
-  # Its own scaffolding gets the same treatment as the moves it performs.
-  # Reading the journal, refusing a record it does not recognise, and
-  # recording progress are each checked, because a rollback that quietly
-  # skipped work and returned success would be worse than one that failed:
-  # callers read success as "the old installation is back" and delete the
-  # lock and journal on the strength of it. Nothing here needs a scratch
-  # file — the journal is read once into a variable and walked twice — so
-  # there is no temporary to create, reverse into, reopen, or remove, and
-  # no failure of any of those to mistake for having nothing to do.
-  #
-  # Returns success only if EVERY recorded move was fully undone. On
-  # partial failure (most plausibly: the original destination has since
-  # become a directory or other non-regular path, so the restore has
-  # nowhere safe to land) it prints exactly what could not be restored and
-  # returns failure; the caller is responsible for leaving the lock and
-  # journal in place rather than declaring victory (F8).
-  rollback_from_journal() {
-    if ! rfj_content=$(cat "$JOURNAL" 2>/dev/null); then
-      error 'could not read the recovery journal %s; nothing was rolled back and %s is LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR"
-      return 1
-    fi
-
-    # First pass: turn the journal into a REVERSED list of pending undo
-    # steps (each "TYPE:WHICH:LINENO", prepended so the list comes out
-    # newest-first) plus the set of line numbers already marked done. One
-    # pass suffices for both because an `UNDONE <n>` marker is always
-    # appended after the record it refers to.
-    rfj_lineno=0
-    rfj_pending=""
-    rfj_undone=" "
-    rfj_bad=""
-    while IFS= read -r rfj_line; do
-      rfj_lineno=$((rfj_lineno + 1))
-      [ -n "$rfj_line" ] || continue
-      case "$rfj_line" in
-        "PARK cli" | "PARK desktop" | "INSTALL cli" | "INSTALL desktop")
-          rfj_pending="${rfj_line%% *}:${rfj_line#* }:$rfj_lineno $rfj_pending"
-          ;;
-        "UNDONE "*)
-          rfj_marked=${rfj_line#UNDONE }
-          case "$rfj_marked" in
-            '' | *[!0-9]*) rfj_bad=$rfj_line ;;
-            *) rfj_undone="$rfj_undone$rfj_marked " ;;
-          esac
-          ;;
-        *) rfj_bad=$rfj_line ;;
-      esac
-      [ -z "$rfj_bad" ] || break
-    done <<EOF
-$rfj_content
-EOF
-
-    # An unrecognized record is not something to skip past: this format has
-    # exactly one writer, so anything else means the journal is not the one
-    # this script wrote, and acting on part of it would be acting on a
-    # stranger's instructions. Refuse, and change nothing.
-    if [ -n "$rfj_bad" ]; then
-      error 'the recovery journal %s contains a record this installer does not recognise; refusing to act on it -- %s and its journal are LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR"
-      return 1
-    fi
-
-    rfj_ok=1
-    for rfj_step in $rfj_pending; do
-      rfj_type=${rfj_step%%:*}
-      rfj_tail=${rfj_step#*:}
-      rfj_which=${rfj_tail%%:*}
-      rfj_at=${rfj_tail##*:}
-      case "$rfj_undone" in
-        *" $rfj_at "*) continue ;;
-      esac
-
-      # Every path this function touches is derived here, from
-      # $INSTALL_DIR and a fixed binary name — never read out of the
-      # journal.
-      if [ "$rfj_which" = cli ]; then
-        rfj_name=farhelm
-      else
-        rfj_name=farhelm-desktop
-      fi
-      rfj_dest="$INSTALL_DIR/$rfj_name"
-      rfj_backup="$INSTALL_DIR/.$rfj_name.old"
-
-      rfj_did=0
-      case "$rfj_type" in
-        INSTALL)
-          # The move was staged->dest; undoing it just means dest must stop
-          # holding the new file. There is nowhere meaningful to move it
-          # BACK to (its staging source may no longer exist at all, from a
-          # different process's ephemeral $STAGING_DIR), so removal is the
-          # correct and sufficient undo — any prior PARK for the same
-          # binary, undone next in this reverse pass, is what restores the
-          # real content.
-          if rm -f "$rfj_dest"; then
-            rfj_did=1
-          else
-            rfj_ok=0
-            error 'could not remove %s while rolling back; manual cleanup needed\n' "$rfj_dest"
-          fi
-          ;;
-        PARK)
-          # The move was dest->backup. Undo only if the backup still
-          # exists (a no-op otherwise: either this PARK never actually
-          # completed, or a previous pass already restored it and died
-          # before it could say so).
-          if [ ! -e "$rfj_backup" ]; then
-            rfj_did=1
-          elif [ -L "$rfj_dest" ] || { [ -e "$rfj_dest" ] && [ ! -f "$rfj_dest" ]; }; then
-            rfj_ok=0
-            error 'cannot restore %s to %s: %s exists and is not a regular file; leaving %s in place for manual recovery\n' "$rfj_backup" "$rfj_dest" "$rfj_dest" "$rfj_backup"
-          elif mv "$rfj_backup" "$rfj_dest"; then
-            rfj_did=1
-          else
-            rfj_ok=0
-            error 'could not restore %s to %s while rolling back\n' "$rfj_backup" "$rfj_dest"
-          fi
-          ;;
-      esac
-
-      if [ "$rfj_did" -eq 1 ]; then
-        # Losing the ability to record progress is fatal to the whole
-        # pass, not just to this step: every step after it would be
-        # unrepeatable-but-unmarked, which is exactly the state a replay
-        # cannot tell apart from "never done".
-        if ! journal_mark_undone "$rfj_at"; then
-          rfj_ok=0
-          error 'could not record rollback progress in %s; stopping before a later attempt could undo an already-restored binary\n' "$JOURNAL"
-          break
-        fi
-      fi
-    done
-    [ "$rfj_ok" -eq 1 ]
-  }
-
-  # Acquires the install-directory lock ($LOCK_DIR, a plain `mkdir` — atomic
-  # create-if-absent on every POSIX filesystem) so two installers cannot
-  # interleave their writes to the same $INSTALL_DIR.
-  #
-  # A lock that already exists is one of three things, distinguished in
-  # order: (1) shaped like something OTHER than our own lock (F6) — refuse
-  # outright, touch nothing; (2) shaped like ours but with no readable
-  # single positive-integer pid yet — treated as OCCUPIED, not stale (F5):
-  # the pid write happens just after `mkdir`, not atomically with it, so a
-  # lock with no readable pid might belong to a brand-new LIVE owner this
-  # process simply raced against, and guessing "stale" wrongly (deleting a
-  # live lock) is far worse than guessing "live" wrongly (one retryable
-  # refusal); (3) a readable pid that `kill -0` finds alive — genuinely
-  # live, refuse and ask to wait. Only past all three checks is a lock
-  # treated as stale wreckage from a crash, at which point any recorded
-  # transaction journal is rolled back (restoring the prior installation)
-  # before the slot is reused. That recovery runs under its own exclusive
-  # claim ($RECOVERY_CLAIM), so only one of several runs started after the
-  # same crash performs it.
-  #
-  # Known limitation: `kill -0` can be fooled by pid reuse on a long-uptime
-  # machine (a stale lock's pid happening to be reassigned to something else
-  # by the time this runs). That is a narrow race on top of an already-rare
-  # crash-at-exactly-the-wrong-instant, and is not solved here. A lock stuck
-  # in state (2) forever (crashed between `mkdir` and the pid write) also has
-  # no automatic recovery, by the same safety-over-self-healing tradeoff;
-  # the refusal message says so.
-  acquire_lock() {
-    if (umask 077; mkdir "$LOCK_DIR") 2>/dev/null; then
-      printf '%s\n' "$$" >"$LOCK_DIR/pid"
-      LOCK_ACQUIRED=1
-      return 0
-    fi
-
-    if ! is_our_lock "$LOCK_DIR"; then
-      error '%s exists and is not a farhelm install lock (unexpected contents); refusing to touch it -- remove it by hand if you are sure nothing owns it, then retry\n' "$LOCK_DIR"
-      exit 1
-    fi
-
-    other_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
-    case "$other_pid" in
-      '' | *[!0-9]*)
-        error 'another farhelm install/update appears to be starting against %s (its pid is not readable yet); wait a moment and retry -- if this persists, a previous run may have crashed between creating the lock and recording its pid, which requires removing %s by hand\n' "$INSTALL_DIR" "$LOCK_DIR"
-        exit 1
-        ;;
-    esac
-    # A lock naming OUR OWN pid is stale by definition: this shell never
-    # wrote it. `kill -0 $$` always succeeds, so without this check a
-    # container that starts sh with the same small pid every time would find
-    # its own pid in a lock a SIGKILLed run left behind and refuse forever.
-    # Unlike reuse by an unrelated process, this case is certain.
-    if [ "$other_pid" != "$$" ] && kill -0 "$other_pid" 2>/dev/null; then
-      error 'another farhelm install/update (pid %s) is already running against %s; wait for it to finish, then retry\n' "$other_pid" "$INSTALL_DIR"
-      exit 1
-    fi
-
-    # Recovery itself must be exclusive. Two runs started after the same
-    # crash both reach this point; replaying the journal twice undoes the
-    # first replay's restore (the second pass read the journal before the
-    # first recorded its progress), and two runs clearing the stale lock can
-    # each delete the other's fresh one. A sidecar `mkdir` is the claim:
-    # exactly one run gets it, and the other refuses and asks for a retry,
-    # which SPEC.md "Concurrent and interrupted runs" allows. A claim left by
-    # a recovery that was itself killed is refused the same way, with the
-    # remove-by-hand advice the pid-less lock gets, because nothing can tell
-    # it from one that is still running.
-    if ! (umask 077; mkdir "$RECOVERY_CLAIM") 2>/dev/null; then
-      error 'another farhelm install/update is recovering from an interrupted run against %s; wait a moment and retry -- if this persists, a previous recovery may itself have been interrupted, which requires removing %s by hand\n' "$INSTALL_DIR" "$RECOVERY_CLAIM"
-      exit 1
-    fi
-    # The lock may have changed hands between reading its pid and winning
-    # the claim: another run can have finished recovering and taken a fresh
-    # lock. Only the same stale lock may be recovered, so both checks are
-    # repeated under the claim. The same pid text is not enough on its own:
-    # a new run that happens to get the dead run's pid (the own-pid case
-    # above) records the same text in its fresh, live lock.
-    claimed_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
-    if [ "$claimed_pid" != "$other_pid" ] ||
-      { [ "$claimed_pid" != "$$" ] && kill -0 "$claimed_pid" 2>/dev/null; }; then
-      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-      error 'another farhelm install/update took over %s while this one was starting; wait for it to finish, then retry\n' "$INSTALL_DIR"
-      exit 1
-    fi
-
-    if [ -e "$JOURNAL" ]; then
-      if rollback_from_journal; then
-        rm -f "$JOURNAL"
-        remove_owned_lock
-        error 'recovered from an interrupted install/update (stale lock recording pid %s): restored the previous installation; re-run this script to retry\n' "$other_pid"
-      else
-        error 'found an interrupted install/update (stale lock recording pid %s) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL"
-      fi
-      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-      exit 1
-    fi
-
-    # No journal: whatever crashed did so before any replacement mutation
-    # began (still downloading/verifying, or between acquiring the lock and
-    # the first move). Nothing to roll back -- clear the stale lock and
-    # continue within THIS invocation; there is nothing to report beyond
-    # "the slot was free".
-    remove_owned_lock
-    if ! (umask 077; mkdir "$LOCK_DIR") 2>/dev/null; then
-      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-      error 'could not re-create the install lock %s after clearing a stale one; retry\n' "$LOCK_DIR"
-      exit 1
-    fi
-    printf '%s\n' "$$" >"$LOCK_DIR/pid"
-    LOCK_ACQUIRED=1
-    rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-  }
-
   # Undo whatever the bundle step (step 7 of main) left half done, then drop
   # its lock. A private build directory still holding the previous bundle
   # means the swap did not finish: the previous bundle goes back if the
   # public name is free, and the directory is deleted only once it no
-  # longer holds it, so a failed restore never deletes the user's app. Safe
-  # to call when the bundle step never ran, and more than once.
+  # longer holds it, so a failed restore never deletes the user's app. An
+  # in-place update leaves only its private work directory and at most one
+  # half-copied file beside its destination, both its own. Safe to call
+  # when the bundle step never ran, and more than once.
   release_bundle_lock() {
     if [ -n "${BUNDLE_WORK:-}" ] && [ -d "$BUNDLE_WORK" ]; then
       if [ -e "$BUNDLE_WORK/previous" ] && [ ! -e "$app_path" ]; then
@@ -1107,46 +680,33 @@ EOF
       fi
     fi
     BUNDLE_WORK=""
+    if [ -n "${REPLACE_TMP:-}" ]; then
+      rm -f "$REPLACE_TMP" 2>/dev/null || true
+      REPLACE_TMP=""
+    fi
+    if [ -n "${UPDATE_WORK:-}" ]; then
+      rm -rf "$UPDATE_WORK" 2>/dev/null || true
+      UPDATE_WORK=""
+    fi
     if [ "${BUNDLE_LOCK_HELD:-0}" -eq 1 ]; then
       BUNDLE_LOCK_HELD=0
       rmdir "$BUNDLE_LOCK" 2>/dev/null || true
     fi
   }
 
-  # The EXIT/INT/TERM/HUP handler. Always removes the ephemeral staging
-  # directory. If this process holds the lock, it also checks for an
-  # in-progress transaction journal: if one exists, the replacement never
-  # reached its commit point (see main's "Committed:" comment), so cleanup
-  # rolls it back BEFORE removing anything else (F3) — this is what makes a
-  # signal or an unhandled failure anywhere during replacement behave the
-  # same as an explicitly handled one, rather than silently deleting the
-  # only record of what needs restoring. Only once rollback succeeds (or
-  # there was no journal to begin with) does the lock itself get removed;
-  # a rollback that cannot fully complete leaves the lock and journal in
-  # place on purpose, for the next run (or a human) to find.
+  # The EXIT/INT/TERM/HUP handler: removes the ephemeral staging directory
+  # and undoes the bundle step's own leftovers (see release_bundle_lock).
   #
   # What this does NOT do: survive SIGKILL or a power loss. Both skip trap
-  # handlers entirely, so a `.farhelm-install.*` staging directory can be
-  # left behind by one of those; it is inert and safe to delete by hand.
-  # The lock and journal are designed to survive that instead of relying on
-  # a trap: see acquire_lock's stale-recovery path, which performs exactly
-  # this same rollback from the NEXT invocation when a trap never got the
-  # chance to run at all.
+  # handlers entirely, so a `.farhelm-install.*` staging directory, a
+  # private build or work directory beside the bundle, or the bundle lock
+  # can be left behind. The staging and work directories are inert and safe
+  # to delete by hand; a leftover lock makes the next run refuse and say to
+  # remove it. The installation itself is a working one at every point an
+  # update can stop (see the header).
   cleanup() {
     rm -rf "$STAGING_DIR" 2>/dev/null || true
     release_bundle_lock
-    if [ "${LOCK_ACQUIRED:-0}" -eq 1 ]; then
-      if [ -e "$JOURNAL" ]; then
-        if rollback_from_journal; then
-          rm -f "$JOURNAL"
-          remove_owned_lock
-        else
-          error 'interrupted while updating; automatic rollback could not fully complete -- %s and %s are LEFT IN PLACE for inspection; re-run this script once you have looked, or ask for help\n' "$LOCK_DIR" "$JOURNAL"
-        fi
-      else
-        remove_owned_lock
-      fi
-    fi
   }
 
   main() {
@@ -1331,9 +891,8 @@ EOF
     INSTALL_DIR="$HOME/.local/bin"
     # Mask group/world write bits on any directory COMPONENT this specific
     # call creates (umask 000 would otherwise leave a brand-new directory
-    # mode 0777, which would undermine the installed binaries' own
-    # hardcoded 0755 below — another account could just replace the
-    # directory entry). A directory that already existed is left exactly
+    # mode 0777, and another account could replace the Terminal link this
+    # run puts there). A directory that already existed is left exactly
     # as it was: this is not a general permission-hardening pass over
     # someone's chosen install location, only over what this run itself
     # creates. The subshell is important because mkdir -p can create
@@ -1345,22 +904,16 @@ EOF
       chmod 0755 "$INSTALL_DIR"
     fi
 
-    # 4. Stage everything in a scratch directory on the same filesystem as
-    # the destination, so the "put the binary in place" step below is a
-    # same-filesystem mv (atomic, no half-written binary a concurrent
-    # launch could exec) rather than a copy.
+    # 4. Stage everything in a private scratch directory. Nothing is moved
+    # from here into the installation directly: the bundle step copies each
+    # file next to its destination first and renames it from there, so the
+    # final step is atomic whichever filesystem this directory is on.
     STAGING_DIR=$(mktemp -d "$INSTALL_DIR/.farhelm-install.XXXXXX")
-    LOCK_DIR="$INSTALL_DIR/.farhelm-install.lock"
-    # The claim that makes stale-lock recovery exclusive; see acquire_lock.
-    RECOVERY_CLAIM="$LOCK_DIR.recovering"
-    # Both are needed before acquire_lock (which rolls back a previous
-    # run's journal) and before the EXIT trap below can fire, so they are
-    # settled here rather than at the replacement phase that uses them.
-    JOURNAL="$LOCK_DIR/journal"
-    LOCK_ACQUIRED=0
-    # Set by the macOS bundle step; see release_bundle_lock.
+    # Set by the bundle step; see release_bundle_lock.
     BUNDLE_LOCK_HELD=0
     BUNDLE_WORK=""
+    UPDATE_WORK=""
+    REPLACE_TMP=""
     trap cleanup EXIT
     # Translate the catchable termination signals into a plain `exit`,
     # which runs the EXIT trap above — the same cleanup either way, without
@@ -1511,355 +1064,280 @@ EOF
       exit 1
     fi
 
-    # 6. Replace. Both binaries this run needs are fully staged and
-    # verified above; nothing past this point downloads anything.
-    # Everything from here is local filesystem work, guarded by a lock so
-    # two installers cannot interleave their writes to the same
-    # $INSTALL_DIR, and journaled move-by-move so that ANY failure — ours,
-    # or one this process never gets to react to (a signal, an unrelated
-    # unhandled error) — leaves either the complete old pair or the
-    # complete new pair in place, never a partial mix.
-    acquire_lock
-
-    binaries="farhelm farhelm-desktop"
-
-    # A journal-free interruption after commit can strand backups between
-    # journal removal and cleanup. At this point the lock is ours and no
-    # journal means recovery has already been ruled out, so remove only the
-    # exact backup names this script owns before checking for collisions.
-    committed_backup_debris=0
-    for name in $binaries; do
-      if [ -e "$INSTALL_DIR/.$name.old" ] || [ -L "$INSTALL_DIR/.$name.old" ]; then
-        committed_backup_debris=1
-        rm -f "$INSTALL_DIR/.$name.old"
-      fi
-    done
-    if [ "$committed_backup_debris" -eq 1 ]; then
-      printf 'removed committed backup debris left by an interrupted cleanup\n' >&2
+    # 6. Older releases. A release from before the side-by-side version
+    # layout would install a desktop app that starts its supervisor from its
+    # sibling, which in this layout is the forwarder, so it is refused here,
+    # before anything installed changes. The marker is a fixed piece of text
+    # that every desktop build since the layout carries (the refusal it
+    # prints when its own version folder is missing); a Rust test in the
+    # desktop crate keeps the two in step.
+    if ! LC_ALL=C grep -qF 'needs its own version of the farhelm binary at' "$STAGING_DIR/farhelm-desktop"; then
+      error 'Farhelm %s is too old for this installer: it cannot be updated while it runs.\n' "$VERSION_NUM"
+      printf '%s\n' '   Pick a newer release, or leave FARHELM_VERSION unset for the latest release.' >&2
+      exit 1
     fi
 
-    # Refuse before touching anything if a public destination is neither
-    # absent nor a regular file. The reserved backups were swept above only
-    # after ownership and the no-journal invariant were established.
-    for name in $binaries; do
-      refuse_unless_absent_or_regular "$INSTALL_DIR/$name"
-    done
-
-    # Only a destination the ownership record vouches for (its SHA-256 is the
-    # one this installer last wrote) is the installer's to replace outright.
-    # Anything else keeps its bytes under a visible name: a file of the user's
-    # own that happens to be called farhelm, or a Farhelm installed before the
-    # record existed (#673), which then leaves one harmless copy behind.
+    # 7. Install the app. ~/Applications/Farhelm.app is the whole
+    # installation (SPEC_impl.md, "Side-by-side versions inside
+    # Farhelm.app"): each version's farhelm in its own Contents/Versions/<v>/
+    # folder, the Installed record Contents/Versions/installed naming the one
+    # the next start uses, the forwarder at Contents/MacOS/farhelm, the app's
+    # main program Contents/MacOS/farhelm-desktop, and an ownership record.
+    # ~/.local/bin/farhelm is only a symlink to the forwarder, for Terminal.
     #
-    # A HARD LINK, made before the transaction below touches anything, rather
-    # than a rename: the journaled park/install loop and its rollback stay
-    # exactly as they are, and there is no crash point that loses the file.
-    # A rename after commit would have one: a crash between removing the
-    # journal and that rename strands the file at .NAME.old, which the next
-    # run deletes as committed debris. With the link, the file is reachable
-    # under the kept name from the moment the link exists, whatever happens
-    # next (after a rollback it is simply reachable under both names).
-    KEPT_NOTES=""
-    # An unrelated wrapper is not evidence of a previous Farhelm install.
-    # Only a recorded binary earns update/reopen wording. Pre-record binaries
-    # take the same conservative installed/open report as other kept files.
+    # The bundle is what makes the app reachable by name from
+    # Spotlight/Alfred, gives it a Dock icon and a Cmd-Tab name, and makes a
+    # second launch activate the running instance instead of racing it for
+    # the embedded helm's state. The executable KEEPS the name
+    # farhelm-desktop inside it: the default APFS is case-insensitive, so an
+    # executable named "Farhelm" would be the same directory entry as the
+    # forwarder "farhelm". The pretty name comes from CFBundleName.
+    app_parent="$HOME/Applications"
+    app_path="$app_parent/Farhelm.app"
+    contents="$app_path/Contents"
+    forwarder="$contents/MacOS/farhelm"
+
+    bundle_fail() {
+      error 'installing %s failed at: %s\n' "$app_path" "$1"
+      printf 'Re-run the installer to retry.\n' >&2
+      exit 1
+    }
+
+    # One run at a time, through the lock beside the bundle that every
+    # installer since the bundle existed takes. Contention refuses, as does
+    # a lock an interrupted run left behind, which nothing can tell from a
+    # live one.
+    (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
+    BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
+    if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
+      error 'another farhelm install is changing %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK"
+      exit 1
+    fi
+    BUNDLE_LOCK_HELD=1
+
+    # The record names the Terminal link this installation owns, by the
+    # canonical path of its directory. The sentinel keeps a trailing newline
+    # in the path through command substitution, and CDPATH cannot redirect
+    # the cd or make it print.
+    canonical_bin=$(
+      CDPATH='' cd -P "$INSTALL_DIR" || exit 1
+      pwd -P || exit 1
+      printf '%s' '__FARHELM_CANONICAL_PATH_END__'
+    ) || bundle_fail "resolving $INSTALL_DIR"
+    canonical_bin=${canonical_bin%__FARHELM_CANONICAL_PATH_END__}
+    canonical_bin=${canonical_bin%"$NEWLINE"}
+
+    # Which kind of run this is. Only a bundle this installer can show it
+    # built is ever changed: one with this installation's current record,
+    # or, for the one-time move from the layout that copied both binaries
+    # into the bundle, an old bundle whose old record names this
+    # installation's bin directory, or the recordless shape from before
+    # records existed. Old installations elsewhere (custom or moved
+    # directories) are refused rather than recognized; that layout's own
+    # uninstall, or removing the bundle by hand, comes first.
     updated_installation=0
-    kept_stamp=$(date -u +%Y%m%dT%H%M%SZ)
-    for name in $binaries; do
-      dest="$INSTALL_DIR/$name"
-      [ -e "$dest" ] || continue
-      # Only a successful match proves ownership. A file this run cannot
-      # even read (mode 000, say) proves nothing, so it takes the keep path
-      # like any other unvouched-for file rather than aborting the install.
-      recorded_sha=$(recorded_digest_of "$name")
-      if [ -n "$recorded_sha" ] && existing_sha=$(sha256_of "$dest" 2>/dev/null) \
-        && [ "$existing_sha" = "$recorded_sha" ]; then
+    if current_record_is_ours "$contents/.farhelm-installation" "$canonical_bin/farhelm" ||
+      current_record_moved_here "$contents/.farhelm-installation"; then
+      updated_installation=1
+      if [ -d "$contents/Versions" ] && [ ! -L "$contents/Versions" ]; then
+        install_mode=update
+      else
+        install_mode=rebuild
+      fi
+    elif [ -e "$app_path" ] || [ -L "$app_path" ]; then
+      if bundle_record_is_ours "$app_path" "$canonical_bin" || is_legacy_installer_bundle "$app_path"; then
         updated_installation=1
+        install_mode=rebuild
+      else
+        error '%s exists and is not an app bundle this installer built; refusing to replace it.\n' "$app_path"
+        printf 'Remove or rename that bundle and re-run.\n' >&2
+        exit 1
+      fi
+    else
+      install_mode=rebuild
+    fi
+
+    previous_installed=""
+    if [ "$install_mode" = update ]; then
+      # In place, while an older Farhelm may be running from this very
+      # bundle. Each step renames one complete, signed file (or a complete
+      # version folder) into place, in an order where stopping after any of
+      # them leaves an app that launches the old version or the new one: the
+      # new version's folder first, then the main program that starts it,
+      # then the Installed record, then Info.plist. The folder is never
+      # replaced as a whole and nothing is re-signed (a running app survives
+      # this, and survives nothing else; see SPEC_impl.md).
+      UPDATE_WORK=$(mktemp -d "$app_parent/.farhelm-update.XXXXXX") || bundle_fail "creating a private work directory in $app_parent"
+      # An interrupted uninstall can leave the app without some of its
+      # folders, and an installer killed between copying a file beside its
+      # destination and renaming it leaves that copy behind, which
+      # uninstall would refuse as foreign. Both are repaired here, under
+      # the lock, before anything is replaced.
+      (umask 022; mkdir -p "$contents/MacOS" "$contents/Resources") || bundle_fail "recreating the app's folders"
+      for leftover in "$contents"/.farhelm-new.* "$contents"/MacOS/.farhelm-new.* \
+        "$contents"/Resources/.farhelm-new.* "$contents"/Versions/.farhelm-new.*; do
+        if [ -f "$leftover" ] && [ ! -L "$leftover" ]; then
+          rm -f "$leftover"
+        fi
+      done
+      if [ -f "$contents/Versions/installed" ]; then
+        IFS= read -r previous_installed <"$contents/Versions/installed" || :
+      fi
+      # A version folder that already holds its farhelm is kept as it is:
+      # a running Farhelm may be using it, and a release's bytes do not
+      # change. Only a folder without one is replaced, and it is put back
+      # if the replacement fails, so a failure never loses a version.
+      new_version_dir="$contents/Versions/$VERSION_NUM"
+      if [ ! -f "$new_version_dir/farhelm" ] || [ -L "$new_version_dir/farhelm" ] || [ -L "$new_version_dir" ]; then
+        stage_version_dir
+        if [ -e "$new_version_dir" ] || [ -L "$new_version_dir" ]; then
+          mv "$new_version_dir" "$UPDATE_WORK/replaced-version" || bundle_fail "moving the incomplete $VERSION_NUM folder aside"
+        fi
+        if ! mv "$UPDATE_WORK/version" "$new_version_dir"; then
+          if [ -e "$UPDATE_WORK/replaced-version" ] || [ -L "$UPDATE_WORK/replaced-version" ]; then
+            mv "$UPDATE_WORK/replaced-version" "$new_version_dir" || :
+          fi
+          bundle_fail "moving the $VERSION_NUM folder into place"
+        fi
+      fi
+      replace_file "$STAGING_DIR/farhelm-desktop" "$contents/MacOS/farhelm-desktop" 0755 "the app's main program"
+      replace_file "$STAGING_DIR/Farhelm.icns" "$contents/Resources/Farhelm.icns" 0644 "the icon"
+      write_forwarder "$UPDATE_WORK/forwarder" || bundle_fail "writing the forwarder"
+      if ! same_bytes "$UPDATE_WORK/forwarder" "$forwarder"; then
+        replace_file "$UPDATE_WORK/forwarder" "$forwarder" 0755 "the forwarder"
+      fi
+      printf '%s\n' "$VERSION_NUM" >"$UPDATE_WORK/installed" || bundle_fail "writing the Installed record"
+      replace_file "$UPDATE_WORK/installed" "$contents/Versions/installed" 0644 "the Installed record"
+      write_info_plist "$UPDATE_WORK/Info.plist" || bundle_fail "writing Info.plist"
+      replace_file "$UPDATE_WORK/Info.plist" "$contents/Info.plist" 0644 "Info.plist"
+      write_current_record "$UPDATE_WORK/record" "$canonical_bin/farhelm" || bundle_fail "writing installer ownership metadata"
+      replace_file "$UPDATE_WORK/record" "$contents/.farhelm-installation" 0600 "installer ownership metadata"
+    else
+      # Built whole in a private directory beside the bundle, so the final
+      # move is a rename on the same filesystem. A previous bundle is moved
+      # into the same directory before the swap, so the public name only
+      # ever holds the old bundle, nothing, or the new one, and everything
+      # deleted afterwards is this run's own. This path is a fresh install,
+      # the one-time move from the old layout, and a repair; the old layout
+      # is replaced with Farhelm quit (docs/install_uninstall.md says so).
+      BUNDLE_WORK=$(mktemp -d "$app_parent/.farhelm-app-build.XXXXXX") || bundle_fail "creating a private build directory in $app_parent"
+      bundle_stage="$BUNDLE_WORK/Farhelm.app"
+      (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources" "$bundle_stage/Contents/Versions/$VERSION_NUM") || bundle_fail "creating the staging layout"
+      cp "$STAGING_DIR/farhelm" "$bundle_stage/Contents/Versions/$VERSION_NUM/farhelm" || bundle_fail "copying farhelm"
+      cp "$STAGING_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
+      write_forwarder "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "writing the forwarder"
+      chmod 0755 "$bundle_stage/Contents/Versions/$VERSION_NUM/farhelm" "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting program modes"
+      cp "$STAGING_DIR/Farhelm.icns" "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "copying the icon"
+      printf '%s\n' "$VERSION_NUM" >"$bundle_stage/Contents/Versions/installed" || bundle_fail "writing the Installed record"
+      chmod 0644 "$bundle_stage/Contents/Resources/Farhelm.icns" "$bundle_stage/Contents/Versions/installed" || bundle_fail "setting file modes"
+      write_info_plist "$bundle_stage/Contents/Info.plist" || bundle_fail "writing Info.plist"
+      chmod 0644 "$bundle_stage/Contents/Info.plist" || bundle_fail "setting the Info.plist mode"
+      write_current_record "$bundle_stage/Contents/.farhelm-installation" "$canonical_bin/farhelm" || bundle_fail "writing installer ownership metadata"
+      if [ -e "$app_path" ] || [ -L "$app_path" ]; then
+        mv "$app_path" "$BUNDLE_WORK/previous" || bundle_fail "moving the previous bundle aside (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
+      fi
+      mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
+      rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
+      BUNDLE_WORK=""
+    fi
+
+    # Spotlight and Launch Services keep showing the old version until the
+    # bundle is touched or re-registered (observed on a real Mac). The
+    # binary does not exist on the Linux CI host the installer tests run
+    # on, hence the -x guard.
+    touch "$app_path" 2>/dev/null || true
+    LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if [ -x "$LSREGISTER" ]; then
+      "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
+    fi
+
+    # The Terminal link, and the copies the layout before this one kept in
+    # the bin directory. A copy is removed only when its checksum matches
+    # what that layout's record says the installer last put there; a
+    # farhelm of the user's own is renamed to a visible name instead, since
+    # its name is needed for the link. A farhelm-desktop of the user's own
+    # is left where it is.
+    KEPT_NOTES=""
+    kept_stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    for name in farhelm farhelm-desktop; do
+      dest="$INSTALL_DIR/$name"
+      if [ -L "$dest" ]; then
+        [ "$name" = farhelm ] && [ "$(readlink "$dest")" = "$forwarder" ] && continue
+      elif [ ! -e "$dest" ]; then
         continue
+      elif [ -f "$dest" ]; then
+        recorded_sha=$(recorded_digest_of "$name")
+        if [ -n "$recorded_sha" ] && existing_sha=$(sha256_of "$dest" 2>/dev/null) \
+          && [ "$existing_sha" = "$recorded_sha" ]; then
+          if [ "$name" = farhelm-desktop ]; then
+            rm -f "$dest" || error 'note: could not remove the old %s; it is safe to delete\n' "$dest"
+          fi
+          continue
+        fi
+      fi
+      [ "$name" = farhelm ] || continue
+      if [ -d "$dest" ] && [ ! -L "$dest" ]; then
+        error '%s is a directory; the app is installed, but the Terminal link was not created; move it aside and re-run\n' "$dest"
+        exit 1
       fi
       kept="$INSTALL_DIR/$name.replaced-$kept_stamp"
       if [ -e "$kept" ] || [ -L "$kept" ]; then
         kept="$kept-$$"
       fi
-      if ! ln "$dest" "$kept"; then
-        error 'could not keep a copy of the existing %s as %s; move it aside and re-run the installer\n' "$dest" "$kept"
-        exit 1
-      fi
+      mv "$dest" "$kept" || { error 'could not keep the existing %s as %s; move it aside and re-run the installer\n' "$dest" "$kept"; exit 1; }
       KEPT_NOTES="${KEPT_NOTES}ℹ️  ~/.local/bin/$name was not installed by this installer, so it was renamed
    to ~/.local/bin/${kept##*/} - farhelm installation still
    proceeded.$NEWLINE"
     done
+    if [ ! -L "$INSTALL_DIR/farhelm" ] || [ "$(readlink "$INSTALL_DIR/farhelm")" != "$forwarder" ]; then
+      link_stage="$INSTALL_DIR/.farhelm-link.$$"
+      rm -f "$link_stage"
+      ln -s "$forwarder" "$link_stage" || bundle_fail "creating the Terminal link"
+      mv -f "$link_stage" "$INSTALL_DIR/farhelm" || { rm -f "$link_stage"; bundle_fail "installing the Terminal link $INSTALL_DIR/farhelm"; }
+    fi
+    # The old layout's record of the bin-directory copies goes once they
+    # are gone; the app's record is the installation's only record now.
+    if [ -f "$INSTALL_DIR/.farhelm-installation" ] && [ ! -L "$INSTALL_DIR/.farhelm-installation" ]; then
+      rm -f "$INSTALL_DIR/.farhelm-installation" || error 'note: could not remove %s, the previous layout'"'"'s record; it is safe to delete\n' "$INSTALL_DIR/.farhelm-installation"
+    fi
 
-    for name in $binaries; do
-      # The journal's own name for this binary (see the transaction
-      # section): records carry this, never $dest or $backup.
-      if [ "$name" = farhelm ]; then
-        binary_id=cli
-        fail_prefix="install/update failed while replacing farhelm"
-        restored_suffix="the previous farhelm (if any) was restored"
-      else
-        binary_id=desktop
-        fail_prefix="install/update failed while replacing farhelm-desktop"
-        restored_suffix="the previous installation (if any) was restored"
+    # Version folders other than the one just installed, the one it
+    # replaced, and the one a running Farhelm started from (its supervisor's
+    # Running record in the default state directory, or in the one this
+    # shell's XDG_STATE_HOME names) are removed. Anything that is not named
+    # like a version is not this installer's and stays. A Farhelm running
+    # with another overridden state directory keeps its version only
+    # through the "just replaced" rule, that is, for one update.
+    if [ "$install_mode" = update ]; then
+      # Both the default state directory, which a Farhelm opened from
+      # Finder or the Dock always uses whatever this shell says, and the
+      # one this shell's absolute XDG_STATE_HOME names.
+      running_version=""
+      running_version_xdg=""
+      if [ -f "$HOME/.local/state/farhelm/running-version" ]; then
+        IFS= read -r running_version <"$HOME/.local/state/farhelm/running-version" || :
       fi
-
-      dest="$INSTALL_DIR/$name"
-      backup="$INSTALL_DIR/.$name.old"
-
-      if [ -e "$dest" ]; then
-        journal_append PARK "$binary_id"
-        if ! mv "$dest" "$backup"; then
-          if rollback_from_journal; then
-            rm -f "$JOURNAL"
-            error '%s; %s\n' "$fail_prefix" "$restored_suffix"
-          else
-            error '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL"
+      case "${XDG_STATE_HOME:-}" in
+        /*)
+          if [ -f "$XDG_STATE_HOME/farhelm/running-version" ]; then
+            IFS= read -r running_version_xdg <"$XDG_STATE_HOME/farhelm/running-version" || :
           fi
-          exit 1
+          ;;
+      esac
+      for version_dir in "$contents/Versions"/*; do
+        if [ ! -d "$version_dir" ] || [ -L "$version_dir" ]; then
+          continue
         fi
-      fi
-
-      journal_append INSTALL "$binary_id"
-      if ! mv "$STAGING_DIR/$name" "$dest"; then
-        if rollback_from_journal; then
-          rm -f "$JOURNAL"
-          error '%s; %s\n' "$fail_prefix" "$restored_suffix"
-        else
-          error '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL"
-        fi
-        exit 1
-      fi
-    done
-
-    # Committed: every binary this run touched is now the new one, and
-    # removing the journal is the single atomic point that says so — from
-    # here on, ANY interruption (including one right after this line) finds
-    # no journal and correctly treats leftover backup files as harmless
-    # already-committed cleanup debris, never as something to restore from.
-    # The backups and the lock are removed next, in that order, but their
-    # removal is not itself atomic with the commit; that is fine, because
-    # nothing after this point depends on them being gone quickly, only on
-    # the journal being gone first — which is also the order
-    # remove_owned_lock insists on before it will release the slot at all.
-    rm -f "$JOURNAL"
-    for name in $binaries; do
-      rm -f "$INSTALL_DIR/.$name.old"
-    done
-
-    if ! publish_installation_record "$INSTALL_DIR/.farhelm-installation" "$STAGING_DIR/.farhelm-installation"; then
-      error 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR"
-      exit 1
-    fi
-    # The lock stays held through the bundle step below, and is released
-    # only after it. The bundle copies the binaries now in $INSTALL_DIR; with
-    # the slot free, another installer for this directory could commit
-    # different ones between the two copies and leave a bundle holding one
-    # binary from each version under this run's version number, or swap the
-    # bundle at the same time as this run. The journal is already gone, so
-    # an interruption from here on only removes the lock (see cleanup).
-
-    # 7. macOS launcher identity: assemble ~/Applications/Farhelm.app around
-    # COPIES of the binaries just committed, plus the icon staged from the
-    # desktop archive. The bundle is what makes the app reachable by name
-    # from Spotlight/Alfred, gives it a Dock icon and a Cmd-Tab name, and
-    # makes a second launch activate the running instance instead of racing
-    # it for the embedded helm's state.
-    #
-    # The bundle is a DERIVED artifact, deliberately outside the journaled
-    # transaction above: the journal's vocabulary is exactly the two flat
-    # binaries, and the bundle is reconstructible from any committed pair,
-    # so every run that gets this far simply rebuilds it wholesale — staged
-    # next to the binaries, then swapped in by renaming rather than
-    # edited in place (in-place modification of an existing .app is what
-    # trips macOS's App Management privacy prompt). A failure here exits 1,
-    # but the messages say what is still true: the binaries in
-    # ~/.local/bin are committed and usable.
-    #
-    # The executable KEEPS the name farhelm-desktop inside the bundle: the
-    # default APFS is case-insensitive, so an executable named "Farhelm"
-    # would be the same directory entry as the required CLI sibling
-    # "farhelm" and the second copy would clobber the first. The pretty
-    # name comes from CFBundleName. Every successful install builds the app.
-    app_parent="$HOME/Applications"
-    app_path="$app_parent/Farhelm.app"
-
-    bundle_fail() {
-      error 'assembling %s failed at: %s\n' "$app_path" "$1"
-      printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
-      exit 1
-    }
-
-    # The bundle has its own lock, next to it. The install lock only
-    # keeps runs for the same install directory apart. Older installers
-    # could target other directories while sharing this bundle name; they
-    # still need to contend on the bundle lock, since `mv` onto an existing
-    # directory nests the second bundle inside the first. Contention
-    # refuses, as does a lock an interrupted
-    # run left behind, which nothing can tell from a live one; the
-    # binaries are already installed either way. The ownership check
-    # below runs under this lock so no other run can change the bundle
-    # between that check and the swap.
-    (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
-    BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
-    if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
-      error 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK"
-      printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
-      exit 1
-    fi
-    BUNDLE_LOCK_HELD=1
-
-    # An uninstall interrupted at the very end of removing the bundle
-    # leaves its retry copy of the bundle record beside it, and uninstall
-    # refuses whenever that copy and the bundle's own record disagree.
-    # This installation's own copy is removed once the new bundle is in
-    # place (below). Another installation's copy is that installation's
-    # only way to finish its uninstall, and building a bundle next to it
-    # would leave both installations unable to uninstall, so this run
-    # refuses the bundle step instead and says how to clear it.
-    pending_receipt="$app_parent/.Farhelm.app.uninstall-receipt"
-    # A receipt naming a directory that has since moved here (or no
-    # longer holds an installation) is this installation's own, by the
-    # same rule the bundle's record gets below; refusing it would point
-    # the user at "that installation", which is this one.
-    if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
-      ! record_file_is_ours "$pending_receipt" "$pir_canonical" &&
-      ! record_file_moved_here "$pending_receipt" "$pir_canonical"; then
-      error '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt"
-      printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
-      exit 1
-    fi
-
-    # Replace only a bundle this installer can show it built: one that
-    # carries this installation's bundle record, or the recordless shape
-    # it built before records existed. Anything else at this name,
-    # including a bundle the user built or customised whose Info.plist
-    # merely mentions Farhelm, belongs to the user and is refused, not
-    # moved aside: a renamed .app in ~/Applications would still show up
-    # as an app, and "rename yours and re-run" is the clearer message.
-    # SPEC.md's installation rule (a file is not destroyed because its
-    # name matches) is the reason.
-    # A bundle whose record names another directory is also this
-    # installation's when that directory has moved here or no longer
-    # holds an installation (bundle_record_moved_here). When the named
-    # directory still holds one, the refusal names it, so the user can
-    # tell which installation the bundle belongs to.
-    if [ -e "$app_path" ]; then
-      if ! bundle_record_is_ours "$app_path" "$pir_canonical" \
-        && ! bundle_record_moved_here "$app_path" "$pir_canonical" \
-        && ! is_legacy_installer_bundle "$app_path"; then
-        if other_install_dir=$(bundle_record_dir "$app_path"); then
-          other_install_dir=${other_install_dir%/}
-          error '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir"
-          printf 'The binaries in %s are installed and usable; uninstall the other installation, or remove or rename that bundle, and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
-        else
-          error '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path"
-          printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
-        fi
-        exit 1
-      fi
-    fi
-
-    # Built in a private directory beside the bundle, so the final move
-    # is a rename on the same filesystem (the install directory may be on
-    # another one, where `mv` would copy the tree into the public name
-    # and an interruption could leave half a bundle there). The previous
-    # bundle is moved into the same directory before the swap, so the
-    # public name only ever holds the old bundle, nothing, or the new
-    # one, and everything deleted afterwards is this run's own.
-    BUNDLE_WORK=$(mktemp -d "$app_parent/.farhelm-app-build.XXXXXX") || bundle_fail "creating a private build directory in $app_parent"
-    bundle_stage="$BUNDLE_WORK/Farhelm.app"
-    (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources") || bundle_fail "creating the staging layout"
-    cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
-    cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
-    chmod 0755 "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting binary modes"
-    cp "$STAGING_DIR/Farhelm.icns" "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "copying the icon"
-    chmod 0644 "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "setting the icon mode"
-
-    cat >"$bundle_stage/Contents/Info.plist" <<PLIST_EOF || bundle_fail "writing Info.plist"
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>CFBundleExecutable</key>
-	<string>farhelm-desktop</string>
-	<key>CFBundleIdentifier</key>
-	<string>org.scode.farhelm.desktop</string>
-	<key>CFBundleName</key>
-	<string>Farhelm</string>
-	<key>CFBundleDisplayName</key>
-	<string>Farhelm</string>
-	<key>CFBundleIconFile</key>
-	<string>Farhelm</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$VERSION_NUM</string>
-	<key>CFBundleVersion</key>
-	<string>$VERSION_NUM</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>11.0</string>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.developer-tools</string>
-</dict>
-</plist>
-PLIST_EOF
-    # Info.plist is launch configuration: its LSEnvironment key can set
-    # DYLD_INSERT_LIBRARIES or FARHELM_* for the app, so whoever can write
-    # it can run code as the user the next time Farhelm is opened. The
-    # heredoc above creates it with the caller's umask (group-writable
-    # under a common umask of 002, and every account on a Mac is in the
-    # staff group), so it gets an explicit owner-only-writable mode like
-    # every other file in the bundle, before it is hashed into the record.
-    chmod 0644 "$bundle_stage/Contents/Info.plist" || bundle_fail "setting the Info.plist mode"
-
-    bundle_cli_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm") || bundle_fail "hashing the staged CLI"
-    bundle_desktop_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm-desktop") || bundle_fail "hashing the staged desktop executable"
-    bundle_plist_sha=$(sha256_of "$bundle_stage/Contents/Info.plist") || bundle_fail "hashing Info.plist"
-    bundle_icns_sha=$(sha256_of "$bundle_stage/Contents/Resources/Farhelm.icns") || bundle_fail "hashing Farhelm.icns"
-    write_bundle_record "$bundle_stage" "$pir_canonical" "$bundle_cli_sha" "$bundle_desktop_sha" \
-      "$bundle_plist_sha" "$bundle_icns_sha" || bundle_fail "writing installer ownership metadata"
-
-    # Swap by renaming, not by deleting in place: interrupting `rm -rf`
-    # on the live name used to leave a half-deleted bundle no later run
-    # or uninstall would accept. If the move in fails, cleanup puts the
-    # previous bundle back.
-    if [ -e "$app_path" ]; then
-      mv "$app_path" "$BUNDLE_WORK/previous" || bundle_fail "moving the previous bundle aside (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
-    fi
-    mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
-    rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
-    BUNDLE_WORK=""
-    # This installation's own leftover receipt (see the check under the
-    # bundle lock above) now describes a bundle that no longer exists,
-    # and would disagree with the new one (a different version's
-    # Info.plist digest, say), so it goes.
-    if record_file_is_ours "$pending_receipt" "$pir_canonical" \
-      || record_file_moved_here "$pending_receipt" "$pir_canonical"; then
-      rm -f "$pending_receipt" || printf 'note: could not delete %s, left by an interrupted uninstall; delete it by hand if a later uninstall refuses\n' "$pending_receipt" >&2
-    fi
-
-    # Registration is best-effort tidiness: Launch Services discovers
-    # ~/Applications on its own, this just shortens the wait. The
-    # binary does not exist on the Linux CI host the installer tests
-    # run on, hence the -x guard.
-    LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-    if [ -x "$LSREGISTER" ]; then
-      "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
+        version_name=${version_dir##*/}
+        is_version_folder_name "$version_name" || continue
+        [ "$version_name" = "$VERSION_NUM" ] && continue
+        [ "$version_name" = "$previous_installed" ] && continue
+        [ "$version_name" = "$running_version" ] && continue
+        [ "$version_name" = "$running_version_xdg" ] && continue
+        rm -rf "$version_dir" || error 'note: could not remove the old version folder %s; it is safe to delete\n' "$version_dir"
+      done
     fi
     release_bundle_lock
-
-    # Stop claiming the lock BEFORE releasing it. Once the slot is free,
-    # another installer can take it and write its own journal there; if this
-    # process still believed it held the lock, its exit handler would roll
-    # back or unlock that installer's live transaction. Clearing the flag
-    # first means a signal arriving in between leaves a stale lock (which the
-    # next run recovers) rather than acting on someone else's.
-    LOCK_ACQUIRED=0
-    remove_owned_lock
 
     # 8. Report. Choose the action from this run's outcome and the local
     # tmux prerequisite. Fresh-install launch advice follows its remedy. An

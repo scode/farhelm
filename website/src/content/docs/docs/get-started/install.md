@@ -19,7 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 ```
 
 It needs no administrator password. It puts the Farhelm app in `~/Applications` and the `farhelm` command in
-`~/.local/bin`, and finishes by telling you Farhelm is installed and how to uninstall it later.
+`~/.local/bin`, and finishes by telling you Farhelm is installed and how to uninstall it later. Running it again updates
+Farhelm, and that is safe while Farhelm is open: quit and reopen it to finish the update.
 
 ## If the installer asks for tmux
 

@@ -16,9 +16,8 @@ use std::os::unix::{
 };
 use std::path::{Path, PathBuf};
 
-const RECORD_LIMIT: u64 = 64 * 1024;
-const FLAT_RECORD: &str = ".farhelm-installation";
-const PENDING_APP_RECORD: &str = ".Farhelm.app.uninstall-receipt";
+pub(super) const RECORD_LIMIT: u64 = 64 * 1024;
+pub(super) const FLAT_RECORD: &str = ".farhelm-installation";
 const CLI: &str = "farhelm";
 const DESKTOP: &str = "farhelm-desktop";
 
@@ -43,16 +42,21 @@ pub(crate) struct InspectionInputs {
 
 /// Everything the remover may act on after service preflight and confirmation.
 ///
-/// Paths are derived from fixed names below a verified root. Metadata is kept
-/// apart from payloads, and `cli` remains separately identified because it
-/// must be the final flat artifact removed for an ordinary retry to work.
+/// Which kind depends on the platform. On macOS the installation is the app
+/// bundle with its side-by-side versions ([`super::app`]); on Linux it is a
+/// standalone bin directory an earlier installer left (the installer now
+/// refuses Linux, but those installations still need a removal path).
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct OwnershipPlan {
-    pub(crate) flat: FlatPlan,
-    pub(crate) bundle: BundleInspection,
+pub(crate) enum OwnershipPlan {
+    Flat(FlatPlan),
+    App(super::app::AppPlan),
 }
 
 /// Verified ownership information for the selected standalone directory.
+///
+/// Paths are derived from fixed names below a verified root. Metadata is kept
+/// apart from payloads, and `cli` remains separately identified because it
+/// must be the final artifact removed for an ordinary retry to work.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FlatPlan {
     pub(crate) root: PathBuf,
@@ -60,40 +64,6 @@ pub(crate) struct FlatPlan {
     pub(crate) desktop: Option<PathBuf>,
     pub(crate) retained_foreign_desktop: Option<PathBuf>,
     pub(crate) metadata: PathBuf,
-}
-
-/// macOS bundle inspection result, including the fact that it was impossible.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum BundleInspection {
-    NotApplicable,
-    UninspectedWithoutHome,
-    Absent,
-    /// A `Farhelm.app` with no installer receipt, internal or pending, at
-    /// this path. Nothing proves Farhelm installed it (installers before
-    /// receipts existed, or a self-built app), so uninstall leaves it in place
-    /// and says so, and still removes the verified flat installation.
-    /// Removal must not depend on reinstalling: rebuilding a recognized
-    /// legacy app could replace it, while a foreign app is refused.
-    RetainedWithoutReceipt(PathBuf),
-    Recognized(BundlePlan),
-}
-
-/// Fixed, verified paths inside an installer-created macOS application.
-///
-/// `files` never includes the receipt. `directories` is deepest-first and
-/// ends with the app root, so a remover can delete exactly these entries
-/// without recursively inventing authority over an unexpected child.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct BundlePlan {
-    pub(crate) root: PathBuf,
-    pub(crate) files: Vec<PathBuf>,
-    pub(crate) directories: Vec<PathBuf>,
-    pub(crate) metadata: PathBuf,
-    /// A fixed sibling receipt preserves authority across the final rmdir steps.
-    pub(crate) pending_metadata: PathBuf,
-    pub(crate) pending_present: bool,
-    /// Validated receipt bytes, used only to preserve that same evidence on retry.
-    pub(crate) receipt: Vec<u8>,
 }
 
 /// Inspect the installation that supplied the running CLI and return no
@@ -107,10 +77,10 @@ pub(crate) fn inspect(inputs: &InspectionInputs) -> Result<OwnershipPlan> {
 /// Production reads `uid` from the same metadata that supplies file type and
 /// inode checks. Tests may substitute only that classification; they still
 /// exercise the real no-follow and descriptor verification path.
-trait MetadataClassifier {
+pub(super) trait MetadataClassifier {
     fn uid(&self, metadata: &Metadata) -> u32;
 }
-struct NativeClassifier;
+pub(super) struct NativeClassifier;
 impl MetadataClassifier for NativeClassifier {
     fn uid(&self, metadata: &Metadata) -> u32 {
         metadata.uid()
@@ -121,10 +91,24 @@ impl MetadataClassifier for NativeClassifier {
 ///
 /// The classifier changes no traversal or hashing rule; it only makes the
 /// effective-UID boundary observable on hosts where a test cannot `chown`.
-fn inspect_with_classifier(
+pub(super) fn inspect_with_classifier(
     inputs: &InspectionInputs,
     classifier: &impl MetadataClassifier,
 ) -> Result<OwnershipPlan> {
+    match inputs.platform {
+        PlatformArtifacts::Macos => {
+            super::app::inspect_app(inputs, classifier).map(OwnershipPlan::App)
+        }
+        PlatformArtifacts::Linux => inspect_flat(inputs, classifier).map(OwnershipPlan::Flat),
+    }
+}
+
+/// Verify the standalone bin directory that holds the running CLI, from the
+/// record beside it.
+fn inspect_flat(
+    inputs: &InspectionInputs,
+    classifier: &impl MetadataClassifier,
+) -> Result<FlatPlan> {
     let executable = fs::canonicalize(&inputs.current_exe).with_context(|| {
         format!(
             "resolving running executable {}",
@@ -138,32 +122,10 @@ fn inspect_with_classifier(
             path_text(&executable)
         );
     }
-    let candidate_root = executable
+    let root = executable
         .parent()
         .ok_or_else(|| anyhow!("{} has no installation directory", path_text(&executable)))?
         .to_path_buf();
-    // An app copy has no flat receipt beside it. A custom standalone directory
-    // may happen to have the same suffix as an app's MacOS directory, so its
-    // adjacent receipt takes precedence over shape-based app discovery. An
-    // existing but invalid receipt still refuses in the normal verifier below.
-    let adjacent_record = candidate_root.join(FLAT_RECORD);
-    let has_flat_record = match fs::symlink_metadata(&adjacent_record) {
-        Ok(_) => true,
-        Err(error) if error.kind() == ErrorKind::NotFound => false,
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("inspecting {}", path_text(&adjacent_record)));
-        }
-    };
-    let invoked_bundle = if inputs.platform == PlatformArtifacts::Macos && !has_flat_record {
-        bundle_invocation(&executable, inputs.effective_uid, classifier)?
-    } else {
-        None
-    };
-    let root = match &invoked_bundle {
-        Some((_, origin)) => origin.clone(),
-        None => candidate_root,
-    };
     let metadata = root.join(FLAT_RECORD);
     let fields = match read_record(&metadata, 4, inputs.effective_uid, true, classifier) {
         Ok(fields) => fields,
@@ -187,23 +149,15 @@ fn inspect_with_classifier(
         );
     }
     let cli_hash = digest_field(&fields[2], &metadata, "CLI digest")?;
-    let desktop_hash = if fields[3].is_empty() {
-        None
-    } else {
-        Some(digest_field(&fields[3], &metadata, "desktop digest")?)
-    };
-    match (inputs.platform, desktop_hash.is_some()) {
-        (PlatformArtifacts::Linux, true) | (PlatformArtifacts::Macos, false) => {
-            return repair_refusal(
-                &metadata,
-                "its desktop digest does not match this platform's artifact set",
-            );
-        }
-        _ => {}
+    if !fields[3].is_empty() {
+        return repair_refusal(
+            &metadata,
+            "its desktop digest does not match this platform's artifact set",
+        );
     }
     let cli = root.join(CLI);
     verify_payload(&cli, &cli_hash, inputs.effective_uid, classifier)?;
-    if invoked_bundle.is_none() && cli != executable {
+    if cli != executable {
         bail!(
             "{} is not the resolved CLI {}",
             path_text(&inputs.current_exe),
@@ -211,58 +165,29 @@ fn inspect_with_classifier(
         );
     }
     let desktop_path = root.join(DESKTOP);
-    let (desktop, retained_foreign_desktop) = match desktop_hash {
-        Some(hash) => {
-            match verify_optional_payload(&desktop_path, &hash, inputs.effective_uid, classifier)? {
-                Some(()) => (Some(desktop_path), None),
-                None => (None, None),
-            }
+    let retained_foreign_desktop = match fs::symlink_metadata(&desktop_path) {
+        Ok(_) => Some(desktop_path),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "inspecting retained foreign artifact {}",
+                    path_text(&desktop_path)
+                )
+            });
         }
-        None => match fs::symlink_metadata(&desktop_path) {
-            Ok(_) => (None, Some(desktop_path)),
-            Err(error) if error.kind() == ErrorKind::NotFound => (None, None),
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "inspecting retained foreign artifact {}",
-                        path_text(&desktop_path)
-                    )
-                });
-            }
-        },
     };
-    let flat = FlatPlan {
-        root: root.clone(),
-        cli: cli.clone(),
-        desktop,
+    Ok(FlatPlan {
+        root,
+        cli,
+        desktop: None,
         retained_foreign_desktop,
         metadata,
-    };
-    let bundle = match (inputs.platform, invoked_bundle) {
-        (PlatformArtifacts::Linux, _) => BundleInspection::NotApplicable,
-        (PlatformArtifacts::Macos, Some((bundle_root, _))) => {
-            let _plan = inspect_bundle_at(&bundle_root, &root, inputs.effective_uid, classifier)?;
-            bail!(
-                "{} is the verified app-bundle CLI; rerun uninstall from the originating flat CLI {}",
-                path_text(&executable),
-                path_text(&cli)
-            );
-        }
-        (PlatformArtifacts::Macos, None) => match inputs.home.as_deref() {
-            Some(home) => inspect_bundle_at(
-                &home.join("Applications/Farhelm.app"),
-                &root,
-                inputs.effective_uid,
-                classifier,
-            )?,
-            None => BundleInspection::UninspectedWithoutHome,
-        },
-    };
-    Ok(OwnershipPlan { flat, bundle })
+    })
 }
 
 /// Turn a receipt failure into the repair direction old installs need.
-fn repair_refusal<T>(path: &Path, reason: &str) -> Result<T> {
+pub(super) fn repair_refusal<T>(path: &Path, reason: &str) -> Result<T> {
     bail!(
         "cannot verify installer ownership record {}: {reason}; rerun the installer, or upgrade once to a release that writes uninstall metadata",
         path_text(path)
@@ -270,7 +195,7 @@ fn repair_refusal<T>(path: &Path, reason: &str) -> Result<T> {
 }
 
 /// Read a bounded NUL record without following its final directory entry.
-fn read_record(
+pub(super) fn read_record(
     path: &Path,
     count: usize,
     uid: u32,
@@ -306,7 +231,7 @@ fn read_record(
 }
 
 /// Open one already-type-checked regular file without blocking on a raced FIFO.
-fn open_regular(
+pub(super) fn open_regular(
     path: &Path,
     uid: u32,
     classifier: &impl MetadataClassifier,
@@ -362,7 +287,7 @@ fn digest_field(bytes: &[u8], record: &Path, name: &str) -> Result<[u8; 32]> {
 /// stricter contract: accepting an alias here would make their meaning depend
 /// on a link the installer never recorded. Path equality alone normalizes some
 /// components, so compare the canonical spelling as bytes.
-fn field_path(bytes: &[u8], record: &Path, name: &str) -> Result<PathBuf> {
+pub(super) fn field_path(bytes: &[u8], record: &Path, name: &str) -> Result<PathBuf> {
     if bytes.is_empty() || bytes.contains(&0) {
         return repair_refusal(record, &format!("its {name} is empty or contains NUL"));
     }
@@ -384,19 +309,6 @@ fn field_path(bytes: &[u8], record: &Path, name: &str) -> Result<PathBuf> {
         );
     }
     Ok(path)
-}
-/// Accept an absent retry artifact, but validate every artifact still present.
-fn verify_optional_payload(
-    path: &Path,
-    digest: &[u8; 32],
-    uid: u32,
-    classifier: &impl MetadataClassifier,
-) -> Result<Option<()>> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => verify_payload(path, digest, uid, classifier).map(Some),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("inspecting {}", path_text(path))),
-    }
 }
 
 /// Check one claimed file against its receipt digest while streaming its bytes.
@@ -434,204 +346,12 @@ fn verify_payload(
     Ok(())
 }
 
-/// Find an app invocation by exact fixed components, then read only its
-/// receipt-origin field. Full payload validation waits until that origin's
-/// flat receipt has independently verified the installation.
-fn bundle_invocation(
-    executable: &Path,
-    uid: u32,
-    classifier: &impl MetadataClassifier,
-) -> Result<Option<(PathBuf, PathBuf)>> {
-    let Some(macos) = executable.parent() else {
-        return Ok(None);
-    };
-    let Some(contents) = macos.parent() else {
-        return Ok(None);
-    };
-    let Some(root) = contents.parent() else {
-        return Ok(None);
-    };
-    if macos.file_name() != Some(OsStr::new("MacOS"))
-        || contents.file_name() != Some(OsStr::new("Contents"))
-        || root.file_name() != Some(OsStr::new("Farhelm.app"))
-    {
-        return Ok(None);
-    }
-    validate_dir(root, uid, classifier)?;
-    validate_dir(contents, uid, classifier)?;
-    let metadata = contents.join(FLAT_RECORD);
-    let fields = read_record(&metadata, 6, uid, true, classifier)?;
-    if fields[0] != b"farhelm-app" {
-        return repair_refusal(&metadata, "its magic field is not farhelm-app");
-    }
-    let origin = field_path(&fields[1], &metadata, "origin directory")?;
-    Ok(Some((root.to_path_buf(), origin)))
-}
-
-/// Validate one known app location against an already-verified flat root.
-///
-/// The receipt's four hashes apply to app-local copies. They intentionally do
-/// not compare against current flat bytes because a later opt-out update may
-/// leave an older, still installer-owned app behind.
-fn inspect_bundle_at(
-    root: &Path,
-    flat_root: &Path,
-    uid: u32,
-    classifier: &impl MetadataClassifier,
-) -> Result<BundleInspection> {
-    let pending_metadata = root
-        .parent()
-        .ok_or_else(|| anyhow!("bundle {} has no parent", path_text(root)))?
-        .join(PENDING_APP_RECORD);
-    let pending = optional_record(&pending_metadata, uid, classifier)?;
-    let root_exists = exists_dir(root, uid, classifier)?;
-    if !root_exists && pending.is_none() {
-        return Ok(BundleInspection::Absent);
-    }
-    let contents = root.join("Contents");
-    let metadata = contents.join(FLAT_RECORD);
-    // Read before the layout checks: a receipt-less app is judged by the
-    // missing receipt alone, since a signed or self-built one carries entries
-    // (`Contents/PkgInfo`, `Contents/_CodeSignature`) the installer never
-    // writes and would otherwise be refused for them.
-    let internal = if root_exists {
-        optional_record(&metadata, uid, classifier)?
-    } else {
-        None
-    };
-    if internal.is_none() && pending.is_none() {
-        return Ok(BundleInspection::RetainedWithoutReceipt(root.to_path_buf()));
-    }
-    if root_exists {
-        reject_unexpected(root, &["Contents"])?;
-    }
-    let contents_exists = exists_dir(&contents, uid, classifier)?;
-    if contents_exists {
-        reject_unexpected(
-            &contents,
-            &[".farhelm-installation", "Info.plist", "MacOS", "Resources"],
-        )?;
-    }
-    if let (Some(internal), Some(pending)) = (&internal, &pending)
-        && internal != pending
-    {
-        return repair_refusal(
-            &pending_metadata,
-            "it disagrees with the app's internal receipt",
-        );
-    }
-    // Both records may exist if removal stopped immediately after publishing
-    // the sibling. Only identical evidence is accepted; a filename alone never
-    // authorizes cleanup of an otherwise empty leftover bundle.
-    let fields = internal
-        .as_ref()
-        .or(pending.as_ref())
-        .expect("a bundle with neither receipt returned early");
-    let record_path = if internal.is_some() {
-        &metadata
-    } else {
-        &pending_metadata
-    };
-    if fields[0] != b"farhelm-app" {
-        return repair_refusal(record_path, "its magic field is not farhelm-app");
-    }
-    let origin = field_path(&fields[1], record_path, "origin directory")?;
-    if origin.as_os_str().as_bytes() != flat_root.as_os_str().as_bytes() {
-        // Not a damaged receipt: a valid one that names another installation
-        // (a Mac can hold a default and a custom-directory install, but only
-        // one Farhelm.app). The generic repair advice, rerunning the
-        // installer, would rebuild the app from THIS installation and take it
-        // away from the other one, so this refusal says what actually helps.
-        bail!(
-            "ownership receipt {} says {} belongs to the Farhelm installation in {}, not the one \
-             being uninstalled from {}; uninstall that installation with its own `farhelm \
-             uninstall` first, or move the app aside, then retry",
-            path_text(record_path),
-            path_text(root),
-            path_text(&origin),
-            path_text(flat_root)
-        );
-    }
-    let hashes = [
-        digest_field(&fields[2], record_path, "CLI digest")?,
-        digest_field(&fields[3], record_path, "desktop digest")?,
-        digest_field(&fields[4], record_path, "Info.plist digest")?,
-        digest_field(&fields[5], record_path, "icon digest")?,
-    ];
-    let macos = contents.join("MacOS");
-    let resources = contents.join("Resources");
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
-    verify_bundle_file(
-        &contents.join("Info.plist"),
-        &hashes[2],
-        uid,
-        classifier,
-        &mut files,
-    )?;
-    if exists_dir(&macos, uid, classifier)? {
-        reject_unexpected(&macos, &[CLI, DESKTOP])?;
-        verify_bundle_file(&macos.join(CLI), &hashes[0], uid, classifier, &mut files)?;
-        verify_bundle_file(
-            &macos.join(DESKTOP),
-            &hashes[1],
-            uid,
-            classifier,
-            &mut files,
-        )?;
-        directories.push(macos.clone());
-    }
-    if exists_dir(&resources, uid, classifier)? {
-        reject_unexpected(&resources, &["Farhelm.icns"])?;
-        verify_bundle_file(
-            &resources.join("Farhelm.icns"),
-            &hashes[3],
-            uid,
-            classifier,
-            &mut files,
-        )?;
-        directories.push(resources.clone());
-    }
-    if contents_exists {
-        directories.push(contents.clone());
-    }
-    if root_exists {
-        directories.push(root.to_path_buf());
-    }
-    Ok(BundleInspection::Recognized(BundlePlan {
-        root: root.to_path_buf(),
-        files,
-        directories,
-        metadata,
-        pending_metadata,
-        pending_present: pending.is_some(),
-        receipt: fields
-            .iter()
-            .flat_map(|field| field.iter().copied().chain([0]))
-            .collect(),
-    }))
-}
-
-/// Missing receipts may be a known removal boundary; malformed ones never are.
-fn optional_record(
+/// Require a bundle component to be a user-owned directory, never a link.
+pub(super) fn validate_dir(
     path: &Path,
     uid: u32,
     classifier: &impl MetadataClassifier,
-) -> Result<Option<Vec<Vec<u8>>>> {
-    match read_record(path, 6, uid, true, classifier) {
-        Ok(fields) => Ok(Some(fields)),
-        Err(error)
-            if error
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|error| error.kind() == ErrorKind::NotFound) =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
-/// Require a bundle component to be a user-owned directory, never a link.
-fn validate_dir(path: &Path, uid: u32, classifier: &impl MetadataClassifier) -> Result<()> {
+) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("inspecting bundle directory {}", path_text(path)))?;
     if !metadata.file_type().is_dir() {
@@ -649,7 +369,11 @@ fn validate_dir(path: &Path, uid: u32, classifier: &impl MetadataClassifier) -> 
     Ok(())
 }
 /// Distinguish an absent retry directory from an unsafe existing one.
-fn exists_dir(path: &Path, uid: u32, classifier: &impl MetadataClassifier) -> Result<bool> {
+pub(super) fn exists_dir(
+    path: &Path,
+    uid: u32,
+    classifier: &impl MetadataClassifier,
+) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => {
             validate_dir(path, uid, classifier)?;
@@ -662,7 +386,7 @@ fn exists_dir(path: &Path, uid: u32, classifier: &impl MetadataClassifier) -> Re
     }
 }
 /// Prove a fixed bundle directory contains no recursive-removal surprises.
-fn reject_unexpected(path: &Path, allowed: &[&str]) -> Result<()> {
+pub(super) fn reject_unexpected(path: &Path, allowed: &[&str]) -> Result<()> {
     for entry in fs::read_dir(path)
         .with_context(|| format!("enumerating bundle directory {}", path_text(path)))?
     {
@@ -678,19 +402,6 @@ fn reject_unexpected(path: &Path, allowed: &[&str]) -> Result<()> {
                 path_text(&entry.path())
             );
         }
-    }
-    Ok(())
-}
-/// Add a surviving fixed bundle payload only after its own receipt hash holds.
-fn verify_bundle_file(
-    path: &Path,
-    digest: &[u8; 32],
-    uid: u32,
-    classifier: &impl MetadataClassifier,
-    files: &mut Vec<PathBuf>,
-) -> Result<()> {
-    if verify_optional_payload(path, digest, uid, classifier)?.is_some() {
-        files.push(path.to_path_buf());
     }
     Ok(())
 }
@@ -790,47 +501,6 @@ pub(crate) mod tests {
             changed.push(0);
             Self::write(path, &changed);
         }
-        /// Build the fixed app tree, optionally retaining an older independent payload generation.
-        pub(crate) fn bundle(&self, older: bool) -> PathBuf {
-            let contents = self.home.join("Applications/Farhelm.app/Contents");
-            fs::create_dir_all(contents.join("MacOS")).expect("macos");
-            fs::create_dir_all(contents.join("Resources")).expect("resources");
-            let cli = if older {
-                b"old cli".as_slice()
-            } else {
-                b"cli".as_slice()
-            };
-            let desktop = if older {
-                b"old desktop".as_slice()
-            } else {
-                b"desktop".as_slice()
-            };
-            Self::write(&contents.join("MacOS/farhelm"), cli);
-            Self::write(&contents.join("MacOS/farhelm-desktop"), desktop);
-            Self::write(&contents.join("Info.plist"), b"plist");
-            Self::write(&contents.join("Resources/Farhelm.icns"), b"icon");
-            let cli_hash = Self::digest(cli);
-            let desktop_hash = Self::digest(desktop);
-            let plist_hash = Self::digest(b"plist");
-            let icon_hash = Self::digest(b"icon");
-            let parts = [
-                b"farhelm-app".as_slice(),
-                self.install.as_os_str().as_bytes(),
-                cli_hash.as_bytes(),
-                desktop_hash.as_bytes(),
-                plist_hash.as_bytes(),
-                icon_hash.as_bytes(),
-            ];
-            let mut record = parts.join(&0);
-            record.push(0);
-            Self::write(&contents.join(FLAT_RECORD), &record);
-            fs::set_permissions(
-                contents.join(FLAT_RECORD),
-                fs::Permissions::from_mode(0o600),
-            )
-            .expect("private app record");
-            contents.parent().unwrap().to_path_buf()
-        }
     }
     /// A complete Linux receipt proves the verifier builds authority only from fixed names.
     #[test]
@@ -838,28 +508,17 @@ pub(crate) mod tests {
         let fixture = Fixture::new();
         fixture.flat(None);
         Fixture::write(&fixture.install.join(DESKTOP), b"foreign");
-        let plan = inspect(&fixture.inputs(PlatformArtifacts::Linux)).expect("valid plan");
-        assert_eq!(plan.flat.cli, fixture.install.join(CLI));
-        assert_eq!(plan.flat.desktop, None);
+        let OwnershipPlan::Flat(plan) =
+            inspect(&fixture.inputs(PlatformArtifacts::Linux)).expect("valid plan")
+        else {
+            panic!("a Linux installation is a flat plan");
+        };
+        assert_eq!(plan.cli, fixture.install.join(CLI));
+        assert_eq!(plan.desktop, None);
         assert_eq!(
-            plan.flat.retained_foreign_desktop,
+            plan.retained_foreign_desktop,
             Some(fixture.install.join(DESKTOP))
         );
-        assert!(matches!(plan.bundle, BundleInspection::NotApplicable));
-    }
-    /// A valid app may carry older independent bytes after a bundle-opt-out update.
-    #[test]
-    fn successful_macos_plan_accepts_an_older_independent_bundle() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let root = fixture.bundle(true);
-        let plan = inspect(&fixture.inputs(PlatformArtifacts::Macos)).expect("valid mac plan");
-        let BundleInspection::Recognized(bundle) = plan.bundle else {
-            panic!("recognized bundle")
-        };
-        assert_eq!(bundle.root, root);
-        assert_eq!(bundle.directories.last(), Some(&root));
-        assert_eq!(bundle.files.len(), 4);
     }
     /// Aliases are allowed only because their resolved target proves the selected installation.
     #[test]
@@ -873,29 +532,6 @@ pub(crate) mod tests {
         assert!(inspect(&inputs).is_ok());
     }
 
-    /// A custom install's directory suffix is not app ownership evidence. Its
-    /// adjacent flat receipt must win even when the path resembles an app copy.
-    #[test]
-    fn bundle_shaped_custom_flat_directory_uses_its_adjacent_receipt() {
-        let mut fixture = Fixture::new();
-        fixture.install = fixture.install.join("Farhelm.app/Contents/MacOS");
-        fs::create_dir_all(&fixture.install).unwrap();
-        fixture.flat(Some(b"desktop"));
-        let plan = inspect(&fixture.inputs(PlatformArtifacts::Macos)).expect("custom flat install");
-        assert_eq!(plan.flat.root, fixture.install);
-        assert!(matches!(plan.bundle, BundleInspection::Absent));
-    }
-    /// The app copy is a running retry command, so it must direct the user to verified flat CLI.
-    #[test]
-    fn bundle_cli_invocation_refuses_after_validating_origin() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let bundle = fixture.bundle(false);
-        let mut inputs = fixture.inputs(PlatformArtifacts::Macos);
-        inputs.current_exe = bundle.join("Contents/MacOS/farhelm");
-        let error = inspect(&inputs).expect_err("bundle invocation").to_string();
-        assert!(error.contains("originating flat CLI"), "{error}");
-    }
     /// Receipts are syntax boundaries, not best-effort hints.
     #[test]
     fn malformed_truncated_and_oversized_records_refuse() {
@@ -969,15 +605,10 @@ pub(crate) mod tests {
                 .contains("regular file")
         );
         fs::remove_file(fixture.install.join(FLAT_RECORD)).expect("link");
-        fixture.flat(Some(b"desktop"));
-        fs::remove_file(fixture.install.join(DESKTOP)).expect("desktop");
-        symlink(&outside, fixture.install.join(DESKTOP)).expect("payload link");
-        assert!(
-            inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string()
-                .contains("regular file")
-        );
+        fixture.flat(None);
+        fs::remove_file(fixture.install.join(CLI)).expect("cli");
+        symlink(&outside, fixture.install.join(CLI)).expect("payload link");
+        assert!(inspect(&fixture.inputs(PlatformArtifacts::Linux)).is_err());
     }
     /// The injected classifier exercises production's ownership decision without chown.
     #[test]
@@ -995,155 +626,6 @@ pub(crate) mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("effective user")
-        );
-    }
-    /// Partial removal remains retryable only while the receipt and required parents survive.
-    #[test]
-    fn partial_bundle_leftovers_keep_a_bounded_plan() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let bundle = fixture.bundle(false);
-        fs::remove_file(bundle.join("Contents/MacOS/farhelm-desktop")).expect("desktop");
-        fs::remove_dir_all(bundle.join("Contents/Resources")).expect("resources");
-        let plan = inspect(&fixture.inputs(PlatformArtifacts::Macos)).expect("partial plan");
-        let BundleInspection::Recognized(bundle) = plan.bundle else {
-            panic!("bundle")
-        };
-        assert_eq!(bundle.files.len(), 2);
-        assert!(
-            !bundle
-                .directories
-                .iter()
-                .any(|path| path.ends_with("Resources"))
-        );
-    }
-    /// A sibling receipt has exactly the same authority checks as the internal
-    /// one, even after the entire bundle has disappeared. Its name alone must
-    /// never grant permission to delete a foreign file or installation.
-    #[test]
-    fn pending_receipt_refuses_foreign_origin_symlinks_and_disagreement() {
-        for case in ["foreign-origin", "symlink", "disagreement"] {
-            let fixture = Fixture::new();
-            fixture.flat(Some(b"desktop"));
-            let bundle = fixture.bundle(false);
-            let internal = bundle.join("Contents").join(FLAT_RECORD);
-            let pending = fixture.home.join("Applications").join(PENDING_APP_RECORD);
-            fs::copy(&internal, &pending).unwrap();
-            match case {
-                "foreign-origin" => {
-                    Fixture::replace_field(&pending, 1, fixture.home.as_os_str().as_bytes());
-                    fs::remove_dir_all(&bundle).unwrap();
-                }
-                "symlink" => {
-                    fs::remove_file(&pending).unwrap();
-                    symlink(&internal, &pending).unwrap();
-                }
-                "disagreement" => Fixture::replace_field(&pending, 2, b"different digest"),
-                _ => unreachable!(),
-            }
-            let before = fs::read(fixture.install.join(CLI)).unwrap();
-            let error = inspect(&fixture.inputs(PlatformArtifacts::Macos)).unwrap_err();
-            let diagnostic = format!("{error:#}");
-            assert!(
-                diagnostic.contains(&path_text(&pending)),
-                "{case}: {diagnostic}"
-            );
-            let evidence = match case {
-                "foreign-origin" => "belongs to the Farhelm installation in",
-                "symlink" => "regular file",
-                "disagreement" => "disagrees",
-                _ => unreachable!(),
-            };
-            assert!(diagnostic.contains(evidence), "{case}: {diagnostic}");
-            assert_eq!(fs::read(fixture.install.join(CLI)).unwrap(), before);
-            assert!(pending.symlink_metadata().is_ok());
-        }
-    }
-
-    /// A removed flat desktop is retryable when its receipt still identifies the CLI.
-    #[test]
-    fn missing_claimed_flat_desktop_is_retryable() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        fs::remove_file(fixture.install.join(DESKTOP)).expect("desktop");
-        let plan = inspect(&fixture.inputs(PlatformArtifacts::Macos)).expect("partial flat plan");
-        assert_eq!(plan.flat.desktop, None);
-    }
-    /// macOS must say it skipped bundle inspection when HOME was unavailable.
-    #[test]
-    fn absent_home_is_not_reported_as_an_absent_bundle() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let mut inputs = fixture.inputs(PlatformArtifacts::Macos);
-        inputs.home = None;
-        assert!(matches!(
-            inspect(&inputs).expect("plan").bundle,
-            BundleInspection::UninspectedWithoutHome
-        ));
-    }
-    /// A surviving app without its own receipt is never deletion authority:
-    /// it is retained rather than removed (the refusal it once got left no
-    /// documented way out; see `RetainedWithoutReceipt`), while an app WITH
-    /// a receipt and an entry the installer never writes still refuses.
-    #[test]
-    fn missing_receipt_retains_and_extra_bundle_entries_refuse() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let bundle = fixture.bundle(false);
-        fs::remove_file(bundle.join("Contents/.farhelm-installation")).expect("record");
-        assert!(matches!(
-            inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .expect("plan")
-                .bundle,
-            BundleInspection::RetainedWithoutReceipt(_)
-        ));
-        fixture.bundle(false);
-        Fixture::write(&bundle.join("Contents/extra"), b"x");
-        assert!(
-            inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string()
-                .contains("unexpected")
-        );
-    }
-    /// The bundle receipt must point back to this flat install, not merely any valid one.
-    #[test]
-    fn mismatched_bundle_origin_refuses() {
-        let fixture = Fixture::new();
-        fixture.flat(Some(b"desktop"));
-        let bundle = fixture.bundle(false);
-        let contents = bundle.join("Contents");
-        let elsewhere = fixture.root.path().join("elsewhere");
-        fs::create_dir(&elsewhere).expect("elsewhere");
-        // The receipt must name a physical canonical path to be read at all
-        // (on macOS the temporary root sits behind the /var symlink).
-        let elsewhere = fs::canonicalize(&elsewhere).expect("canonical elsewhere");
-        let cli_hash = Fixture::digest(b"cli");
-        let desktop_hash = Fixture::digest(b"desktop");
-        let plist_hash = Fixture::digest(b"plist");
-        let icon_hash = Fixture::digest(b"icon");
-        let parts = [
-            b"farhelm-app".as_slice(),
-            elsewhere.as_os_str().as_bytes(),
-            cli_hash.as_bytes(),
-            desktop_hash.as_bytes(),
-            plist_hash.as_bytes(),
-            icon_hash.as_bytes(),
-        ];
-        let mut record = parts.join(&0);
-        record.push(0);
-        Fixture::write(&contents.join(FLAT_RECORD), &record);
-        let refusal = inspect(&fixture.inputs(PlatformArtifacts::Macos))
-            .unwrap_err()
-            .to_string();
-        // The remedy must point at the other installation: the generic
-        // "rerun the installer" advice would rebuild the app from this one
-        // and take it away from its real owner.
-        assert!(
-            refusal.contains(&path_text(&elsewhere))
-                && refusal.contains("farhelm uninstall")
-                && !refusal.contains("rerun the installer"),
-            "the refusal must name the owning installation and its remedy: {refusal}"
         );
     }
 
@@ -1171,75 +653,17 @@ pub(crate) mod tests {
             );
             assert!(error.contains("rerun the installer"), "{error}");
         }
-        fixture.flat(Some(b"desktop"));
-        let bundle = fixture.bundle(false);
-        Fixture::replace_field(
-            &bundle.join("Contents").join(FLAT_RECORD),
-            1,
-            alias.as_os_str().as_bytes(),
-        );
-        let error = inspect(&fixture.inputs(PlatformArtifacts::Macos))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("canonical"), "{error}");
-    }
-
-    /// Validate every fixed app boundary, including directories: following a
-    /// linked parent would bypass a no-follow check on its child files.
-    #[test]
-    fn bundle_links_and_unexpected_entries_refuse_at_each_boundary() {
-        for component in [
-            "",
-            "Contents",
-            "Contents/MacOS",
-            "Contents/Resources",
-            "Contents/Info.plist",
-            "Contents/MacOS/farhelm",
-            "Contents/MacOS/farhelm-desktop",
-            "Contents/Resources/Farhelm.icns",
-            "Contents/.farhelm-installation",
-        ] {
-            let fixture = Fixture::new();
-            fixture.flat(Some(b"desktop"));
-            let bundle = fixture.bundle(false);
-            assert!(inspect(&fixture.inputs(PlatformArtifacts::Macos)).is_ok());
-            let path = if component.is_empty() {
-                bundle.clone()
-            } else {
-                bundle.join(component)
-            };
-            let parked = fixture.install.parent().unwrap().join("parked");
-            fs::rename(&path, &parked).expect("park fixture artifact");
-            symlink(&parked, &path).expect("replace with link");
-            let error = inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("link"), "{component}: {error}");
-        }
-        for component in ["", "Contents", "Contents/MacOS", "Contents/Resources"] {
-            let fixture = Fixture::new();
-            fixture.flat(Some(b"desktop"));
-            let bundle = fixture.bundle(false);
-            assert!(inspect(&fixture.inputs(PlatformArtifacts::Macos)).is_ok());
-            let extra = bundle.join(component).join("unowned");
-            Fixture::write(&extra, b"keep");
-            let error = inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("unexpected"), "{component}: {error}");
-            assert_eq!(fs::read(extra).unwrap(), b"keep");
-        }
     }
 
     /// FIFO and dangling-link metadata must refuse on type, before reading bytes;
     /// otherwise a dry-run could hang waiting for an unrelated writer.
     #[test]
     fn nonregular_record_and_payload_refuse_without_reading() {
-        for name in [FLAT_RECORD, DESKTOP] {
+        for name in [FLAT_RECORD] {
             for kind in ["fifo", "directory", "dangling"] {
                 let fixture = Fixture::new();
-                fixture.flat(Some(b"desktop"));
-                assert!(inspect(&fixture.inputs(PlatformArtifacts::Macos)).is_ok());
+                fixture.flat(None);
+                assert!(inspect(&fixture.inputs(PlatformArtifacts::Linux)).is_ok());
                 let path = fixture.install.join(name);
                 fs::remove_file(&path).unwrap();
                 match kind {
@@ -1252,7 +676,7 @@ pub(crate) mod tests {
                     _ => symlink(fixture.install.join("missing-target"), &path).unwrap(),
                 }
                 assert!(!fs::symlink_metadata(&path).unwrap().file_type().is_file());
-                let error = inspect(&fixture.inputs(PlatformArtifacts::Macos))
+                let error = inspect(&fixture.inputs(PlatformArtifacts::Linux))
                     .unwrap_err()
                     .to_string();
                 assert!(error.contains("regular file"), "{name}/{kind}: {error}");
@@ -1260,31 +684,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Every app digest binds its own payload; swapped or ignored hash fields
-    /// must not let an altered app pass under a still-valid flat receipt.
-    #[test]
-    fn each_bundle_payload_is_bound_to_its_own_digest() {
-        for component in [
-            "MacOS/farhelm",
-            "MacOS/farhelm-desktop",
-            "Info.plist",
-            "Resources/Farhelm.icns",
-        ] {
-            let fixture = Fixture::new();
-            fixture.flat(Some(b"desktop"));
-            let bundle = fixture.bundle(true);
-            assert!(inspect(&fixture.inputs(PlatformArtifacts::Macos)).is_ok());
-            let path = bundle.join("Contents").join(component);
-            Fixture::write(&path, b"altered");
-            let error = inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string();
-            assert!(
-                error.contains("digest") && error.contains(&path_text(&path)),
-                "{error}"
-            );
-        }
-    }
     /// Raw bytes must remain distinguishable in errors and no inspection mutates sentinels.
     #[test]
     fn raw_path_bytes_are_escaped_and_inspection_is_read_only() {
