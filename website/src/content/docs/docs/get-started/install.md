@@ -18,4 +18,4 @@ The one-line install, what it puts where on disk, and the prerequisites it check
 enough tmux. Updating and removing Farhelm later is covered in
 [Update or uninstall Farhelm](/docs/using/update-and-uninstall/).
 
-Next: [Choose your setup](/docs/get-started/choose-your-setup/).
+Next: [Your first session](/docs/get-started/first-session/).
