@@ -91,7 +91,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   assertion is trusted even from an agent, so an agent can start a YOLO command on a host that asks before YOLO launches
   by asserting that it is not YOLO, and with this work an agent's command launch on such a host must ask whatever its
   assertion says; and agents may apply launch templates but not create, edit or delete them, and this work is what
-  allows template writes from agents, behind the same prompt.
+  allows template writes from agents, behind the same prompt. Plan: `plans/queue/cli-permission-prompts.md`.
 
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
