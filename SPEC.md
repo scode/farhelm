@@ -1491,14 +1491,42 @@ the agent creates it.
   exercise, or shim another protocol version's messages, and reviews should push back on additions that do. Data a build
   persisted is a separate question, decided per feature (see Upgrade compatibility and client scale).
 
+## Feedback
+
+The sidebar's top bar has a **?** button immediately to the right of the settings gear, in the desktop app and the web
+UI alike. It opens a small menu with two items: **Send feedback** and **Documentation**. Documentation opens the docs
+site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop
+app.
+
+Send feedback is a lightweight, private way to tell the maintainer something. It opens a dialog with a required message,
+an optional field for how to reach the user, and a plain display of everything else that will be sent: the Farhelm
+version, whether this is the desktop app or the web UI, and the operating system the user is on. That display is the
+whole submission; nothing else is attached (no logs, session content, host names, or paths). Nothing leaves the machine
+until the user presses Send. Feedback goes only to the project's maintainer, not to a public issue tracker, and needs no
+account; opening a public issue stays possible for anyone who prefers that. On success the dialog thanks the user and
+closes. On any failure (offline, the feedback service unreachable or refusing) it says sending failed, in plain words,
+and keeps the typed text so the user can retry or copy it. Nothing is queued or retried later.
+
+The helm sends the submission on the UI's behalf; the browser and the desktop webview never send it themselves. Sending
+feedback is a UI action only. Farhelm offers agents no way to send feedback, and no agent request or `farhelm` CLI
+command may be added that does: feedback sent that way would leave the user's machine without the user pressing Send.
+This is about what Farhelm offers, not containment; anything that runs commands as the user can reach a public URL.
+
+The submission travels over HTTPS to a service the project runs on Vercel, which sees the helm machine's IP address
+(used only to rate-limit sends, never put into the feedback), and is stored as an issue in a private GitHub repository
+that only the maintainer can read.
+
 ## Security
 
 The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below define local account authority, directional
 trust between hosts, and the exact temporary exceptions for agent-requested session creation and cloning. Apply those
 boundaries when interpreting the transport and credential rules here.
 
-Steady-state operation has exactly two network edges — the browser to a standalone helm (token-authenticated) and the
-helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
+Steady-state operation between Farhelm's own components has exactly two network edges — the browser to a standalone helm
+(token-authenticated) and the helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
+Besides provisioning's release downloads (see [Topology](#topology)), one more outbound connection exists, only on
+explicit user action: when the user sends feedback, the helm posts that submission, and nothing else, to the project's
+feedback endpoint (see [Feedback](#feedback)).
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -1555,9 +1583,9 @@ helm to each supervisor (SSH) — plus the desktop app's deliberately local loop
 
 Further requirements:
 
-- SSH is Farhelm's one transport integration: given passwordless SSH access, the helm rides it automatically for
-  provisioning, updates, and all supervisor communication. How the SSH connection itself is possible (a tailnet, a LAN,
-  whatever) is the user's business. No public relay, no third-party rendezvous service.
+- SSH is Farhelm's one transport integration for reaching hosts: given passwordless SSH access, the helm rides it
+  automatically for provisioning, updates, and all supervisor communication. How the SSH connection itself is possible
+  (a tailnet, a LAN, whatever) is the user's business. No public relay, no third-party rendezvous service.
 - Provisioning rides the user's existing SSH access — their keys, agent, and config. Farhelm stores no SSH credentials
   of its own. Confirmed 2026-10-01: the config governs reaching and authenticating to the host (keys, the agent used to
   authenticate, ProxyJump, Match blocks), not what rides Farhelm's connections. Whatever the config says, Farhelm's own
