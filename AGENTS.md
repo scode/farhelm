@@ -111,6 +111,11 @@ that its required systemd or SSH substrate ran.
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
   silent-failure boundary, run against the real shipped asset. Same node terms as the UI harness above; the release gate
   runs it through the recorder with the `OMP reporter asset scenarios` selection.
+- `cd website/feedback-tests && node --test` — the feedback endpoint's handler (`website/feedback/handler.js`, deployed
+  as `website/api/feedback.js`): method, configuration and size refusals, field caps counted in code points, fences that
+  user text cannot close, and that no response or log line carries the token, the inbox's name, the message or the
+  contact. Configuration and the GitHub client are injected; nothing touches the network or `process.env`. Run it when
+  the handler or its tests change; CI's website job runs it beside the website build.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`
@@ -188,9 +193,9 @@ that its required systemd or SSH substrate ran.
   `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
-compilation, the JS harness, the website build, installer validation, and generated-workflow validation; costly Rust,
-pinned-tmux, desktop runtime, and CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes,
-update this list in the same change.
+compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, and
+generated-workflow validation; costly Rust, pinned-tmux, desktop runtime, and CentOS gates run in the x86_64 Linux
+release artifact job. If either workflow changes, update this list in the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build
