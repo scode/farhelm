@@ -318,6 +318,12 @@ jobs:
         working-directory: website
       - run: bun run build
         working-directory: website
+      # The feedback endpoint's handler tests ride this job because it is the
+      # one that runs for website-only changes and already pins Node. Running
+      # from inside the suite directory keeps node's default test discovery,
+      # as the UI's JS harness does.
+      - run: node --test
+        working-directory: website/feedback-tests
 
   dprint:
     runs-on: ubicloud
