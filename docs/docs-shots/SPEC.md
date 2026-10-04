@@ -34,6 +34,13 @@ from `scenario.json5`, and no others:
   spellings on the capturing machine, and one of them names its account, which must never be photographed, so every host
   reply shows each remote's `shown_ssh` instead.
 
+One more thing is staged rather than real, the add-host check. Asking Farhelm to add a host makes it check that host
+over ssh before showing what setup would install, and the staged fleet has no spare machine to check. So for the
+scenario's invented `add_host` destination, and only that one, the helm answers the check from Farhelm's own test
+stand-in (the one the browser tests use) as a reachable Ubuntu machine with nothing set up. The setup confirmation it
+then shows is the helm's real plan, with the scenario's invented home directory in its paths. No shot confirms that
+setup, so no host is ever added.
+
 Statuses are never rewritten, as for the hero. Before writing each PNG the capture also checks the page's visible text
 and form values for the capturing account's name, its home directory, and the run's temporary state, and fails if any
 appears: the rewrites are supposed to keep those out, and the check is what proves they did.

@@ -1,10 +1,38 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-04T01:20:52Z",
-  "captured_from": "42513255d360f2ebe68a03659692b4e9c6208be2",
-  "commit": "6c673112d5725aecbdd9f2603ba6de155b093578",
+  "captured_at": "2026-10-04T01:50:41Z",
+  "captured_from": "b54b4c07c3458fc869e613d1702780f38b5591b3",
+  "commit": "98679c38ec6d2410152d68e14a4cfa8debfa6be5",
   "shots": {
+    "add-a-remote-host/add-button": {
+      "height": 418,
+      "width": 1260
+    },
+    "add-a-remote-host/add-dialog": {
+      "height": 800,
+      "width": 1754
+    },
+    "add-a-remote-host/connected-host": {
+      "height": 310,
+      "width": 1332
+    },
+    "add-a-remote-host/setup-plan": {
+      "height": 990,
+      "width": 1754
+    },
+    "first-session/running-session": {
+      "height": 746,
+      "width": 1670
+    },
+    "first-session/statuses": {
+      "height": 516,
+      "width": 1332
+    },
+    "first-session/this-machine": {
+      "height": 378,
+      "width": 1332
+    },
     "start-a-session/destination": {
       "height": 778,
       "width": 1562

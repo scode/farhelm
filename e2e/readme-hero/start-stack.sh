@@ -19,6 +19,9 @@
 #   FARHELM_E2E_PORT        the helm's port
 #   FARHELM_HERO_REMOTES    JSON array of ssh destinations, one per remote host
 #   FARHELM_E2E_STACK_INFO  where to publish what was booted
+#   FARHELM_HERO_ADD_HOST   optional, docs screenshots only: the JSON configuration
+#                           of Farhelm's test stand-in for the add-host check (see
+#                           docs/docs-shots/SPEC.md); empty or unset leaves it off
 #
 # Every remote is ssh to THIS machine under its own spelling. The helm keys
 # hosts on the exact destination string, so distinct spellings are distinct
@@ -192,7 +195,21 @@ with open(info_path, "w") as info:
     }, info)
 ' "$bin" "$ensure" "$stack_info" "$state" "$wrappers" "$work" "$port" "$fixtures" || exit 1
 
-"$bin" helm run \
+# The add-host stand-in, only when a docs scenario asks for it. The helm
+# enables it only for a directory inside its own state directory that holds
+# the marker, and answers the add-host check from config.json for the
+# destinations it names (the stand-in's other defaults never come into play,
+# since the docs shots add no other host). Everything else stays real.
+helm_env=()
+if [ -n "${FARHELM_HERO_ADD_HOST:-}" ]; then
+  backend="$state/provisioning-backend"
+  mkdir -p "$backend" || exit 1
+  printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$backend/ENABLED" || exit 1
+  printf '%s\n' "$FARHELM_HERO_ADD_HOST" >"$backend/config.json" || exit 1
+  helm_env=(env "FARHELM_E2E_PROVISIONING_BACKEND_DIR=$backend")
+fi
+
+"${helm_env[@]}" "$bin" helm run \
   --state-dir "$state" \
   --port "$port" \
   --ui-dist "$dist" \

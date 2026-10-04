@@ -1,0 +1,49 @@
+---
+title: Your first session
+description: Start an agent, see what it is doing, and find it still running after you close Farhelm.
+sidebar:
+  order: 3
+---
+
+import Screenshot from '../../../../components/Screenshot.astro';
+
+<Screenshot
+  name="first-session/this-machine"
+  alt="The host list with local (this machine) marked as a host that is ready."
+/>
+
+Before you start a session, make sure the agent you want is installed on your Mac and starts when you type its command
+in a terminal (`claude` or `codex`, for example). Farhelm starts it the way your login shell would, with the same
+`PATH`. [Supported agents](/docs/agents/) lists the agents Farhelm knows.
+
+## Start it
+
+Select **new** at the top of the session list, choose the agent, and launch. [Start a
+session](/docs/using/start-a-session/) walks through the session launcher and its choices.
+
+<Screenshot
+  name="first-session/running-session"
+  alt="The new session in the session list, with its agent's terminal beside it."
+/>
+
+## Keep an eye on it
+
+You do not have to watch the terminal to know when an agent needs you. The session list shows every session's status,
+and it updates as the agents work.
+
+<Screenshot
+  name="first-session/statuses"
+  alt="The session list with a waiting session and an idle, unread session each explained."
+/>
+
+[Read the session list](/docs/using/session-list/) explains every status.
+
+## Close Farhelm and come back
+
+Quit Farhelm while the agent is working, then open it again: the session is still there, still running, and its terminal
+shows everything that happened while Farhelm was closed. Sessions keep running until you stop them or your Mac reboots.
+After a reboot they show as interrupted, ready to start again; [What survives
+what](/docs/how-it-works/what-survives-what/) has the details, and [Stop, restart, and
+resume](/docs/using/stop-restart-resume/) covers starting them again.
+
+Next: [Add a remote host](/docs/get-started/add-a-remote-host/).

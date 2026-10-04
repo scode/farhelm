@@ -84,6 +84,12 @@ on while reviewing a draft are recorded the same way, per [Learning from feedbac
 - **session launcher**: what you start a session from. Use this name, not "launch dialog" or "launch composer".
 - **status**: what the session list says an agent is doing: running, waiting (it needs you), idle, exited, interrupted,
   or error. Use these words, the ones the UI shows.
+- **a terminal**, **shell command**: say "run this shell command" or "in a terminal", never "in Terminal": readers use
+  whatever terminal app they like, and the macOS app called Terminal is only one of them. (Stated by the maintainer,
+  2026-10-04, on Add a remote host's "has to work in Terminal".)
+- **reboot**: a machine (your Mac, a host) shutting down and starting again. Say reboot, never "restart", which is kept
+  for software: a session, Farhelm, an agent. (Stated by the maintainer, 2026-10-04, on Your first session, where "your
+  Mac restarts" could be read as restarting a program.)
 - **directory**: a file system directory, in prose, callouts, and alt text alike; never "folder". An exact UI label that
   says folder (**browse folders on**, **use existing folder**, the `folder:` search prefix) is still quoted the way the
   UI shows it. (Stated by the maintainer, 2026-10-04.)

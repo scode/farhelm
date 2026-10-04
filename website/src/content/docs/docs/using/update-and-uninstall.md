@@ -14,5 +14,5 @@ This page is planned but not written yet. The text below says what it will cover
 
 :::
 
-Updating Farhelm on the machine that runs the helm, and uninstalling it: what the uninstaller removes, what it asks
-before removing, and what it leaves alone. Updating remote hosts is in [Manage hosts](/docs/using/manage-hosts/).
+Updating Farhelm on your Mac. Uninstalling is covered in [Uninstall Farhelm](/docs/get-started/uninstall/), and updating
+remote hosts in [Manage hosts](/docs/using/manage-hosts/).
