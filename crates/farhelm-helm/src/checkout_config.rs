@@ -1323,12 +1323,14 @@ mod tests {
             conn.execute_batch(crate::store::PROFILE_TABLES_V15)
                 .unwrap();
             // Every table a later schema added goes, including schema 38's
-            // `launch_templates`: the test compares the result with the
-            // frozen v26 DDL, which has none of them.
+            // `launch_templates` and schema 39's `agent_create_bindings`:
+            // the test compares the result with the frozen v26 DDL, which
+            // has none of them.
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
                  DROP TABLE launch_templates;
+                 DROP TABLE agent_create_bindings;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;

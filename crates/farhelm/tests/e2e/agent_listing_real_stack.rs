@@ -628,6 +628,14 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 /// and this test covers everything about the two verbs that does not need
 /// a second machine.
 ///
+/// ## Templates and spawn's launch flags
+///
+/// A template stored through the helm's REST API is applied by
+/// `create --template` and by `spawn --template`, the second of which goes
+/// through the helm rather than being answered by the supervisor; both are
+/// read back live. This is the one place the helm's own template catalog,
+/// its resolution and the spawn relay run together.
+///
 /// ## The stdout/stderr split is asserted here, not only in the CLI tests
 ///
 /// `create`/`clone` print the new session's id on stdout and their
@@ -759,6 +767,106 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         cloned["launch"]["command"], invocation,
         "a same-host clone runs the source's command line: {cloned}"
     );
+
+    // A template stored through the helm's API supplies the whole launch:
+    // `create` then needs only a host and a folder, the templates listing
+    // reports the command as set without its text, and a `spawn` naming the
+    // template goes through the helm onto this host with its parent.
+    let response = client
+        .put(format!("{}/api/templates/e2e-fixture", helm.base))
+        .json(&serde_json::json!({
+            "kind": "command",
+            "command": invocation,
+            "yolo": false,
+        }))
+        .send()
+        .await
+        .expect("store a template");
+    assert!(response.status().is_success(), "storing the template");
+    let output = spawn_agent_command_args(
+        &[
+            "create",
+            "--template",
+            "e2e-fixture",
+            "--host",
+            "this machine",
+            "--cwd",
+            &created_cwd,
+        ],
+        &asker_id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "`farhelm agent create --template` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let templated_id = String::from_utf8(output.stdout)
+        .expect("UTF-8")
+        .trim()
+        .to_string();
+    let templated = get_json(
+        &client,
+        &format!("{}/api/sessions/{templated_id}", helm.base),
+    )
+    .await;
+    assert_eq!(
+        templated["launch"]["command"], invocation,
+        "the template's command is what the session runs: {templated}"
+    );
+    let listing = spawn_agent_command_args(&["templates"], &asker_id, &token, &socket).await;
+    assert!(
+        listing.status.success(),
+        "`farhelm agent templates` failed: {}",
+        String::from_utf8_lossy(&listing.stderr)
+    );
+    let listing = String::from_utf8(listing.stdout).expect("UTF-8");
+    assert!(
+        listing.contains("e2e-fixture") && listing.contains("command (set)"),
+        "{listing}"
+    );
+    assert!(
+        !listing.contains(&invocation),
+        "the listing withholds the command text: {listing}"
+    );
+    let spawned = tokio::process::Command::from({
+        let mut command = std::process::Command::new(farhelm_bin());
+        command
+            .args([
+                "spawn",
+                "--template",
+                "e2e-fixture",
+                "--cwd",
+                &created_cwd,
+                "--parent",
+                &asker_id,
+            ])
+            .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, &asker_id)
+            .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, &token)
+            .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, &socket);
+        command
+    })
+    .output()
+    .await
+    .expect("run farhelm spawn");
+    assert!(
+        spawned.status.success(),
+        "`farhelm spawn --template` failed: {}",
+        String::from_utf8_lossy(&spawned.stderr)
+    );
+    let spawned_id = String::from_utf8(spawned.stdout)
+        .expect("UTF-8")
+        .trim()
+        .to_string();
+    let child = get_json(&client, &format!("{}/api/sessions/{spawned_id}", helm.base)).await;
+    assert_eq!(
+        child["parent"],
+        asker_id.as_str(),
+        "the spawn recorded its parent: {child}"
+    );
+    assert_eq!(child["launch"]["command"], invocation, "{child}");
 
     // A directory that does not exist is the TARGET supervisor's own
     // refusal, reported verbatim — SPEC.md's agent section requires those

@@ -118,17 +118,26 @@ fn render(agent: &Command) -> String {
          the target. Restart uses its stored configuration; you cannot supply another\n\
          command. Self-restart can lose its acknowledgement.\n\
          \n\
-         Create requires a host, a cwd, the command line to run as --command, and --yolo or\n\
-         --no-yolo: your statement of whether that command runs without approval prompts.\n\
-         Farhelm believes it and never checks the command, so say it truthfully. --agent TYPE\n\
-         declares the agent type the command runs; the command must then contain\n\
-         {farhelm_args} as one argument where Farhelm adds its own. --resume-command (needs\n\
-         --agent) is the command that resumes a conversation, with {conversation} and\n\
-         {farhelm_args}; without one the session cannot be restarted.\n\
+         Create needs a launch, a cwd and a host. An agent launch is --agent TYPE with optional\n\
+         --model, --effort, --permissions and --trust; Farhelm composes its command. A command\n\
+         launch is --command with the command line to run and --yolo or --no-yolo: your\n\
+         statement of whether it runs without approval prompts. Farhelm believes it and never\n\
+         checks the command, so say it truthfully. On a command launch --agent TYPE declares\n\
+         the agent type the command runs; the command must then contain {farhelm_args} as one\n\
+         argument where Farhelm adds its own. --resume-command (needs --agent) is the command\n\
+         that resumes a conversation, with {conversation} and {farhelm_args}; without one the\n\
+         session cannot be restarted (--no-resume-command drops one a template set). An\n\
+         unknown --agent value lists the agent types.\n\
+         --template NAME applies a launch template by its exact name (templates lists them);\n\
+         repeat it to apply several in order. Templates apply first and the other flags then\n\
+         change their result; a template may supply the cwd, host and title. A choice nothing\n\
+         set is the agent type's default, never the user's remembered GUI choice; pass default\n\
+         to reset one a template set. You can apply templates but not create or change them.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
-         source's launch inherit. Spawn stays on this supervisor and requires\n\
-         --inherit-agent: the child runs this session's own agent. Both refuse a session\n\
-         created before launch kinds; use create --command for one.\n\
+         source's launch inherit. Spawn creates on this host only, from --inherit-agent (this\n\
+         session's own launch, needing no helm) or from the same launch flags as create (which\n\
+         the helm resolves), never both; a template that sets a host is refused there. Clone\n\
+         and --inherit-agent refuse a session created before launch kinds; use create instead.\n\
          \n\
          A YOLO launch (one that skips approval prompts) on a host that asks before YOLO\n\
          launches is refused, and the refusal names --confirm-yolo (older Farhelm versions\n\
@@ -150,8 +159,9 @@ fn render(agent: &Command) -> String {
            farhelm agent rename --session='caller-id' --expected-title='my old title' -- 'my new title'\n\
          \n\
          A lost or malformed mutation reply means the outcome may be unknown. List again before\n\
-         retrying. For create or clone, reuse the SAME --idempotency-key on a retry; do not mint\n\
-         a new one. Ordinary valid actions need no extra confirmation.\n\
+         retrying. For create, clone or spawn, retry with the SAME --idempotency-key and exactly\n\
+         the same other flags and templates; do not mint a new key. Ordinary valid actions need\n\
+         no extra confirmation.\n\
          \n\
          Results come from the helm attached to this session and cover its fleet. If no helm is\n\
          attached, ask the user to open this session in the Farhelm UI, then retry.\n",
@@ -572,14 +582,13 @@ mod tests {
     ///
     /// The sibling above pins the lifecycle verbs; these two are pinned
     /// separately because they are the only ones whose usage carries
-    /// information an agent cannot get anywhere else. `create --cwd <DIR>`
-    /// is REQUIRED and must render without brackets — a `[--cwd <DIR>]`
-    /// here would tell a model the directory is optional and it would
-    /// dutifully omit it. `--host <NAME>` must say NAME rather than HOST
-    /// because the value is a name from the hosts listing. `--command` and
-    /// the YOLO assertion are required, the assertion rendered as the one
-    /// required choice it is, and the hidden refusals for the removed
-    /// `--invocation`, `--profile` and `--profile-id` must not render.
+    /// information an agent cannot get anywhere else. `create`'s `--cwd` and
+    /// `--host` render optional because a template may supply them (the
+    /// prose says when they are needed), `--host <NAME>` says NAME rather
+    /// than HOST because the value is a name from the hosts listing, every
+    /// launch flag renders with the value it takes, and the hidden refusals
+    /// for the removed `--invocation`, `--profile` and `--profile-id` must
+    /// not render.
     ///
     /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
     /// over-wide verb looks like in the REAL text rather than only in
@@ -589,9 +598,10 @@ mod tests {
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
-            "farhelm agent create --cwd <DIR> --host <NAME> --command <CMD> \
-             (--yolo | --no-yolo) [--agent <TYPE>] [--resume-command <CMD>] [--title <TITLE>] \
-             [--idempotency-key <KEY>] [--confirm-yolo]  \
+            "farhelm agent create [--cwd <DIR>] [--host <NAME>] [--template <NAME>] \
+             [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
+             [--trust <BOOL>] [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
+             [--no-resume-command] [--title <TITLE>] [--idempotency-key <KEY>] [--confirm-yolo]  \
              Create a session on any host; prints its id",
             "farhelm agent clone --source-session <SOURCE_SESSION> --host <NAME> [--cwd <DIR>] \
              [--title <TITLE>] [--idempotency-key <KEY>] [--confirm-yolo]  \

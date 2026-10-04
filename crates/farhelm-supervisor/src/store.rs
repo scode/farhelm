@@ -591,8 +591,9 @@ pub struct Reservation {
     /// probes tmux for exactly this name at decision time rather than
     /// trusting a session map that may predate a late-completing create.
     pub tmux_name: String,
-    /// How long this row deduplicates its key. Restricted spawn creates use
-    /// `SessionLifetime`; full-authority interactive creates use `Permanent`.
+    /// How long this row deduplicates its key. Spawn creates (restricted, or
+    /// the helm's marked create for a spawn with launch flags) use
+    /// `SessionLifetime`; other full-authority creates use `Permanent`.
     pub dedup_scope: DedupScope,
     pub outcome: ReservationOutcome,
 }
@@ -600,10 +601,13 @@ pub struct Reservation {
 /// The lifetime policy attached to one create reservation (PLAN_M7.md
 /// item 2).
 ///
-/// This is derived from the creating connection and never appears on the
-/// wire, so a caller cannot widen its own deduplication window. One
-/// reservation mechanism therefore serves both interactive creates and
-/// bounded spawn retries without trusting the request to select policy.
+/// This is derived from the creating connection, so a caller cannot widen
+/// its own deduplication window. The one input from the wire is the helm's
+/// `key_lives_with_session` marker for a `farhelm spawn` it creates on the
+/// asking session's host (protocol 40), honored only on the helm's
+/// full-authority connection, and it can only narrow a key to
+/// `SessionLifetime`. One reservation mechanism therefore serves both
+/// interactive creates and bounded spawn retries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupScope {
     /// M3's existing tombstone behavior: the key remains spent forever.

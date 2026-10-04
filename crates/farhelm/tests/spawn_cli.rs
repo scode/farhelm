@@ -194,49 +194,55 @@ fn non_utf8_spawn_environment_values_are_refused_before_dialing() {
     }
 }
 
-/// The working directory is a required scripting input, not a value inferred
-/// from the parent session or a default silently selected by clap.
+/// Spec: an inherited spawn needs `--cwd`, refused before the supervisor
+/// is dialed, with nothing on stdout.
+///
+/// Why: the child's folder is not something an inherited spawn may guess;
+/// only a spawn with launch flags can take it from a template.
 #[farhelm_testtrace::test]
-fn cwd_is_required_by_the_cli_surface() {
-    let output = spawn_command().output().expect("run spawn");
+fn an_inherited_spawn_requires_cwd() {
+    let output = spawn_command()
+        .arg("--inherit-agent")
+        .output()
+        .expect("run spawn");
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8(output.stderr).unwrap().contains("--cwd"));
 }
 
-/// Spawn requires explicit `--inherit-agent` before it can contact the
-/// supervisor.
+/// Spec: a spawn naming neither `--inherit-agent` nor any launch flag is
+/// refused before the supervisor is contacted, naming both ways to say
+/// what the child runs.
 ///
-/// The inheritance flag is a consequential choice rather than the absence
-/// of one. Keeping this refusal at clap also prevents a current CLI from
-/// emitting the omitted-selector wire shape that older builds treated as an
-/// implicit parent snapshot.
+/// Why: what a child runs is a consequential choice rather than the
+/// absence of one, and this also keeps a current CLI from emitting the
+/// omitted-selector wire shape older builds treated as an implicit parent
+/// snapshot.
 #[farhelm_testtrace::test]
-fn explicit_inheritance_is_required_by_the_cli_surface() {
+fn a_spawn_must_say_what_the_child_runs() {
     let output = spawn_command()
         .args(["--cwd", "/tmp"])
         .output()
         .expect("run spawn");
-    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("--inherit-agent"),
-        "the refusal names explicit inheritance: {stderr}"
+        stderr.contains("--inherit-agent") && stderr.contains("--template"),
+        "the refusal names both ways to describe the child: {stderr}"
     );
 }
 
-/// `farhelm spawn --agent <name>`, removed with agent profiles, is refused
-/// before the supervisor is contacted, with a message naming
-/// `--inherit-agent`.
+/// Spec: `--inherit-agent` beside a launch flag is refused at parse, before
+/// the supervisor is contacted.
 ///
-/// Agents in sessions started before profiles were removed may still pass
-/// a profile name here; the refusal has to tell them what a spawn can do
-/// instead. The variables point at a socket nobody listens on, so a
+/// Why: SPEC.md makes inheritance exclusive with every launch flag; a
+/// spawn that silently preferred one would run something the caller did
+/// not ask for. The variables point at a socket nobody listens on, so a
 /// regression that sent the request would fail on the connection rather
-/// than with this message.
+/// than with clap's usage error.
 #[farhelm_testtrace::test]
-fn the_removed_agent_selector_is_refused_naming_inheritance() {
+fn inheritance_with_a_launch_flag_is_refused() {
     let temp = farhelm_teststate::tempdir().expect("tempdir");
     let output = spawn_command()
         .args(["--cwd", "/tmp", "--agent", "claude", "--inherit-agent"])
@@ -249,9 +255,113 @@ fn the_removed_agent_selector_is_refused_naming_inheritance() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("agent profiles were removed") && stderr.contains("--inherit-agent"),
-        "the refusal says why and names inheritance: {stderr}"
+        stderr.contains("--inherit-agent") && stderr.contains("--agent"),
+        "{stderr}"
     );
+}
+
+/// Spec: a spawn with launch flags goes to the helm as an agent `create`
+/// placed on this session's own host: the flags as launcher edits, the
+/// templates in order, the folder (resolved against this process's cwd),
+/// title, parent and key carried over; the created id is the one stdout
+/// line.
+///
+/// Why: SPEC.md has the attached helm resolve a spawn's launch flags, since
+/// it owns the templates and composes agent launches; the spawn contract
+/// (one id on stdout) must hold on that path as on the inherited one.
+#[farhelm_testtrace::test]
+fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
+    use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
+    use farhelm_proto::{AgentOutcome, AgentReply, AgentSession, AgentVerb};
+    let temp = farhelm_teststate::tempdir().expect("tempdir");
+    let socket = temp.path().join("supervisor.sock");
+    let expected_cwd = temp.path().join("child").to_string_lossy().into_owned();
+    let (done, server) = mock_supervisor(&socket, move |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            request:
+                AgentVerb::Create {
+                    host,
+                    templates,
+                    edits,
+                    intent_key,
+                    confirm_yolo,
+                    spawn,
+                },
+            ..
+        } = request
+        else {
+            panic!("a flag spawn must send an agent create: {request:?}");
+        };
+        assert_eq!(host, None, "a spawn names no host");
+        assert_eq!(templates, ["base"]);
+        assert_eq!(
+            edits,
+            TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Codex),
+                model: Some(Some("gpt-6-luna".to_string())),
+                destination: Some(TemplateDestination::Folder(expected_cwd.clone())),
+                name: Some("scripted child".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(intent_key.as_deref(), Some("retry-7"));
+        assert!(confirm_yolo);
+        assert_eq!(
+            spawn.and_then(|spawn| spawn.parent).as_deref(),
+            Some("parent-123")
+        );
+        ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Created {
+                    session: AgentSession {
+                        id: "child-123".to_string(),
+                        host_id: "1".to_string(),
+                        host: Some("this machine".to_string()),
+                        title: "scripted child".to_string(),
+                        cwd: expected_cwd,
+                        agent: "codex".to_string(),
+                        status: String::new(),
+                        current: false,
+                        restart_offer: Default::default(),
+                        stale: false,
+                    },
+                },
+            },
+        }
+    });
+    let output = spawn_command()
+        .current_dir(temp.path())
+        .args([
+            "--cwd",
+            "child",
+            "--template",
+            "base",
+            "--agent",
+            "codex",
+            "--model",
+            "gpt-6-luna",
+            "--parent",
+            "parent-123",
+            "--title",
+            "scripted child",
+            "--idempotency-key",
+            "retry-7",
+            "--confirm-yolo",
+        ])
+        .env("FARHELM_SESSION_ID", "parent-123")
+        .env("FARHELM_SESSION_TOKEN", "secret")
+        .env("FARHELM_SUPERVISOR_SOCK", &socket)
+        .output()
+        .expect("run spawn");
+    finish_server(done, server);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"child-123\n");
 }
 
 /// A successful command emits exactly one id line and maps every scripting

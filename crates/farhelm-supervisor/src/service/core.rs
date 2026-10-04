@@ -22534,6 +22534,7 @@ exit 0
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -23701,6 +23702,7 @@ exit 0
             intent_key: Some("one-intent".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -24311,6 +24313,7 @@ exit 0
                     intent_key: None,
                     confirm_yolo: false,
                     github_checkout: None,
+                    key_lives_with_session: false,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -24360,6 +24363,7 @@ exit 0
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -24420,6 +24424,7 @@ exit 0
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -24496,6 +24501,7 @@ exit 0
             intent_key: Some("one-intent".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");

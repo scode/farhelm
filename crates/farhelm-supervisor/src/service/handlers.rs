@@ -54,7 +54,12 @@ use crate::tmux::PaneProbe;
 /// keys or spawn derivation with permanent tombstones.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CreateAdmission {
-    Interactive,
+    /// A create on the helm's full-authority connection.
+    /// `key_lives_with_session` is the helm's marker for a `farhelm spawn`
+    /// it creates on the asking session's host (protocol 40), which gives
+    /// the key a spawn's lifetime rather than an interactive create's.
+    Interactive { key_lives_with_session: bool },
+    /// A session-authenticated `farhelm spawn --inherit-agent`.
     Spawn { asking_session: String },
 }
 
@@ -80,7 +85,12 @@ fn spawn_scoped_intent_key(asking_session: &str, key: &str) -> String {
 impl CreateAdmission {
     fn dedup_scope(&self) -> DedupScope {
         match self {
-            CreateAdmission::Interactive => DedupScope::Permanent,
+            CreateAdmission::Interactive {
+                key_lives_with_session: false,
+            } => DedupScope::Permanent,
+            CreateAdmission::Interactive {
+                key_lives_with_session: true,
+            } => DedupScope::SessionLifetime,
             CreateAdmission::Spawn { .. } => DedupScope::SessionLifetime,
         }
     }
@@ -499,7 +509,7 @@ async fn handle_create_session(
         CreateAdmission::Spawn { asking_session } => {
             intent_key.map(|key| spawn_scoped_intent_key(asking_session, &key))
         }
-        CreateAdmission::Interactive => intent_key,
+        CreateAdmission::Interactive { .. } => intent_key,
     };
     // Inheritance reads the parent's durable bundle and must wait until its
     // credential and lifecycle are protected by the same guards that will
@@ -2604,10 +2614,11 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             cols,
             rows,
             intent_key,
-            // Unused since profiles were removed (protocol 38): no spawn
-            // form resolves a launch through the helm any more.
+            // Unused: a spawn whose launch the helm resolves is the helm's
+            // own create (protocol 40), checked there before it is sent.
             confirm_yolo: _,
             github_checkout,
+            key_lives_with_session,
         } => {
             // The fresh-checkout payload flows straight through to the
             // create path (Design C): the supervisor validates the
@@ -2635,7 +2646,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 ctx.tx,
                 req_id,
                 request,
-                CreateAdmission::Interactive,
+                CreateAdmission::Interactive {
+                    key_lives_with_session,
+                },
                 None,
             )
             .await
@@ -2988,10 +3001,13 @@ pub(crate) async fn handle_restricted_control(
             cols,
             rows,
             intent_key,
-            // Unused since profiles were removed (protocol 38): no spawn
-            // form resolves a launch through the helm any more.
+            // Unused: a spawn whose launch the helm resolves is the helm's
+            // own create (protocol 40), checked there before it is sent.
             confirm_yolo: _,
             github_checkout,
+            // Restricted creates always get the session-lifetime key a
+            // spawn has, so the helm-only marker changes nothing here.
+            key_lives_with_session: _,
         } => {
             // Refused BEFORE the credential check, at the very top of
             // create handling: a fresh-checkout payload is helm-supplied
@@ -3479,18 +3495,20 @@ pub(crate) async fn handle_restricted_control(
 /// apply at the far end.
 ///
 /// The CREATING verbs are bounded as a GROUP, the way
-/// `handle_create_session` bounds a create's fields: cwd, selector and
-/// title are summed against one cap rather than each given its own, because
+/// `handle_create_session` bounds a create's fields: a clone's cwd and
+/// title, and a create's flags (folder, title, command and the rest, as the
+/// JSON they travel as), are summed against one cap rather than each given
+/// its own, because
 /// what the cap protects against is the total a single request can push
 /// through the two queues downstream, and three individually-legal fields
 /// can add up to three times the intended ceiling. The intent key is
 /// separate for the same reason it is separate over there — it bounds a
 /// durable table keyed by whatever the caller sent, not a reply.
 ///
-/// A host NAME is bounded by the same total. It is caller-supplied text
-/// that the helm compares against its registry and quotes back in a
-/// not-found refusal, so it is exactly the kind of field this function
-/// exists to stop early.
+/// A host NAME, and a create's template names, are bounded on their own
+/// allowances (see [`validate_create_fields`]). Both are caller-supplied
+/// text the helm quotes back in a not-found refusal, so they are exactly
+/// the kind of field this function exists to stop early.
 ///
 /// WHAT IT IS NOT: this is a doorway bound, not the target's admission
 /// check restated. It knows nothing about whether the named session exists,
@@ -3532,7 +3550,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
     const LIFECYCLE_FLAG: &str = "--session";
     const LIFECYCLE_REMEDY: &str = "name the asking session explicitly to act on it";
     match verb {
-        AgentVerb::Hosts {} | AgentVerb::Sessions {} => Ok(()),
+        AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
         AgentVerb::Rename {
             session_id,
             expected_title,
@@ -3575,40 +3593,54 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         }
         AgentVerb::Create {
             host,
-            cwd,
-            launch,
-            title,
+            templates,
+            edits,
             intent_key,
             confirm_yolo: _,
+            spawn,
         } => {
-            if cwd.is_empty() {
-                return Err("--cwd must not be empty".to_string());
-            }
-            let Some(launch) = launch else {
+            // Whether the create says enough to launch is the helm's to
+            // decide, since a template may supply any of it; this doorway
+            // only bounds what travels upward.
+            if spawn.is_some() && host.is_some() {
                 return Err(
-                    "create requires a launch; pass --command with --yolo or --no-yolo".to_string(),
+                    "farhelm spawn always creates on its own host and takes no --host".to_string(),
                 );
-            };
-            // The command launch's own rules are checked here, at the
-            // asking session's doorway, so a mistake is answered before the
-            // request reaches the helm; an agent launch is composed by the
-            // helm, which checks its choices against the catalog.
-            let launch_bytes = match launch {
-                farhelm_proto::LaunchRequest::Command(command) => {
-                    command.validate()?;
-                    command.command.len() + command.resume.as_deref().map_or(0, str::len)
+            }
+            if templates.len() > AGENT_TEMPLATES_CAP {
+                return Err(format!(
+                    "{} templates were named, more than the {AGENT_TEMPLATES_CAP} one create may \
+                     apply",
+                    templates.len()
+                ));
+            }
+            for name in templates {
+                // Quoted back in the helm's unknown-template refusal, so
+                // bounded and kept free of control characters here like a
+                // host name.
+                if name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
+                    || name.chars().any(char::is_control)
+                {
+                    return Err(
+                        "a --template name is too long or contains control characters; \
+                         farhelm agent templates lists the names"
+                            .to_string(),
+                    );
                 }
-                // A free-text model id is the one unbounded choice; count
-                // the selection as the JSON it travels as.
-                farhelm_proto::LaunchRequest::Agent { selection } => {
-                    serde_json::to_string(selection).map_or(usize::MAX, |json| json.len())
-                }
-            };
+            }
+            // The flags carry the folder, title, command and resume command:
+            // the create payload `validate_create_fields` bounds, counted as
+            // the JSON they travel as.
+            let edits_bytes = serde_json::to_string(edits).map_or(usize::MAX, |json| json.len())
+                + spawn
+                    .as_ref()
+                    .and_then(|spawn| spawn.parent.as_deref())
+                    .map_or(0, str::len);
             validate_create_fields(
-                host.as_deref(),
-                cwd,
-                launch_bytes,
-                title.as_deref(),
+                HostSelector::Optional(host.as_deref()),
+                "",
+                edits_bytes,
+                None,
                 intent_key.as_deref(),
             )
         }
@@ -3636,7 +3668,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                 );
             }
             validate_create_fields(
-                host.as_deref(),
+                HostSelector::Required(host.as_deref()),
                 cwd.as_deref().unwrap_or_default(),
                 0,
                 title.as_deref(),
@@ -3650,18 +3682,21 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 ///
 /// Factored out because `Create` and `Clone` carry overlapping subsets of
 /// the same fields and must be held to identical limits: a clone is a
-/// create whose selector the helm derives, so a looser cap on one of them
-/// would be a way to send through the other's doorway.
+/// create whose launch the helm copies, so a looser cap on one of them
+/// would be a way to send through the other's doorway. `Create` passes its
+/// flags' encoded size as `launch_bytes` and an empty `cwd`, because its
+/// folder and title travel inside the flags.
 ///
 /// THREE bounds, not one, and the split follows what each field is:
 ///
-/// - The CREATE PAYLOAD — cwd, selector, title — is summed against
+/// - The CREATE PAYLOAD — cwd, launch, title — is summed against
 ///   [`CREATE_FIELD_CAP`], because those are exactly the fields
 ///   `handle_create_session` holds a create to over there and a create that
 ///   would be refused at the far end should be refused here first. Summed
 ///   rather than checked one by one for the reason [`validate_agent_verb`]
 ///   documents.
-/// - The HOST NAME gets [`AGENT_HOST_NAME_CAP`], its own allowance. It is
+/// - The HOST NAME, when there is one (a create may leave it to a
+///   template), gets [`AGENT_HOST_NAME_CAP`], its own allowance. It is
 ///   ROUTING metadata: the helm matches it against the registry and never
 ///   forwards it to any supervisor, so charging it against the create's
 ///   payload budget would let a long registered host name make an
@@ -3674,10 +3709,10 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 ///
 /// Control characters are refused in the host name alone — the one field of
 /// these that this process's own downstream (the helm's not-found refusal)
-/// echoes back as free text. `cwd`, the launch's command text
-/// (`launch_bytes`) and `title` are the TARGET supervisor's to judge, with
-/// rules this one has no business duplicating beyond the command launch's
-/// shape; what happens to them here is a size bound.
+/// echoes back as free text (template names get the same refusal in the
+/// `Create` arm). `cwd`, the launch (`launch_bytes`) and `title` are the
+/// helm's and the TARGET supervisor's to judge, with rules this one has no
+/// business duplicating; what happens to them here is a size bound.
 ///
 /// `cwd` arrives as `""` for a `Clone` that named none, and that is the
 /// wire's `None` rather than an empty directory (an explicitly empty clone
@@ -3687,16 +3722,20 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 /// SOURCE's, which was bounded when the source was created and never
 /// travels through this doorway at all.
 fn validate_create_fields(
-    host: Option<&str>,
+    host: HostSelector<'_>,
     cwd: &str,
     launch_bytes: usize,
     title: Option<&str>,
     intent_key: Option<&str>,
 ) -> Result<(), String> {
-    let Some(host) = host else {
-        return Err("--host is required; name the destination explicitly".to_string());
+    let host = match host {
+        HostSelector::Required(None) => {
+            return Err("--host is required; name the destination explicitly".to_string());
+        }
+        HostSelector::Required(Some(host)) | HostSelector::Optional(Some(host)) => Some(host),
+        HostSelector::Optional(None) => None,
     };
-    {
+    if let Some(host) = host {
         if host.is_empty() {
             return Err("--host must not be empty; list hosts and pass one exact name".to_string());
         }
@@ -3726,6 +3765,17 @@ fn validate_create_fields(
         _ => Ok(()),
     }
 }
+
+/// A creating verb's `--host`: `clone` must name one, while `create` may
+/// leave it to a template and a spawn never names one.
+enum HostSelector<'a> {
+    Required(Option<&'a str>),
+    Optional(Option<&'a str>),
+}
+
+/// The most templates one create may name. Far past any real stack of
+/// templates; it bounds the helm's lookups, not a use.
+const AGENT_TEMPLATES_CAP: usize = 64;
 
 /// The longest a creating verb's `--host` value may be.
 ///
@@ -4099,6 +4149,7 @@ mod tests {
                 intent_key: Some("spawn-copy".to_string()),
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -4159,6 +4210,7 @@ mod tests {
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -4202,6 +4254,7 @@ mod tests {
                 intent_key: Some("structured-spawn-copy".to_string()),
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -4258,6 +4311,7 @@ mod tests {
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -4349,6 +4403,7 @@ mod tests {
                     intent_key: Some(format!("ambiguous-{req_id}")),
                     confirm_yolo: false,
                     github_checkout: None,
+                    key_lives_with_session: false,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -5651,62 +5706,43 @@ mod tests {
         );
     }
 
-    /// Spec: the two CREATING verbs pass with every optional absent, refuse
-    /// an empty or control-laced `--host`, refuse a field TOTAL past
-    /// [`CREATE_FIELD_CAP`] even when no single field exceeds it, and hold
-    /// an intent key to [`INTENT_KEY_CAP`] — with `Clone` bounded
-    /// identically to `Create`.
+    /// Spec: the two CREATING verbs refuse an empty, control-laced or
+    /// oversized `--host`, refuse a field TOTAL past [`CREATE_FIELD_CAP`],
+    /// and hold an intent key to [`INTENT_KEY_CAP`]. `Clone` needs a host;
+    /// `Create` may name none (a template may set it), but a spawn may not
+    /// name one, and its template names are bounded in number and length
+    /// and refused with control characters. A create's flags count against
+    /// the total as the JSON they travel as.
     ///
-    /// The SUM clause is the one worth a test of its own. Each of cwd,
-    /// selector and title is individually free to be large, and a
-    /// per-field check would let a request three times the intended
-    /// ceiling through the two byte-unbounded queues this validation
-    /// exists to protect (this connection's writer queue, then the helm's)
-    /// — the same reasoning `handle_create_session` applies to a create
-    /// arriving on the wire directly.
-    ///
-    /// The identical-bounds clause matters because `Clone` is a create
-    /// whose selector the HELM derives: a looser cap on it would be a way
-    /// to push bytes through the other verb's doorway, and the two field
-    /// lists overlapping only partially is exactly how such a gap gets
-    /// written by accident.
-    ///
-    /// EVERY payload field is checked at the cap and one byte past it, not
-    /// just a representative pair. The aggregate is the kind of rule an
-    /// implementation can partially forget — dropping the title or the
-    /// invocation from the sum leaves every remaining case passing — so
-    /// coverage of one field would have said nothing about the others.
-    /// The host name is pinned separately, on its own allowance, for the
-    /// reason [`validate_create_fields`] gives.
+    /// Why: this doorway bounds what an agent can push through the two
+    /// byte-unbounded queues between it and the helm (this connection's
+    /// writer queue, then the helm's), the reasoning `handle_create_session`
+    /// applies to a create arriving on the wire directly. The SUM clause is
+    /// pinned at the cap and one byte past it for each payload, because a
+    /// per-field check would let a request several times the intended
+    /// ceiling through. The host name is pinned separately, on its own
+    /// allowance, for the reason [`validate_create_fields`] gives.
     #[farhelm_testtrace::test]
     fn validate_agent_verb_bounds_the_creating_verbs() {
-        // A builder rather than one base value spread with `..`: struct
-        // ENUM variants have no functional-update syntax, so varying one
-        // field at a time needs a closure.
-        let full = |host: Option<&str>,
-                    cwd: &str,
-                    invocation: Option<&str>,
-                    title: Option<&str>,
-                    intent_key: Option<&str>| AgentVerb::Create {
-            confirm_yolo: false,
-            host: host.map(str::to_string),
-            cwd: cwd.to_string(),
-            launch: invocation.map(|command| {
-                farhelm_proto::LaunchRequest::Command(farhelm_proto::CommandLaunch {
-                    command: command.to_string(),
-                    yolo: false,
-                    agent: None,
-                    resume: None,
-                })
-            }),
-            title: title.map(str::to_string),
-            intent_key: intent_key.map(str::to_string),
+        use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
+        let create = |host: Option<&str>, edits: TemplateFields, intent_key: Option<&str>| {
+            AgentVerb::Create {
+                host: host.map(str::to_string),
+                templates: Vec::new(),
+                edits,
+                intent_key: intent_key.map(str::to_string),
+                confirm_yolo: false,
+                spawn: None,
+            }
         };
-        let create =
-            |host: Option<&str>, cwd: &str, invocation: Option<&str>, intent_key: Option<&str>| {
-                full(host, cwd, invocation, None, intent_key)
-            };
-        assert!(validate_agent_verb(&create(None, "/w", Some("agent"), None)).is_err());
+        let folder = |path: &str| TemplateFields {
+            destination: Some(TemplateDestination::Folder(path.to_string())),
+            ..Default::default()
+        };
+        assert!(
+            validate_agent_verb(&create(None, folder("/w"), None)).is_ok(),
+            "a create may leave its host to a template"
+        );
         assert!(
             validate_agent_verb(&AgentVerb::Clone {
                 source_session_id: None,
@@ -5720,8 +5756,38 @@ mod tests {
             "the old implicit source and destination shape must be refused"
         );
 
-        let empty_host = validate_agent_verb(&create(Some(""), "/w", Some("agent"), None));
+        let empty_host = validate_agent_verb(&create(Some(""), folder("/w"), None));
         assert!(empty_host.unwrap_err().contains("empty"));
+
+        let spawn_with_host = validate_agent_verb(&AgentVerb::Create {
+            host: Some("h".to_string()),
+            templates: Vec::new(),
+            edits: folder("/w"),
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement::default()),
+        });
+        assert!(spawn_with_host.unwrap_err().contains("its own host"));
+
+        let with_templates = |templates: Vec<String>| {
+            validate_agent_verb(&AgentVerb::Create {
+                host: Some("h".to_string()),
+                templates,
+                edits: TemplateFields::default(),
+                intent_key: None,
+                confirm_yolo: false,
+                spawn: None,
+            })
+        };
+        assert!(with_templates(vec!["a".to_string(); AGENT_TEMPLATES_CAP]).is_ok());
+        assert!(with_templates(vec!["a".to_string(); AGENT_TEMPLATES_CAP + 1]).is_err());
+        assert!(with_templates(vec!["bad\nname".to_string()]).is_err());
+        assert!(
+            with_templates(vec![
+                "n".repeat(farhelm_proto::launcher::TEMPLATE_NAME_CAP + 1)
+            ])
+            .is_err()
+        );
 
         let control_host = validate_agent_verb(&AgentVerb::Clone {
             source_session_id: Some("source".to_string()),
@@ -5772,14 +5838,10 @@ mod tests {
 
         // A host name is bounded on its OWN allowance rather than against
         // the create payload, because it is routing metadata the helm
-        // consumes and no supervisor ever sees. Pinned here because the
-        // previous shape charged it to the payload, which let a long
-        // registered host name make an otherwise-legal create fail only
-        // through the agent surface.
+        // consumes and no supervisor ever sees.
         let long_host = validate_agent_verb(&create(
             Some(&"h".repeat(AGENT_HOST_NAME_CAP + 1)),
-            "/w",
-            Some("agent"),
+            folder("/w"),
             None,
         ));
         assert!(
@@ -5788,95 +5850,32 @@ mod tests {
                 .contains(&AGENT_HOST_NAME_CAP.to_string()),
             "the host name has its own limit, not the create payload's"
         );
+
+        // The flags, folder, title and command included, are one payload
+        // counted as JSON: at the cap is legal, one byte past is not.
+        let with_command = |len: usize| TemplateFields {
+            command: Some("c".repeat(len)),
+            ..Default::default()
+        };
+        let overhead = serde_json::to_string(&with_command(0)).unwrap().len();
         assert!(
-            validate_agent_verb(&full(
+            validate_agent_verb(&create(
                 Some(&"h".repeat(AGENT_HOST_NAME_CAP)),
-                &"x".repeat(CREATE_FIELD_CAP - 1),
-                Some("i"),
-                None,
-                None,
+                with_command(CREATE_FIELD_CAP - overhead),
+                None
             ))
             .is_ok(),
-            "a host name at its cap does not eat into the create payload's cap"
+            "flags exactly at the cap are legal, beside a host name at its own cap"
         );
-
-        // EVERY payload field contributes to the ONE total, and each is
-        // checked at the cap and one byte past it. Exercising only two of
-        // them (which is what this test used to do) would let an
-        // implementation that stopped charging the title pass unchanged.
-        for (label, at_cap, over_cap) in [
-            (
-                "cwd alone",
-                full(
-                    Some("h"),
-                    &"x".repeat(CREATE_FIELD_CAP - 1),
-                    Some("i"),
-                    None,
-                    None,
-                ),
-                full(
-                    Some("h"),
-                    &"x".repeat(CREATE_FIELD_CAP),
-                    Some("i"),
-                    None,
-                    None,
-                ),
-            ),
-            (
-                "command",
-                full(
-                    Some("h"),
-                    "/w",
-                    Some(&"i".repeat(CREATE_FIELD_CAP - 2)),
-                    None,
-                    None,
-                ),
-                full(
-                    Some("h"),
-                    "/w",
-                    Some(&"i".repeat(CREATE_FIELD_CAP - 1)),
-                    None,
-                    None,
-                ),
-            ),
-            (
-                "title",
-                full(
-                    Some("h"),
-                    "/w",
-                    Some("i"),
-                    Some(&"t".repeat(CREATE_FIELD_CAP - 3)),
-                    None,
-                ),
-                full(
-                    Some("h"),
-                    "/w",
-                    Some("i"),
-                    Some(&"t".repeat(CREATE_FIELD_CAP - 2)),
-                    None,
-                ),
-            ),
-        ] {
-            assert!(
-                validate_agent_verb(&at_cap).is_ok(),
-                "{label} exactly at the cap is legal"
-            );
-            assert!(
-                validate_agent_verb(&over_cap)
-                    .unwrap_err()
-                    .contains(&CREATE_FIELD_CAP.to_string()),
-                "{label} one byte past the cap is refused"
-            );
-        }
-
-        // No third exceeds the cap alone; together they do. A per-field
-        // check would accept this.
-        let third = "x".repeat(CREATE_FIELD_CAP / 3 + 1);
-        let summed =
-            validate_agent_verb(&full(Some("h"), &third, Some(&third), Some(&third), None));
         assert!(
-            summed.unwrap_err().contains(&CREATE_FIELD_CAP.to_string()),
-            "cwd, invocation and title share one total"
+            validate_agent_verb(&create(
+                Some("h"),
+                with_command(CREATE_FIELD_CAP - overhead + 1),
+                None
+            ))
+            .unwrap_err()
+            .contains(&CREATE_FIELD_CAP.to_string()),
+            "flags one byte past the cap are refused"
         );
 
         let half = "x".repeat(CREATE_FIELD_CAP / 2 + 1);
@@ -5892,10 +5891,10 @@ mod tests {
             summed_clone
                 .unwrap_err()
                 .contains(&CREATE_FIELD_CAP.to_string()),
-            "a clone is bounded by the same total a create is"
+            "a clone's cwd and title share one total"
         );
 
-        let empty_key = validate_agent_verb(&create(Some("h"), "/w", Some("agent"), Some("")));
+        let empty_key = validate_agent_verb(&create(Some("h"), folder("/w"), Some("")));
         assert!(empty_key.unwrap_err().contains("empty"));
 
         let oversized_key = validate_agent_verb(&AgentVerb::Clone {
@@ -6163,6 +6162,7 @@ mod tests {
                 intent_key: Some("forged-key".to_string()),
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -6330,6 +6330,7 @@ mod tests {
                         config_revision: 1,
                     },
                 }),
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -6449,6 +6450,7 @@ mod tests {
                         config_revision: 1,
                     },
                 }),
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -6534,6 +6536,7 @@ mod tests {
                 intent_key: Some("revoked-key".to_string()),
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             &tx,
             &auth,
@@ -6598,6 +6601,7 @@ mod tests {
             intent_key: Some("waiting-revoked-key".into()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         // Keep the request future owned by this test: a timeout drops it,
         // rather than detaching a task that might later create a session.
@@ -6790,6 +6794,7 @@ mod tests {
             intent_key: Some("mutation-wins-key".into()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let create = handle_restricted_control(&sup, request, &tx, &auth, None);
         tokio::pin!(create);
@@ -8139,6 +8144,7 @@ mod tests {
             intent_key: Some("self-replay-key".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
 
         handle_restricted_control(&sup, spawn(61), &tx, &parent, None).await;
@@ -8175,6 +8181,72 @@ mod tests {
         assert_eq!(sup.store.load_all().await.expect("load sessions").len(), 3);
     }
 
+    /// Spec: a full-authority create carrying the helm's spawn marker
+    /// reserves its key for the child's lifetime, and one without it
+    /// reserves the key permanently.
+    ///
+    /// Why: a `farhelm spawn` with launch flags reaches its own host as the
+    /// helm's create, and SPEC.md gives a spawn's key the child's lifetime
+    /// whichever way the spawn's launch was described; the marker is the
+    /// only thing that tells this supervisor which kind of create it is.
+    #[farhelm_testtrace::test]
+    async fn the_helms_spawn_marker_gives_a_key_the_childs_lifetime() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        for (req_id, key, marked, expected) in [
+            (71, "marked", true, DedupScope::SessionLifetime),
+            (72, "unmarked", false, DedupScope::Permanent),
+        ] {
+            handle_control(
+                &sup,
+                ControlMsg::CreateSession {
+                    req_id,
+                    parent: None,
+                    cwd: state.path().to_string_lossy().into_owned(),
+                    launch: Some(SessionLaunch::plain_command("agent")),
+                    inherit_agent: false,
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                    intent_key: Some(key.to_string()),
+                    confirm_yolo: false,
+                    github_checkout: None,
+                    key_lives_with_session: marked,
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let reply: ControlMsg =
+                serde_json::from_slice(&rx.recv().await.expect("create reply").body)
+                    .expect("decode");
+            assert!(
+                matches!(reply, ControlMsg::SessionCreated { .. }),
+                "premise: the create succeeded: {reply:?}"
+            );
+            assert_eq!(
+                sup.store
+                    .reservation(key)
+                    .await
+                    .unwrap()
+                    .expect("the key is reserved")
+                    .dedup_scope,
+                expected,
+                "{key}"
+            );
+        }
+    }
+
     /// An admitted spawn receives bounded idempotency, preserves its direct
     /// parent, replays an identical key, conflicts if only that parent
     /// intent changes, and may reuse the key after its child is deleted.
@@ -8198,6 +8270,7 @@ mod tests {
             intent_key: Some("spawn-key".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let mut send = async |msg| {
             handle_restricted_control(&sup, msg, &tx, &auth, None).await;
@@ -8530,6 +8603,7 @@ mod tests {
                 intent_key: Some("oversized-checkout".into()),
                 confirm_yolo: false,
                 github_checkout: Some(checkout),
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -8590,6 +8664,7 @@ mod tests {
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -8676,6 +8751,7 @@ mod tests {
                     intent_key: Some(key),
                     confirm_yolo: false,
                     github_checkout: None,
+                    key_lives_with_session: false,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -8729,6 +8805,7 @@ mod tests {
                 intent_key: Some("k".repeat(INTENT_KEY_CAP)),
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -8794,6 +8871,7 @@ mod tests {
                     intent_key: Some("key".to_string()),
                     confirm_yolo: false,
                     github_checkout: None,
+                    key_lives_with_session: false,
                 },
                 ConnectionCtx {
                     tx: &tx,

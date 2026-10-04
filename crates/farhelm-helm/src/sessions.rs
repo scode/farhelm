@@ -1506,6 +1506,8 @@ pub(crate) async fn create_session(
                 github_checkout: None,
                 confirm_yolo: req.confirm_yolo,
                 settings_from_source: false,
+                parent: None,
+                spawned: false,
             },
         )
         .await
@@ -1574,6 +1576,8 @@ pub(crate) async fn do_create_session(
         accept_result,
         github_checkout,
         settings_from_source,
+        parent,
+        spawned,
     } = spec;
     // Before any bookkeeping or dispatch: a YOLO launch on a host that asks before YOLO
     // launches is refused unless the caller confirmed it (see `yolo_guard`).
@@ -1604,6 +1608,8 @@ pub(crate) async fn do_create_session(
             CreateExtras {
                 intent_key,
                 github_checkout: github_checkout.clone(),
+                parent,
+                key_lives_with_session: spawned,
             },
         )
         .await?;
@@ -1766,6 +1772,14 @@ pub(crate) struct CreateSpec {
     /// remembered defaults or recent setup (SPEC.md: only explicit GUI
     /// selections shape GUI defaults and suggestions).
     pub(crate) settings_from_source: bool,
+    /// The organizational parent a `farhelm spawn` records, forwarded to the
+    /// supervisor as given. `None` for every other create: the GUI and
+    /// `farhelm agent create` record none (SPEC.md, Session list).
+    pub(crate) parent: Option<String>,
+    /// The create is a `farhelm spawn` on the asking session's own host: its
+    /// key is spent only while the child exists, as a spawn's key is when the
+    /// session's own supervisor answers it (SPEC.md, Agent-spawned sessions).
+    pub(crate) spawned: bool,
 }
 
 /// Whose successful create may shape the user's launch suggestions.
@@ -1919,6 +1933,8 @@ async fn create_fresh_session(
             accept_result: acceptance.accept_result,
             confirm_yolo: req.confirm_yolo,
             settings_from_source: false,
+            parent: None,
+            spawned: false,
         },
     )
     .await
@@ -1968,7 +1984,7 @@ pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<S
 }
 
 /// A helm-originated `InvalidRequest`, the 400 every create-body refusal is.
-fn invalid_request(message: String) -> anyhow::Error {
+pub(crate) fn invalid_request(message: String) -> anyhow::Error {
     anyhow::Error::new(SupervisorError {
         origin: crate::client::ErrorOrigin::Helm,
         kind: ErrorKind::InvalidRequest,
@@ -2840,6 +2856,8 @@ pub(crate) async fn do_replace_session(
             accept_result: Some(replacement_result_check(id)),
             confirm_yolo,
             settings_from_source,
+            parent: None,
+            spawned: false,
         },
     )
     .await?;

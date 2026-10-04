@@ -1387,9 +1387,11 @@ their existing retry exposure. The current implementation remains described here
 made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
 never have heard of the asking session. Both kinds of key are stored scoped to the asking session (spawn's by the
 supervisor, as `spawn-<asking session>-<SHA-256 of the key>`; create's and clone's by the helm relay), so a key only
-ever replays for the session that used it. Spawn requires explicit `--inherit-agent`, which copies the asking session's
-exact stored launch bundle on its own supervisor and therefore works offline; the supervisor refuses a
-session-authenticated create without it, naming the flag. Agent create likewise requires an explicit command line.
+ever replays for the session that used it. A spawn with `--inherit-agent` copies the asking session's exact stored
+launch bundle on its own supervisor and therefore works offline; the supervisor refuses a session-authenticated create
+without it, naming the flag. A spawn with launch flags is not a supervisor create at all: the CLI relays it as an agent
+`create` placed on the asking session's own host, which the helm marks so its key still gets a spawn's session-lifetime
+scope (see "Agent launches from the CLI").
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -2714,23 +2716,29 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
-- `farhelm spawn --cwd <dir> --inherit-agent [--title ...] [--parent ...] [--idempotency-key ...]` — the in-session
-  spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting (see "What running
-  sessions hold across versions"), as are the `farhelm agent` verbs below. The `--agent <name>` and `--profile-id <id>`
-  selectors were removed with profiles; both are still parsed, hidden, only so they can be refused with a message saying
-  so and naming `--inherit-agent` or `farhelm agent create --command`.
-- `farhelm agent hosts|sessions [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected credential
-  spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a refusal on
-  stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a model
-  quoting its own shell output. The JSON form uses schema version 5, includes exact IDs, caller identity, and
+- `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`
+  — the in-session spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting
+  (see "What running sessions hold across versions"), as are the `farhelm agent` verbs below. `--inherit-agent` is
+  answered by the session's own supervisor and needs `--cwd`; the launch flags are the ones `farhelm agent create`
+  takes, and go through the helm (see "Agent launches from the CLI"). clap refuses `--inherit-agent` beside any launch
+  flag, and a spawn with neither is refused before anything is dialed. `--agent` took a profile name before profiles
+  were removed and is now the agent type flag; `--profile-id <id>` is still parsed, hidden, only so it can be refused
+  with a message naming the launch flags and `--template`.
+- `farhelm agent hosts|sessions|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
+  credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
+  refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
+  model quoting its own shell output. The JSON form uses schema version 6, includes exact IDs, caller identity, and
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
-  Version 3 is the restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while
-  `resume` kept its spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent
-  type's word or `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds:
-  `restart_offer` gained `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is
-  still parsed, hidden, only so it can be refused with a message saying profiles were removed. A session row's
-  non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it cannot
-  (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
+  Version 6 adds the templates listing; nothing earlier changed meaning. The templates listing carries each template's
+  fields except a command line or resume command, which appear only as `sets_command` and `sets_resume_command` (in the
+  table, `command (set)`), and names the host a template's install identity currently resolves to. Version 3 is the
+  restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its
+  spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent type's word or
+  `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained
+  `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is still parsed, hidden,
+  only so it can be refused with a message saying profiles were removed and naming `farhelm agent templates`. A session
+  row's non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it
+  cannot (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
   `no_resume_command` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
   recommendation. Every dynamic table cell is escaped to one printable line and every non-final column is capped at 48
   characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an
@@ -2750,10 +2758,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   restart resumes and to drop the flag. An explicit self-stop or self-restart may terminate the CLI before its line is
   printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
   warning before dispatch and treats a lost reply as unknown rather than success.
-- `farhelm agent create --host <name> --cwd <dir> --command <cmd> (--yolo | --no-yolo) [--agent <type>] [--resume-command <cmd>] [--title ...] [--idempotency-key ...]`
-  and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
-  [--idempotency-key ...]` —
-  the in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
+- `farhelm agent create [--host <name>] [--cwd <dir>] <launch flags> [--title ...] [--idempotency-key ...]` and
+  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` — the
+  in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
   The id is the one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as
@@ -2768,12 +2776,13 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
   every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
   characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
-  ambiguous targets. `--cwd`, `--host`, `--command` and exactly one of `--yolo` and `--no-yolo` are required on
-  `create`, so a command launch's YOLO assertion is always stated; `--source-session` and `--host` are required on
-  clone. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can be refused
-  naming `--command`, and the retired `--invocation` is parsed, hidden, only to be refused naming `--command` and the
-  YOLO flags. Every free-text value option on both verbs carries `allow_hyphen_values` (`--agent` does not: it takes an
-  agent type's word, and an unknown one is refused listing them all), because every one of these values is judged
+  ambiguous targets. What `create` needs (a folder, a host, a launch, and for a command launch its YOLO assertion) may
+  come from a template, so clap requires none of it and the helm refuses what is still missing, naming the flag;
+  `--source-session` and `--host` are required on clone. The removed `--profile` and `--profile-id` selectors are still
+  parsed, hidden, only so they can be refused naming the launch flags and `--template`, and the retired `--invocation`
+  is parsed, hidden, only to be refused naming `--command` and the YOLO flags. Every free-text value option on both
+  verbs carries `allow_hyphen_values` (`--agent`, `--effort`, `--permissions` and `--trust` do not: each takes a word
+  from a closed set, and an unknown one is refused listing them all), because every one of these values is judged
   downstream — by the registry, by the target filesystem — and every one of them may legally begin with `-`; refusing
   such a value locally would be this CLI declining to carry a name the far end would have explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
@@ -3442,3 +3451,49 @@ field, each with a "leave as is" state and, where the field has a default, a "re
 the new name before deleting the old one, so a failure in between leaves both; saving under a name another template
 already has is refused in the panel rather than overwriting that template. The launcher reads templates when it opens
 and again whenever the Templates dialog closes.
+
+### Agent launches from the CLI
+
+`farhelm agent create` and `farhelm spawn` (other than `--inherit-agent`) send the helm launcher edits, not a launch:
+`AgentVerb::Create` (protocol 40) carries the template names in order, the flags as one more
+`farhelm_proto::launcher::TemplateFields` (`--cwd` as the destination folder, `--title` as the name), an optional host
+NAME, and for a spawn a placement naming the parent. The helm's `agent_launch::resolve` applies the templates and then
+the flags to an empty launcher with the same `apply_templates` the GUI uses, so the CLI and `tl:` cannot disagree about
+what a template means; a refusal of the flags names the flag (`--model applies to an agent launch ...`) rather than an
+unnamed template. The result must have a folder (a fresh-checkout destination is refused, since the CLI creates no
+checkouts, unless `--cwd` replaced it), and either an agent type or a command and a YOLO answer; the launch is then
+validated by the same `sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch
+kind: the agent-launch flags leave it alone, so on a command template they are refused naming the flag, as the same edit
+is refused in the launcher. `--model`, `--effort`, `--permissions` and `--trust` accept `default`, sent as `null`, which
+resets a choice a template made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The
+CLI has no way to clear a command launch's declared agent type that a template set. clap refuses a repeated flag (other
+than `--template`) and `--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64
+template names of at most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether
+it says enough to launch is the helm's to decide.
+
+The host is the asking session's own for a spawn (which also makes a template that sets a host a refusal, through the
+launcher's host-fixed rule); otherwise an explicit `--host` name, then the install a template named, matched among host
+rows not in the identity-mismatch phase. With an explicit `--host` the templates' host fields are dropped before they
+are applied, so the flag wins even over a template whose host was since reinstalled or removed, which the launcher's
+`tl:` would refuse. A spawn's parent must be the asking session, as the supervisor requires of `--inherit-agent`; the
+relay holds the asking session's delete fence for the whole request, which is what the restricted create's parent
+lifecycle claim gives the inherited path. The helm sends the spawn's create with `key_lives_with_session` (protocol 40),
+which the supervisor honors only on the helm's full-authority connection, so the key gets a spawn's session-lifetime
+reservation rather than an interactive create's permanent one.
+
+A keyed create is bound to its first accepted resolution in `helm.db` (schema 39, table `agent_create_bindings`): the
+asker-scoped key the supervisor also reserves, the asking session, a SHA-256 digest of the request as sent (host name,
+templates, flags, spawn placement; not `--confirm-yolo`, so a retry that adds the confirmation the helm asked for is the
+same request), and the resolved host, folder, launch and title. A retry with the same digest reuses the resolution
+instead of reading the templates again, so the supervisor's fingerprint matches and it replays the session (or the
+refusal it recorded) after a template edit. Two attempts racing on one key both dispatch the resolution stored first. A
+different request under the same key is resolved afresh and meets the supervisor's ordinary key conflict unless it
+resolves identically. The binding is written before dispatch, because a lost reply is exactly when a retry comes. It is
+removed again, if this attempt wrote it, only when no supervisor holds the key's outcome: the helm refused before
+sending (the YOLO confirmation, an unconnected host), or a supervisor refused a spawn, whose session-lifetime key it
+does not keep for a refusal. A supervisor's refusal of an ordinary keyed create is recorded against the key, so the
+binding stays and the retry gets that refusal back. The table only spares retries from template edits, while the
+supervisor's reservation is what ties a key to its session, so every write prunes rows older than 30 days and all but
+the asking session's newest 256; a retry past that is resolved afresh. A spawn's binding also outlives its child: a
+keyed spawn re-run after the child was deleted creates a new child from the stored resolution, not from the templates as
+they are now.

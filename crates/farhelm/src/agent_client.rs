@@ -308,15 +308,29 @@ pub(crate) fn unexpected_reply(what: &str, reply: &ControlMsg, mutating: bool) -
 // `farhelm spawn`
 // ---------------------------------------------------------------------------
 
-/// Parsed spawn inputs after clap has enforced the one required flag.
+/// Parsed spawn inputs.
 pub(crate) struct SpawnArgs {
-    pub(crate) cwd: PathBuf,
+    pub(crate) cwd: Option<PathBuf>,
     pub(crate) title: Option<String>,
-    pub(crate) inherit_agent: bool,
+    pub(crate) launch: SpawnLaunch,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
     /// See `farhelm spawn --confirm-yolo`.
     pub(crate) confirm_yolo: bool,
+}
+
+/// What a spawned child runs, which also decides who answers the spawn.
+pub(crate) enum SpawnLaunch {
+    /// `--inherit-agent`: this session's own stored launch, copied by this
+    /// host's supervisor with no helm involved.
+    Inherit,
+    /// Launch flags and templates, which only the attached helm can resolve
+    /// (it owns the templates and composes agent launches). The folder and
+    /// title are added by [`spawn_session`].
+    Flags {
+        templates: Vec<String>,
+        edits: farhelm_proto::launcher::TemplateFields,
+    },
 }
 
 /// Create one child under the environment's session authority.
@@ -325,62 +339,112 @@ pub(crate) struct SpawnArgs {
 /// all three injected environment values before dialing, preserve the cwd's
 /// lexical spelling (an ordinary relative input resolves against this
 /// process's cwd; a `~`-prefixed input is forwarded verbatim for the
-/// supervisor's own expansion — see the branch below for why absolutizing
-/// it would be wrong), authenticate the connection, and return the child id
-/// for the sole stdout line. A `SessionCreated` reply means creation
-/// succeeded regardless of the status snapshot it carries; every refusal
-/// and protocol mismatch is an error and therefore produces no id.
+/// supervisor's own expansion — see [`spawn_cwd`]), authenticate the
+/// connection, and return the child id for the sole stdout line. A created
+/// reply means creation succeeded regardless of the status snapshot it
+/// carries; every refusal and protocol mismatch is an error and therefore
+/// produces no id.
+///
+/// An inherited spawn is answered by this host's supervisor. A spawn with
+/// launch flags is relayed to the attached helm as an agent `create` placed
+/// on this session's own host (SPEC.md: "The launch flags are resolved by
+/// the attached helm ... and are refused with a remedy when no helm is
+/// attached"), which is the relay's own "no helm is attached" refusal.
 ///
 /// A create is a mutation, so a reply lost after the request went out
 /// carries the outcome-unknown warning: the child may already be running.
 pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::Result<String> {
-    let dial = env.dial("farhelm spawn")?;
-    // `~`-prefixed paths are forwarded verbatim: the SUPERVISOR owns that
-    // contract (SPEC.md — `~` expands against its own home, `~user` is its
-    // refusal to give), and a spawn always targets the same host it runs
-    // on, so nothing is gained by resolving locally. Absolutizing them
-    // here would instead manufacture `<cwd>/~...` — a path that at best
-    // fails as nonexistent and at worst names a real directory literally
-    // called `~user`, silently dodging the supervisor's refusal. Ordinary
-    // relative paths keep resolving against this process's cwd, which is
-    // the spelling a shell user means.
-    let cwd = if args.cwd.is_absolute() || args.cwd.to_str().is_some_and(|c| c.starts_with('~')) {
-        args.cwd
+    let cwd = args.cwd.map(spawn_cwd).transpose()?;
+    match args.launch {
+        SpawnLaunch::Inherit => {
+            let Some(cwd) = cwd else {
+                anyhow::bail!("farhelm spawn --inherit-agent needs --cwd");
+            };
+            let dial = env.dial("farhelm spawn")?;
+            let request = ControlMsg::CreateSession {
+                req_id: REQUEST_ID,
+                parent: args.parent,
+                cwd,
+                // Explicit inheritance copies the authenticated parent's
+                // stored launch, the only safe source of it.
+                launch: None,
+                inherit_agent: true,
+                title: args.title,
+                cols: 80,
+                rows: 24,
+                intent_key: args.idempotency_key,
+                confirm_yolo: args.confirm_yolo,
+                // Fresh-checkout payloads are helm-supplied only; a
+                // restricted spawn never carries one (and the supervisor
+                // refuses it).
+                github_checkout: None,
+                key_lives_with_session: false,
+            };
+            let reply = one_shot_request(&dial, request, true, "spawn").await?;
+            match reply {
+                ControlMsg::SessionCreated {
+                    req_id: REQUEST_ID,
+                    session,
+                } => Ok(session.id),
+                other => Err(unexpected_reply("spawn", &other, true)),
+            }
+        }
+        SpawnLaunch::Flags {
+            templates,
+            mut edits,
+        } => {
+            edits.destination = cwd.map(farhelm_proto::launcher::TemplateDestination::Folder);
+            edits.name = args.title;
+            let (_asking, reply) = relay_request(
+                env,
+                "farhelm spawn",
+                farhelm_proto::AgentVerb::Create {
+                    host: None,
+                    templates,
+                    edits,
+                    intent_key: args.idempotency_key,
+                    confirm_yolo: args.confirm_yolo,
+                    spawn: Some(farhelm_proto::SpawnPlacement {
+                        parent: args.parent,
+                    }),
+                },
+            )
+            .await?;
+            match reply {
+                AgentReply::Created { session } => Ok(session.id),
+                // `agent_request` has already checked the reply's tag, so
+                // this is a defect rather than a peer's answer.
+                _ => {
+                    anyhow::bail!("the helm answered spawn with something other than a new session")
+                }
+            }
+        }
+    }
+}
+
+/// A spawn's working directory as it crosses the wire.
+///
+/// `~`-prefixed paths are forwarded verbatim: the SUPERVISOR owns that
+/// contract (SPEC.md — `~` expands against its own home, `~user` is its
+/// refusal to give), and a spawn always targets the same host it runs on,
+/// so nothing is gained by resolving locally. Absolutizing them here would
+/// instead manufacture `<cwd>/~...` — a path that at best fails as
+/// nonexistent and at worst names a real directory literally called
+/// `~user`, silently dodging the supervisor's refusal. Ordinary relative
+/// paths keep resolving against this process's cwd, which is the spelling a
+/// shell user means.
+fn spawn_cwd(cwd: PathBuf) -> anyhow::Result<String> {
+    let cwd = if cwd.is_absolute() || cwd.to_str().is_some_and(|c| c.starts_with('~')) {
+        cwd
     } else {
         std::env::current_dir()
             .context("reading farhelm spawn's current directory")?
-            .join(args.cwd)
+            .join(cwd)
     };
-    let cwd = cwd
+    Ok(cwd
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("spawn working directory is not valid UTF-8"))?
-        .to_string();
-
-    let request = ControlMsg::CreateSession {
-        req_id: REQUEST_ID,
-        parent: args.parent,
-        cwd,
-        // Explicit inheritance copies the authenticated parent's stored
-        // launch, the only safe source of it.
-        launch: None,
-        inherit_agent: args.inherit_agent,
-        title: args.title,
-        cols: 80,
-        rows: 24,
-        intent_key: args.idempotency_key,
-        confirm_yolo: args.confirm_yolo,
-        // Fresh-checkout payloads are helm-supplied only; a restricted
-        // spawn never carries one (and the supervisor refuses it).
-        github_checkout: None,
-    };
-    let reply = one_shot_request(&dial, request, true, "spawn").await?;
-    match reply {
-        ControlMsg::SessionCreated {
-            req_id: REQUEST_ID,
-            session,
-        } => Ok(session.id),
-        other => Err(unexpected_reply("spawn", &other, true)),
-    }
+        .to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +483,17 @@ pub(crate) async fn agent_request(
     env: &SessionEnv,
     request: farhelm_proto::AgentVerb,
 ) -> anyhow::Result<(String, AgentReply)> {
+    relay_request(env, "farhelm agent", request).await
+}
+
+/// [`agent_request`] for a command other than `farhelm agent`, named in
+/// its environment and dial errors: `farhelm spawn` with launch flags is
+/// relayed the same way, and its caller should read its own command's name.
+pub(crate) async fn relay_request(
+    env: &SessionEnv,
+    command: &str,
+    request: farhelm_proto::AgentVerb,
+) -> anyhow::Result<(String, AgentReply)> {
     // Captured before the request goes out, because the reply's own tag is
     // the only thing that can be checked against it — see [`ReplyKind`].
     let expected = ReplyKind::of_verb(&request);
@@ -426,7 +501,7 @@ pub(crate) async fn agent_request(
     // other question this function can no longer answer afterwards: whether
     // the thing that went out CHANGES something. See [`lost_reply`].
     let mutating = request.is_mutating();
-    let dial = env.dial("farhelm agent")?;
+    let dial = env.dial(command)?;
     let session_id = dial.session_id.clone();
     let reply = one_shot_request(
         &dial,
@@ -550,6 +625,7 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 enum ReplyKind {
     Hosts,
     Sessions,
+    Templates,
     Session,
     Restarted,
     Stopped,
@@ -561,6 +637,7 @@ impl ReplyKind {
         match verb {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
+            farhelm_proto::AgentVerb::Templates {} => ReplyKind::Templates,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
@@ -580,6 +657,7 @@ impl ReplyKind {
         match reply {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
+            AgentReply::Templates { .. } => ReplyKind::Templates,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
@@ -597,6 +675,7 @@ impl ReplyKind {
         match self {
             ReplyKind::Hosts => "hosts listing",
             ReplyKind::Sessions => "sessions listing",
+            ReplyKind::Templates => "templates listing",
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",

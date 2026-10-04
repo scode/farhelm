@@ -918,6 +918,7 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
             intent_key: Some("structured-inherited-child".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         })
         .await;
     let ControlMsg::SessionCreated {
@@ -980,6 +981,7 @@ async fn restricted_raw_data_is_refused() {
             intent_key: Some("structured-parent-raw-override".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         })
         .await;
     let ControlMsg::Error {

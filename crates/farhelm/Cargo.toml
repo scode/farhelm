@@ -55,6 +55,7 @@ farhelm-helm.workspace = true
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
 libc.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 # Installer ownership receipts carry SHA-256 digests; the uninstall verifier
 # streams claimed artifacts through this shared implementation before it can
