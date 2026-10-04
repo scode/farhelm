@@ -117,13 +117,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   them only to a log nobody reads. The first thing to go into it is the session-tracking warnings, starting with the
   supervisor's warning that a session launched with Farhelm's conversation hook (Claude, Codex) has had input for a
   while and no identity report has arrived, which today is only a supervisor log line; the user finds out only later,
-  when restart offers a fresh launch instead of Resume. Design TBD.
+  when restart offers a fresh launch instead of Resume. Design settled 2026-10-03 in the plan:
+  `plans/queue/session-notifications.md`.
 
 - **Hover help on icons and buttons.** Hovering any of these should show a short text saying what it is or does: the
   icons that show a session's agent kind, the YOLO / not-YOLO / unknown (question mark) icons, and every clickable
   button. Today a user has to guess what an unlabeled icon means or what a terse button will do before clicking it.
   Native `title` tooltips are the cheap way to get there; the Maybe later entry on custom hover tooltips covers the
-  faster, themed alternative if the browser's built-in delay proves too slow.
+  faster, themed alternative if the browser's built-in delay proves too slow. Plan: `plans/queue/hover-help.md`.
 
 ## Doc todo
 
@@ -547,7 +548,8 @@ are large mostly because of their tests.
   sidebar: `.app-sidebar`'s `overflow: hidden auto` clips anything anchored inside a row near its edges, so the tooltip
   needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's popover is the pattern
   to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop / delete, the host row's
-  buttons) is an hour and needs none of this.
+  buttons) is an hour and needs none of this. Plan: `plans/queue/hover-help.md` (taken over by the Near term hover help
+  entry).
 
 - Consider dropping the race-proofing around host identity, keeping the identity itself. To be clear about what stays:
   the per-install identity the supervisor mints on first run and stores in its own database, independent of hostname and
