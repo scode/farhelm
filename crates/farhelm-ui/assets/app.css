@@ -826,7 +826,11 @@ samp {
   white-space: nowrap;
 }
 
+/* The section headers' buttons sit on the header's 12px line and match it.
+   A button added beside New has to be listed here too: the templates button
+   once was not, and rendered at the page's default size. */
 .session-heading .new-session-button,
+.session-heading .templates-button,
 .hosts-heading .update-all-button {
   padding: 2px 8px;
   font-size: 12px;
@@ -3791,8 +3795,12 @@ samp {
 /* The evidence and the remedy each get a full-width line under the row's
    controls rather than squeezing into it: both are sentences (a transport
    error, the helm's remediation), and a single non-wrapping flex row would
-   clip exactly the part that says what is wrong. */
+   clip exactly the part that says what is wrong. An aliased host's real
+   destination, shown with the details, is one more line of the same kind and
+   reads as part of them; without this rule it fell back to the page's default
+   size and margin. */
 .host-detail,
+.host-destination-detail,
 .host-remedy {
   font-size: 12px;
   color: var(--fg-1);
