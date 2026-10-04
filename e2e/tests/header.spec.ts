@@ -9,7 +9,14 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { createSession, cleanupSession, listSessions, openRowMenu, stopSession } from "./helpers/fleet";
+import {
+  cleanupSession,
+  createResumableSession,
+  createSession,
+  listSessions,
+  openRowMenu,
+  stopSession,
+} from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
@@ -39,10 +46,12 @@ test(
     // comment, so the agent that actually launches is unaffected. `cwd`
     // stays a real directory: a nonexistent one is a precondition failure
     // SPEC.md has the create route refuse outright.
-    const session = await createSession(request, {
+    // Resumable, because the test opens Restart's confirmation, and an
+    // unavailable Restart opens nothing.
+    const session = await createResumableSession(request, {
       title: `${marker}-${"t".repeat(200)}`,
       cwd: "/tmp",
-      invocation: `${FAKE_AGENT_INVOCATION} #${"x".repeat(200)}`,
+      invocationSuffix: ` #${"x".repeat(200)}`,
     });
     try {
       await page.setViewportSize({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT });

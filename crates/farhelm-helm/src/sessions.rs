@@ -2670,18 +2670,16 @@ pub(crate) async fn get_session(
 
 /// The body of `POST /api/sessions/{id}/restart`.
 ///
-/// `mode` is required, and deliberately has no default: a restart that
-/// guessed a mode could resume a conversation the caller never asked to
-/// resume, or launch a fresh agent where the caller expected a resume.
-/// The supervisor validates it against the session's CURRENT offer anyway
-/// (PLAN_M3.md item 9), so a wrong value is refused rather than obeyed —
-/// but an ABSENT one should not be silently turned into a choice at all.
+/// There is no mode: a restart always resumes the session's own
+/// conversation, and the supervisor refuses one whose CURRENT offer is not
+/// Resume. A `mode` field sent by an older page is ignored like any other
+/// unknown field, which is harmless because the only mode that could still
+/// succeed was `resume`.
 ///
 /// `stop_if_running` defaults to false, the safe direction: an old-shaped
 /// or hand-written body never kills a live agent by omission.
 #[derive(Deserialize)]
 pub(crate) struct RestartReq {
-    mode: farhelm_proto::RestartMode,
     #[serde(default)]
     stop_if_running: bool,
     #[serde(default)]
@@ -2697,8 +2695,8 @@ pub(crate) struct RestartReq {
 /// session is this same operation, not a separate one).
 ///
 /// The restart fields pass through unchanged, including the refusals that
-/// carry this endpoint's real contract: a `mode` that no longer matches the
-/// session's offer and a working agent without `stop_if_running` both come back
+/// carry this endpoint's real contract: a session that cannot currently resume
+/// its conversation and a working agent without `stop_if_running` both come back
 /// as 409s through `http_error`, and a vanished working directory as a 400
 /// naming the directory. Before that call the helm snapshots its profile
 /// identity index, so enriching a successful reply is infallible after the
@@ -2715,15 +2713,7 @@ pub(crate) async fn restart_session(
     // Helm-owned for the reason `create_session` is: the relaunch is
     // followed by recording the session's new state.
     crate::run_owned(async move {
-        match do_restart_session(
-            &state,
-            &id,
-            req.mode,
-            req.stop_if_running,
-            req.with,
-            req.confirm_yolo,
-        )
-        .await
+        match do_restart_session(&state, &id, req.stop_if_running, req.with, req.confirm_yolo).await
         {
             Ok((_claim, session)) => match browser_session_ready(&session) {
                 Ok(()) => axum::Json(session).into_response(),
@@ -2739,7 +2729,7 @@ pub(crate) async fn restart_session(
 ///
 /// This is shared by the REST surface and the attached-session relay so a
 /// restart has one owner-routing and post-mutation publication contract.
-/// `mode` and `stop_if_running` deliberately reach the supervisor unchanged:
+/// `stop_if_running` deliberately reaches the supervisor unchanged:
 /// it alone can revalidate the current offer and liveness immediately before
 /// destructive work. The profile index is read before that work, because a
 /// catalog read that fails afterward must not make a completed relaunch look
@@ -2747,7 +2737,6 @@ pub(crate) async fn restart_session(
 pub(crate) async fn do_restart_session(
     state: &AppState,
     id: &str,
-    mode: farhelm_proto::RestartMode,
     stop_if_running: bool,
     with: Option<farhelm_proto::LaunchSelection>,
     confirm_yolo: bool,
@@ -2762,7 +2751,7 @@ pub(crate) async fn do_restart_session(
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let profile_names = load_profile_name_index(&state.store).await?;
     let mut session = client
-        .restart_session_with(id, mode, stop_if_running, with)
+        .restart_session_with(id, stop_if_running, with)
         .await?;
     resolve_session_profiles(&profile_names, std::iter::once(&mut session));
     // An ambiguity is logged and refreshed inside; this id was already

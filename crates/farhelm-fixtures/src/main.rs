@@ -65,6 +65,14 @@ enum Cmd {
         /// The status `--then exit` exits with.
         #[arg(long, default_value_t = 0)]
         exit_code: i32,
+        /// Fire the real Claude `SessionStart` hook for this conversation id
+        /// before the script starts, so the session has a captured
+        /// conversation and Restart (which only ever resumes) is available,
+        /// without a test having to type into the terminal. The browser
+        /// specs use it; a resume command that passes the resumed id here
+        /// keeps a restarted session resumable. Works with every script.
+        #[arg(long)]
+        report_conversation: Option<String>,
         /// Whose dialog shape [`fake_agent::Script::Replay`]'s menus
         /// imitate; staging passes the harness the session stands in for.
         /// Ignored by every other script.
@@ -123,23 +131,29 @@ fn main() -> anyhow::Result<()> {
             then,
             exit_code,
             dialect,
+            report_conversation,
             // The fake agent does not need to understand the injected
             // tail — it only has to survive parsing it. The record
             // scripts read the same strings straight from
             // `std::env::args()` for their `FAKE-AGENT ARGV:` marker,
             // so nothing is passed through here.
             extra: _,
-        } => fake_agent::run(
-            script,
-            record_home,
-            sync_output,
-            fake_agent::ReplayOptions {
-                transcript,
-                then,
-                exit_code,
-                dialect,
-            },
-        ),
+        } => {
+            if let Some(conversation) = report_conversation {
+                fake_agent::report_conversation_at_start(&conversation)?;
+            }
+            fake_agent::run(
+                script,
+                record_home,
+                sync_output,
+                fake_agent::ReplayOptions {
+                    transcript,
+                    then,
+                    exit_code,
+                    dialect,
+                },
+            )
+        }
         Cmd::SweepTestState => {
             let outcome = farhelm_teststate::sweep(
                 std::path::Path::new(farhelm_teststate::TMP_ROOT),
@@ -242,6 +256,39 @@ mod tests {
             record_home,
             Some(std::path::PathBuf::from("/tmp/fake-agent-home"))
         );
+        assert_eq!(extra, vec!["--settings", "{}"]);
+    }
+
+    /// `--report-conversation` binds as a named flag ahead of an injected
+    /// vendor tail, so the hook flags a Claude-kind launch appends after it
+    /// are still captured as `extra` and the id is not swallowed.
+    ///
+    /// Why: the browser specs' resumable sessions put the flag on the
+    /// command line and their resume command, and a launch whose report
+    /// silently never fired would leave Restart unavailable with no clue
+    /// why.
+    #[farhelm_testtrace::test]
+    fn fake_agent_report_conversation_parses_before_the_tail() {
+        let cli = Cli::try_parse_from([
+            "farhelm-fixtures",
+            "fake-agent",
+            "--script",
+            "basic",
+            "--report-conversation",
+            "conv-1",
+            "--settings",
+            "{}",
+        ])
+        .unwrap();
+        let Cmd::FakeAgent {
+            report_conversation,
+            extra,
+            ..
+        } = cli.command
+        else {
+            panic!("expected Cmd::FakeAgent");
+        };
+        assert_eq!(report_conversation.as_deref(), Some("conv-1"));
         assert_eq!(extra, vec!["--settings", "{}"]);
     }
 

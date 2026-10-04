@@ -26,6 +26,7 @@ import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import {
   cleanupSession,
+  createResumableSession,
   createSession,
   holdMutation,
 } from "./helpers/fleet";
@@ -79,7 +80,8 @@ test("a Restart prompt's claim is released when another client deletes the sessi
   request,
 }) => {
   const cwd = stackScratchDir("claims-restart-prompt-");
-  const source = await createSession(request, { title: `claims-restart-prompt-${Date.now()}`, cwd });
+  // Restart only resumes, so the source reports a conversation.
+  const source = await createResumableSession(request, { title: `claims-restart-prompt-${Date.now()}`, cwd });
   const others = await bystanders(request, cwd);
   try {
     await page.goto("/");
@@ -92,6 +94,8 @@ test("a Restart prompt's claim is released when another client deletes the sessi
     await page.keyboard.press("Enter");
     await waitForTermText(page, "busy-tick-");
     const restart = page.locator(".restart-primary");
+    // Premise: Restart is available, or clicking it would do nothing.
+    await expect(restart).not.toHaveAttribute("aria-disabled", "true");
     await expect(restart).toHaveAttribute("data-confirms", "true", { timeout: 15_000 });
     await restart.click();
     await expect(page.locator(".restart-confirm")).toBeVisible();
@@ -118,7 +122,8 @@ test("an in-flight Restart's claim is released when another client deletes the s
   request,
 }) => {
   const cwd = stackScratchDir("claims-restart-flight-");
-  const source = await createSession(request, { title: `claims-restart-flight-${Date.now()}`, cwd });
+  // Restart only resumes, so the source reports a conversation.
+  const source = await createResumableSession(request, { title: `claims-restart-flight-${Date.now()}`, cwd });
   const others = await bystanders(request, cwd);
   let release = () => {};
   try {
@@ -126,6 +131,8 @@ test("an in-flight Restart's claim is released when another client deletes the s
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     const restart = page.locator(".restart-primary");
+    // Premise: Restart is available, or clicking it would do nothing.
+    await expect(restart).not.toHaveAttribute("aria-disabled", "true");
     // An idle agent restarts at once, without a prompt.
     await expect(restart).toHaveAttribute("data-confirms", "false", { timeout: 15_000 });
     release = await holdMutation(page, (url) => url.pathname === `/api/sessions/${source.id}/restart`);

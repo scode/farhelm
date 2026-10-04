@@ -397,22 +397,14 @@ impl AgentRequestHandler for HelmAgentRequests {
             }
             AgentVerb::Restart {
                 session_id: target,
-                mode,
                 stop_if_running,
             } => {
                 let target = resolve_target(target.expect("validated"), session_id, "restart");
-                crate::sessions::do_restart_session(
-                    &state,
-                    &target,
-                    mode,
-                    stop_if_running,
-                    None,
-                    false,
-                )
-                .await
-                .map(|(claim, info)| {
-                    agent_restarted_reply(&state, &claim, info, origin.host, session_id)
-                })
+                crate::sessions::do_restart_session(&state, &target, stop_if_running, None, false)
+                    .await
+                    .map(|(claim, info)| {
+                        agent_restarted_reply(&state, &claim, info, origin.host, session_id)
+                    })
             }
             AgentVerb::Create {
                 host,
@@ -1787,7 +1779,7 @@ mod tests {
             launch: None,
             status,
             annotation: None,
-            restart_offer: RestartOffer::FreshOnly,
+            restart_offer: RestartOffer::NotCaptured,
             tabs: Vec::new(),
             source_profile: None,
             github_repo: None,
@@ -3254,7 +3246,6 @@ mod tests {
                 "asker",
                 AgentVerb::Restart {
                     session_id: Some("target".to_string()),
-                    mode: farhelm_proto::RestartMode::Fresh,
                     stop_if_running: true,
                 },
             ),

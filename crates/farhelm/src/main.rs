@@ -212,14 +212,25 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
     },
-    /// Restart an explicitly named session using its advertised mode.
+    /// Restart an explicitly named session, resuming its own conversation.
     Restart {
         /// Exact session id from `farhelm agent sessions`.
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
-        /// Restart behavior selected from the session's OFFER column.
-        #[arg(long, value_enum)]
-        mode: AgentRestartMode,
+        /// Removed: every restart resumes the session's own conversation.
+        /// Kept, hidden, only so an agent still following older
+        /// instructions gets a refusal saying so rather than clap's generic
+        /// "unexpected argument" (SPEC.md, Agent-spawned sessions). Its
+        /// parser refuses every value, so a parsed command never carries
+        /// one.
+        #[arg(
+            long,
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_restart_mode,
+        )]
+        mode: Option<String>,
         /// Permit stopping the target's agent if it is working when the
         /// owning supervisor handles this request; without it, a working
         /// agent is refused, while an idle, waiting, or unknown-status one
@@ -331,11 +342,10 @@ impl AgentCmd {
             }),
             AgentCmd::Restart {
                 session,
-                mode,
                 stop_if_running,
+                ..
             } => Some(farhelm_proto::AgentVerb::Restart {
                 session_id: Some(session.clone()),
-                mode: (*mode).into(),
                 stop_if_running: *stop_if_running,
             }),
             AgentCmd::Create {
@@ -381,27 +391,20 @@ impl AgentCmd {
     }
 }
 
-/// The agent CLI's spelling of the supervisor-owned restart modes.
+/// The refusal for the removed `farhelm agent restart --mode`, whatever
+/// value it was given.
 ///
-/// This is deliberately a CLI enum rather than a second restart policy:
-/// conversion preserves the protocol vocabulary, while clap gives the
-/// human-facing `fallback-template` spelling and refuses invented modes
-/// before any authenticated request is sent.
-#[derive(Clone, Copy, ValueEnum)]
-enum AgentRestartMode {
-    Resume,
-    Fresh,
-    FallbackTemplate,
-}
-
-impl From<AgentRestartMode> for farhelm_proto::RestartMode {
-    fn from(value: AgentRestartMode) -> Self {
-        match value {
-            AgentRestartMode::Resume => Self::Resume,
-            AgentRestartMode::Fresh => Self::Fresh,
-            AgentRestartMode::FallbackTemplate => Self::FallbackTemplate,
-        }
-    }
+/// Earlier releases required `--mode resume|fresh|fallback-template`, and
+/// agents in sessions started then may still type it. Restart now has one
+/// kind, so the message names what replaced the flag (nothing: drop it)
+/// instead of letting clap call it an unknown argument.
+fn refuse_restart_mode(_value: &str) -> Result<String, String> {
+    Err(
+        "farhelm agent restart no longer takes --mode: every restart resumes the \
+         session's own conversation, so drop --mode. A session whose sessions --json \
+         restart_offer is not resume cannot be restarted"
+            .to_string(),
+    )
 }
 
 #[derive(Subcommand)]
@@ -1165,8 +1168,12 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
             | AgentReply::Profiles { caller_host_id, .. } => caller_host_id,
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
+        // Bumped whenever a value an agent reads changes meaning or
+        // disappears. 3: `restart_offer` lost `fresh_only` and
+        // `fallback_template` when restart came to mean resume only; `resume`
+        // kept its spelling and meaning.
         let envelope = serde_json::json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "caller": {
                 "session_id": asking,
                 "host_id": caller_host_id,
@@ -1604,12 +1611,54 @@ mod tests {
         }
     }
 
-    /// The CLI must never manufacture a target, a restart mode, or consent
-    /// from the caller's discovery cache. This parser-level boundary catches
-    /// the unsafe failure before any authenticated relay request exists.
+    /// The CLI must never manufacture a target or consent from the
+    /// caller's discovery cache. This parser-level boundary catches the
+    /// unsafe failure before any authenticated relay request exists.
     #[farhelm_testtrace::test]
-    fn agent_restart_requires_its_explicit_target_and_mode() {
-        assert!(Cli::try_parse_from(["farhelm", "agent", "restart", "--mode", "resume"]).is_err());
-        assert!(Cli::try_parse_from(["farhelm", "agent", "restart", "--session", "s1"]).is_err());
+    fn agent_restart_requires_its_explicit_target() {
+        assert!(Cli::try_parse_from(["farhelm", "agent", "restart"]).is_err());
+        assert!(Cli::try_parse_from(["farhelm", "agent", "restart", "--session", "s1"]).is_ok());
+    }
+
+    /// The removed `--mode` is refused, with or without a value, by a
+    /// message saying restart has one kind and the flag should be dropped.
+    ///
+    /// Why: agents in sessions started before this release were taught to
+    /// pass `--mode resume` (SPEC_impl.md, "What running sessions hold
+    /// across versions"). SPEC.md decides the retirement and requires the
+    /// refusal to name what replaced the flag, so an agent can recover from
+    /// the message alone.
+    #[farhelm_testtrace::test]
+    fn agent_restart_refuses_the_removed_mode_flag_by_name() {
+        for args in [
+            &[
+                "farhelm",
+                "agent",
+                "restart",
+                "--session",
+                "s1",
+                "--mode",
+                "resume",
+            ][..],
+            &[
+                "farhelm",
+                "agent",
+                "restart",
+                "--session",
+                "s1",
+                "--mode",
+                "fresh",
+            ][..],
+            &["farhelm", "agent", "restart", "--session", "s1", "--mode"][..],
+        ] {
+            let error = match Cli::try_parse_from(args) {
+                Ok(_) => panic!("{args:?} must be refused"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.contains("no longer takes --mode") && error.contains("drop --mode"),
+                "{args:?}: {error}"
+            );
+        }
     }
 }

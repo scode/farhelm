@@ -131,6 +131,37 @@ export const FIXTURES_BIN = path.resolve(__dirname, "../../../target/debug/farhe
  */
 export const FAKE_AGENT = `"${FIXTURES_BIN}" fake-agent --script basic`;
 
+/** The conversation id [`RESUMABLE_FAKE_AGENT`] reports. */
+export const RESUMABLE_CONVERSATION = "conv-browser";
+
+/**
+ * [`FAKE_AGENT`], but a session Restart can resume.
+ *
+ * Restart only ever resumes a captured conversation (SPEC.md), so a spec
+ * that restarts a real session needs one that reports a conversation. The
+ * fixture's `--report-conversation` fires the real Claude `SessionStart`
+ * hook for [`RESUMABLE_CONVERSATION`] before the script starts, which is why
+ * [`createResumableSession`] declares the session Claude. The script is still
+ * `basic`: Claude's status reader falls back to the generic one on a screen
+ * without Claude's input box, so the session's statuses read exactly as a
+ * plain fake agent's do.
+ */
+export const RESUMABLE_FAKE_AGENT = `${FAKE_AGENT} --report-conversation ${RESUMABLE_CONVERSATION}`;
+
+/**
+ * The resume command for [`RESUMABLE_FAKE_AGENT`]: the same fixture, which
+ * reports the resumed conversation again as it starts, so a restarted
+ * session stays resumable.
+ */
+export const RESUMABLE_FAKE_AGENT_RESUME = [
+  FIXTURES_BIN,
+  "fake-agent",
+  "--script",
+  "basic",
+  "--report-conversation",
+  "{conversation}",
+];
+
 /**
  * The session LISTING endpoint, as a route matcher.
  *
@@ -168,7 +199,8 @@ export interface SessionRow {
   id: string;
   title: string;
   status?: { state: string };
-  /** What a plain restart may do now: "resume", "fresh_only" or "fallback_template". */
+  /** Whether Restart can resume the session ("resume"), or why it cannot
+   * ("not_captured", "no_conversation_reporting"). */
   restart_offer?: string;
   /** Working directory and invocation as the listing reports them; the
    * badge-render test compares the rendered row against these. */
@@ -336,6 +368,87 @@ export async function createSession(
   });
   await ok(response, `creating session ${body.title}`);
   return await response.json();
+}
+
+/**
+ * Wait until the listing says session `id` can resume, for the resumable
+ * creates below. The polled value carries the row's status too, so a timeout
+ * shows whether the session died (its fixture exits when it cannot report)
+ * or is alive and simply never reported.
+ */
+async function waitForResumable(request: APIRequestContext, id: string, title: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const row = (await listSessions(request)).sessions.find((one) => one.id === id);
+        return `${row?.restart_offer ?? "unlisted"} (status ${row?.status?.state ?? "unknown"})`;
+      },
+      { message: `waiting for ${title} to report its conversation`, timeout: 30_000 },
+    )
+    .toMatch(/^resume /);
+}
+
+/**
+ * Create a session Restart can resume, and wait until the listing says so.
+ *
+ * Same shape as [`createSession`], with [`RESUMABLE_FAKE_AGENT`] as the
+ * agent. The wait is part of the helper because the report arrives from the
+ * launched process, after the create reply, and a spec that restarted
+ * before it landed would meet Restart unavailable.
+ */
+export async function createResumableSession(
+  request: APIRequestContext,
+  body: { title: string; cwd?: string; host?: number; invocationSuffix?: string },
+): Promise<SessionRow> {
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd: body.cwd ?? "/tmp",
+      title: body.title,
+      // `invocationSuffix` lets a spec lengthen the command a header shows
+      // without losing the report flag.
+      invocation: `${RESUMABLE_FAKE_AGENT}${body.invocationSuffix ?? ""}`,
+      agent_kind: "claude",
+      resume_template: RESUMABLE_FAKE_AGENT_RESUME,
+      ...(body.host === undefined ? {} : { host: body.host }),
+    },
+  });
+  await ok(response, `creating resumable session ${body.title}`);
+  const created: SessionRow = await response.json();
+  await waitForResumable(request, created.id, body.title);
+  return created;
+}
+
+/**
+ * [`createResumableSession`] for a YOLO launch: `claude` from the browser
+ * stack's fake harness directory, with `--dangerously-skip-permissions`, so
+ * the YOLO guard treats it as one, reporting [`RESUMABLE_CONVERSATION`] as
+ * it starts. The fake `claude` passes its arguments to the fake agent, whose
+ * named flags must come before anything it does not know, hence the order.
+ * Created with `confirm_yolo`: the session is the fixture, not the question
+ * under test.
+ *
+ * It is YOLO only because the guard reads `--dangerously-skip-permissions`
+ * from the command line, which the launch-kinds change replaces with an
+ * explicit YOLO assertion on command launches; this fixture has to move to
+ * that assertion then.
+ */
+export async function createResumableYoloSession(
+  request: APIRequestContext,
+  body: { title: string; cwd: string; host: number },
+): Promise<string> {
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd: body.cwd,
+      title: body.title,
+      host: body.host,
+      invocation: `claude --report-conversation ${RESUMABLE_CONVERSATION} --dangerously-skip-permissions`,
+      confirm_yolo: true,
+    },
+  });
+  await ok(response, `creating resumable YOLO session ${body.title}`);
+  const id = (await response.json()).id as string;
+  await waitForResumable(request, id, body.title);
+  return id;
 }
 
 /** Rename a session — the cheapest single-request mutation there is, which

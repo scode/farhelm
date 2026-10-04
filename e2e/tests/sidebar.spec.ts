@@ -44,6 +44,7 @@ import {
   cleanupSession,
   countReads,
   createProfile,
+  createResumableSession,
   createSession,
   FAKE_AGENT,
   forceBuildSkew,
@@ -1351,10 +1352,11 @@ test("an unanswered view operation disables row selection until it completes", a
   page,
   request,
 }) => {
-  const a = await createSession(request, {
+  // Resumable, because the held operation is a restart of `a`, and an
+  // unavailable Restart sends nothing.
+  const a = await createResumableSession(request, {
     title: `busy-a-${Date.now()}`,
     cwd: "/tmp",
-    invocation: "sleep 300",
   });
   const b = await createSession(request, {
     title: `busy-b-${Date.now()}`,

@@ -435,17 +435,17 @@ enum TabResolution {
 ///   when the agent ended relative to it is not, so the sentence names the
 ///   restart and nothing about the agent.
 ///
-/// The reboot case ends with what restart would actually do, per the
-/// session's own [`RestartOffer`]: only a session whose conversation was
-/// captured can be promised a resume, and SPEC.md forbids implying one
-/// where a fresh launch is what the user would get.
+/// The reboot case ends with the way out, per the session's own
+/// [`RestartOffer`]: only a session whose conversation was captured can be
+/// promised a resume, and SPEC.md makes Restart unavailable otherwise, so
+/// such a session is pointed at Replace instead.
 fn missing_terminal_message(id: &str, outcome: &LastOutcome, offer: RestartOffer) -> String {
     let id = truncate_for_error(id);
     if matches!(outcome, LastOutcome::Interrupted) {
-        let restart = match offer {
-            RestartOffer::Resume => "restart offers to resume the conversation",
-            RestartOffer::FallbackTemplate => "restart runs its configured resume command",
-            RestartOffer::FreshOnly => "restart launches a fresh agent in the same directory",
+        let restart = if offer.can_restart() {
+            "restart offers to resume the conversation"
+        } else {
+            "its conversation cannot be resumed, so replace starts it over"
         };
         format!(
             "session {id} has no terminal: its host rebooted and the terminal did not survive; \
@@ -2503,21 +2503,20 @@ mod tests {
             resumable.contains("restart offers to resume"),
             "{resumable}"
         );
-        // Only a captured conversation may be promised a resume: the other
-        // two offers name what restart would really do instead.
-        let fresh =
-            missing_terminal_message("s-1", &LastOutcome::Interrupted, RestartOffer::FreshOnly);
-        assert!(fresh.contains("host rebooted"), "{fresh}");
-        assert!(
-            fresh.contains("fresh agent") && !fresh.contains("resume"),
-            "{fresh}"
-        );
-        let template = missing_terminal_message(
-            "s-1",
-            &LastOutcome::Interrupted,
-            RestartOffer::FallbackTemplate,
-        );
-        assert!(template.contains("configured resume command"), "{template}");
+        // Only a captured conversation may be promised a resume: every
+        // unavailable offer points at replace instead, and never at a
+        // restart that would start fresh.
+        for offer in [
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
+        ] {
+            let text = missing_terminal_message("s-1", &LastOutcome::Interrupted, offer);
+            assert!(text.contains("host rebooted"), "{text}");
+            assert!(
+                text.contains("replace starts it over") && !text.contains("restart offers"),
+                "{offer:?}: {text}"
+            );
+        }
 
         for other in [
             LastOutcome::Launching,
@@ -2531,7 +2530,7 @@ mod tests {
                 detail: "exec failed".to_string(),
             },
         ] {
-            let text = missing_terminal_message("s-1", &other, RestartOffer::FreshOnly);
+            let text = missing_terminal_message("s-1", &other, RestartOffer::NotCaptured);
             assert!(
                 text.contains("has no terminal on this host"),
                 "{other:?}: {text}"
@@ -2543,7 +2542,7 @@ mod tests {
         }
         for text in [
             resumable,
-            missing_terminal_message("s-1", &LastOutcome::Running, RestartOffer::FreshOnly),
+            missing_terminal_message("s-1", &LastOutcome::Running, RestartOffer::NotCaptured),
         ] {
             assert!(
                 !text.contains("after the agent ended"),

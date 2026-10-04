@@ -312,7 +312,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 2,
+            "schema_version": 3,
             "caller": {"session_id": "session-1", "host_id": "host-local"},
             "reply": {
                 "reply": "hosts",
@@ -464,9 +464,9 @@ fn sessions_prints_the_marked_table_with_staleness() {
         String::from_utf8(output.stdout).unwrap(),
         [
             "  ID        HOST         TITLE CWD     AGENT  STATUS       OFFER",
-            "* session-1 this machine auth  /w/auth claude running      fresh",
-            "  session-2 builder      docs  /w      codex  idle (stale) fresh",
-            "  session-3 builder      old   /w      codex  exited       fresh",
+            "* session-1 this machine auth  /w/auth claude running      not-captured",
+            "  session-2 builder      docs  /w      codex  idle (stale) not-captured",
+            "  session-3 builder      old   /w      codex  exited       not-captured",
             "",
         ]
         .join("\n")

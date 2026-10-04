@@ -105,10 +105,13 @@ fn render(agent: &Command) -> String {
          title from discovery: --expected-title='old title'. An empty old title is written\n\
          --expected-title=. To act on yourself deliberately, discover your * session and pass\n\
          its id. Self-stop can kill this command; stop leaves the row.\n\
-         Restart requires --mode matching the discovered offer. The restart_offer field of\n\
-         sessions --json spells it resume, fallback_template, or fresh_only; the table and\n\
-         --mode spell the same three resume, fallback-template, and fresh. Prefer resume;\n\
-         never downgrade after a refusal. Restart stops an idle, waiting, or unknown-status\n\
+         Restart resumes the target's own conversation; there is no other kind of restart\n\
+         and no --mode. It works only when the restart_offer field of sessions --json is\n\
+         resume, which the table's OFFER column also spells resume. Any other value says why\n\
+         it cannot: not_captured (no conversation Farhelm can resume was captured) or\n\
+         no_conversation_reporting (Farhelm has no conversation reporting for that agent),\n\
+         spelled not-captured and no-reporting in the table. Do not restart such a session;\n\
+         tell the user instead. Restart stops an idle, waiting, or unknown-status\n\
          target's agent without asking; a working one is refused unless you pass\n\
          --stop-if-running. Use --stop-if-running only with deliberate permission to stop\n\
          the target. Restart uses its stored configuration; you cannot supply another\n\
@@ -169,15 +172,23 @@ const MAX_USAGE_WIDTH: usize = 52;
 /// [`MAX_USAGE_WIDTH`]. The usage half is built from clap's own view of the
 /// verb — name plus arguments — so a verb that grows a `--cwd` shows it
 /// here without anyone remembering to come back.
+///
+/// Hidden verbs and hidden arguments are left out. A removed spelling is
+/// kept hidden only so that using it earns a refusal naming its
+/// replacement; listing it here would teach agents to use it.
 fn verb_lines(agent: &Command) -> Vec<String> {
-    let usages: Vec<String> = agent
+    let verbs: Vec<&Command> = agent
         .get_subcommands()
+        .filter(|verb| !verb.is_hide_set())
+        .collect();
+    let usages: Vec<String> = verbs
+        .iter()
         .map(|verb| {
             let mut usage = format!("farhelm agent {}", verb.get_name());
             for arg in verb.get_arguments() {
                 // clap synthesizes these onto every subcommand; they are
                 // not part of what the verb asks for.
-                if matches!(arg.get_id().as_str(), "help" | "version") {
+                if matches!(arg.get_id().as_str(), "help" | "version") || arg.is_hide_set() {
                     continue;
                 }
                 usage.push(' ');
@@ -192,8 +203,8 @@ fn verb_lines(agent: &Command) -> Vec<String> {
         .filter(|len| *len <= MAX_USAGE_WIDTH)
         .max()
         .unwrap_or(0);
-    agent
-        .get_subcommands()
+    verbs
+        .into_iter()
         .zip(usages)
         .map(|(verb, usage)| {
             // An `about` is the variant's own doc comment. A variant
@@ -258,6 +269,7 @@ mod tests {
         let agent = AgentCmd::augment_subcommands(Command::new("agent"));
         let verbs: Vec<String> = agent
             .get_subcommands()
+            .filter(|verb| !verb.is_hide_set())
             .map(|verb| verb.get_name().to_string())
             .collect();
         assert!(
@@ -272,25 +284,60 @@ mod tests {
         }
     }
 
-    /// Spec: the restart paragraph names every restart offer the way
-    /// `sessions --json` prints it and every mode the way `--mode` accepts it.
+    /// Spec: no hidden verb or hidden flag appears in the verb list.
     ///
-    /// Why: the two spellings differ (`fresh_only` against `fresh`), and an
-    /// agent that reads its offer from JSON and copies it into `--mode` gets a
-    /// usage error unless this text says how the two line up. A new offer or
-    /// mode added to either enum without updating the paragraph fails here;
-    /// the offer list goes through an exhaustive match so that a new variant
-    /// is a compile error in this test rather than a silent omission.
+    /// Why: a removed spelling (`farhelm agent restart --mode`) stays in
+    /// the parser, hidden, only so that using it earns a refusal naming
+    /// what replaced it. The verb list is generated from the parser, so
+    /// without the filter it would advertise exactly the spellings the
+    /// refusals exist to retire, and agents read this text as the source of
+    /// truth for what to type.
     #[farhelm_testtrace::test]
-    fn the_restart_paragraph_names_every_offer_and_mode_spelling() {
-        use clap::ValueEnum;
+    fn hidden_verbs_and_flags_stay_out_of_the_instructions() {
+        let text = text();
+        let agent = AgentCmd::augment_subcommands(Command::new("agent"));
+        let mut hidden = Vec::new();
+        for verb in agent.get_subcommands() {
+            if verb.is_hide_set() {
+                hidden.push(format!("farhelm agent {}", verb.get_name()));
+            }
+            for arg in verb.get_arguments().filter(|arg| arg.is_hide_set()) {
+                if let Some(long) = arg.get_long() {
+                    hidden.push(format!("--{long}"));
+                }
+            }
+        }
+        assert!(
+            hidden.iter().any(|spelling| spelling == "--mode"),
+            "premise: the removed restart --mode is still parsed, hidden: {hidden:?}"
+        );
+        for spelling in hidden {
+            assert!(
+                !text.contains(&format!("{spelling} ")) && !text.contains(&format!("{spelling}]")),
+                "the instructions advertise the hidden spelling {spelling}:\n{text}"
+            );
+        }
+    }
+
+    /// Spec: the restart paragraph names every restart offer the way
+    /// `sessions --json` prints it and the way the table's OFFER column
+    /// prints it.
+    ///
+    /// Why: an agent decides whether a restart can work by reading the
+    /// offer, and the JSON and table spellings differ (`not_captured`
+    /// against `not-captured`). A new offer added without updating the
+    /// paragraph fails here; the offer list goes through an exhaustive match
+    /// so that a new variant is a compile error in this test rather than a
+    /// silent omission.
+    #[farhelm_testtrace::test]
+    fn the_restart_paragraph_names_every_offer_spelling() {
         use farhelm_proto::RestartOffer;
         let text = text();
-        // Only the restart paragraph counts: `resume` and `fresh` are ordinary
-        // words, and a match anywhere else would keep this green after the
+        // Only the restart paragraph counts: `resume` is an ordinary word,
+        // and a match anywhere else would keep this green after the
         // paragraph itself lost a spelling.
         let start = text
-            .find("Restart requires --mode")
+            .find("Restart resumes the target's own conversation")
             .expect("the instructions have a restart paragraph");
         let paragraph = &text[start..];
         let paragraph = &paragraph[..paragraph.find("\n\n").unwrap_or(paragraph.len())];
@@ -299,13 +346,15 @@ mod tests {
             .collect();
         let offers = [
             RestartOffer::Resume,
-            RestartOffer::FallbackTemplate,
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
         ];
         // Exhaustive on purpose: a new RestartOffer variant must fail to
         // compile here until it is added to `offers` above.
         match offers[0] {
-            RestartOffer::Resume | RestartOffer::FallbackTemplate | RestartOffer::FreshOnly => {}
+            RestartOffer::Resume
+            | RestartOffer::NotCaptured
+            | RestartOffer::NoConversationReporting => {}
         }
         for offer in offers {
             let json = serde_json::to_value(offer).expect("offer serializes");
@@ -314,13 +363,10 @@ mod tests {
                 words.contains(spelling),
                 "the restart paragraph never spells the JSON offer {spelling:?}:\n{paragraph}"
             );
-        }
-        for mode in crate::AgentRestartMode::value_variants() {
-            let value = mode.to_possible_value().expect("every mode is selectable");
+            let cell = crate::render::restart_offer_cell(offer);
             assert!(
-                words.contains(value.get_name()),
-                "the restart paragraph never spells the --mode value {:?}:\n{paragraph}",
-                value.get_name()
+                words.contains(cell),
+                "the restart paragraph never spells the table offer {cell:?}:\n{paragraph}"
             );
         }
     }

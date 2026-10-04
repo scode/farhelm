@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 34;
+const SCHEMA_VERSION: i64 = 35;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -1913,6 +1913,10 @@ pub struct HelmStore {
 ///   clients continue to ask before setting up a host.
 /// - 34: `hosts.yolo_safe` becomes `hosts.yolo_without_asking`, preserving
 ///   each host's choice under the name used by the UI and protocol.
+/// - 35: cached sessions' `restart_offer` values `fresh_only` and
+///   `fallback_template`, which protocol 37 removed with fresh and fallback
+///   restarts, become `not_captured` and `no_conversation_reporting`, so a
+///   down host's cached sessions keep decoding and keep being listed.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2217,7 +2221,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 34;",
+              PRAGMA user_version = 35;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3040,6 +3044,40 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 34")?;
         version = 34;
+    }
+    if version == 34 {
+        // The same byte-level rewrite schema 4 made for `alive`, and safe for
+        // the same reason (see that step): `info_json` is serde's compact
+        // encoding, and a user-controlled string cannot contain these bytes
+        // unescaped. Without it the cache reader skips the undecodable row,
+        // and a down host's sessions vanish from the list after the upgrade.
+        //
+        // `fallback_template` only ever described a session with no
+        // conversation reporting. `fresh_only` described both that and an
+        // integrated session with nothing captured; `not_captured` is the
+        // decoder's own default and the reason that never claims more than
+        // the cache knows. The host's supervisor recomputes the real offer
+        // on its next listing either way. STORAGE ONLY: the wire refuses the
+        // old values, which is what the protocol bump is for.
+        tx.execute_batch(
+            "UPDATE session_cache
+             SET info_json = replace(
+                 info_json,
+                 '\"restart_offer\":\"fresh_only\"',
+                 '\"restart_offer\":\"not_captured\"'
+             )
+             WHERE info_json LIKE '%\"restart_offer\":\"fresh_only\"%';
+             UPDATE session_cache
+             SET info_json = replace(
+                 info_json,
+                 '\"restart_offer\":\"fallback_template\"',
+                 '\"restart_offer\":\"no_conversation_reporting\"'
+             )
+             WHERE info_json LIKE '%\"restart_offer\":\"fallback_template\"%';
+             PRAGMA user_version = 35;",
+        )
+        .context("migrating helm.db to schema version 35")?;
+        version = 35;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -9867,6 +9905,76 @@ mod tests {
             "the stale detail view behind an unreachable-host notice must decode too"
         );
     }
+    /// Schema 35 rewrites the restart offers protocol 37 removed, so cached
+    /// sessions of a down host keep listing after the upgrade.
+    ///
+    /// Why: the cache reader skips a row it cannot decode, so without the
+    /// rewrite every session cached as `fresh_only` or `fallback_template`
+    /// would silently drop out of the list until its host reconnected —
+    /// SPEC.md's promise that an unreachable host's sessions stay listed,
+    /// broken by an upgrade. Specified: `fresh_only` reads back as
+    /// `NotCaptured`, `fallback_template` as `NoConversationReporting`, and
+    /// `resume` is untouched.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v34_rewrites_removed_cached_restart_offers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        // The reserved local row `open` mints; ids start at 1.
+        let host: HostId = 1;
+        // Hand-written rows in the spelling a schema-34 helm stored, rather
+        // than serialized from today's types, which can no longer produce it.
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            for (id, offer) in [
+                ("fresh", "fresh_only"),
+                ("fallback", "fallback_template"),
+                ("resumable", "resume"),
+            ] {
+                let row = format!(
+                    r#"{{"id":"{id}","title":"t","created_at":100,"cwd":"/w","invocation":"agent","status":{{"state":"running"}},"annotation":null,"restart_offer":"{offer}","tabs":[]}}"#
+                );
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (?1, ?2, 100, ?3)",
+                    rusqlite::params![host, id, row],
+                )
+                .expect("plant a cached session");
+            }
+            conn.execute_batch("PRAGMA user_version = 34;")
+                .expect("mark the file schema 34");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let mut offers: Vec<(String, farhelm_proto::RestartOffer)> = store
+            .cached_sessions(host)
+            .await
+            .expect("stale list")
+            .into_iter()
+            .map(|info| (info.id, info.restart_offer))
+            .collect();
+        offers.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            offers,
+            vec![
+                (
+                    "fallback".to_string(),
+                    farhelm_proto::RestartOffer::NoConversationReporting
+                ),
+                (
+                    "fresh".to_string(),
+                    farhelm_proto::RestartOffer::NotCaptured
+                ),
+                ("resumable".to_string(), farhelm_proto::RestartOffer::Resume),
+            ],
+            "every cached session must still decode, with the removed offers mapped"
+        );
+    }
+
     /// A migrated database and a freshly created one must end up with
     /// identical schemas after SQL formatting normalization — the invariant
     /// that lets [`apply_schema`]'s version-0 branch create the final shape directly instead of

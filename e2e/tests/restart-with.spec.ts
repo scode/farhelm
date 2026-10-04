@@ -162,7 +162,6 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
   await submit.click();
   await expect(dialog).toHaveCount(0);
   expect(bodies, "one consent must send one restart request").toEqual([{
-    mode: "resume",
     stop_if_running: false,
     with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
   }]);
@@ -242,7 +241,6 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
   await expect(dialog).toHaveCount(0);
   expect(bodies).toHaveLength(3);
   expect(bodies[2]).toMatchObject({
-    mode: "resume",
     with: { harness: "codex", permissions: "yolo" },
     confirm_yolo: true,
   });
@@ -346,7 +344,6 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   expect(marks).toEqual([{ yolo_without_asking: true }, { yolo_without_asking: true }]);
   expect(restarts).toHaveLength(2);
   expect(restarts[1]).toMatchObject({
-    mode: "resume",
     with: { harness: "codex", permissions: "yolo" },
     confirm_yolo: true,
   });

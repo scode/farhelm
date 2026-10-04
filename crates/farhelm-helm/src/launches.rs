@@ -681,7 +681,7 @@ mod tests {
                 assert!(snapshot.resume_template.is_none());
                 assert_eq!(
                     snapshot.restart_offer(Some("saved-id"), 0),
-                    farhelm_proto::RestartOffer::FreshOnly
+                    farhelm_proto::RestartOffer::NoConversationReporting
                 );
             }
         }

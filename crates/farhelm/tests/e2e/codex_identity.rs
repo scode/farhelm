@@ -234,7 +234,7 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
     assert_eq!(durable_binding(h.state.path(), &session.id).await, pristine);
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
     );
 
     let from = seen.len();
@@ -263,7 +263,7 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
     );
 
     // The same live foreground must then succeed: a permanently broken
@@ -653,7 +653,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     }
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect("the foreground root remains resumable after child reports");
     let (channel, replay, mut stream) = h
@@ -704,7 +704,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     wait_for_offer(
         &h.client,
         &session.id,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
     )
     .await;
     // An admitted fileless foreground transition writes provenance 1
@@ -722,7 +722,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
 
     let refusal = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect_err("pending clear has no stale A resume to run");
     let refusal = refusal
@@ -758,7 +758,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     wait_for_offer(
         &h.client,
         &session.id,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
     )
     .await;
 
@@ -813,7 +813,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
         "promoting the discarded conversation must not cause a legitimate clear to be lost"
     );
     assert_hook_reply_since(&hook_log, clear_log_offset, &cleared_b, "clear", " acked ");
@@ -865,7 +865,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
         "the report must preserve the B binding established before its capture transaction"
     );
     std::fs::write(&race_record, bound_b).expect("restore B's owned root record");
@@ -917,7 +917,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     wait_for_offer(
         &h.client,
         &session.id,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
     )
     .await;
     send_and_wait(
@@ -931,12 +931,12 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
+        farhelm_proto::RestartOffer::NotCaptured,
         "a repeated report must not rebind B's file to a different persistent thread"
     );
     let refusal = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect_err("the conflicting persistent identity must not be resumed");
     assert_eq!(
@@ -950,7 +950,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect("persisted B becomes the only resumable foreground conversation");
     let (channel, replay, mut stream) = h

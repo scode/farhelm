@@ -4037,7 +4037,8 @@ struct RecycledPaneWedge {
 /// what fails instead.
 async fn recycled_pane_wedge() -> RecycledPaneWedge {
     let h = harness().await;
-    let (old, _work_old) = basic_session(&h).await;
+    // Resumable, because one test below restarts it.
+    let (old, _work_old) = resumable_basic_session(&h).await;
     let sock = h.state.path().join("tmux.sock");
     let old_pane_id = pane_id_of(&sock, &format!("fh-{}", old.id)).await;
 
@@ -4148,14 +4149,10 @@ async fn restart_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessi
     let w = recycled_pane_wedge().await;
     let sock = w.h.state.path().join("tmux.sock");
 
-    let restarted =
-        w.h.client
-            .restart_session(&w.old.id, farhelm_proto::RestartMode::Fresh, false)
-            .await
-            .expect(
-                "restart must tolerate a pane id recycled onto another session, and must not \
+    let restarted = w.h.client.restart_session(&w.old.id, false).await.expect(
+        "restart must tolerate a pane id recycled onto another session, and must not \
                  demand stop consent for an agent that died with its server",
-            );
+    );
     assert_eq!(restarted.id, w.old.id);
 
     wait_for_live_pane(&sock, &format!("fh-{}", w.old.id), 30).await;

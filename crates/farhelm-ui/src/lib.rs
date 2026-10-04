@@ -317,11 +317,12 @@ pub struct Session {
     /// missing key on an `Option` as `None`, so the same old-peer
     /// tolerance holds without the attribute.
     pub annotation: Option<String>,
-    /// What restarting this session would do to its conversation — the
-    /// supervisor recomputes it on every reply, so a session whose identity
-    /// was captured a moment ago starts offering a resume without anything
-    /// here having to ask. `#[serde(default)]` for the same old-peer
-    /// tolerance as `status`, defaulting to the safe `FreshOnly`.
+    /// Whether restarting this session can resume its conversation, and why
+    /// not when it cannot — the supervisor recomputes it on every reply, so
+    /// a session whose identity was captured a moment ago starts offering a
+    /// resume without anything here having to ask. `#[serde(default)]` for
+    /// the same old-peer tolerance as `status`, defaulting to the safe
+    /// `NotCaptured`.
     #[serde(default)]
     pub restart_offer: RestartOffer,
     /// Seconds since the Unix epoch when this session was created, straight
@@ -2205,12 +2206,12 @@ mod tests {
     }
 
     /// A `Session` JSON with no `restart_offer` (a helm predating
-    /// PLAN_M3.md item 9) must decode as `FreshOnly`, never as something
+    /// PLAN_M3.md item 9) must decode as `NotCaptured`, never as something
     /// that would make this UI offer a resume the supervisor would then
     /// refuse. The same no-fabrication direction `status`'s own default
     /// takes.
     #[farhelm_testtrace::test]
-    fn session_without_restart_offer_decodes_as_fresh_only() {
+    fn session_without_restart_offer_decodes_as_not_captured() {
         let json = serde_json::json!({
             "id": "s1",
             "title": "demo",
@@ -2219,7 +2220,7 @@ mod tests {
             "status": { "state": "interrupted" },
         });
         let decoded: Session = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
+        assert_eq!(decoded.restart_offer, RestartOffer::NotCaptured);
 
         let resumable = serde_json::json!({
             "id": "s1",
@@ -2532,7 +2533,7 @@ mod tests {
             launch: None,
             status: SessionStatus::Running,
             annotation: None,
-            restart_offer: RestartOffer::FreshOnly,
+            restart_offer: RestartOffer::NotCaptured,
             created_at,
             last_activity_at,
             tabs: Vec::new(),
@@ -2596,7 +2597,7 @@ mod tests {
             launch: None,
             status: SessionStatus::Idle,
             annotation: None,
-            restart_offer: RestartOffer::FreshOnly,
+            restart_offer: RestartOffer::NotCaptured,
             created_at: 1_700_000_000,
             last_activity_at,
             tabs: Vec::new(),

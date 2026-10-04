@@ -391,22 +391,23 @@ The open session's chrome is ONE header row ordered status, title, age, copyable
 Restart, Restart with, Replace, Clone, and Replace with — sized at about 40px, with the tab strip beneath it and nothing
 else in the steady state. It used to be four stacked bands costing roughly 170px before the terminal started, on a
 surface whose entire point is the terminal. Two of those bands had to go somewhere rather than merely shrink. The
-restart offer's explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's "restart
-says so and offers that same fallback or a fresh launch" is carried by the button's accessible name (`aria-label` and,
-alongside the further elaboration, `title`) — naming the offer (`resume conversation`, `restart (fresh launch)`,
-`restart with the configured resume command`) rather than the action. The directory and invocation buttons carry their
-full values in `title`, shrink before the session title, and reveal a clipboard affordance on hover or keyboard focus.
-The six action buttons remain fully visible and in DOM order from a 650px main pane. The app's 320px main-pane floor is
-unchanged; between those widths the row may clip its trailing actions rather than wrapping or hiding them. The restart
-confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on cancel; the
-consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
-that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
-so it cannot accidentally open the interrupted card's confirmation. Everything conditional — a refused restart's prose,
-the host-unreachable notice and its last-known-status band, the "helm stopped listing this session" line — is still a
-full-width band, because a band that only appears when it has something to say costs the steady state nothing. A
-classified status renders in at most one place: the header normally, the stale notice's own metadata band for a stale
-session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
-nothing has classified yet.
+restart offer's explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's rule that
+Restart always resumes and, when it cannot, is greyed out with the specific reason is carried by the button's accessible
+name (`aria-label` and, alongside the further elaboration, `title`) — naming the offer (`resume conversation` or
+`restart unavailable`) rather than the action. An unavailable Restart, like an unavailable Restart with, is
+`aria-disabled` rather than natively disabled, so its tooltip stays hoverable in webviews and its click handler is what
+refuses. The directory and invocation buttons carry their full values in `title`, shrink before the session title, and
+reveal a clipboard affordance on hover or keyboard focus. The six action buttons remain fully visible and in DOM order
+from a 650px main pane. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing
+actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that
+opened it, still confirm-in-place with focus on cancel; the consequence sentence they lead with is the one line standing
+between a click and a killed process tree, and a header that kept it in flow would have to either wrap or truncate it.
+Header Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted card's
+confirmation. Everything conditional — a refused restart's prose, the host-unreachable notice and its last-known-status
+band, the "helm stopped listing this session" line — is still a full-width band, because a band that only appears when
+it has something to say costs the steady state nothing. A classified status renders in at most one place: the header
+normally, the stale notice's own metadata band for a stale session (where SPEC.md's title/directory/last-known-status
+triple is assembled), and nowhere at all for a session nothing has classified yet.
 
 Restart with uses a separate dialog because it relaunches the current session rather than creating one. It renders the
 same `LaunchControls` component as the session launcher, with the harness fixed to the session's stored structured
@@ -1748,7 +1749,7 @@ evidence, but cannot authorize another directory move.
   resume template (a future resume's command). OMP admission requires the marker to name the current binary's asset with
   the file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
   running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
-  every older OMP row offers fresh-only until its first proven report.
+  every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution proofs apply to Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
@@ -1766,12 +1767,12 @@ evidence, but cannot authorize another directory move.
   accepted because two session starts that close together are not a realistic sequence; the generation fence only keeps
   a check made before a relaunch from committing into the new launch. The lifecycle does not justify another
   coordination layer. The check writes no provenance and does not flip Claude's predicate, because flipping it would
-  make every existing Claude capture fresh-only until its next proven report, and stopping replacement needs no version.
-  The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds
-  keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface
-  consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no
-  other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old
-  processes and assets fail closed after the upgrade; nothing is grandfathered.
+  make every existing Claude capture unresumable until its next proven report, and stopping replacement needs no
+  version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
+  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
+  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
+  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
+  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
@@ -2790,27 +2791,30 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm agent hosts|sessions|profiles [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
-  model quoting its own shell output. The JSON form uses schema version 2, includes exact IDs, caller identity, and
-  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration. A
-  session row's non-secret `OFFER` capability is the exact mode its restart command may request; it does not disclose
-  the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is escaped to one
-  printable line and every non-final column is capped at 48 characters: these values are fleet-wide user text printed
-  straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title would otherwise
-  be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so a script
-  capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the relay and
-  is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
+  model quoting its own shell output. The JSON form uses schema version 3, includes exact IDs, caller identity, and
+  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
+  Version 3 is the restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while
+  `resume` kept its spelling and meaning. A session row's non-secret `OFFER` cell is `resume` when restart can resume
+  the session's conversation, otherwise the reason it cannot (`not-captured`, `no-reporting`; `not_captured` and
+  `no_conversation_reporting` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
+  recommendation. Every dynamic table cell is escaped to one printable line and every non-final column is capped at 48
+  characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an
+  ESC drives the terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its
+  rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no
+  timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see
+  the transport section's version-20 paragraph).
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
-  `farhelm agent restart --session <id> --mode <resume|fallback-template|fresh>
-  [--stop-if-running]` — the in-session
-  ACTING CLI, on the same relay and credential. Every target is explicit, including a deliberate self-action. Rename
-  compares the observed title and changes it atomically in the owning supervisor; a mismatch is a conflict with no
-  mutation. Success prints one plain confirmation line on stdout (`renamed <id> to "<title>"`, `stopped <id>`,
-  `restarted <id>`), its dynamic cells run through the same escaping the listing tables use, so a scripted caller gets
-  exactly one line rather than a table with one row. Restart forwards the mode and consent unchanged to the owning
-  supervisor, which rechecks both current offer and whether the agent is working; the CLI never infers consent from
-  discovery. An explicit self-stop or self-restart may terminate the CLI before its line is printed because it belongs
-  to the process tree being ended. Self restart prints its interruption/outcome-unknown warning before dispatch and
-  treats a lost reply as unknown rather than success.
+  `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
+  credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
+  changes it atomically in the owning supervisor; a mismatch is a conflict with no mutation. Success prints one plain
+  confirmation line on stdout (`renamed <id> to "<title>"`, `stopped <id>`, `restarted <id>`), its dynamic cells run
+  through the same escaping the listing tables use, so a scripted caller gets exactly one line rather than a table with
+  one row. Restart always resumes and forwards the consent unchanged to the owning supervisor, which rechecks both that
+  the session can still resume and whether the agent is working; the CLI never infers consent from discovery. The
+  `--mode` flag earlier releases required is still parsed, hidden, only so it can be refused with a message saying every
+  restart resumes and to drop the flag. An explicit self-stop or self-restart may terminate the CLI before its line is
+  printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
+  warning before dispatch and treats a lost reply as unknown rather than success.
 - `farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title ...]
   [--idempotency-key ...]`
   and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
@@ -3333,9 +3337,32 @@ SPEC.md (Durability and resume) has compatibility decided with the maintainer fe
 decision for what sessions hold, and it applies from here on. Breaks already decided stay as they were: hooks that
 predate the required `--vendor` discriminator fail closed (see "Ownership provenance and the offer gate"), sessions
 launched before the spawn credential existed must be restarted before an agent in them can use `farhelm spawn` or
-`farhelm agent` (the refusal says so), and OMP admission accepts only the current binary's reporter asset. The last one
-keeps biting: any change to the OMP asset's bytes or name makes every OMP session started before it lose conversation
-tracking until relaunched, so such a change is exactly the kind of retirement this section asks to be surfaced.
+`farhelm agent` (the refusal says so), `farhelm agent restart --mode` is refused because every restart now resumes
+(SPEC.md, Agent-spawned sessions; the refusal says to drop the flag), the `restart_offer` values `fresh_only` and
+`fallback_template` are gone from `farhelm agent sessions` (its JSON envelope moved to schema version 3; `resume` is
+unchanged), and OMP admission accepts only the current binary's reporter asset. The last one keeps biting: any change to
+the OMP asset's bytes or name makes every OMP session started before it lose conversation tracking until relaunched, so
+such a change is exactly the kind of retirement this section asks to be surfaced.
+
+### Restart only resumes
+
+SPEC.md makes Restart mean resuming the session's own conversation, so the wire has no way to ask for anything else.
+`RestartOffer` is `resume` when the supervisor can fill the session's resume command with a captured conversation it
+accepts, and otherwise names why it cannot: `not_captured` for an agent type that reports conversations but has no
+usable identity (nothing reported yet, an identity from before ownership proofs, a Pi or OMP file that no longer
+matches), and `no_conversation_reporting` for a session with no integration at all. `resume` kept its spelling because
+agents in running sessions read it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the
+`mode` field from `RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose
+current offer is not `resume` is refused with a `Conflict` naming the reason, before anything is stopped, and the fresh
+relaunch of the stored invocation and the verbatim run of a placeholder-free template are gone. Such a template is still
+accepted at create on a non-integrated kind and stored, but never run.
+
+Because every restart resumes, a relaunch keeps the captured identity, its source, and its ownership version; only the
+OMP launch-provenance columns clear, as they describe the launch rather than the conversation. The helm caches each
+host's last listing, so helm.db schema 35 rewrites cached `fresh_only` to `not_captured` and `fallback_template` to
+`no_conversation_reporting`; without it the cache reader would skip those rows and a down host's sessions would drop out
+of the list. Tests of restart mechanics that once restarted a plain command fresh now bind a conversation through the
+supervisor's `record_conversation_for_test` seam, which exists only under `cfg(test)` and the `test-seams` feature.
 
 ### Restart-with backend wire and persistence
 
@@ -3344,14 +3371,14 @@ tracking until relaunched, so such a change is exactly the kind of retirement th
 ignored them would relaunch with the old settings and still report success. A selection the catalog refuses is a 400
 from the helm and never reaches the supervisor. The helm compiles a supplied `LaunchSelection` and passes those fields
 through without checking cached offer or harness state; attached-session relay calls omit them. The supervisor
-revalidates the current stored structured selection, fixed harness, `Resume` offer, and `Resume` mode immediately before
-destructive work, then resolves and fills the supplied template using the same executable and integration checks as
-create. After the new process spawns, one generation-fenced store write updates invocation, launch, and the resolved
-resume template while leaving the integration kind and working directory fixed. A compiler-omitted template is resolved
-before this write, so the saved row retains the concrete template required to resume. A spawn failure leaves the prior
-bundle untouched. If the post-spawn write fails after an otherwise successful relaunch, the restart still reports
-success because the new process is already running; the failure is logged, and the reply and live session retain the old
-stored settings. A relaunch that published its new process but hit an independent cleanup or reply error still attempts
-the bundle write and retains that error reply. A later restart uses the saved settings, or the old settings if the write
+revalidates the current stored structured selection, fixed harness, and `Resume` offer immediately before destructive
+work, then resolves and fills the supplied template using the same executable and integration checks as create. After
+the new process spawns, one generation-fenced store write updates invocation, launch, and the resolved resume template
+while leaving the integration kind and working directory fixed. A compiler-omitted template is resolved before this
+write, so the saved row retains the concrete template required to resume. A spawn failure leaves the prior bundle
+untouched. If the post-spawn write fails after an otherwise successful relaunch, the restart still reports success
+because the new process is already running; the failure is logged, and the reply and live session retain the old stored
+settings. A relaunch that published its new process but hit an independent cleanup or reply error still attempts the
+bundle write and retains that error reply. A later restart uses the saved settings, or the old settings if the write
 failed, as it would after a crash between spawn and the write. This is the only exception to the ordinary create-time
 immutability of those launch columns, and the fixed kind avoids PATH-dependent kind re-derivation.

@@ -14,6 +14,7 @@ import { type APIRequestContext, type Locator, type Page } from "@playwright/tes
 import { expect, test } from "./helpers/evidence";
 import {
   cleanupSession,
+  createResumableYoloSession,
   listHosts,
   listSessions,
   localHostId,
@@ -245,19 +246,13 @@ test("don't ask again marks the host safe before launching, and a failed mark la
 async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, answer: string): Promise<void> {
   const cwd = stackScratchDir("yolo-header-replace-");
   const local = await localHostId(request);
-  const created = await request.post("/api/sessions", {
-    data: {
-      cwd,
-      title: `yolo-header-replace-${Date.now()}`,
-      host: local,
-      launch: { harness: "codex", permissions: "yolo" },
-      // The fixture itself is a YOLO launch on the ask-first host;
-      // the question under test is the Replace's, not this create's.
-      confirm_yolo: true,
-    },
+  // A YOLO launch that can resume: restart, the only way to bring the
+  // stopped source back to life below, only ever resumes.
+  const sourceId = await createResumableYoloSession(request, {
+    cwd,
+    title: `yolo-header-replace-${Date.now()}`,
+    host: local,
   });
-  expect(created.ok(), `creating the YOLO source: ${await created.text()}`).toBe(true);
-  const sourceId = (await created.json()).id as string;
   try {
     await setLocalYoloWithoutAsking(request, false);
     await stopSession(request, sourceId);
@@ -285,12 +280,8 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     await expect(confirmation).toBeVisible();
 
     // While the question is open, the session comes back to life from
-    // outside the prompt. A structured Codex launch offers a fresh restart
-    // (or a resume once a conversation was captured), never a fallback
-    // template, so those are the two modes to choose between.
-    const listed = (await listSessions(request)).sessions.find((row) => row.id === sourceId);
-    const mode = listed?.restart_offer === "resume" ? "resume" : "fresh";
-    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: { mode } });
+    // outside the prompt, through a restart that resumes it.
+    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     // And this page has seen it: code that re-read the session when the
     // answer arrived would now find it alive and send no precondition.
@@ -358,19 +349,13 @@ test("a header replace keeps its confirmed nothing-alive answer when told not to
 async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext, answer: string): Promise<void> {
   const cwd = stackScratchDir("yolo-sidebar-replace-");
   const local = await localHostId(request);
-  const created = await request.post("/api/sessions", {
-    data: {
-      cwd,
-      title: `yolo-sidebar-replace-${Date.now()}`,
-      host: local,
-      launch: { harness: "codex", permissions: "yolo" },
-      // The fixture itself is a YOLO launch on the ask-first host;
-      // the question under test is the Replace's, not this create's.
-      confirm_yolo: true,
-    },
+  // A YOLO launch that can resume: restart, the only way to bring the
+  // stopped source back to life below, only ever resumes.
+  const sourceId = await createResumableYoloSession(request, {
+    cwd,
+    title: `yolo-sidebar-replace-${Date.now()}`,
+    host: local,
   });
-  expect(created.ok(), `creating the YOLO source: ${await created.text()}`).toBe(true);
-  const sourceId = (await created.json()).id as string;
   try {
     await setLocalYoloWithoutAsking(request, false);
     await stopSession(request, sourceId);
@@ -397,10 +382,8 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
     await expect(confirmation).toBeVisible();
 
     // While the question is open, the session comes back to life from
-    // outside the prompt (see `headerReplaceKeepsAnswer` for the mode).
-    const listed = (await listSessions(request)).sessions.find((row) => row.id === sourceId);
-    const mode = listed?.restart_offer === "resume" ? "resume" : "fresh";
-    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: { mode } });
+    // outside the prompt, through a restart that resumes it.
+    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     // And the list has shown it: code that looked the row up again when the
     // answer arrived would now find it alive and send no precondition.

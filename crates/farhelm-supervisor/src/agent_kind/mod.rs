@@ -1900,12 +1900,15 @@ pub struct IntegrationSnapshot {
 /// that belongs at the boundary, not here.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SnapshotError {
-    /// A generic kind has no conversation-identity capture, so its fallback
-    /// command cannot substitute this placeholder. Refuse it at create time
-    /// rather than storing a restart command that can never be used.
+    /// A generic kind has no conversation-identity capture, so nothing can
+    /// substitute this placeholder. Refused at create time rather than
+    /// storing a restart command that can never be used. A placeholder-free
+    /// template is still accepted on a generic kind until launch kinds
+    /// replace this create path, but it is never run either: a generic
+    /// session cannot be restarted (SPEC_impl.md, "Restart only resumes").
     #[error(
-        "a generic session cannot supply conversation identity to its resume template; remove \
-         the {CONVERSATION_PLACEHOLDER} placeholder or use an integrated agent kind"
+        "a generic session cannot be restarted, so it has no use for a resume template with \
+         {CONVERSATION_PLACEHOLDER}; omit the resume template or declare an integrated agent kind"
     )]
     GenericTemplateHasPlaceholder,
     /// An integrated kind (derived or overridden) was given a template
@@ -1913,8 +1916,7 @@ pub enum SnapshotError {
     /// resume, because by resume time the only honest thing left to do
     /// would be to DISCARD a successfully captured identity — the exact
     /// promise SPEC.md makes ("restart resumes exactly that conversation")
-    /// turned into a silent no-op. Placeholder-free templates belong to
-    /// non-integrated kinds, where they are SPEC.md's verbatim fallback.
+    /// turned into a silent no-op.
     #[error(
         "an explicit resume template for the integrated agent kind {kind} must contain a \
          {CONVERSATION_PLACEHOLDER} argv element; a placeholder-free template could only ever \
@@ -2059,27 +2061,23 @@ impl IntegrationSnapshot {
         integration_for(self.kind)
     }
 
-    /// What restarting this session would do to its conversation
-    /// (PLAN_M3.md item 7's third clause), given whatever identity is
-    /// DURABLY claimed for it.
+    /// Whether restarting this session can resume its own conversation,
+    /// given whatever identity is DURABLY claimed for it, and why not when
+    /// it cannot.
     ///
-    /// The `FallbackTemplate` test is "a template that exists and does NOT
-    /// mention the placeholder", which is exactly equivalent to "an
-    /// explicitly overridden placeholder-free template" without needing a
-    /// column to record explicitness: a DERIVED template exists only for
-    /// integrated kinds and always contains the placeholder, and an
-    /// integrated kind with a placeholder-free template can neither be
-    /// created nor loaded (`store`'s decode enforces the same invariant at
-    /// the trust boundary). So the only way to reach this state is a
-    /// Generic session whose caller supplied a verbatim resume invocation
-    /// — SPEC.md's fallback shape.
-    ///
-    /// A template that DOES mention the placeholder with nothing captured
-    /// is `FreshOnly`, never `FallbackTemplate`: SPEC.md forbids running a
-    /// `{conversation}` invocation unfilled, so offering it would be
+    /// SPEC.md: Restart always preserves the conversation, so the only
+    /// available offer is [`RestartOffer::Resume`]. A session with no
+    /// integration has nothing to resume and offers
+    /// [`RestartOffer::NoConversationReporting`]; any explicit resume
+    /// template it carries is stored but never run. An integrated session
+    /// without a usable identity offers [`RestartOffer::NotCaptured`]:
+    /// SPEC.md forbids running a `{conversation}` invocation unfilled, and
+    /// offering it would be offering a garbled command line.
     #[warn(clippy::wildcard_enum_match_arm)]
-    /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>, ownership_version: i64) -> RestartOffer {
+        if self.integration().is_none() {
+            return RestartOffer::NoConversationReporting;
+        }
         // Provenance gate: kinds with an implemented ownership proof offer
         // exact Resume only for bindings admitted under this contract
         // (version 1). The deliberate Codex exception keeps existing valid
@@ -2096,7 +2094,7 @@ impl IntegrationSnapshot {
             && ownership_version != 1
             && !(ownership_version == 0 && accepts_unversioned_ownership(self.kind))
         {
-            return RestartOffer::FreshOnly;
+            return RestartOffer::NotCaptured;
         }
         // Each kind reads its captured identity in its own vocabulary, the
         // same one `filled_resume_argv` substitutes from, so an offer and the
@@ -2109,7 +2107,7 @@ impl IntegrationSnapshot {
                     {
                         RestartOffer::Resume
                     }
-                    _ => RestartOffer::FreshOnly,
+                    _ => RestartOffer::NotCaptured,
                 }
             }
             AgentKind::Grok => {
@@ -2121,7 +2119,7 @@ impl IntegrationSnapshot {
                     {
                         RestartOffer::Resume
                     }
-                    _ => RestartOffer::FreshOnly,
+                    _ => RestartOffer::NotCaptured,
                 }
             }
             AgentKind::Pi => self.typed_locator_offer(LocatorVendor::Pi, captured),
@@ -2140,13 +2138,14 @@ impl IntegrationSnapshot {
             .and_then(|locator| locator.session_file)
         {
             Some(_) if self.resume_template.is_some() => RestartOffer::Resume,
-            _ => RestartOffer::FreshOnly,
+            _ => RestartOffer::NotCaptured,
         }
     }
 
-    /// The offer for a kind whose identity is a plain conversation id
-    /// (Claude, Goose), and for Generic sessions, which never have an
-    /// identity but may carry an explicit fallback template.
+    /// The offer for an integrated kind whose identity is a plain
+    /// conversation id (Claude, Goose). Generic never reaches here with an
+    /// integration, but stays in the caller's arm so the match names every
+    /// kind rather than hiding one behind a wildcard.
     fn plain_id_offer(&self, captured: Option<&str>) -> RestartOffer {
         // An identity this build would refuse to substitute
         // (`is_plausible_conversation_id` — an option-shaped id being the
@@ -2157,13 +2156,8 @@ impl IntegrationSnapshot {
         let captured = captured
             .filter(|id| is_plausible_conversation_id(id) && !is_reserved_locator_token(id));
         match (&self.resume_template, captured) {
-            (Some(_), Some(_)) if self.integration().is_some() => RestartOffer::Resume,
-            (Some(template), _)
-                if !template.is_empty() && !template_has_placeholder(Some(template)) =>
-            {
-                RestartOffer::FallbackTemplate
-            }
-            _ => RestartOffer::FreshOnly,
+            (Some(_), Some(_)) => RestartOffer::Resume,
+            _ => RestartOffer::NotCaptured,
         }
     }
 
@@ -2417,7 +2411,7 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 /// when available; the ordinary `{cwd}` marker keeps the path tmux receives.
 /// Meant for exactly one caller, `Supervisor::spawn_agent` — the
 /// single seam where an argv becomes a process for create, retry, and
-/// every restart mode alike — as the first of the two transformations that
+/// every restart alike — as the first of the two transformations that
 /// seam applies, ahead of hook-flag injection, so the injected tail is
 /// never itself a substitution target. Filling anywhere else would need a
 /// second, subtly different copy of this substitution for whichever path
@@ -2834,7 +2828,7 @@ pub fn parse_agent_instructions(value: &str) -> AgentInstructions {
 ///
 /// Exact basename equality, not a prefix or substring match, and the
 /// asymmetry is the point: a false NEGATIVE (`claude-wrapper` classified
-/// generic) costs an honest fresh-launch offer and is fixable with an
+/// generic) costs only Restart, honestly unavailable, and is fixable with an
 /// explicit override, while a false POSITIVE gives a session Claude's
 /// record layout and correlators when its agent will never write them —
 /// producing either no capture at all or, worse, a correlation against
@@ -3104,7 +3098,7 @@ mod tests {
     /// kind could only ever throw the captured identity away, which is
     /// SPEC.md's exact-conversation restart promise quietly becoming false.
     /// A generic placeholder-bearing template is equally unusable and must
-    /// be rejected instead of stored as a verbatim fallback.
+    /// be rejected instead of stored.
     #[farhelm_testtrace::test]
     fn an_integrated_kind_refuses_a_placeholder_free_template() {
         let refused = IntegrationSnapshot::resolve(
@@ -3130,8 +3124,9 @@ mod tests {
             )
             .is_err()
         );
-        // A generic fallback is valid only when it does not ask Farhelm for
-        // conversation identity; embedded text is ordinary literal argv.
+        // A generic template is accepted (stored, never run) only when it
+        // does not ask Farhelm for conversation identity; embedded text is
+        // ordinary literal argv.
         assert_eq!(
             IntegrationSnapshot::resolve(
                 &["bash".into()],
@@ -3151,8 +3146,9 @@ mod tests {
             )
             .is_ok()
         );
-        // Generic keeps placeholder-free fallback templates and no-template
-        // sessions; integrated kinds keep exact-placeholder templates.
+        // Generic still accepts placeholder-free templates (stored, never
+        // run) and no-template sessions; integrated kinds keep
+        // exact-placeholder templates.
         assert!(
             IntegrationSnapshot::resolve(
                 &["bash".into()],
@@ -3540,7 +3536,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.restart_offer(Some("--dangerously-bypass-approvals-and-sandbox"), 0),
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "and must not be advertised as resumable either, or the offer would promise a \
              command the substitution then refuses to build"
         );
@@ -4148,11 +4144,11 @@ mod tests {
             let snapshot =
                 IntegrationSnapshot::resolve(&[argv0.to_string()], None, None).expect("integrated");
             // OMP's ownership proof is implemented, so an unproven
-            // (version 0) binding offers fresh-only until its first proven
+            // (version 0) binding offers no restart until its first proven
             // report; Pi keeps today's offer until its own proof flips the
             // predicate.
             let unproven_offer = if vendor == LocatorVendor::Omp {
-                RestartOffer::FreshOnly
+                RestartOffer::NotCaptured
             } else {
                 RestartOffer::Resume
             };
@@ -4174,7 +4170,7 @@ mod tests {
             .expect("encode fileless locator");
             assert_eq!(
                 snapshot.restart_offer(Some(&fileless), 0),
-                RestartOffer::FreshOnly
+                RestartOffer::NotCaptured
             );
             assert!(
                 snapshot.filled_resume_argv(&fileless).is_none(),
@@ -4220,7 +4216,7 @@ mod tests {
                     .expect("integrated");
             assert_eq!(
                 other_snapshot.restart_offer(Some(&encoded), 0),
-                RestartOffer::FreshOnly,
+                RestartOffer::NotCaptured,
                 "a {vendor:?} locator cannot make a {other:?} session offer a resume"
             );
             assert!(
@@ -4236,7 +4232,7 @@ mod tests {
             ] {
                 assert_eq!(
                     snapshot.restart_offer(Some(&malformed), 0),
-                    RestartOffer::FreshOnly,
+                    RestartOffer::NotCaptured,
                     "{malformed:?} cannot make a {vendor:?} session offer a resume"
                 );
                 assert!(
@@ -4557,15 +4553,21 @@ mod tests {
         assert!(read.is_err(), "a directory is not a regular session file");
     }
 
-    /// `restart_offer` is what the UI (PR8) turns into an affordance, so
-    /// every one of its three answers is pinned against the state that
-    /// produces it. The subtle one is the last: a `{conversation}` template
-    /// with nothing captured is FreshOnly, never FallbackTemplate, because
-    /// SPEC.md forbids ever running the placeholder unfilled.
+    /// `restart_offer` decides whether Restart exists at all, so every
+    /// answer is pinned against the state that produces it.
+    ///
+    /// Why: SPEC.md makes Restart mean "resume this session's own
+    /// conversation" and nothing else. The cases that used to offer a fresh
+    /// relaunch or a verbatim fallback command must now say Restart is
+    /// unavailable, with the reason the UI shows: an integrated kind with
+    /// nothing captured is `NotCaptured` (never a run with the placeholder
+    /// unfilled), and a non-integrated kind is `NoConversationReporting`
+    /// even when it carries a placeholder-free template that once ran
+    /// verbatim.
     #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
         let claude = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
-        assert_eq!(claude.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(claude.restart_offer(None, 0), RestartOffer::NotCaptured);
         assert_eq!(
             claude.restart_offer(Some("conv-1"), 0),
             RestartOffer::Resume
@@ -4579,12 +4581,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             fallback.restart_offer(None, 0),
-            RestartOffer::FallbackTemplate,
-            "a placeholder-free template is the one thing that can be run verbatim"
+            RestartOffer::NoConversationReporting,
+            "a placeholder-free template no longer makes a session restartable"
         );
 
         let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
-        assert_eq!(generic.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(
+            generic.restart_offer(None, 0),
+            RestartOffer::NoConversationReporting
+        );
 
         // This models a legacy stored snapshot. New generic creates reject
         // the unfillable template, but previously stored state still needs
@@ -4596,7 +4601,11 @@ mod tests {
                 CONVERSATION_PLACEHOLDER.to_string(),
             ]),
         };
-        assert_eq!(unfillable.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(
+            unfillable.restart_offer(Some("conv-1"), 0),
+            RestartOffer::NoConversationReporting,
+            "even a stray identity cannot make a non-integrated session resumable"
+        );
     }
 
     /// Codex's transcript contains events from internal work as well as the

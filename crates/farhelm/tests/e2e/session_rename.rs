@@ -301,7 +301,7 @@ async fn a_rename_reply_reflects_a_reported_identity_without_a_list_first() {
     let session = hook_session(&h, &fixtures, work.path()).await;
     assert_eq!(
         session.restart_offer,
-        RestartOffer::FreshOnly,
+        RestartOffer::NotCaptured,
         "test premise: a newly created session has no reported identity"
     );
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;

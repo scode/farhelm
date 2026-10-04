@@ -4362,19 +4362,17 @@ async fn create_session_error_reply_maps_to_bad_request_status() {
 }
 
 /// `POST /api/sessions/{id}/restart` end to end (PLAN_M3.md item 9):
-/// the body's `mode` and `stop_if_running` reach the supervisor
-/// unaltered, and the success body is the session's own recomputed
-/// `SessionInfo` — including the freshly computed `restart_offer` a
-/// caller re-renders its row from without listing again.
+/// the body's `stop_if_running` reaches the supervisor unaltered, and the
+/// success body is the session's own recomputed `SessionInfo` — including
+/// the freshly computed `restart_offer` a caller re-renders its row from
+/// without listing again.
 ///
-/// Both body fields are asserted at the WIRE, not merely accepted by
-/// the handler: `stop_if_running` is the user's consent to kill a
-/// running agent and `mode` is the choice the supervisor validates
-/// against the current offer, so a route that dropped or defaulted
-/// either would be a silent safety regression rather than a visible
-/// failure.
+/// The consent is asserted at the WIRE, not merely accepted by the
+/// handler: it is the user's permission to kill a running agent, so a
+/// route that dropped or defaulted it would be a silent safety regression
+/// rather than a visible failure.
 #[farhelm_testtrace::test]
-async fn restart_session_passes_mode_and_consent_through_and_returns_the_session() {
+async fn restart_session_passes_consent_through_and_returns_the_session() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
@@ -4391,7 +4389,6 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
         let ControlMsg::RestartSession {
             req_id,
             session_id,
-            mode,
             stop_if_running,
             ..
         } = request
@@ -4399,7 +4396,6 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
             panic!("expected RestartSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
-        assert_eq!(mode, farhelm_proto::RestartMode::Resume);
         assert!(
             stop_if_running,
             "the user's consent to stop a live agent must reach the supervisor"
@@ -4442,7 +4438,7 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
-            serde_json::json!({ "mode": "resume", "stop_if_running": true }).to_string(),
+            serde_json::json!({ "stop_if_running": true }).to_string(),
         ))
         .unwrap();
 
@@ -4515,7 +4511,6 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(serde_json::json!({
-            "mode": "resume",
             "with": {"harness":"claude","model":null,"effort":null,"permissions":"yolo","workspace_trust":null}
         }).to_string())).unwrap();
     assert_eq!(
@@ -4559,7 +4554,6 @@ async fn restart_with_an_invalid_selection_is_a_400_and_never_reaches_the_superv
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
             serde_json::json!({
-                "mode": "resume",
                 "with": {"harness":"grok","model":"x-ai/grok-4.5","effort":null,"permissions":null,"workspace_trust":null}
             })
             .to_string(),
@@ -4613,9 +4607,7 @@ async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
         .uri("/api/sessions/sess-1/restart")
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
-        .body(axum::body::Body::from(
-            serde_json::json!({ "mode": "fresh" }).to_string(),
-        ))
+        .body(axum::body::Body::from(serde_json::json!({}).to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -7484,10 +7476,7 @@ async fn catalog_failure_precedes_every_session_mutation() {
                 "profile_id": "builtin-claude",
             }),
         ),
-        (
-            "/api/sessions/profile-order/restart",
-            serde_json::json!({ "mode": "fresh" }),
-        ),
+        ("/api/sessions/profile-order/restart", serde_json::json!({})),
         (
             "/api/sessions/profile-order/rename",
             serde_json::json!({ "title": "not-applied" }),
@@ -7646,7 +7635,7 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
         "/api/sessions/profile-live/rename",
     ] {
         let body = if path.ends_with("restart") {
-            serde_json::json!({ "mode": "fresh" })
+            serde_json::json!({})
         } else {
             serde_json::json!({ "title": "renamed session" })
         };
@@ -7713,14 +7702,14 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
             let Ok(ControlMsg::RestartSession { req_id, .. }) = parse_control(&frame) else {
                 return;
             };
-            // Exactly what a real supervisor sends: a fresh offer and
-            // a deliberately unknown status (`publish_relaunched`).
+            // Exactly what a real supervisor sends: a freshly computed
+            // offer and a deliberately unknown status (`publish_relaunched`).
             writer
                 .write_control(&ControlMsg::SessionRestarted {
                     req_id,
                     session: farhelm_proto::SessionInfo {
                         status: farhelm_proto::SessionStatus::Unknown,
-                        restart_offer: farhelm_proto::RestartOffer::FreshOnly,
+                        restart_offer: farhelm_proto::RestartOffer::Resume,
                         title: "restarted".to_string(),
                         ..rest_harness::session("sess-1", 500)
                     },
@@ -7748,7 +7737,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/restart",
-        serde_json::json!({ "mode": "fresh" }),
+        serde_json::json!({}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
@@ -7764,7 +7753,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
         "every other field of the reply is authoritative and lands at once"
     );
     assert_eq!(
-        after["sessions"][0]["restart_offer"], "fresh_only",
+        after["sessions"][0]["restart_offer"], "resume",
         "including the freshly recomputed offer the restart exists to produce"
     );
     drop(release_refresh);
@@ -7846,7 +7835,7 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/restart",
-        serde_json::json!({ "mode": "fresh" }),
+        serde_json::json!({}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");

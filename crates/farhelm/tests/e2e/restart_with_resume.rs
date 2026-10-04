@@ -6,8 +6,7 @@ use crate::harness::*;
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
-    ServeTask, attach_ready, hook_harness, hook_log, hook_log_at, hook_session,
-    report as report_conversation, report_client,
+    ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
 };
 use crate::structured_launches::{FakeHarness, fake_harness, observed_argv};
 
@@ -124,13 +123,12 @@ async fn captured_claude_conversation(h: &Harness, session: &SessionInfo) -> Str
 async fn assert_restart_with_refused(
     h: &Harness,
     session: &SessionInfo,
-    mode: farhelm_proto::RestartMode,
     selection: farhelm_proto::LaunchSelection,
 ) {
     let before = durable_launch_bundle(h, &session.id).await;
     let error = h
         .client
-        .restart_session_with(&session.id, mode, true, Some(selection))
+        .restart_session_with(&session.id, true, Some(selection))
         .await
         .expect_err("invalid restart-with must be refused");
     assert_eq!(
@@ -160,12 +158,7 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
 
     let restarted = h
         .client
-        .restart_session_with(
-            &session.id,
-            farhelm_proto::RestartMode::Resume,
-            true,
-            Some(yolo.clone()),
-        )
+        .restart_session_with(&session.id, true, Some(yolo.clone()))
         .await
         .expect("restart with new permissions");
     assert_eq!(restarted.launch, Some(yolo.clone()));
@@ -191,7 +184,7 @@ async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
 
     let second = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect("plain restart uses saved settings");
     assert_eq!(second.launch, Some(yolo));
@@ -236,7 +229,6 @@ async fn restart_with_refuses_legacy_session_without_changing_settings() {
     assert_restart_with_refused(
         &h,
         &session,
-        farhelm_proto::RestartMode::Resume,
         farhelm_proto::LaunchSelection {
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -248,33 +240,25 @@ async fn restart_with_refuses_legacy_session_without_changing_settings() {
     .await;
 }
 
-/// Captured identity does not permit a harness swap or a fresh-mode override.
+/// Captured identity does not permit a harness swap.
 ///
-/// Both conflicts must leave the saved bundle alone, so the session can
-/// still resume with its original Claude settings afterwards.
+/// The conflict must leave the saved bundle alone, so the session can still
+/// resume with its original Claude settings afterwards.
 #[farhelm_testtrace::test]
-async fn restart_with_refuses_harness_mismatch_and_non_resume_mode() {
+async fn restart_with_refuses_a_harness_mismatch() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let session = structured_claude_session(&h, &fixture).await;
     captured_claude_conversation(&h, &session).await;
     let mut wrong_harness = session.launch.clone().expect("structured premise");
     wrong_harness.harness = farhelm_proto::LaunchHarness::Codex;
-    assert_restart_with_refused(
-        &h,
-        &session,
-        farhelm_proto::RestartMode::Resume,
-        wrong_harness,
-    )
-    .await;
-    let mut yolo = session.launch.clone().expect("structured premise");
-    yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
-    assert_restart_with_refused(&h, &session, farhelm_proto::RestartMode::Fresh, yolo).await;
+    assert_restart_with_refused(&h, &session, wrong_harness).await;
 }
 
 /// Restart-with needs an actual captured conversation, not merely a structured launch.
 ///
-/// A ready process that has received no prompt has a fresh-only offer; its
-/// stored selection and invocation must survive a refused override.
+/// A ready process that has reported nothing cannot resume, so Restart with
+/// is unavailable; its stored selection and invocation must survive a
+/// refused override.
 #[farhelm_testtrace::test]
 async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
     let (h, fixture, _accepting) = restart_with_harness().await;
@@ -282,11 +266,11 @@ async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
     observed_argv(&h, &session.id, 1).await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
+        farhelm_proto::RestartOffer::NotCaptured
     );
     let mut yolo = session.launch.clone().expect("structured premise");
     yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
-    assert_restart_with_refused(&h, &session, farhelm_proto::RestartMode::Resume, yolo).await;
+    assert_restart_with_refused(&h, &session, yolo).await;
 }
 
 /// Send one restart-with bundle exactly as given, over a connection of its
@@ -318,7 +302,6 @@ async fn raw_restart_with(
         .write_control(&ControlMsg::RestartSession {
             req_id: 1,
             session_id: session_id.to_string(),
-            mode: farhelm_proto::RestartMode::Resume,
             stop_if_running: true,
             invocation: Some(invocation.to_string()),
             launch: Some(launch),
@@ -523,17 +506,14 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script spawner"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script spawner"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let tmux_name = format!("fh-{}", session.id);
 
@@ -553,7 +533,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
     // the request is refused outright (see the next test).
     let restarted = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart with consent to stop the running agent");
     assert_eq!(restarted.id, session.id);
@@ -604,17 +584,14 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
 async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothing() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script spawner"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script spawner"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (_chan, initial_replay, mut rx) = h
@@ -629,7 +606,7 @@ async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothi
 
     let err = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect_err("a working agent may not be restarted without consent to stop it");
     let err = err
@@ -673,7 +650,7 @@ async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothi
 async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = resumable_basic_session(&h).await;
     let tmux_name = format!("fh-{}", session.id);
 
     let (chan, initial_replay, mut rx) = h
@@ -706,7 +683,7 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
     wait_for_after(&mut rx, &mut seen, "spam-line-60", "GRID-ONLY-MARKER", 10).await;
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart");
     wait_for_live_status(&h.client, &session.id, 30).await;
@@ -765,17 +742,14 @@ async fn a_reused_terminal_keeps_the_prior_run_above_the_new_one() {
 async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script spawner-reparent"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script spawner-reparent"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (_chan, initial_replay, mut rx) = h
@@ -801,7 +775,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
     );
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect("an agent that already exited needs no stop consent");
 
@@ -826,17 +800,8 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let cwd = work.path().to_string_lossy().into_owned();
-    let session = h
-        .client
-        .create_session(
-            &cwd,
-            &fixture_cmd("fake-agent --script basic"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session =
+        create_resumable_session(&h, &cwd, &fixture_cmd("fake-agent --script basic"), 80, 24).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
     assert_eq!(
@@ -850,7 +815,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 
     let err = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect_err("a session whose working directory is gone cannot be relaunched");
     let err = err
@@ -872,61 +837,6 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
         after.annotation.as_deref(),
         Some("stopped by user"),
         "a restart that never opened a launch generation cannot have cleared the annotation"
-    );
-}
-
-/// The staleness contract in the direction that actually happens
-/// (`ControlMsg::RestartSession`'s docs): an accepted identity report upgrades
-/// a session's offer from fresh-only to resumable AFTER a client read its
-/// `SessionInfo`, so the mode that client picked is no longer the one the
-/// supervisor will accept — and the refusal has to NAME the current offer,
-/// because the client's next move is to re-present it rather than retry.
-///
-/// Driven through the ordinary client rather than a raw frame writer: the
-/// staleness this exercises is a property of the SUPERVISOR's revalidation,
-/// and reproducing it only needs the request to be sent with a mode that
-/// was correct a moment earlier.
-#[farhelm_testtrace::test]
-async fn a_capture_that_lands_after_the_clients_read_makes_a_fresh_restart_conflict() {
-    let (h, fixtures, _accepting) = hook_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = hook_session(&h, &fixtures, work.path()).await;
-    // What a client that listed BEFORE the identity report would have cached.
-    assert_eq!(
-        session.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
-    );
-
-    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-    report_conversation(&h, chan, &mut rx, &mut seen, "late-report").await;
-    assert_eq!(
-        snapshot_of(&h, &session.id)
-            .await
-            .captured_conversation
-            .as_deref(),
-        Some("late-report"),
-        "the report must have landed, or there is no staleness to test; {}",
-        hook_log(&h, &session.id)
-    );
-
-    let err = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect_err("a fresh restart is not a legal answer to a resumable session");
-    let err = err
-        .downcast_ref::<SupervisorError>()
-        .expect("a stale-offer refusal carries its classification");
-    assert_eq!(err.kind, ErrorKind::Conflict);
-    assert!(
-        err.message.contains("resum"),
-        "the refusal must name the CURRENT offer so the client can re-present it: {}",
-        err.message
-    );
-    assert_eq!(
-        listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::Resume,
-        "and the offer the client should re-present is the one it can now read"
     );
 }
 
@@ -1184,7 +1094,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     );
 
     let restarted = client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
+        .restart_session(&session.id, false)
         .await
         .expect("an interrupted session has nothing running to consent about");
     assert_eq!(
@@ -1453,7 +1363,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     );
 
     client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, false)
+        .restart_session(&session.id, false)
         .await
         .expect("an interrupted session has nothing running to consent about");
     let (_chan, initial_replay, mut rx) = client
@@ -1480,97 +1390,6 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     drop(sup);
     drop(_tmux);
     drop(slot);
-}
-
-/// SPEC.md's verbatim fallback resume, which only an explicitly configured
-/// placeholder-free template can produce (PLAN_M3.md item 7): the session
-/// offers `FallbackTemplate`, and restarting it runs that template rather
-/// than the launch invocation.
-///
-/// The two commands are deliberately distinguishable in the terminal — the
-/// launch prints one marker and the fallback another — because "ran the
-/// right command" is the whole claim, and a template that silently fell
-/// back to the launch invocation would otherwise look identical.
-#[farhelm_testtrace::test]
-async fn a_configured_fallback_template_is_what_a_restart_runs() {
-    let h = harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = h
-        .client
-        .create_session_with_extras(
-            &work.path().to_string_lossy(),
-            "sh -c 'echo LAUNCH-INVOCATION; sleep 300'",
-            None,
-            80,
-            24,
-            farhelm_helm::CreateExtras {
-                // Placeholder-free, on a session whose basename derives no
-                // integration: SPEC.md's "the profile's resume invocation
-                // verbatim".
-                resume_template: Some(vec![
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "echo FALLBACK-RESUME; sleep 300".to_string(),
-                ]),
-                ..farhelm_helm::CreateExtras::default()
-            },
-        )
-        .await
-        .expect("create with a configured fallback resume command");
-    assert_eq!(
-        session.restart_offer,
-        farhelm_proto::RestartOffer::FallbackTemplate,
-        "a configured placeholder-free template is an offer in its own right, not a fresh launch"
-    );
-
-    let (chan, initial_replay, mut rx) = h
-        .client
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("attach");
-    let mut seen = initial_replay;
-    wait_for(&mut rx, &mut seen, "LAUNCH-INVOCATION", 20).await;
-
-    // The mode has to match the offer exactly — a `Fresh` restart of a
-    // session with a configured fallback is refused, not silently honored.
-    let refused = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect_err("fresh is not a legal mode for a fallback-template offer");
-    assert_eq!(
-        refused
-            .downcast_ref::<SupervisorError>()
-            .expect("classified")
-            .kind,
-        ErrorKind::Conflict
-    );
-
-    h.client
-        .restart_session(
-            &session.id,
-            farhelm_proto::RestartMode::FallbackTemplate,
-            true,
-        )
-        .await
-        .expect("restart through the configured fallback");
-    wait_for_live_status(&h.client, &session.id, 30).await;
-
-    h.client.detach(chan).await;
-    let (_chan2, initial_replay, mut rx2) = h
-        .client
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("attach after restart");
-    let mut replay = initial_replay;
-    wait_for_after(
-        &mut rx2,
-        &mut replay,
-        "LAUNCH-INVOCATION",
-        "FALLBACK-RESUME",
-        20,
-    )
-    .await;
 }
 
 /// The variable the `env-echo` fixture reports (`fake_agent::RC_MARKER_VAR`),
@@ -1643,17 +1462,14 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
     )
     .await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script env-echo"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script env-echo"),
+        80,
+        24,
+    )
+    .await;
 
     let (chan, initial_replay, mut rx) = h
         .client
@@ -1692,7 +1508,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
     // The edit a user would make between launches.
     write_rc_files(home.path(), "second");
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart");
     wait_for_live_status(&h.client, &session.id, 30).await;
@@ -1727,9 +1543,9 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 /// file that produced it.
 ///
 /// The session is created with an invocation that cannot exec plus a
-/// configured resume command that can, which is the only way (before M6.75's
-/// profiles) to give one session both a failing launch and a working
-/// relaunch. What that combination really exercises is the per-launch
+/// resume command that can, and a conversation recorded through the test
+/// seam, which gives one session both a failing launch and a working
+/// relaunch (restart only resumes). What that combination really exercises is the per-launch
 /// sentinel lifecycle: the failed launch's sentinel sits at the very path
 /// this relaunch's own would use, and a build that left it there would
 /// classify a perfectly good agent as `error` forever.
@@ -1748,16 +1564,23 @@ async fn a_restart_clears_a_previous_launch_error() {
             80,
             24,
             farhelm_helm::CreateExtras {
+                // Goose, for the reasons `create_resumable_session` gives.
+                agent_kind: Some(farhelm_proto::AgentKind::Goose),
                 resume_template: Some(vec![
                     "sh".to_string(),
                     "-c".to_string(),
                     "echo RELAUNCHED-OK; sleep 300".to_string(),
+                    "farhelm-test-resume".to_string(),
+                    "{conversation}".to_string(),
                 ]),
                 ..farhelm_helm::CreateExtras::default()
             },
         )
         .await
         .expect("create a session whose invocation cannot exec");
+    h.sup
+        .record_conversation_for_test(&session.id, RESUMABLE_TEST_CONVERSATION)
+        .await;
 
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
     let errored = wait_for_non_live_status(&h.client, &session.id, 30).await;
@@ -1767,13 +1590,9 @@ async fn a_restart_clears_a_previous_launch_error() {
     );
 
     h.client
-        .restart_session(
-            &session.id,
-            farhelm_proto::RestartMode::FallbackTemplate,
-            false,
-        )
+        .restart_session(&session.id, false)
         .await
-        .expect("restart through the configured resume command");
+        .expect("restart through the resume command");
 
     let alive = wait_for_live_status(&h.client, &session.id, 30).await;
     assert!(

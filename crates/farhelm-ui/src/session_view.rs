@@ -18,8 +18,7 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
-    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, replace_session, restart_mode_for,
-    restart_session,
+    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, replace_session, restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -143,9 +142,9 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   acceptable for the one sentence standing between a click and a killed
 ///   agent, so it gets its own surface hanging under the trigger.
 /// - **The restart explanation is a TOOLTIP plus an accessible
-///   description**, not a band. SPEC.md's "restart says so and offers that
-///   same fallback or a fresh launch — it must never silently resume the
-///   wrong conversation" is carried by the button's own accessible name
+///   description**, not a band. SPEC.md's rule that Restart always resumes
+///   the session's own conversation, and is greyed out with the specific
+///   reason when it cannot, is carried by the button's own accessible name
 ///   (`restart_button_label`, which names the offer rather than the
 ///   action) — the VISIBLE glyph is the compact "restart" every action
 ///   button uses, so the cluster fits the supported minimum width, and
@@ -1172,11 +1171,6 @@ pub(crate) fn SessionView(
         restart_epoch += 1;
         let base = restart_base.clone();
         let id = current.read().id.clone();
-        let mode = if with.is_some() {
-            "resume"
-        } else {
-            restart_mode_for(current.read().restart_offer)
-        };
         // Cloned per click: the spawned task owns what it captures, and this
         // closure runs again for the next restart.
         let refresh_after_restart = refresh_after_restart.clone();
@@ -1194,7 +1188,7 @@ pub(crate) fn SessionView(
                 restart_yolo.set(None);
             }
             let outcome =
-                restart_session(&base, &id, mode, stop_if_running, with.as_ref(), allow_yolo).await;
+                restart_session(&base, &id, stop_if_running, with.as_ref(), allow_yolo).await;
             match &outcome {
                 // Only a restart WITH new settings is ever refused this way;
                 // a plain restart relaunches a choice already made.
@@ -1298,7 +1292,7 @@ pub(crate) fn SessionView(
     // The interrupted card carries the same restart control as the header.
     let mut notice_restart = restart.clone();
     let mut with_restart = restart.clone();
-    let mut fresh_restart = restart;
+    let mut direct_restart = restart;
 
     let replace_base = base.clone();
     let replace_preferences = preferences;
@@ -1797,14 +1791,17 @@ pub(crate) fn SessionView(
     // accessible description rather than a permanent band (see this
     // component's header docs).
     let offer_explanation = restart_offer_text(&shown.status, shown.restart_offer);
-    // The restart control's full accessible name (`resume conversation`,
-    // `restart (fresh launch)`, ...): the button's own VISIBLE glyph is now
+    // The restart control's full accessible name (`resume conversation` or
+    // `restart unavailable`): the button's own VISIBLE glyph is now
     // the compact "restart" every header action uses (so the cluster fits
     // the header's supported minimum width — see the `.titlebar-actions`
     // CSS), so this is what actually carries SPEC.md's "restart says so"
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
+    // Whether Restart can run at all; Restart with additionally needs a
+    // structured launch (`restart_with_reason`).
+    let restart_available = shown.restart_offer.can_restart();
     // The precondition the header delete's prompt, as rendered by THIS pass,
     // covered, captured by its confirm handler. It must come from the same
     // snapshot the consequence text is drawn from, not from a fresh read at
@@ -1983,9 +1980,16 @@ pub(crate) fn SessionView(
                             "aria-label": "{restart_label}",
                             title: "{restart_label} — {offer_explanation}",
                             "aria-describedby": RESTART_OFFER_DESCRIPTION_ID,
+                            // Greyed out rather than removed when the session
+                            // cannot resume (SPEC.md): `aria-disabled` keeps
+                            // the tooltip hoverable and the reason reachable,
+                            // and the handler is what refuses activation.
+                            "aria-disabled": !restart_available,
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                if !lifecycle.claim_into(&mut view_claim) {
+                                if !restart_available
+                                    || !lifecycle.claim_into(&mut view_claim)
+                                {
                                     return;
                                 }
                                 if confirms_restart {
@@ -1994,7 +1998,7 @@ pub(crate) fn SessionView(
                                     // sending that request.
                                     confirming.set(true);
                                 } else {
-                                    fresh_restart(false, None, false, None);
+                                    direct_restart(false, None, false, None);
                                 }
                             },
                             "restart"
@@ -2425,26 +2429,30 @@ pub(crate) fn SessionView(
             // (SPEC.md: metadata and the reason, never an empty pane, and
             // nothing relaunches until the user asks). Both controls use the
             // shared lifecycle claim and existing request closures; Restart
-            // remains unconfirmed because nothing is running.
+            // remains unconfirmed because nothing is running. A session that
+            // cannot resume offers only Replace, and the notice says why
+            // (SPEC.md, Durability and resume).
             if interrupted_card_shown() {
                 div { class: "interrupted-card",
                     span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer)}" }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-primary restart-from-notice",
-                        // The visible choice matches the notice's
-                        // "Restart or Replace" wording; the accessible
-                        // name and tooltip keep the conversation promise.
-                        "aria-label": "{restart_label}",
-                        title: "{restart_label} — {offer_explanation}",
-                        disabled: lifecycle.busy(),
-                        onclick: move |_| {
-                            if !lifecycle.claim_into(&mut view_claim) {
-                                return;
-                            }
-                            notice_restart(false, None, false, None);
-                        },
-                        "restart"
+                    if restart_available {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-primary restart-from-notice",
+                            // The visible choice matches the notice's
+                            // "Restart or Replace" wording; the accessible
+                            // name and tooltip keep the conversation promise.
+                            "aria-label": "{restart_label}",
+                            title: "{restart_label} — {offer_explanation}",
+                            disabled: lifecycle.busy(),
+                            onclick: move |_| {
+                                if !lifecycle.claim_into(&mut view_claim) {
+                                    return;
+                                }
+                                notice_restart(false, None, false, None);
+                            },
+                            "restart"
+                        }
                     }
                     button {
                         r#type: "button",
@@ -2827,11 +2835,10 @@ fn activity_destination(
     }
 }
 
-/// What restarting this session would do to its conversation, in the
-/// user's own terms — SPEC.md's "restart says so and offers the fallback
-/// or a fresh launch — it must never silently resume the wrong
-/// conversation", which is a promise about what the user is TOLD, not only
-/// about what runs.
+/// Whether restarting this session resumes its conversation, or why Restart
+/// is unavailable, in the user's own terms — SPEC.md's requirement that an
+/// unavailable Restart explain the specific reason is a promise about what
+/// the user is TOLD, not only about what runs.
 ///
 /// Since the header consolidation this text is part of the restart
 /// button's hover tooltip and accessible description rather than a band
@@ -2856,21 +2863,30 @@ fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
     }
 }
 
-/// What a restart would do for this session, as the clause every surface
-/// that offers one shares: the header control's tooltip and accessible
-/// description (`restart_offer_text`) and the interrupted session's own
-/// notice (`interrupted_surface_text`). One source, so the two can never
-/// promise different things about the same conversation.
+/// Whether a restart can resume this session's conversation, and why not
+/// when it cannot, as the clause every surface that offers Restart shares:
+/// the header control's tooltip and accessible description
+/// (`restart_offer_text`) and the interrupted session's own notice
+/// (`interrupted_surface_text`). One source, so the two can never promise
+/// different things about the same conversation.
+///
+/// SPEC.md: Restart always preserves the conversation, and when it cannot,
+/// Restart and Restart with are greyed out with the specific reason and
+/// Replace is how the session starts over — so every unavailable clause
+/// names Replace.
 fn offer_clause(offer: RestartOffer) -> &'static str {
     match offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation",
-        RestartOffer::FallbackTemplate => {
-            "no conversation was captured, so restarting runs this session's configured resume \
-             command"
+        // No "restart is unavailable" here: the control's accessible name
+        // (`restart_button_label`) already says so, and the tooltip joins
+        // the two.
+        RestartOffer::NotCaptured => {
+            "no conversation Farhelm can resume was captured for this session, so replace starts \
+             it over"
         }
-        RestartOffer::FreshOnly => {
-            "no conversation was captured for this session, so restarting launches a fresh agent \
-             in the same directory"
+        RestartOffer::NoConversationReporting => {
+            "Farhelm has no conversation reporting for this session's agent, so replace starts it \
+             over"
         }
     }
 }
@@ -2922,12 +2938,21 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
 ///
 /// Names the host restart and the intentional handoff before stating what
 /// Restart would do, so the empty terminal area explains both the missing
-/// terminal and the safe next step without implying automatic recovery.
+/// terminal and the safe next step without implying automatic recovery. A
+/// session that cannot resume is offered only Replace, so its notice names
+/// only that choice.
 fn interrupted_surface_text(offer: RestartOffer) -> String {
-    format!(
-        "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {}.",
-        offer_clause(offer)
-    )
+    if offer.can_restart() {
+        format!(
+            "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {}.",
+            offer_clause(offer)
+        )
+    } else {
+        format!(
+            "a host restart paused this session. Farhelm will wait for you to choose Replace — {}.",
+            offer_clause(offer)
+        )
+    }
 }
 
 /// The restart control's accessible name (`aria-label`, and the front half
@@ -2937,10 +2962,10 @@ fn interrupted_surface_text(offer: RestartOffer) -> String {
 /// survives, which is the exact question SPEC.md requires an honest answer
 /// to before they click.
 fn restart_button_label(offer: RestartOffer) -> &'static str {
-    match offer {
-        RestartOffer::Resume => "resume conversation",
-        RestartOffer::FallbackTemplate => "restart with the configured resume command",
-        RestartOffer::FreshOnly => "restart (fresh launch)",
+    if offer.can_restart() {
+        "resume conversation"
+    } else {
+        "restart unavailable"
     }
 }
 
@@ -3053,7 +3078,10 @@ mod tests {
             workspace_trust: None,
         });
         assert_eq!(restart_with_reason(&session), None);
-        for offer in [RestartOffer::FreshOnly, RestartOffer::FallbackTemplate] {
+        for offer in [
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
+        ] {
             session.restart_offer = offer;
             assert_eq!(
                 restart_with_reason(&session).as_deref(),
@@ -3228,15 +3256,16 @@ mod tests {
     ///
     /// The two are built from one `offer_clause`, and this pins that they
     /// stay so: a card that said "resumes the conversation" beside a
-    /// tooltip that said "launches a fresh agent" would be the exact
+    /// tooltip that said Restart is unavailable would be the exact
     /// silently-wrong-resume claim SPEC.md forbids, for the session whose
-    /// capture never landed.
+    /// capture never landed. An unavailable offer's card names only
+    /// Replace, the one choice it shows.
     #[farhelm_testtrace::test]
     fn the_interrupted_surface_matches_the_restart_offer() {
         for offer in [
             RestartOffer::Resume,
-            RestartOffer::FallbackTemplate,
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
         ] {
             let card = interrupted_surface_text(offer);
             let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
@@ -3251,6 +3280,11 @@ mod tests {
             assert!(
                 tooltip.ends_with(&format!("{}.", offer_clause(offer))),
                 "{tooltip}"
+            );
+            assert_eq!(
+                card.contains("Restart or Replace"),
+                offer.can_restart(),
+                "only a resumable session's card offers Restart: {card}"
             );
         }
     }
@@ -3398,9 +3432,9 @@ mod tests {
     /// SPEC.md requires restart to SAY what it would do to the
     /// conversation — "it must never silently resume the wrong
     /// conversation" is a promise about what the user is told before they
-    /// click, not only about what runs. So the three offers must read
-    /// differently, and a fresh launch must say so rather than borrowing
-    /// resume's wording.
+    /// click, not only about what runs. So each offer must read
+    /// differently, and an unavailable Restart must say why rather than
+    /// borrowing resume's wording.
     ///
     /// The interrupted case leads with WHY the terminal is gone, since
     /// that is the state where the user is being asked to act on something
@@ -3414,24 +3448,28 @@ mod tests {
             "an interrupted, resumable session must say both: {resumable}"
         );
 
-        let fresh = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::FreshOnly);
+        // SPEC.md: when Farhelm cannot resume, Restart is unavailable with
+        // the specific reason, and Replace is the way to start over.
+        let uncaptured = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::NotCaptured);
         assert!(
-            fresh.contains("no conversation was captured") && fresh.contains("fresh agent"),
-            "a fresh-only restart must say plainly that nothing is resumed: {fresh}"
+            uncaptured.contains("no conversation") && uncaptured.contains("replace"),
+            "an uncaptured session must say why Restart is unavailable: {uncaptured}"
         );
 
-        let fallback =
-            restart_offer_text(&SessionStatus::Interrupted, RestartOffer::FallbackTemplate);
+        let unreported = restart_offer_text(
+            &SessionStatus::Interrupted,
+            RestartOffer::NoConversationReporting,
+        );
         assert!(
-            fallback.contains("configured resume command"),
-            "a configured fallback is labeled honestly, not as a plain fresh launch: {fallback}"
+            unreported.contains("no conversation reporting") && unreported.contains("replace"),
+            "an agent without reporting must say why Restart is unavailable: {unreported}"
         );
 
         let error = restart_offer_text(
             &SessionStatus::Error {
                 detail: "exec_failed".to_string(),
             },
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
         );
         assert!(
             error.contains("never started"),
@@ -3462,7 +3500,7 @@ mod tests {
                 launch: None,
                 status: SessionStatus::Running,
                 annotation: None,
-                restart_offer: RestartOffer::FreshOnly,
+                restart_offer: RestartOffer::NotCaptured,
                 created_at: 0,
                 last_activity_at: 0,
                 tabs: Vec::new(),
@@ -3514,7 +3552,7 @@ mod tests {
                 launch: None,
                 status,
                 annotation: None,
-                restart_offer: RestartOffer::FreshOnly,
+                restart_offer: RestartOffer::NotCaptured,
                 created_at: 0,
                 last_activity_at: 0,
                 tabs: Vec::new(),
@@ -3606,7 +3644,7 @@ mod tests {
             launch: None,
             status: SessionStatus::Unknown,
             annotation: None,
-            restart_offer: RestartOffer::FreshOnly,
+            restart_offer: RestartOffer::NotCaptured,
             created_at: 0,
             last_activity_at: 1_700_000_000 - 120,
             tabs: Vec::new(),
@@ -3643,14 +3681,16 @@ mod tests {
             restart_button_label(RestartOffer::Resume),
             "resume conversation"
         );
-        assert!(
-            restart_button_label(RestartOffer::FreshOnly).contains("fresh"),
-            "a fresh launch must not be labeled as a resume"
-        );
-        assert!(
-            restart_button_label(RestartOffer::FallbackTemplate).contains("resume command"),
-            "a configured fallback is its own thing, distinct from both"
-        );
+        for offer in [
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
+        ] {
+            assert_eq!(
+                restart_button_label(offer),
+                "restart unavailable",
+                "{offer:?}: a session that cannot resume must not be labeled as a resume"
+            );
+        }
     }
 
     /// `seen_effect_eligible`'s three independent gates (review STATE-1's
@@ -3672,7 +3712,7 @@ mod tests {
                 launch: None,
                 status: crate::SessionStatus::Idle,
                 annotation: None,
-                restart_offer: crate::RestartOffer::FreshOnly,
+                restart_offer: crate::RestartOffer::NotCaptured,
                 created_at: 0,
                 last_activity_at: 0,
                 tabs: Vec::new(),
@@ -3731,7 +3771,7 @@ mod tests {
             launch: None,
             status: crate::SessionStatus::Idle,
             annotation: None,
-            restart_offer: crate::RestartOffer::FreshOnly,
+            restart_offer: crate::RestartOffer::NotCaptured,
             created_at: 0,
             last_activity_at: 1_700_000_000,
             tabs: Vec::new(),

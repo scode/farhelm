@@ -673,7 +673,7 @@ mod tests {
             launch: None,
             status: SessionStatus::Unknown,
             annotation: None,
-            restart_offer: crate::RestartOffer::FreshOnly,
+            restart_offer: crate::RestartOffer::NotCaptured,
             created_at: 0,
             last_activity_at: 0,
             tabs: Vec::new(),

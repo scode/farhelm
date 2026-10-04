@@ -384,14 +384,14 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // forward, and never claims to know that the agent ended BEFORE the
     // restart — the ordering SPEC.md's "interrupted" exists to leave open.
     // The way forward is worded per the session's restart offer, and this
-    // plain-shell session has no captured conversation, so what it is
-    // promised is a fresh launch — never a resume it would not get.
+    // plain-shell session cannot resume anything, so what it is promised is
+    // Replace starting it over — never a resume it would not get.
     assert!(
-        refusal.contains("host rebooted") && refusal.contains("restart launches a fresh agent"),
-        "the refusal must name the reboot and the fresh-launch offer: {refusal}"
+        refusal.contains("host rebooted") && refusal.contains("replace starts it over"),
+        "the refusal must name the reboot and the way forward: {refusal}"
     );
     assert!(
-        !refusal.contains("resume"),
+        !refusal.contains("restart offers"),
         "a session with no captured conversation must not be promised a resume: {refusal}"
     );
     assert!(

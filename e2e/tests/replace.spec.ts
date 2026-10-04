@@ -29,6 +29,7 @@ import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import {
   cleanupSession,
+  createResumableSession,
   createSession,
   FAKE_AGENT,
   hideSeenState,
@@ -643,7 +644,8 @@ test("replace with keeps a source restarted while its launcher showed nothing al
   request,
 }) => {
   const title = `replace-with-restarted-${Date.now()}`;
-  const source = await createSession(request, { title });
+  // Restart only resumes, so the source must have a conversation to resume.
+  const source = await createResumableSession(request, { title });
   try {
     await stopSession(request, source.id);
     await waitForListedState(request, source.id, "exited");
@@ -659,7 +661,7 @@ test("replace with keeps a source restarted while its launcher showed nothing al
     // afterwards can carry the restarted state into the launcher.
     await waitForFeedReadersSettled(page);
 
-    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: { mode: "fresh" } });
+    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     // Premise: the launcher still shows the state it opened on.
@@ -699,7 +701,8 @@ test("replace with's warning follows a source restarted while the launcher is op
   request,
 }) => {
   const title = `replace-with-follows-${Date.now()}`;
-  const source = await createSession(request, { title });
+  // Restart only resumes, so the source must have a conversation to resume.
+  const source = await createResumableSession(request, { title });
   let replacedId: string | undefined;
   try {
     await stopSession(request, source.id);
@@ -714,7 +717,7 @@ test("replace with's warning follows a source restarted while the launcher is op
     await expect(warning).toBeEmpty();
     await expect(form.locator(".create-session-submit")).not.toHaveAttribute("aria-describedby", /./);
 
-    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: { mode: "fresh" } });
+    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     feed.notify(2);

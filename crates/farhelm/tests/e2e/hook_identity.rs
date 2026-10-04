@@ -415,23 +415,6 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
     );
 }
 
-/// The stored row, read through a second connection to the live
-/// supervisor's own database — the same bytes a restart would reload.
-///
-/// Needed because `conversation_source` is deliberately not on the wire:
-/// the UI has no use for which writer set the identity (plan §2.7), so the
-/// column itself is where tests can verify report provenance.
-async fn stored_row(h: &Harness, session_id: &str) -> StoredSession {
-    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
-        .await
-        .expect("open the store directly");
-    store
-        .session(session_id)
-        .await
-        .expect("read the session row")
-        .expect("the session exists")
-}
-
 // ---------------------------------------------------------------------
 // The report as an identity
 // ---------------------------------------------------------------------
@@ -545,7 +528,7 @@ async fn a_second_report_replaces_the_first() {
     );
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect("resume the running session");
     let (_chan, mut rx, mut seen) = attach_ready(&h, &session).await;
@@ -811,76 +794,6 @@ async fn a_report_survives_a_supervisor_restart() {
         "a restart must preserve the stored report source"
     );
 }
-
-/// A `Fresh` restart is REFUSED while a report stands, and the report
-/// survives the refusal untouched.
-///
-/// Written to the behaviour the product actually has rather than to the
-/// plan's wording ("report, restart `Fresh`, assert `FreshOnly`"): SPEC.md
-/// has no fresh-restart variant, so `relaunch_argv` requires the mode to
-/// match the CURRENT offer exactly and a `Fresh` request against a `Resume`
-/// offer is a `Conflict`. A reported identity therefore cannot be forgotten
-/// through the restart API at all — the only mode a reporting session can
-/// be restarted in is `Resume`, which keeps it by design. The reset half of
-/// the plan's intent (a non-`Resume` relaunch clearing
-/// `conversation_source`) is pinned where it is reachable: the store's own
-/// `begin_relaunch_clears_conversation_source_only_when_resetting_capture`.
-///
-/// An accepted report is part of the offer contract. A report that
-/// moved the offer without also moving what the offer is VALIDATED against
-/// would let a client's cached `FreshOnly` blow away a live conversation,
-/// which is precisely what the exact-match rule exists to prevent.
-///
-/// The identity is re-read afterwards because a refusal must be total:
-/// `begin_relaunch` is what would have cleared the columns, and a refusal
-/// that had already run it would leave the session with no identity and no
-/// relaunch either.
-#[farhelm_testtrace::test]
-async fn a_fresh_restart_is_refused_while_a_report_stands() {
-    let (h, fixtures, serving) = hook_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = hook_session(&h, &fixtures, work.path()).await;
-    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-    // What a client that listed at create time would have cached: no
-    // identity yet, so nothing to resume.
-    assert_eq!(
-        session.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
-    );
-    report(&h, chan, &mut rx, &mut seen, "conv-standing").await;
-
-    let err = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect_err("a fresh restart is not a legal answer to a session that can resume");
-    let err = err
-        .downcast_ref::<SupervisorError>()
-        .expect("a stale-offer refusal carries its classification");
-    assert_eq!(err.kind, ErrorKind::Conflict);
-    assert!(
-        err.message.contains("resum"),
-        "the refusal must name the CURRENT offer so the client can re-present it: {}",
-        err.message
-    );
-
-    let snapshot = snapshot_of(&h, &session.id).await;
-    assert_eq!(
-        snapshot.captured_conversation.as_deref(),
-        Some("conv-standing"),
-        "a refused restart must not have opened a relaunch generation"
-    );
-    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
-    assert_eq!(
-        stored_row(&h, &session.id).await.conversation_source,
-        Some("hook".to_string())
-    );
-    serving.stop().await;
-}
-
-// ---------------------------------------------------------------------
-// Injection: when the flags are appended, and when they are not
-// ---------------------------------------------------------------------
 
 /// A user invocation that already passes `--settings` gets no injection.
 ///
@@ -1826,12 +1739,19 @@ async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_r
     );
 }
 
-/// An unhooked Claude launch offers and performs a fresh restart after input
-/// creates an on-disk record. The replacement must start a different conversation.
-/// This pins the fallback; removal of the scanner establishes that later input
-/// cannot turn a nearby record into an identity.
+/// An unhooked Claude launch cannot be restarted, even after input creates
+/// an on-disk record, and a restart request launches nothing.
+///
+/// Why: SPEC.md identifies a conversation only from the harness's own
+/// report, so a record on disk is not an identity, and Restart always
+/// resumes: a session with no captured conversation has Restart
+/// unavailable ("rather than starting fresh or running some other
+/// command"). This used to pin a fresh restart as the fallback; that
+/// fallback is the bug the spec now names. Specified: the offer is
+/// `NotCaptured` before and after the refused request, the refusal is a
+/// `Conflict`, and the agent keeps running in the same pane.
 #[farhelm_testtrace::test]
-async fn an_unhooked_claude_session_restarts_fresh_after_input() {
+async fn an_unhooked_claude_session_cannot_be_restarted_after_input() {
     let (h, fixtures) = fixture_harness_with_seams(|seams| {
         seams.agent_hooks = farhelm_supervisor::agent_kind::AgentHooks::Only(vec![]);
     })
@@ -1849,43 +1769,41 @@ async fn an_unhooked_claude_session_restarts_fresh_after_input() {
     );
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-    let first_record = marker_value(&seen, "RECORD-WRITTEN:");
     let before = snapshot_of(&h, &session.id).await;
     assert_eq!(before.captured_conversation, None);
-    assert_eq!(before.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
-    let restarted = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect("fresh restart is the available fallback");
     assert_eq!(
-        restarted.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
+        before.restart_offer,
+        farhelm_proto::RestartOffer::NotCaptured
     );
-    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-    let from = seen.len();
-    h.client
-        .send_input(chan, b"replacement prompt\r".to_vec())
-        .await;
-    wait_for_after_from(
-        &mut rx,
-        &mut seen,
-        from,
-        "RECORD-WRITTEN:",
-        "replacement prompt",
-        20,
-    )
-    .await;
-    assert_ne!(
-        marker_value(&seen[from..], "RECORD-WRITTEN:"),
-        first_record,
-        "fresh restart must actually launch a new conversation"
-    );
+    let sock = h.state.path().join("tmux.sock");
+    let pane = pane_id_of(&sock, &format!("fh-{}", session.id)).await;
+
+    let err = h
+        .client
+        .restart_session(&session.id, true)
+        .await
+        .expect_err("a session with no captured conversation cannot be restarted");
+    let err = err
+        .downcast_ref::<SupervisorError>()
+        .expect("the refusal carries its classification");
+    assert_eq!(err.kind, ErrorKind::Conflict, "{}", err.message);
+
     let after = snapshot_of(&h, &session.id).await;
     assert_eq!(after.captured_conversation, None);
-    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
+    assert_eq!(
+        after.restart_offer,
+        farhelm_proto::RestartOffer::NotCaptured
+    );
+    assert_eq!(
+        after.generation, before.generation,
+        "a refused restart must not open a relaunch generation"
+    );
+    assert_eq!(
+        pane_id_of(&sock, &format!("fh-{}", session.id)).await,
+        pane,
+        "the running agent is left where it was"
+    );
 }
-
 /// Removing heuristic identification must not erase older stored identities.
 /// Seed a historical row with no hook provenance, reconstruct the supervisor,
 /// then observe the actual replacement process receiving that exact Resume id.
@@ -1945,7 +1863,7 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
     );
     let client = connect_client(&sup).await;
     client
-        .restart_session(&legacy.id, farhelm_proto::RestartMode::Resume, false)
+        .restart_session(&legacy.id, false)
         .await
         .expect("resume historical conversation");
     let (_chan, mut seen, mut rx) = client

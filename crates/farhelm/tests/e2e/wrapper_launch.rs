@@ -50,14 +50,13 @@
 //! other test here runs in a directory where the two spellings coincide
 //! and says nothing about which rule is in force.
 //!
-//! ## Which restart arm each test covers
+//! ## Restart
 //!
-//! `relaunch_argv` picks a different vector per mode, and all three reach
-//! the same fill in `spawn_agent`, so each arm needs its own test:
-//! `Resume` in [`a_wrapper_session_resumes_through_the_wrapper`], `Fresh`
-//! in [`a_wrapper_session_fresh_restarts_into_the_same_directory`], and
-//! `FallbackTemplate` in
-//! [`a_generic_wrapper_with_a_template_falls_back_through_the_wrapper`].
+//! A restart always resumes the session's conversation, so there is one
+//! restart vector to fill: the resume command, covered by
+//! [`a_wrapper_session_resumes_through_the_wrapper`] and, through a
+//! symlinked directory, by
+//! [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`].
 
 use crate::harness::*;
 use crate::hook_identity::{attach_ready, hook_harness, hook_log, report as report_conversation};
@@ -84,16 +83,6 @@ use crate::hook_identity::{attach_ready, hook_harness, hook_log, report as repor
 /// A directory spliced into the script would be re-parsed by the shell,
 /// and this feature's whole rule is that it never is.
 const WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && "$@"; exit $?"#;
-
-/// A flag that appears in the fallback resume template and NOWHERE else,
-/// so a relaunch through that template is distinguishable from a replay of
-/// the create-time launch.
-///
-/// The fixture never interprets it: it lands in clap's trailing `extra`
-/// catch-all, which accepts anything and echoes it back under
-/// [`ARGV_MARKER`]. That is the entire job — the flag exists to be seen in
-/// a transcript, not to do something.
-const FALLBACK_FLAG: &str = "--fallback-resume-marker";
 
 /// The argv slot `{cwd}` occupies in every wrapper vector this file
 /// builds: `sh`, `-c`, the script, `$0`, then `$1`.
@@ -316,8 +305,8 @@ fn assert_wrapper_got(session_id: &str, cwd: &std::path::Path) {
 /// complete — that is, until the fixture's `FAKE-AGENT READY` has arrived
 /// after it.
 ///
-/// Every anchor the tests wait for (`--resume `, the fallback flag, a
-/// second marker) sits somewhere INSIDE the argv line, and the terminal
+/// Every anchor the tests wait for (`--resume `, a second marker) sits
+/// somewhere INSIDE the argv line, and the terminal
 /// stream is chunked with no respect for line boundaries. Asserting on
 /// the line the moment the anchor shows up would read a prefix of it and
 /// fail, some of the time, on an id or a hook flag that was still in
@@ -483,7 +472,7 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
     );
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .restart_session(&session.id, true)
         .await
         .expect("resume the running wrapper session");
 
@@ -530,205 +519,6 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
     );
 }
 
-/// A fresh restart of a wrapper session lands in the same directory it
-/// was created in.
-///
-/// `relaunch_argv` has three arms, one per restart mode, and this covers
-/// the `Fresh` one: it re-splits the stored INVOCATION, so a fill that
-/// lived on the create path alone would relaunch this session into a
-/// literal `{cwd}`. (The other two are
-/// [`a_wrapper_session_resumes_through_the_wrapper`] and
-/// [`a_generic_wrapper_with_a_template_falls_back_through_the_wrapper`].)
-/// Nothing is reported before the restart on purpose —
-/// an offer of `Resume` would make `Fresh` a conflict, and a wrapper
-/// session that has not written a record yet is exactly the state a user
-/// restarts out of when the first launch went wrong.
-/// The wrapper's own argv and the explicit `assert_wrapper_got` check are the
-/// directory oracles; this test does not need a record scan to prove them.
-///
-/// The directory asserted after the restart is the created spelling, which
-/// works here only because a tempdir under `/tmp` already IS its own
-/// resolution. A restart substitutes the VERIFIED path, and
-/// [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`]
-/// is where that distinction is made observable.
-#[farhelm_testtrace::test]
-async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
-    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
-    let parent = farhelm_teststate::tempdir().expect("workdir parent");
-    let work = dir_with_a_space(parent.path());
-    let (invocation, template) = wrapper_profile(&fixtures);
-
-    let session = h
-        .client
-        .create_session_with_extras(
-            &work.to_string_lossy(),
-            &invocation,
-            None,
-            WIDE_COLS,
-            ROWS,
-            farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Claude),
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
-        )
-        .await
-        .expect("create a wrapper session");
-
-    // Attached once before the restart for a single reason: waiting for
-    // READY is what proves the first launch is actually up, so the restart
-    // below exercises a live-session relaunch rather than racing the
-    // initial spawn.
-    let (_chan, mut seen, mut rx) = h
-        .client
-        .attach_live(&session.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach");
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
-
-    assert_eq!(
-        snapshot_of(&h, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
-        "this test's premise is that nothing has been captured yet, so a fresh restart is the \
-         only offer"
-    );
-
-    h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect("fresh-restart the running wrapper session");
-
-    let (_chan, mut seen, mut rx) = h
-        .client
-        .attach_live(&session.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach after the relaunch");
-    // The first marker this attach sees IS the relaunched run's. Both
-    // generations print the identical argv line (a fresh restart reruns
-    // the same invocation), but `respawn-pane` reinitializes the visible
-    // grid and the first run never scrolled, so its marker exists nowhere
-    // the reattach could replay from — restart does not preserve the
-    // previous run's screen (SPEC.md, Lifecycle operations/Restart). This
-    // wait once anchored on a SECOND marker, back when the relaunch pushed
-    // the old grid into history first; waiting for two markers now times
-    // out, because only one can ever arrive. The line still has to be
-    // complete before the "no `--resume`" assertion below means anything.
-    wait_for(&mut rx, &mut seen, ARGV_MARKER, 30).await;
-    wait_for_settled_argv(&mut rx, &mut seen, 30).await;
-
-    // The verified path, as on every restart; identical to the created
-    // spelling here unless the temp directory is reached through a symlink.
-    let verified = std::fs::canonicalize(&work).expect("resolve the working directory");
-    assert_wrapper_got(&session.id, &verified);
-    let argv = argv_marker(&seen);
-    assert!(
-        !argv.contains(farhelm_supervisor::agent_kind::CWD_PLACEHOLDER),
-        "no placeholder may reach the agent through the wrapper: {argv}"
-    );
-    assert!(
-        !argv.contains("--resume"),
-        "a fresh restart reruns the invocation, not the resume template: {argv}"
-    );
-}
-
-/// A generic wrapper whose profile carries a verbatim fallback resume
-/// command relaunches through the wrapper, with `{cwd}` filled again.
-///
-/// This is `relaunch_argv`'s remaining arm. `FallbackTemplate` reads the
-/// stored template like `Resume` does, but without the
-/// `{conversation}` substitution in front of it — the vector goes to
-/// `spawn_agent` as it was written down. A fill that had been attached to
-/// the resume path rather than to `spawn_agent` would therefore relaunch
-/// this session into a literal `{cwd}`, and the wrapper's `cd` would fail
-/// silently. Nothing else in the file exercises this arm: a wrapper
-/// profile with a declared kind cannot reach it, since an integrated kind
-/// must have a `{conversation}` template.
-///
-/// The template is the invocation's own agent command plus
-/// [`FALLBACK_FLAG`], which is what makes "ran the template" and "ran the
-/// invocation again" tell apart in the transcript. It carries no
-/// `{conversation}`, and that placeholder-free shape is the only thing
-/// that produces a `FallbackTemplate` offer at all.
-#[farhelm_testtrace::test]
-async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
-    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let (invocation, _resume_template) = wrapper_profile(&fixtures);
-
-    let agent = fixtures.bin().join("claude");
-    let tail = record_tail(&fixtures);
-    let mut fallback_tail: Vec<&str> = tail.iter().map(String::as_str).collect();
-    fallback_tail.push(FALLBACK_FLAG);
-    let template = wrapper_argv(&agent, &fallback_tail);
-
-    let session = h
-        .client
-        .create_session_with_extras(
-            &work.path().to_string_lossy(),
-            &invocation,
-            None,
-            WIDE_COLS,
-            ROWS,
-            farhelm_helm::CreateExtras {
-                resume_template: Some(template),
-                ..farhelm_helm::CreateExtras::default()
-            },
-        )
-        .await
-        .expect("create a generic wrapper session with a verbatim fallback resume command");
-    assert_eq!(
-        session.restart_offer,
-        farhelm_proto::RestartOffer::FallbackTemplate,
-        "a generic session with a placeholder-free template offers that template, and the rest \
-         of this test has no meaning if it does not"
-    );
-
-    let (_chan, mut seen, mut rx) = h
-        .client
-        .attach_live(&session.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach");
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
-    assert_wrapper_got(&session.id, work.path());
-
-    h.client
-        .restart_session(
-            &session.id,
-            farhelm_proto::RestartMode::FallbackTemplate,
-            true,
-        )
-        .await
-        .expect("restart the wrapper session through its fallback template");
-
-    let (_chan, mut seen, mut rx) = h
-        .client
-        .attach_live(&session.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach after the relaunch");
-    // Anchored on the template's own flag rather than on the argv marker:
-    // a reattach replays the create-time launch's marker, and the flag is
-    // the one token that replay cannot produce.
-    wait_for(&mut rx, &mut seen, FALLBACK_FLAG, 30).await;
-    wait_for_settled_argv(&mut rx, &mut seen, 30).await;
-
-    // The VERIFIED path, not the literal spelling, because this is a
-    // restart — see
-    // [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`].
-    // The two coincide for an ordinary tempdir; asking for the canonical
-    // one keeps this test honest on a host where /tmp is a symlink.
-    let verified = std::fs::canonicalize(work.path()).expect("resolve the working directory");
-    assert_wrapper_got(&session.id, &verified);
-    let argv = argv_marker(&seen);
-    assert!(
-        argv.contains(FALLBACK_FLAG),
-        "the relaunch must run the template, not the launch invocation again: {argv}"
-    );
-    assert!(
-        !argv.contains(farhelm_supervisor::agent_kind::CWD_PLACEHOLDER),
-        "no placeholder may reach the agent through the wrapper: {argv}"
-    );
-}
-
 /// A wrapper is handed the user's own spelling of the directory at create
 /// and the VERIFIED resolution of it on a restart (plan D1).
 ///
@@ -751,13 +541,11 @@ async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
 /// somewhere nothing validated, and a wrapper handed the unverified
 /// spelling would `cd` there itself.
 ///
-/// The restart is `Fresh` and happens before anything is captured, for
-/// the same reason as
-/// [`a_wrapper_session_fresh_restarts_into_the_same_directory`]: an offer
-/// of `Resume` would make `Fresh` a conflict.
+/// The restart resumes a conversation the hook-reporting fixture reported,
+/// because restart only ever resumes.
 #[farhelm_testtrace::test]
 async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart() {
-    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
+    let (h, fixtures, _accepting) = hook_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
     let real = parent.path().join("real");
     std::fs::create_dir(&real).expect("create the real working directory");
@@ -770,7 +558,7 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
          they do not would make this test assert nothing"
     );
 
-    let (invocation, template) = wrapper_profile(&fixtures);
+    let (invocation, template) = hook_wrapper_profile(&fixtures);
     let session = h
         .client
         .create_session_with_extras(
@@ -788,33 +576,30 @@ async fn a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_
         .await
         .expect("create a wrapper session through a symlinked working directory");
 
-    let (_chan, mut seen, mut rx) = h
-        .client
-        .attach_live(&session.id, WIDE_COLS, ROWS)
-        .await
-        .expect("attach");
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
     assert_wrapper_got(&session.id, &link);
 
+    report_conversation(&h, chan, &mut rx, &mut seen, "symlink-report").await;
     assert_eq!(
         snapshot_of(&h, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
-        "nothing has been captured yet, so a fresh restart is the only legal mode here"
+        farhelm_proto::RestartOffer::Resume,
+        "the report makes the session resumable; {}",
+        hook_log(&h, &session.id)
     );
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
-        .expect("fresh-restart the wrapper session");
+        .expect("resume the wrapper session");
 
     let (_chan, mut seen, mut rx) = h
         .client
         .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
         .expect("attach after the relaunch");
-    // The first marker is the relaunched run's, for the same reason as in
-    // the fresh-restart test above: the respawn reinitialized the grid, the
-    // first run never scrolled, so no replay can carry the old marker.
-    wait_for(&mut rx, &mut seen, ARGV_MARKER, 30).await;
+    // Anchored on `--resume `, which only the relaunched run's argv
+    // carries, for the reason `a_wrapper_session_resumes_through_the_wrapper`
+    // gives: a reattach replays the previous run's marker first.
+    wait_for(&mut rx, &mut seen, "--resume ", 30).await;
     wait_for_settled_argv(&mut rx, &mut seen, 30).await;
 
     assert_wrapper_got(&session.id, &verified);
@@ -899,17 +684,13 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
 /// A wrapper profile with NEITHER an agent kind NOR a resume template
 /// gets no resume offer, however well the launch itself works.
 ///
-/// Both halves of that premise are load-bearing, and the `FreshOnly`
-/// result is not attributable to either one alone: a generic kind WITH a
-/// placeholder-free template offers `FallbackTemplate` instead, which is
-/// what [`a_generic_wrapper_with_a_template_falls_back_through_the_wrapper`]
-/// pins. What this test is about is the missing KIND — the template is
-/// omitted only so that nothing else can be producing the outcome.
+/// What this test is about is the missing KIND — the template is omitted
+/// only so that nothing else can be producing the outcome.
 ///
 /// The missing kind is the failure a user hits when they build a wrapper
 /// profile and forget it, and it is silent: the session launches, the
-/// agent runs, records get written, and the only symptom is a restart that
-/// can only be fresh. Kind derivation reads the invocation's FIRST word,
+/// agent runs, records get written, and the only symptom is that Restart
+/// is unavailable. Kind derivation reads the invocation's FIRST word,
 /// and for a wrapper that word is the wrapper — so `generic` is the
 /// correct answer here and the profile has to say otherwise itself.
 #[farhelm_testtrace::test]
@@ -941,7 +722,7 @@ async fn a_generic_wrapper_profile_gets_no_resume_offer() {
     );
     assert_eq!(
         snapshot.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly,
-        "a wrapper profile that never declared its kind can only ever be restarted fresh"
+        farhelm_proto::RestartOffer::NoConversationReporting,
+        "a wrapper profile that never declared its kind has nothing to resume"
     );
 }

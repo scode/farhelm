@@ -174,7 +174,7 @@ fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
 #[farhelm_testtrace::test]
 async fn the_agent_window_keeps_its_marker_across_a_restart_in_place() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = resumable_basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let agent_marker = |rows: &[String]| -> Option<String> {
@@ -192,7 +192,7 @@ async fn the_agent_window_keeps_its_marker_across_a_restart_in_place() {
     );
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart");
     assert_eq!(
