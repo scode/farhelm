@@ -121,11 +121,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Uninstall Farhelm from remote hosts.** `farhelm uninstall` only removes Farhelm from the Mac it runs on, and nothing
   removes it from a remote host: the docs' "Uninstall Farhelm" page tells users to stop the host's sessions and then run
   `systemctl` and `rm` by hand on the host. Add a supported way to uninstall from a remote host, and replace those
-  manual steps in the docs with it.
+  manual steps in the docs with it. Plan: `plans/queue/remote-uninstall.md`.
 
 - **Remove the add-host dialog's two optional fields.** The add host dialog's **remote farhelm (optional)** and **remote
   state dir (optional)** fields go. Nobody adding a host will know what to put in them, even the maintainer is unsure
-  what they are for, and they are not a tested part of the UI.
+  what they are for, and they are not a tested part of the UI. Plan: `plans/queue/trim-add-host-dialog.md`.
 
 ## Doc todo
 
