@@ -191,7 +191,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_39` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_40` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -202,7 +202,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 39;
+pub const PROTOCOL_VERSION: u32 = 40;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1438,12 +1438,12 @@ pub const UPLOAD_ABORT_REASON_STALLED: &str = "transfer stopped making progress 
 ///
 /// ## The two creating verbs, and why they take a host NAME
 ///
-/// `Create` and `Clone` both carry `host: Option<String>` so malformed old
-/// wire shapes remain decodable and can receive a correlated refusal.
-/// Protocol 20 requires `Some(name)`, naming a host by the display NAME
-/// [`AgentHost::name`] reports. The listing also exposes the stable host ID
-/// so duplicate names remain distinct, but acting commands accept names
-/// only and refuse ambiguity.
+/// `Create` and `Clone` both carry `host: Option<String>`, naming a host by
+/// the display NAME [`AgentHost::name`] reports. `Clone` requires it (an
+/// absent one is decoded only to be refused); `Create` may leave it to a
+/// template that sets the host, and a spawn never names one (protocol 40).
+/// The listing also exposes the stable host ID so duplicate names remain
+/// distinct, but acting commands accept names only and refuse ambiguity.
 ///
 /// That widening is the point of routing creates through the helm at all.
 /// A supervisor-local implementation could create on the asking session's
@@ -1479,6 +1479,11 @@ pub enum AgentVerb {
     /// for a page walk, and the honest shape when the fleet outgrows one
     /// answer is a filter on this verb rather than paging state.
     Sessions {},
+    /// Every launch template the helm holds, by name, with the fields each
+    /// sets. Answered with [`AgentReply::Templates`], which withholds the
+    /// text of a command line or resume command (SPEC.md: "listed as set
+    /// without their text").
+    Templates {},
     /// Change a session's title — SPEC.md's rename verb, reached through
     /// the same routing and recording the REST `/rename` route uses.
     /// Answered with [`AgentReply::Session`], the session's freshly
@@ -1520,40 +1525,45 @@ pub enum AgentVerb {
         /// stopped without it (protocol 34).
         stop_if_running: bool,
     },
-    /// Create a session on any host in the fleet — SPEC.md's creation verb
-    /// reached from inside a session. Answered with [`AgentReply::Created`].
+    /// Create a session — SPEC.md's creation verb reached from inside a
+    /// session, for `farhelm agent create` and for `farhelm spawn` with
+    /// launch flags. Answered with [`AgentReply::Created`].
     ///
-    /// What to run is `launch`, which is required: an absent one is refused
-    /// rather than filled from a remembered default. It is a
-    /// [`LaunchRequest`], never a composed launch: for an agent type the
-    /// helm composes the commands exactly as it does for the launcher, and
-    /// a command launch is checked with [`CommandLaunch::validate`] before
-    /// a target is chosen.
+    /// The request is the launcher's edits rather than a launch: the named
+    /// `templates` are applied first, in order, and `edits` (the command
+    /// line's flags) after them as one more template, exactly as
+    /// `farhelm_proto::launcher::apply_templates` applies them in the GUI.
+    /// The HELM resolves the result, because it owns the templates and
+    /// composes agent launches; nothing here is checked against a launch
+    /// until then, and no remembered GUI default fills a field the
+    /// templates and flags left empty (protocol 40).
     Create {
-        /// The target host's display NAME. `None` is retained only so an old
-        /// wire shape can be decoded and refused.
+        /// The target host's display NAME. `None` when a template names the
+        /// host, and always for a spawn, which targets the asking session's
+        /// own host.
         host: Option<String>,
-        /// Required: SPEC.md's creation contract has no default working
-        /// directory, and inheriting the asking session's would make
-        /// `create` a silent `clone`.
-        cwd: String,
-        /// What the new session runs. Required; `None` is decoded only so it
-        /// can be refused with a message.
-        launch: Option<LaunchRequest>,
-        /// Optional display title; absent lets the target host derive one
-        /// from the directory exactly as an interactive create does.
-        title: Option<String>,
-        /// The create's idempotency key, forwarded to the target
-        /// supervisor unchanged: a retry under the same key returns the
-        /// session the first attempt made rather than a second one.
+        /// Template names, applied in order before `edits`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        templates: Vec<String>,
+        /// The flags, as the launcher fields they set: `--cwd` is the
+        /// destination folder and `--title` the session's name.
+        #[serde(default)]
+        edits: crate::launcher::TemplateFields,
+        /// The create's idempotency key. The helm binds it to the launch
+        /// its first accepted request resolved to, so a retry under the
+        /// same key returns that session even after a template edit.
         intent_key: Option<String>,
         /// Start a YOLO launch even though the target host asks before YOLO launches.
         /// Without it the helm refuses such a launch; an agent passes it only with the
-        /// user's explicit approval (the agent instructions say so). Changes what the helm
-        /// does, hence protocol version 32. Serialized only when true, so a request without
-        /// the override keeps its earlier wire shape.
+        /// user's explicit approval (the agent instructions say so). Serialized only when
+        /// true, so a request without the override keeps its wire shape.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
+        /// Present for `farhelm spawn`: create on the asking session's own
+        /// host, recording `parent`. Such a request names no host and
+        /// applies no template that sets one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spawn: Option<SpawnPlacement>,
     },
     /// Create a copy of an explicitly named session on an explicitly named
     /// host — same working directory, title, and agent unless overridden —
@@ -1605,7 +1615,7 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} => false,
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -1617,6 +1627,55 @@ impl AgentVerb {
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. } => true,
+        }
+    }
+}
+
+/// Where a `farhelm spawn` create lands: the asking session's own host,
+/// with an optional organizational parent (SPEC.md: "Parent tracking is not
+/// comprehensive"; it never defaults to the asking session).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnPlacement {
+    pub parent: Option<String>,
+}
+
+/// One launch template as an agent sees it: what [`AgentVerb::Templates`]
+/// lists.
+///
+/// `fields` is the template as stored except for the two command texts,
+/// which a listing never carries: a template's command line can be run by
+/// every host the helm manages, and SPEC.md lists it only as set. A command
+/// or resume command the template sets shows up as the matching `sets_*`
+/// flag instead; a resume command the template explicitly clears carries no
+/// text and stays in `fields` as `null`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentTemplate {
+    pub name: String,
+    pub fields: crate::launcher::TemplateFields,
+    pub sets_command: bool,
+    pub sets_resume_command: bool,
+    /// The display name of the host a template's `host` (an install
+    /// identity) currently names, or `None` when it sets no host or no
+    /// host here has that install.
+    pub host_name: Option<String>,
+}
+
+impl AgentTemplate {
+    /// The listing form of `template`: its command texts withheld.
+    pub fn listed(template: &crate::launcher::LaunchTemplate, host_name: Option<String>) -> Self {
+        let mut fields = template.fields.clone();
+        let sets_command = fields.command.take().is_some();
+        let sets_resume_command = matches!(fields.resume_command, Some(Some(_)));
+        if sets_resume_command {
+            fields.resume_command = None;
+        }
+        AgentTemplate {
+            name: template.name.clone(),
+            fields,
+            sets_command,
+            sets_resume_command,
+            host_name,
         }
     }
 }
@@ -1675,6 +1734,12 @@ pub enum AgentReply {
         /// The verb promises the fleet; this is how it admits when it did
         /// not deliver it.
         truncated: bool,
+    },
+    /// Answers `Templates`, in name order.
+    Templates {
+        templates: Vec<AgentTemplate>,
+        /// Stable host identity of the authenticated asking session.
+        caller_host_id: String,
     },
     /// Answers `Rename` with the one freshly recomputed session row.
     Session { session: AgentSession },
@@ -2084,13 +2149,20 @@ pub enum ControlMsg {
         /// an older UI build) that never learned this field exists, so
         /// its mere addition does not newly expose them to anything.
         intent_key: Option<String>,
-        /// For a spawned child whose launch the attached helm resolves: start it even if
-        /// it is a YOLO launch and this host asks before YOLO launches. Protocol 32. No
-        /// spawn form resolves through the helm since profiles were removed (protocol 38),
-        /// so it is ignored for now; the agent CLI's launch flags will use it again. Every
-        /// other create is checked by the helm before it is sent.
+        /// Unused. Protocol 32 added it for a spawn whose launch the helm resolved on
+        /// the supervisor's behalf; since protocol 40 a spawn with launch flags is an
+        /// agent `create` the helm resolves and checks itself (its own `confirm_yolo`),
+        /// and an inherited spawn is never asked. Every receiver ignores it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
+        /// Set by the helm for a `farhelm spawn` it creates on the asking session's own
+        /// host (protocol 40): the intent key is then spent only while the child
+        /// exists, the lifetime a spawn's key has when the session's own supervisor
+        /// answers it (SPEC.md, Agent-spawned sessions). Honored only from the helm's
+        /// full-authority connection; it can only narrow a key's lifetime, never widen
+        /// it. Serialized only when true.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        key_lives_with_session: bool,
         /// An owned fresh GitHub checkout this create must perform before
         /// launching: which repository to clone, where, and what runs after
         /// the clone. Absent (`None`) is the entire pre-checkout behavior, and
@@ -4089,6 +4161,7 @@ mod tests {
             intent_key: None,
             confirm_yolo: false,
             github_checkout: Some(resolved.clone()),
+            key_lives_with_session: false,
         };
         let decoded: ControlMsg =
             serde_json::from_value(serde_json::to_value(&with_payload).unwrap()).unwrap();
@@ -4160,8 +4233,46 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_39() {
-        assert_eq!(PROTOCOL_VERSION, 39);
+    fn protocol_version_is_pinned_at_40() {
+        assert_eq!(PROTOCOL_VERSION, 40);
+    }
+
+    /// Spec: a listed template carries every field it sets except the text
+    /// of a command line or resume command, which it reports only as set; a
+    /// resume command the template clears (`null`, no text) stays listed.
+    ///
+    /// Why: SPEC.md lists templates to agents "with their values except a
+    /// command line or resume command"; a template's command can run on
+    /// every host the helm manages, and the listing is the one place an
+    /// agent reads a template, so the text must not leak through it.
+    #[farhelm_testtrace::test]
+    fn a_listed_template_withholds_its_command_texts() {
+        let template = crate::launcher::LaunchTemplate {
+            name: "runner".to_string(),
+            fields: crate::launcher::TemplateFields {
+                kind: Some(crate::launcher::LauncherKind::Command),
+                command: Some("secret-tool --token x".to_string()),
+                resume_command: Some(Some("secret-tool --resume {conversation}".to_string())),
+                yolo: Some(false),
+                ..Default::default()
+            },
+        };
+        let listed = AgentTemplate::listed(&template, None);
+        assert!(listed.sets_command && listed.sets_resume_command);
+        let json = serde_json::to_string(&listed).unwrap();
+        assert!(!json.contains("secret-tool"), "{json}");
+        assert_eq!(listed.fields.yolo, Some(false));
+
+        let cleared = crate::launcher::LaunchTemplate {
+            name: "no-resume".to_string(),
+            fields: crate::launcher::TemplateFields {
+                resume_command: Some(None),
+                ..Default::default()
+            },
+        };
+        let listed = AgentTemplate::listed(&cleared, None);
+        assert!(!listed.sets_command && !listed.sets_resume_command);
+        assert_eq!(listed.fields.resume_command, Some(None));
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -5554,6 +5665,7 @@ mod tests {
             intent_key: Some("intent-abc".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5609,6 +5721,7 @@ mod tests {
             intent_key: Some("intent-abc".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5658,6 +5771,7 @@ mod tests {
             intent_key: Some("spawn-copy".to_string()),
             confirm_yolo: false,
             github_checkout: None,
+            key_lives_with_session: false,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5708,6 +5822,7 @@ mod tests {
                 intent_key: None,
                 confirm_yolo: false,
                 github_checkout: None,
+                key_lives_with_session: false,
             };
             let json = serde_json::to_value(&msg).unwrap();
             let decoded: ControlMsg = serde_json::from_value(json)
@@ -7251,16 +7366,18 @@ mod tests {
             session_id: "s1".to_string(),
             request: AgentVerb::Create {
                 host: Some("builder".to_string()),
-                cwd: "/srv/work".to_string(),
-                launch: Some(LaunchRequest::Command(CommandLaunch {
-                    command: "claude {farhelm_args}".to_string(),
-                    yolo: false,
-                    agent: Some(LaunchHarness::Claude),
-                    resume: None,
-                })),
-                title: Some("a title".to_string()),
+                templates: vec!["my-codex".to_string()],
+                edits: crate::launcher::TemplateFields {
+                    model: Some(Some("gpt-6-luna".to_string())),
+                    destination: Some(crate::launcher::TemplateDestination::Folder(
+                        "/srv/work".to_string(),
+                    )),
+                    name: Some("a title".to_string()),
+                    ..Default::default()
+                },
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
+                spawn: None,
             },
         };
         assert_eq!(create.request_req_id(), Some(9));
@@ -7274,47 +7391,51 @@ mod tests {
                 "request": {
                     "verb": "create",
                     "host": "builder",
-                    "cwd": "/srv/work",
-                    "launch": {
-                        "kind": "command",
-                        "command": "claude {farhelm_args}",
-                        "yolo": false,
-                        "agent": "claude",
-                        "resume": null,
+                    "templates": ["my-codex"],
+                    "edits": {
+                        "model": "gpt-6-luna",
+                        "destination": {"folder": "/srv/work"},
+                        "name": "a title",
                     },
-                    "title": "a title",
                     "intent_key": "key-1",
                 },
             })
         );
 
-        // The old omitted-selector shape remains decodable so both
-        // authoritative boundaries can return a correlated refusal.
-        let bare_create = ControlMsg::AgentRequest {
+        // A spawn names no host and carries its placement; a request with
+        // no templates leaves the key out.
+        let spawn = ControlMsg::AgentRequest {
             req_id: 10,
             session_id: "s1".to_string(),
             request: AgentVerb::Create {
-                host: Some("builder".to_string()),
-                cwd: "/srv/work".to_string(),
-                launch: None,
-                title: None,
+                host: None,
+                templates: Vec::new(),
+                edits: crate::launcher::TemplateFields {
+                    kind: Some(crate::launcher::LauncherKind::Command),
+                    command: Some("sh".to_string()),
+                    yolo: Some(false),
+                    ..Default::default()
+                },
                 intent_key: None,
-                confirm_yolo: false,
+                confirm_yolo: true,
+                spawn: Some(SpawnPlacement {
+                    parent: Some("fh-parent".to_string()),
+                }),
             },
         };
         assert_eq!(
-            serde_json::to_value(&bare_create).unwrap(),
+            serde_json::to_value(&spawn).unwrap(),
             serde_json::json!({
                 "type": "agent_request",
                 "req_id": 10,
                 "session_id": "s1",
                 "request": {
                     "verb": "create",
-                    "host": "builder",
-                    "cwd": "/srv/work",
-                    "launch": null,
-                    "title": null,
+                    "host": null,
+                    "edits": {"kind": "command", "command": "sh", "yolo": false},
                     "intent_key": null,
+                    "confirm_yolo": true,
+                    "spawn": {"parent": "fh-parent"},
                 },
             })
         );

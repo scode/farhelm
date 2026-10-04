@@ -88,6 +88,7 @@
 
 use std::sync::{Arc, Weak};
 
+use anyhow::Context as _;
 use async_trait::async_trait;
 use farhelm_proto::{
     AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, SessionStatus,
@@ -331,23 +332,26 @@ impl AgentRequestHandler for HelmAgentRequests {
                         agent_restarted_reply(&state, &claim, info, origin.host, session_id)
                     })
             }
+            AgentVerb::Templates {} => template_listing(&state, origin.host).await,
             AgentVerb::Create {
                 host,
-                cwd,
-                launch,
-                title,
+                templates,
+                edits,
                 intent_key,
                 confirm_yolo,
+                spawn,
             } => {
                 create_for_agent(
                     &state,
                     origin,
                     session_id,
                     CreateRequest {
-                        host: host.expect("validated"),
-                        cwd,
-                        launch: launch.expect("validated"),
-                        title,
+                        edits: LaunchEditsRequest {
+                            host,
+                            templates,
+                            edits,
+                            spawn,
+                        },
                         intent_key,
                         confirm_yolo,
                     },
@@ -585,13 +589,11 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
         AgentVerb::Stop { session_id } | AgentVerb::Restart { session_id, .. } => {
             required(session_id.as_deref(), "--session")
         }
-        AgentVerb::Create {
-            host, cwd, launch, ..
-        } => {
-            required(host.as_deref(), "--host")?;
-            required(Some(cwd), "--cwd")?;
-            if launch.is_none() {
-                return Err("--command is required".to_string());
+        // Everything else a create needs may come from a template, so only
+        // the helm's resolution can tell what is missing (`agent_launch`).
+        AgentVerb::Create { host, .. } => {
+            if host.as_deref() == Some("") {
+                return Err("--host must not be empty".to_string());
             }
             Ok(())
         }
@@ -614,7 +616,7 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Hosts {} | AgentVerb::Sessions {} => Ok(()),
+        AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
     }
 }
 
@@ -683,22 +685,51 @@ fn escape_for_log(id: &str) -> String {
 
 /// One `create` verb's fields, moved out of [`AgentVerb`] so the handler
 /// arm stays a dispatch and the policy lives in [`create_for_agent`].
-///
-/// A struct rather than positional parameters because three of them are
-/// strings and two more `Option<String>`: a call site that transposed `cwd`
-/// and `invocation`, or `title` and `intent_key`, would compile and be wrong.
 struct CreateRequest {
-    host: String,
-    cwd: String,
-    /// What the agent asked to run: an agent type and its choices, which
-    /// this helm composes exactly as for the launcher, or a command launch.
-    launch: farhelm_proto::LaunchRequest,
-    title: Option<String>,
+    edits: LaunchEditsRequest,
     intent_key: Option<String>,
     confirm_yolo: bool,
 }
 
-/// One `clone` verb's fields. See [`CreateRequest`] for why it is a struct.
+/// What an agent's create asked for, as it asked: the part a keyed retry
+/// must repeat exactly to be bound to the first attempt's resolution
+/// (`store`'s `AGENT_CREATE_BINDINGS_SCHEMA`). The YOLO override is not
+/// part of it, because a retry adding `--confirm-yolo` after the helm asked
+/// for it is the same request answered.
+#[derive(serde::Serialize)]
+struct LaunchEditsRequest {
+    host: Option<String>,
+    templates: Vec<String>,
+    edits: farhelm_proto::launcher::TemplateFields,
+    spawn: Option<farhelm_proto::SpawnPlacement>,
+}
+
+impl LaunchEditsRequest {
+    /// The digest a binding is matched by.
+    fn digest(&self) -> anyhow::Result<String> {
+        use sha2::Digest as _;
+        let json = serde_json::to_vec(self).context("encoding the create request")?;
+        Ok(sha2::Sha256::digest(&json)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
+    }
+}
+
+/// A keyed create's resolution as the helm stores it: the host chosen (with
+/// the registry's name for it when it was chosen, for the audit line) and
+/// what the templates and flags resolved to.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredResolution {
+    host: HostId,
+    host_name: String,
+    resolution: crate::agent_launch::Resolution,
+}
+
+/// One `clone` verb's fields, moved out of [`AgentVerb`] so the handler arm
+/// stays a dispatch. A struct rather than positional parameters because
+/// several are `Option<String>`: a call site that transposed `cwd` and
+/// `title` would compile and be wrong.
 struct CloneRequest {
     source_session_id: String,
     host: String,
@@ -902,20 +933,46 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
     })
 }
 
-/// `create`: one session on an explicitly named host, from the launch the
-/// agent supplied: a command launch as it wrote it, or an agent type and its
-/// choices for the helm to compose.
+/// `create`: one session from the templates and flags an agent named
+/// (`farhelm agent create`, or `farhelm spawn` with launch flags).
 ///
-/// A missing command is refused by `validate_authoritative_verb` before this
-/// runs: an agent request never consults the interactive create dialog's
-/// remembered settings, so there is nothing to fall back on.
+/// The templates and flags are resolved here (`agent_launch::resolve`), on
+/// an empty launcher: an agent request never consults the create dialog's
+/// remembered settings, so a field nothing set is a refusal naming its flag.
+///
+/// ## Which host
+///
+/// A spawn creates on the asking session's own host, the one its request
+/// arrived from. Its parent, when it names one, must be the asking session,
+/// the rule the supervisor applies to `farhelm spawn --inherit-agent`; the
+/// relay already holds the asking session's delete fence for the whole
+/// request, so the parent cannot be deleted under the create. Its key is
+/// marked to live only as long as the child, as a spawn's key does when the
+/// session's own supervisor answers it. Otherwise an explicit `--host` name
+/// wins; failing that, the install a template named; failing both, the
+/// create is refused, since SPEC.md's creation contract has no default host.
 ///
 /// ## What a keyed retry is bound to
 ///
-/// The supervisor fingerprints the launch it is sent, so a different
-/// launch under one key (another command, YOLO answer, agent type or resume
-/// command) produces the ordinary idempotency conflict rather than a
-/// replay.
+/// The first accepted request's resolution (SPEC.md: "a retry with the same
+/// key returns that session even if a template has been edited since"). The
+/// resolution is stored before dispatch under the asker-scoped key and the
+/// request's digest; a retry repeating the request reuses it, so the
+/// supervisor sees the same launch and replays the session. Two attempts
+/// racing on one key both end up dispatching whichever resolution was
+/// stored first. A different request under the same key is resolved afresh,
+/// and the supervisor's fingerprint answers it with the ordinary idempotency
+/// conflict unless it resolves to the same launch.
+///
+/// A binding this attempt wrote is removed again when no supervisor holds
+/// the key's outcome, so a retry after fixing the cause re-reads the
+/// templates: a refusal the helm made before sending (the YOLO
+/// confirmation, an unconnected host), and a supervisor's refusal of a
+/// spawn, whose session-lifetime key the supervisor does not keep for a
+/// refusal. A supervisor's refusal of an ordinary keyed create is recorded
+/// against the key and replayed by the supervisor, so the binding stays and
+/// the retry gets that refusal back rather than a key conflict; an
+/// outcome-unknown failure keeps it too, because the session may exist.
 ///
 /// ## What this function does NOT decide
 ///
@@ -924,70 +981,242 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
 /// [`AgentOutcome::Err`] like every other create precondition — this side
 /// never stats a path on another machine, and could not.
 ///
-/// The INSTALLATION behind the host. `resolve_host` answers with the
-/// registry's durable [`HostId`], and `sessions::host_client` takes the
-/// connection currently published for that row — exactly what the lifecycle
-/// verbs do through `route_session`, and exactly what the REST create does
-/// through `create_target`. A row retargeted or adopted between the two
-/// reads sends the create to the new installation, and nothing here pins an
-/// incarnation to prevent that. The claim is what makes it safe rather than
-/// silent: every write below revalidates against the connection the create
-/// was actually sent on, so the create either lands on one coherent
-/// installation or fails. Pinning an incarnation for these two verbs alone
-/// would give the agent surface a stricter contract than the UI's own
-/// create, which is not a difference this feature should invent.
+/// The INSTALLATION behind the host. The host is the registry's durable
+/// [`HostId`], and `sessions::host_client` takes the connection currently
+/// published for that row — exactly what the lifecycle verbs do through
+/// `route_session`, and exactly what the REST create does through
+/// `create_target`. A row retargeted or adopted between the two reads sends
+/// the create to the new installation, and nothing here pins an incarnation
+/// to prevent that. The claim is what makes it safe rather than silent:
+/// every write below revalidates against the connection the create was
+/// actually sent on, so the create either lands on one coherent installation
+/// or fails.
 async fn create_for_agent(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
     request: CreateRequest,
 ) -> anyhow::Result<AgentReply> {
-    let mode = crate::sessions::resolve_launch_request(request.launch)?;
-    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    let CreateRequest {
+        edits,
+        intent_key,
+        confirm_yolo,
+    } = request;
+    let spawned = edits.spawn.is_some();
+    let parent = edits.spawn.as_ref().and_then(|spawn| spawn.parent.clone());
+    if let Some(parent) = &parent
+        && parent != asking_session
+    {
+        return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unauthorized,
+            message: format!(
+                "a session-authenticated peer may name only itself ({}) as parent",
+                escape_for_log(asking_session)
+            ),
+        }));
+    }
+    let intent_key = asker_scoped_intent_key(asking_session, intent_key);
+    let digest = edits.digest()?;
+    let stored_binding = |key: String| {
+        let digest = digest.clone();
+        async move {
+            state
+                .store
+                .agent_create_binding(key, digest)
+                .await?
+                .map(|json| {
+                    serde_json::from_str::<StoredResolution>(&json)
+                        .context("reading a stored agent create resolution")
+                })
+                .transpose()
+        }
+    };
+    let existing = match &intent_key {
+        Some(key) => stored_binding(key.clone()).await?,
+        None => None,
+    };
+    let (stored, bound_here) = match existing {
+        Some(stored) => (stored, false),
+        None => {
+            let fresh = resolve_agent_create(state, origin, &edits).await?;
+            match &intent_key {
+                Some(key) => {
+                    let wrote = state
+                        .store
+                        .bind_agent_create(
+                            key.clone(),
+                            asking_session.to_string(),
+                            digest.clone(),
+                            serde_json::to_string(&fresh)
+                                .context("encoding an agent create resolution")?,
+                        )
+                        .await?;
+                    if wrote {
+                        (fresh, true)
+                    } else {
+                        // Another attempt under this key stored its
+                        // resolution first; send that one, so both attempts
+                        // present the supervisor the same launch.
+                        (stored_binding(key.clone()).await?.unwrap_or(fresh), false)
+                    }
+                }
+                None => (fresh, false),
+            }
+        }
+    };
+    let result = dispatch_agent_create(
+        state,
+        origin,
+        asking_session,
+        &stored,
+        AgentCreateDispatch {
+            intent_key: intent_key.clone(),
+            confirm_yolo,
+            parent,
+            spawned,
+        },
+    )
+    .await;
+    if let (Err(error), true, Some(key)) = (&result, bound_here, intent_key)
+        && no_supervisor_holds_the_outcome(error, spawned)
+        && let Err(unbind) = state.store.unbind_agent_create(key).await
+    {
+        // The refusal is what the caller needs; a binding left behind only
+        // pins this attempt's resolution for a retry.
+        tracing::warn!(error = %format!("{unbind:#}"), "could not remove an agent create binding");
+    }
+    result
+}
+
+/// Whether a failed agent create left no outcome behind that a supervisor
+/// would replay for the same key; see [`create_for_agent`]'s binding rule.
+fn no_supervisor_holds_the_outcome(error: &anyhow::Error, spawned: bool) -> bool {
+    use crate::SupervisorTransportError as Lost;
+    if matches!(
+        crate::find_cause::<Lost>(error),
+        Some(Lost::SentUnanswered | Lost::SentWrongReply { .. } | Lost::SentInvalidReply { .. })
+    ) {
+        return false;
+    }
+    let refused_by_target = crate::find_cause::<crate::SupervisorError>(error)
+        .is_some_and(|refusal| refusal.origin == crate::client::ErrorOrigin::SupervisorReply);
+    !refused_by_target || spawned
+}
+
+/// Resolve an agent's create request to a host and a launch; see
+/// [`create_for_agent`] for the host rule.
+async fn resolve_agent_create(
+    state: &AppState,
+    origin: AgentOrigin,
+    edits: &LaunchEditsRequest,
+) -> anyhow::Result<StoredResolution> {
+    let views = crate::hosts::host_views(state).await?;
+    let templates = state.store.launch_templates().await?;
+    let resolution = crate::agent_launch::resolve(
+        &templates,
+        &edits.templates,
+        &edits.edits,
+        &crate::agent_launch::template_host_identities(&views),
+        edits.spawn.is_some(),
+        edits.host.is_some(),
+    )?;
+    let (host, host_name) = if edits.spawn.is_some() {
+        if edits.host.is_some() {
+            return Err(crate::sessions::invalid_request(
+                "farhelm spawn always creates on its own host and takes no --host".to_string(),
+            ));
+        }
+        let name = views
+            .iter()
+            .find(|view| view.id == origin.host)
+            .map(|view| view.name.clone())
+            .unwrap_or_default();
+        (origin.host, name)
+    } else if let Some(name) = edits.host.clone() {
+        resolve_host(state, origin, name).await?
+    } else if let Some(identity) = &resolution.template_host {
+        // `agent_launch::resolve` accepted this identity against the same
+        // rows, so a miss here is a defect rather than a stale template.
+        let view = crate::agent_launch::template_host_row(&views, identity).ok_or_else(|| {
+            anyhow::anyhow!("a template's host matched no host row it was checked against")
+        })?;
+        (view.id, view.name.clone())
+    } else {
+        return Err(crate::sessions::invalid_request(
+            "--host is required unless a template sets the host".to_string(),
+        ));
+    };
+    Ok(StoredResolution {
+        host,
+        host_name,
+        resolution,
+    })
+}
+
+/// The per-attempt inputs of an agent create's dispatch, beside the
+/// resolution it may share with an earlier attempt.
+struct AgentCreateDispatch {
+    intent_key: Option<String>,
+    confirm_yolo: bool,
+    parent: Option<String>,
+    spawned: bool,
+}
+
+/// Send one resolved agent create to its host.
+async fn dispatch_agent_create(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    stored: &StoredResolution,
+    dispatch: AgentCreateDispatch,
+) -> anyhow::Result<AgentReply> {
     // The claim and the client come from ONE read, which is what lets every
     // write the create goes on to make revalidate against the connection it
     // was actually sent on (see `sessions::host_client`).
-    let (claim, client) = crate::sessions::host_client(state, host)?;
+    let (claim, client) = crate::sessions::host_client(state, stored.host)?;
+    let host_name = stored.host_name.as_str();
     // The same paper trail [`resolve_target`] leaves for the lifecycle
-    // verbs, and the values are safe for the same reasons: the supervisor
-    // validated `asking_session` before forwarding, and `host_name` is the
-    // REGISTRY's own rendering of the matched row rather than the string
-    // the request carried — `resolve_host` returns the view's name, not the
-    // caller's, so nothing attacker-chosen reaches this line.
+    // verbs. `host_name` is the REGISTRY's own rendering of the matched row
+    // rather than the string the request carried, so nothing
+    // attacker-chosen reaches this line.
     info!(
         asking = asking_session,
-        host = host_name.as_str(),
+        host = host_name,
         verb = "create",
         "an agent is creating a session"
     );
+    let resolution = stored.resolution.clone();
     let session = on_host(
         crate::sessions::do_create_session(
             state,
             &claim,
             &client,
             crate::sessions::CreateSpec {
-                cwd: request.cwd,
-                mode,
-                title: request.title,
+                cwd: resolution.cwd,
+                mode: resolution.launch,
+                title: resolution.title,
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
-                intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
+                intent_key: dispatch.intent_key,
                 // Agent creates never carry a fresh-checkout payload: the
-                // composer's gh: flow is a user-dialog concern.
+                // CLI refuses a template that names one.
                 github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
-                // `create` names a directory and an agent rather than a
+                // `create` names a directory and a launch rather than a
                 // session, so no answer of the target's is forbidden — a
                 // keyed replay is the caller's own earlier create coming
                 // back, which is what the key is for. Contrast
                 // `clone_for_agent`, whose replay can be the ASKING session.
                 accept_result: None,
-                confirm_yolo: request.confirm_yolo,
+                confirm_yolo: dispatch.confirm_yolo,
                 settings_from_source: false,
+                parent: dispatch.parent,
+                spawned: dispatch.spawned,
             },
         )
         .await,
-        &host_name,
+        host_name,
     )?;
     Ok(agent_created_reply(
         state,
@@ -996,6 +1225,27 @@ async fn create_for_agent(
         origin.host,
         asking_session,
     ))
+}
+
+/// `templates`: every template the helm holds, its command texts withheld
+/// (`AgentTemplate::listed`), with the host each one's install identity
+/// currently names.
+async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<AgentReply> {
+    let views = crate::hosts::host_views(state).await?;
+    let templates = state.store.launch_templates().await?;
+    Ok(AgentReply::Templates {
+        templates: templates
+            .iter()
+            .map(|template| {
+                let host_name = template.fields.host.as_deref().and_then(|identity| {
+                    crate::agent_launch::template_host_row(&views, identity)
+                        .map(|view| view.name.clone())
+                });
+                farhelm_proto::AgentTemplate::listed(template, host_name)
+            })
+            .collect(),
+        caller_host_id: caller.to_string(),
+    })
 }
 
 /// `clone`: another session like an explicitly named source, on an
@@ -1123,6 +1373,8 @@ async fn clone_for_agent(
                 })),
                 confirm_yolo: request.confirm_yolo,
                 settings_from_source: false,
+                parent: None,
+                spawned: false,
             },
         )
         .await,
@@ -1461,6 +1713,35 @@ fn status_word(status: &SessionStatus) -> &'static str {
         SessionStatus::Interrupted => "interrupted",
         SessionStatus::Error { .. } => "error",
         SessionStatus::Unknown => "",
+    }
+}
+
+/// A test's `farhelm agent create --command <command> --no-yolo` on a named
+/// host: the create shape most relay tests need, spelled once.
+#[cfg(test)]
+pub(crate) fn command_create(
+    host: &str,
+    cwd: &str,
+    command: &str,
+    title: Option<&str>,
+    intent_key: Option<&str>,
+) -> AgentVerb {
+    AgentVerb::Create {
+        host: Some(host.to_string()),
+        templates: Vec::new(),
+        edits: farhelm_proto::launcher::TemplateFields {
+            kind: Some(farhelm_proto::launcher::LauncherKind::Command),
+            command: Some(command.to_string()),
+            yolo: Some(false),
+            destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                cwd.to_string(),
+            )),
+            name: title.map(str::to_string),
+            ..Default::default()
+        },
+        intent_key: intent_key.map(str::to_string),
+        confirm_yolo: false,
+        spawn: None,
     }
 }
 
@@ -3368,6 +3649,7 @@ mod tests {
         launch: Option<farhelm_proto::SessionLaunch>,
         title: Option<String>,
         intent_key: Option<String>,
+        parent: Option<String>,
     }
 
     /// Script a supervisor that answers every `CreateSession`, recording
@@ -3413,6 +3695,7 @@ mod tests {
                         launch,
                         title,
                         intent_key,
+                        parent,
                         ..
                     } => {
                         recorded.lock().expect("seen mutex").push(SeenCreate {
@@ -3420,6 +3703,7 @@ mod tests {
                             launch: launch.clone(),
                             title: title.clone(),
                             intent_key,
+                            parent,
                         });
                         match refusal.clone() {
                             Some(message) => ControlMsg::Error {
@@ -3495,6 +3779,475 @@ mod tests {
         (h, local, remote)
     }
 
+    /// Store `fields` as the template `name` on `h`'s helm.
+    async fn put_template(
+        h: &Harness,
+        name: &str,
+        fields: farhelm_proto::launcher::TemplateFields,
+    ) {
+        h.state
+            .store
+            .put_launch_template(farhelm_proto::launcher::LaunchTemplate {
+                name: name.to_string(),
+                fields,
+            })
+            .await
+            .expect("store template");
+    }
+
+    /// A command template: `command`, asserted not YOLO, in `/srv/t`.
+    fn command_template(command: &str) -> farhelm_proto::launcher::TemplateFields {
+        farhelm_proto::launcher::TemplateFields {
+            kind: Some(farhelm_proto::launcher::LauncherKind::Command),
+            command: Some(command.to_string()),
+            yolo: Some(false),
+            destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                "/srv/t".to_string(),
+            )),
+            ..Default::default()
+        }
+    }
+
+    /// A create naming only templates (and `key`), with no flags.
+    fn template_create(templates: &[&str], key: Option<&str>) -> AgentVerb {
+        AgentVerb::Create {
+            host: None,
+            templates: templates.iter().map(|name| name.to_string()).collect(),
+            edits: farhelm_proto::launcher::TemplateFields::default(),
+            intent_key: key.map(str::to_string),
+            confirm_yolo: false,
+            spawn: None,
+        }
+    }
+
+    /// Spec: a create naming only a template takes its launch, folder,
+    /// title and host from it: the template's host is matched by install
+    /// identity, and `--cwd`/`--host` may then be omitted.
+    ///
+    /// Why: SPEC.md lets "a flag required by the verb, such as `--cwd` or
+    /// the target host" be omitted when a template sets it; this pins that
+    /// the helm, which owns the templates and the registry, resolves them,
+    /// and that the identity selects the right installation.
+    #[farhelm_testtrace::test]
+    async fn a_template_supplies_the_launch_folder_title_and_host() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        put_template(
+            &h,
+            "builder-shell",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-builder".to_string()),
+                name: Some("from-template".to_string()),
+                ..command_template("sh")
+            },
+        )
+        .await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["builder-shell"], None),
+            )
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1, "the create reached the template's host");
+        assert_eq!(seen[0].cwd, "/srv/t");
+        assert_eq!(seen[0].title.as_deref(), Some("from-template"));
+        assert_eq!(
+            seen[0].launch,
+            Some(farhelm_proto::SessionLaunch::Command(
+                farhelm_proto::CommandLaunch {
+                    command: "sh".to_string(),
+                    yolo: false,
+                    agent: None,
+                    resume: None,
+                }
+            ))
+        );
+    }
+
+    /// Spec: a keyed create's retry under the same key and the same request
+    /// launches what the first attempt resolved to even after the template
+    /// it names was edited, and so does a retry after the target supervisor
+    /// refused the first attempt (it replays its own refusal for the key);
+    /// after a refusal the helm made before sending anything, a retry sees
+    /// the edited template.
+    ///
+    /// Why: SPEC.md binds the key to "the launch the first accepted request
+    /// resolved its templates and flags into", so the supervisor's
+    /// fingerprint matches and it replays the session (or its recorded
+    /// refusal) rather than refusing the retry as a key conflict. A request
+    /// the helm itself refused never reached a supervisor, so nothing holds
+    /// its outcome and its binding must not outlive it.
+    #[farhelm_testtrace::test]
+    async fn a_keyed_retry_keeps_the_first_resolution_unless_the_helm_refused_it() {
+        let launched = |seen: &SeenCreate| match &seen.launch {
+            Some(farhelm_proto::SessionLaunch::Command(command)) => command.command.clone(),
+            other => panic!("a command launch: {other:?}"),
+        };
+        let builder_shell = |command: &str, yolo: bool| farhelm_proto::launcher::TemplateFields {
+            host: Some("identity-builder".to_string()),
+            yolo: Some(yolo),
+            ..command_template(command)
+        };
+        let created = |outcome: &AgentOutcome| {
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            )
+        };
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        put_template(&h, "t", builder_shell("sh", false)).await;
+        let first = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        assert!(
+            created(&first),
+            "premise: the first attempt created: {first:?}"
+        );
+        put_template(&h, "t", builder_shell("bash", false)).await;
+        let retry = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        assert!(created(&retry), "{retry:?}");
+        let other = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("other")),
+            )
+            .await;
+        assert!(created(&other), "{other:?}");
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 3, "{seen:?}");
+        assert_eq!(
+            launched(&seen[1]),
+            "sh",
+            "the retry keeps the first resolution"
+        );
+        assert_eq!(seen[0].intent_key, seen[1].intent_key);
+        assert_eq!(launched(&seen[2]), "bash", "another key resolves afresh");
+
+        // A refusal by the target supervisor keeps the binding.
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, Some("cwd does not exist".to_string()));
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        put_template(&h, "t", builder_shell("sh", false)).await;
+        let first = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        assert!(
+            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("cwd does not exist")),
+            "premise: the target refused the first attempt: {first:?}"
+        );
+        put_template(&h, "t", builder_shell("bash", false)).await;
+        handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(
+            launched(&seen[1]),
+            "sh",
+            "the target holds the key's outcome"
+        );
+
+        // A refusal the helm made before sending removes it: the builder host
+        // asks before YOLO launches, and no confirmation was given.
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        put_template(&h, "t", builder_shell("sh", true)).await;
+        let first = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        assert!(
+            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("--confirm-yolo")),
+            "premise: the helm refused the YOLO launch: {first:?}"
+        );
+        put_template(&h, "t", builder_shell("bash", false)).await;
+        let retry = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["t"], Some("k")),
+            )
+            .await;
+        assert!(created(&retry), "{retry:?}");
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(launched(&seen[0]), "bash", "a helm refusal binds nothing");
+    }
+
+    /// Spec: a failed agent create leaves its binding in place exactly when
+    /// a supervisor may hold the key's outcome: the request went out and
+    /// its answer was lost, or a supervisor refused an ordinary create
+    /// (it records that refusal against the key). A refusal the helm made,
+    /// a request never sent, and a supervisor's refusal of a spawn (whose
+    /// session-lifetime key it does not record) leave none.
+    ///
+    /// Why: a lost reply is the moment a keyed retry exists for, and the
+    /// supervisor-refusal and spawn cases follow the supervisor's own
+    /// reservation rules; a scripted supervisor cannot drop a reply
+    /// mid-request without also dropping the host, so the classifier is
+    /// pinned on the errors themselves.
+    #[farhelm_testtrace::test]
+    fn a_binding_stays_exactly_when_a_supervisor_may_hold_the_outcome() {
+        use crate::SupervisorTransportError as Lost;
+        let target = |kind| {
+            anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::SupervisorReply,
+                kind,
+                message: "refused".to_string(),
+            })
+        };
+        let helm = anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::InvalidRequest,
+            message: "refused".to_string(),
+        });
+        assert!(!no_supervisor_holds_the_outcome(
+            &anyhow::Error::new(Lost::SentUnanswered).context("on host"),
+            false
+        ));
+        assert!(!no_supervisor_holds_the_outcome(
+            &anyhow::Error::new(Lost::SentUnanswered),
+            true
+        ));
+        assert!(!no_supervisor_holds_the_outcome(
+            &target(ErrorKind::InvalidRequest),
+            false
+        ));
+        assert!(no_supervisor_holds_the_outcome(
+            &target(ErrorKind::InvalidRequest),
+            true
+        ));
+        assert!(no_supervisor_holds_the_outcome(&helm, false));
+        assert!(no_supervisor_holds_the_outcome(
+            &anyhow::Error::new(Lost::NotSent),
+            false
+        ));
+    }
+
+    /// Spec: an explicit `--host` wins over a template's host, even one
+    /// naming an install no host has any more, and a create with neither is
+    /// refused naming `--host`.
+    ///
+    /// Why: SPEC.md has explicit flags win over templates, and agents cannot
+    /// edit templates, so a template pinned to a reinstalled host would
+    /// otherwise be unusable from the CLI; the refusal is how an agent
+    /// learns the host is its to name.
+    #[farhelm_testtrace::test]
+    async fn an_explicit_host_wins_over_a_templates_host() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        put_template(
+            &h,
+            "stale",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-gone".to_string()),
+                ..command_template("sh")
+            },
+        )
+        .await;
+        put_template(&h, "plain", command_template("sh")).await;
+        let mut with_host = template_create(&["stale"], None);
+        if let AgentVerb::Create { host, .. } = &mut with_host {
+            *host = Some("user@builder".to_string());
+        }
+        let outcome = handler
+            .handle(origin_of(&h, local), "asker", with_host)
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            seen.lock().expect("seen mutex").len(),
+            1,
+            "it reached --host's host"
+        );
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["plain"], None),
+            )
+            .await;
+        let AgentOutcome::Err { message, .. } = outcome else {
+            panic!("no host anywhere is refused: {outcome:?}");
+        };
+        assert!(message.contains("--host is required"), "{message}");
+    }
+
+    /// Spec: a spawn with launch flags creates on the asking session's own
+    /// host and records the parent it names; a template that sets a host,
+    /// and a parent other than the asking session, are refused for a spawn,
+    /// with nothing sent.
+    ///
+    /// Why: SPEC.md keeps `farhelm spawn` to its own host whichever way its
+    /// launch is described, and the supervisor refuses `--inherit-agent`
+    /// with a foreign parent; a spawn described by flags must get the same
+    /// answers, and the helm is the one creating it here.
+    #[farhelm_testtrace::test]
+    async fn a_spawn_creates_on_its_own_host_with_its_parent() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let spawn = |templates: Vec<String>| AgentVerb::Create {
+            host: None,
+            templates,
+            edits: farhelm_proto::launcher::TemplateFields {
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                    "/srv/child".to_string(),
+                )),
+                ..command_template("sh")
+            },
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement {
+                parent: Some("asker".to_string()),
+            }),
+        };
+        let outcome = handler
+            .handle(origin_of(&h, remote), "asker", spawn(Vec::new()))
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        put_template(
+            &h,
+            "elsewhere",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-local".to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+        let outcome = handler
+            .handle(
+                origin_of(&h, remote),
+                "asker",
+                spawn(vec!["elsewhere".to_string()]),
+            )
+            .await;
+        let AgentOutcome::Err { kind, message } = outcome else {
+            panic!("a host-setting template is refused for a spawn: {outcome:?}");
+        };
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(
+            message.contains("farhelm spawn always creates on its own host"),
+            "{message}"
+        );
+        let mut foreign = spawn(Vec::new());
+        if let AgentVerb::Create { spawn, .. } = &mut foreign {
+            *spawn = Some(farhelm_proto::SpawnPlacement {
+                parent: Some("someone-else".to_string()),
+            });
+        }
+        let outcome = handler
+            .handle(origin_of(&h, remote), "asker", foreign)
+            .await;
+        let AgentOutcome::Err { kind, message } = outcome else {
+            panic!("a foreign parent is refused: {outcome:?}");
+        };
+        assert_eq!(kind, ErrorKind::Unauthorized);
+        assert!(message.contains("may name only itself"), "{message}");
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 1, "only the first spawn was sent: {seen:?}");
+        assert_eq!(seen[0].cwd, "/srv/child");
+        assert_eq!(seen[0].parent.as_deref(), Some("asker"));
+    }
+
+    /// Spec: the templates verb lists every template by name with what it
+    /// sets, withholding command and resume-command text, and names the
+    /// host a template's install identity currently resolves to.
+    ///
+    /// Why: this is an agent's only view of templates (SPEC.md: "listed as
+    /// set without their text"), and the host name is how an agent reads a
+    /// template's identity-valued host field.
+    #[farhelm_testtrace::test]
+    async fn the_templates_listing_withholds_command_text() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        put_template(
+            &h,
+            "builder-shell",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-builder".to_string()),
+                ..command_template("secret-tool --token x")
+            },
+        )
+        .await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(origin_of(&h, local), "asker", AgentVerb::Templates {})
+            .await;
+        let AgentOutcome::Ok {
+            reply: AgentReply::Templates { templates, .. },
+        } = outcome
+        else {
+            panic!("a templates listing: {outcome:?}");
+        };
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "builder-shell");
+        assert!(templates[0].sets_command);
+        assert_eq!(templates[0].host_name.as_deref(), Some("user@builder"));
+        assert!(!format!("{templates:?}").contains("secret-tool"));
+    }
+
     /// Spec: `create --host <name>` naming an unregistered host is
     /// `NotFound`, quoting the name and listing what does exist.
     ///
@@ -3514,21 +4267,7 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                AgentVerb::Create {
-                    host: Some("nowhere".to_string()),
-                    cwd: "/srv/work".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "sh".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: None,
-                    intent_key: None,
-                    confirm_yolo: false,
-                },
+                command_create("nowhere", "/srv/work", "sh", None, None),
             )
             .await;
 
@@ -3578,21 +4317,7 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                AgentVerb::Create {
-                    host: Some("builder-alias".to_string()),
-                    cwd: "/srv/work".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "sh".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: None,
-                    intent_key: None,
-                    confirm_yolo: false,
-                },
+                command_create("builder-alias", "/srv/work", "sh", None, None),
             )
             .await;
         match outcome {
@@ -3656,21 +4381,7 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                AgentVerb::Create {
-                    host: Some("user@builder".to_string()),
-                    cwd: "/srv/work".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "sh".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: None,
-                    intent_key: None,
-                    confirm_yolo: false,
-                },
+                command_create("user@builder", "/srv/work", "sh", None, None),
             )
             .await;
         match outcome {
@@ -3900,21 +4611,7 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                AgentVerb::Create {
-                    host: Some("user@builder".to_string()),
-                    cwd: "/srv/absent".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "claude".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: None,
-                    intent_key: None,
-                    confirm_yolo: false,
-                },
+                command_create("user@builder", "/srv/absent", "claude", None, None),
             )
             .await;
 
@@ -4018,21 +4715,7 @@ mod tests {
                 .handle(
                     origin_of(&h, local),
                     "asker",
-                    AgentVerb::Create {
-                        host: Some("user@builder".to_string()),
-                        cwd: "/srv/work".to_string(),
-                        launch: Some(farhelm_proto::LaunchRequest::Command(
-                            farhelm_proto::CommandLaunch {
-                                command: "agent".to_string(),
-                                yolo: false,
-                                agent: None,
-                                resume: None,
-                            },
-                        )),
-                        title: None,
-                        intent_key: None,
-                        confirm_yolo: false,
-                    },
+                    command_create("user@builder", "/srv/work", "agent", None, None),
                 )
                 .await;
 
@@ -4289,21 +4972,13 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                AgentVerb::Create {
-                    host: Some("user@builder".to_string()),
-                    cwd: "/srv/raw".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "sh -c 'sleep 1'".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: Some("raw one".to_string()),
-                    intent_key: Some("raw-key".to_string()),
-                    confirm_yolo: false,
-                },
+                command_create(
+                    "user@builder",
+                    "/srv/raw",
+                    "sh -c 'sleep 1'",
+                    Some("raw one"),
+                    Some("raw-key"),
+                ),
             )
             .await;
 
@@ -4382,13 +5057,15 @@ mod tests {
         );
     }
 
-    /// A create without a command is refused before target dispatch.
+    /// Spec: a create that names neither an agent type nor a command, and
+    /// applies no template that does, is refused naming `--agent` before
+    /// any target is contacted.
     ///
-    /// This pins the authoritative helm boundary independently of clap. An
-    /// old or malicious client can still send the optional wire field as
-    /// null, and must not make the helm choose an agent on its behalf.
+    /// Why: this pins the authoritative helm boundary independently of
+    /// clap. An agent's create never borrows the GUI's remembered agent
+    /// type (SPEC.md), so the helm must not choose an agent on its behalf.
     #[farhelm_testtrace::test]
-    async fn create_with_no_command_is_refused() {
+    async fn create_with_no_launch_is_refused() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
         let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
@@ -4399,11 +5076,16 @@ mod tests {
                 "asker",
                 AgentVerb::Create {
                     host: Some("user@builder".to_string()),
-                    cwd: "/srv/work".to_string(),
-                    launch: None,
-                    title: None,
+                    templates: Vec::new(),
+                    edits: farhelm_proto::launcher::TemplateFields {
+                        destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                            "/srv/work".to_string(),
+                        )),
+                        ..Default::default()
+                    },
                     intent_key: None,
                     confirm_yolo: false,
+                    spawn: None,
                 },
             )
             .await;
@@ -4412,8 +5094,8 @@ mod tests {
             AgentOutcome::Err { kind, message } => {
                 assert_eq!(kind, ErrorKind::InvalidRequest);
                 assert!(
-                    message.contains("--command is required"),
-                    "the refusal must name the missing command: {message}"
+                    message.contains("--agent is required"),
+                    "the refusal must name what is missing: {message}"
                 );
             }
             other => panic!("expected a refusal, got {other:?}"),

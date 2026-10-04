@@ -301,6 +301,20 @@ pub enum LaunchEffort {
 }
 
 impl LaunchEffort {
+    /// Every effort, in the order the launcher offers them, for places that
+    /// name the whole vocabulary to a person (the CLI's refusal of an
+    /// unknown `--effort`).
+    pub const ALL: [LaunchEffort; 8] = [
+        LaunchEffort::Off,
+        LaunchEffort::Minimal,
+        LaunchEffort::Low,
+        LaunchEffort::Medium,
+        LaunchEffort::High,
+        LaunchEffort::Xhigh,
+        LaunchEffort::Max,
+        LaunchEffort::Ultra,
+    ];
+
     /// Return the spelling accepted by the harness command-line interfaces.
     ///
     /// Serde uses snake case for wire stability, while the CLI spelling is a

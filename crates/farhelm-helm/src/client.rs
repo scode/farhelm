@@ -789,6 +789,13 @@ pub struct CreateExtras {
     /// supervisor's allocation path. The binding's config revision must
     /// match what the helm resolved at preview time.
     pub github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
+    /// The organizational parent a `farhelm spawn` records; see
+    /// `sessions::CreateSpec::parent`.
+    pub parent: Option<String>,
+    /// The create is a `farhelm spawn` on the asking session's own host,
+    /// whose key lives only as long as the child; see
+    /// `ControlMsg::CreateSession::key_lives_with_session`.
+    pub key_lives_with_session: bool,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -2666,7 +2673,7 @@ impl SupervisorClient {
                 req_id,
                 ControlMsg::CreateSession {
                     req_id,
-                    parent: None,
+                    parent: extras.parent,
                     inherit_agent: false,
                     cwd: cwd.to_string(),
                     launch: Some(launch),
@@ -2681,6 +2688,7 @@ impl SupervisorClient {
                     // plus hook); the supervisor re-verdicts it under
                     // directory admission and allocates the checkout.
                     github_checkout: extras.github_checkout,
+                    key_lives_with_session: extras.key_lives_with_session,
                 },
             )
             .await?
@@ -7886,21 +7894,7 @@ mod tests {
                 },
             ),
             (
-                farhelm_proto::AgentVerb::Create {
-                    host: Some("this machine".to_string()),
-                    cwd: "/w".to_string(),
-                    launch: Some(farhelm_proto::LaunchRequest::Command(
-                        farhelm_proto::CommandLaunch {
-                            command: "sh".to_string(),
-                            yolo: false,
-                            agent: None,
-                            resume: None,
-                        },
-                    )),
-                    title: None,
-                    intent_key: None,
-                    confirm_yolo: false,
-                },
+                crate::agent_requests::command_create("this machine", "/w", "sh", None, None),
                 farhelm_proto::AgentReply::Created {
                     session: renamed("created-1"),
                 },

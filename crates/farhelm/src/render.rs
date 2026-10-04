@@ -43,7 +43,7 @@ pub(crate) fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// piece of information that has no other spelling — which row is the
 /// asking session, and which host it is on.
 ///
-/// Only ever called with the reply to `Hosts` or `Sessions` —
+/// Only ever called with the reply to `Hosts`, `Sessions` or `Templates` —
 /// the four lifecycle verbs print their own one-line confirmation instead
 /// (see `main`'s `Rename`/`Stop`/`Restart` arms) and the two creating verbs
 /// print an id on stdout with their confirmation on stderr — which is why
@@ -119,6 +119,17 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             }));
             Ok(aligned(&rows, &[]))
         }
+        AgentReply::Templates { templates, .. } => {
+            let mut rows = vec![vec!["NAME".to_string(), "SETS".to_string()]];
+            rows.extend(
+                templates
+                    .iter()
+                    .map(|template| vec![template.name.clone(), template_sets_cell(template)]),
+            );
+            // NAME is printed whole for the reason the hosts table gives its
+            // own: it is the selector `--template` matches exactly.
+            Ok(aligned(&rows, &[0]))
+        }
         // Refused rather than rendered: a lifecycle or creating reply has
         // one row and no table to be, and printing an empty one would read
         // as an empty fleet. `main` never routes one here — see this
@@ -130,6 +141,94 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         | AgentReply::Created { .. } => {
             anyhow::bail!("only discovery listings are rendered as a table")
         }
+    }
+}
+
+/// A template row's SETS cell: each field the template sets, in the order
+/// a template applies them, with its value, except a command line or resume
+/// command, which is listed as set without its text (SPEC.md).
+///
+/// Values are the spellings the CLI flags take (`--agent codex`,
+/// `--effort high`), so a row reads as the flags it stands for; a field the
+/// template resets is shown as `default`. Free text (a model, host name,
+/// folder, repository or title) is quoted, because the parts are joined
+/// with commas and a title such as `x, yolo` would otherwise read as the
+/// template asserting YOLO.
+pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> String {
+    use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
+    /// The protocol word a value serializes to (`open_code`).
+    fn word(value: serde_json::Result<serde_json::Value>) -> String {
+        match value {
+            Ok(serde_json::Value::String(word)) => word,
+            Ok(other) => other.to_string(),
+            Err(_) => "?".to_string(),
+        }
+    }
+    fn reset<T>(value: &Option<T>, show: impl Fn(&T) -> String) -> String {
+        value.as_ref().map_or_else(|| "default".to_string(), show)
+    }
+    let fields = &template.fields;
+    let mut parts = Vec::new();
+    if let Some(kind) = fields.kind {
+        parts.push(match kind {
+            LauncherKind::Agent => "agent launch".to_string(),
+            LauncherKind::Command => "command launch".to_string(),
+        });
+    }
+    if let Some(agent) = fields.agent {
+        parts.push(format!("agent {}", word(serde_json::to_value(agent))));
+    }
+    if let Some(model) = &fields.model {
+        parts.push(format!("model {}", reset(model, |model| quoted(model))));
+    }
+    if let Some(effort) = &fields.effort {
+        parts.push(format!(
+            "effort {}",
+            reset(effort, |effort| effort.as_cli_arg().to_string())
+        ));
+    }
+    if let Some(permissions) = &fields.permissions {
+        parts.push(format!(
+            "permissions {}",
+            reset(permissions, |permission| permission.wire_word().to_string())
+        ));
+    }
+    if let Some(trust) = &fields.workspace_trust {
+        parts.push(format!("trust {}", reset(trust, bool::to_string)));
+    }
+    if template.sets_command {
+        parts.push("command (set)".to_string());
+    }
+    if let Some(yolo) = fields.yolo {
+        parts.push(if yolo { "yolo" } else { "no-yolo" }.to_string());
+    }
+    if template.sets_resume_command {
+        parts.push("resume command (set)".to_string());
+    } else if fields.resume_command.is_some() {
+        parts.push("resume command default".to_string());
+    }
+    if fields.host.is_some() {
+        parts.push(match &template.host_name {
+            Some(name) => format!("host {}", quoted(name)),
+            None => "host (no longer registered)".to_string(),
+        });
+    }
+    match &fields.destination {
+        Some(TemplateDestination::Folder(folder)) => {
+            parts.push(format!("folder {}", quoted(folder)))
+        }
+        Some(TemplateDestination::Github(repo)) => {
+            parts.push(format!("fresh checkout {}", quoted(repo)))
+        }
+        None => {}
+    }
+    if let Some(name) = &fields.name {
+        parts.push(format!("title {}", quoted(name)));
+    }
+    if parts.is_empty() {
+        "nothing".to_string()
+    } else {
+        parts.join(", ")
     }
 }
 
@@ -391,6 +490,64 @@ fn clamp_to(cell: String, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec: a template's SETS cell lists what it sets in application
+    /// order with the values the flags take, `default` for a reset, the
+    /// command texts only as set, a host that no longer resolves as such,
+    /// and free text quoted; a template setting nothing says so.
+    ///
+    /// Why: this cell is the only place an agent reads what a template will
+    /// do, including its YOLO answer, so a title like `x, yolo` must not
+    /// read as an assertion and a withheld command must not leak (SPEC.md:
+    /// "listed as set without their text").
+    #[farhelm_testtrace::test]
+    fn a_templates_sets_cell_reads_as_its_flags() {
+        use farhelm_proto::launcher::{
+            LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields,
+        };
+        let cell = |fields: TemplateFields, host_name: Option<&str>| {
+            template_sets_cell(&farhelm_proto::AgentTemplate::listed(
+                &LaunchTemplate {
+                    name: "t".to_string(),
+                    fields,
+                },
+                host_name.map(str::to_string),
+            ))
+        };
+        assert_eq!(
+            cell(
+                TemplateFields {
+                    agent: Some(farhelm_proto::LaunchHarness::OpenCode),
+                    model: Some(Some("big".to_string())),
+                    effort: Some(None),
+                    host: Some("identity-gone".to_string()),
+                    name: Some("x, yolo".to_string()),
+                    ..Default::default()
+                },
+                None,
+            ),
+            "agent open_code, model \"big\", effort default, host (no longer registered), \
+             title \"x, yolo\""
+        );
+        let command = cell(
+            TemplateFields {
+                kind: Some(LauncherKind::Command),
+                command: Some("secret --token".to_string()),
+                yolo: Some(false),
+                resume_command: Some(None),
+                host: Some("identity-b".to_string()),
+                destination: Some(TemplateDestination::Github("o/r".to_string())),
+                ..Default::default()
+            },
+            Some("builder"),
+        );
+        assert_eq!(
+            command,
+            "command launch, command (set), no-yolo, resume command default, host \"builder\", \
+             fresh checkout \"o/r\""
+        );
+        assert_eq!(cell(TemplateFields::default(), None), "nothing");
+    }
 
     // ---------------------------------------------------------------
     // `farhelm agent`'s table. The process-level contract lives in

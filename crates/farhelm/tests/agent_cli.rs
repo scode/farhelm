@@ -311,7 +311,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 5,
+            "schema_version": 6,
             "caller": {"session_id": "session-1", "host_id": "host-local"},
             "reply": {
                 "reply": "hosts",
@@ -327,6 +327,82 @@ fn hosts_json_has_the_exact_discovery_envelope() {
             }
         })
     );
+}
+
+/// Spec: `farhelm agent templates --json` sends the `Templates` verb and
+/// prints the versioned envelope with each template's name, its fields
+/// without command text, the `sets_*` flags and the host name; the table
+/// form lists the same template by name with what it sets.
+///
+/// Why: the listing is an agent's only view of templates, read as JSON when
+/// exact names matter; the envelope is a public schema like the hosts one.
+#[farhelm_testtrace::test]
+fn templates_json_and_table_list_what_each_template_sets() {
+    let reply = || {
+        Some(AgentReply::Templates {
+            caller_host_id: "host-local".to_string(),
+            templates: vec![farhelm_proto::AgentTemplate {
+                name: "my-codex".to_string(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    agent: Some(farhelm_proto::LaunchHarness::Codex),
+                    ..Default::default()
+                },
+                sets_command: false,
+                sets_resume_command: false,
+                host_name: None,
+            }],
+        })
+    };
+    let run = |args: &[&str]| {
+        let temp = farhelm_teststate::tempdir().unwrap();
+        let socket = temp.path().join("supervisor.sock");
+        let (done, thread) = mock_supervisor(&socket, move |request| {
+            let ControlMsg::AgentRequest {
+                req_id, request, ..
+            } = request
+            else {
+                panic!("farhelm agent must send an AgentRequest, got {request:?}");
+            };
+            assert_eq!(request, AgentVerb::Templates {});
+            Some(ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Ok {
+                    reply: reply().expect("a reply"),
+                },
+            })
+        });
+        let output = output_with_timeout(agent_command_with_args(&socket, args));
+        finish_server(done, thread);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let value: serde_json::Value =
+        serde_json::from_slice(&run(&["templates", "--json"])).expect("JSON envelope");
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "schema_version": 6,
+            "caller": {"session_id": "session-1", "host_id": "host-local"},
+            "reply": {
+                "reply": "templates",
+                "caller_host_id": "host-local",
+                "templates": [{
+                    "name": "my-codex",
+                    "fields": {"agent": "codex"},
+                    "sets_command": false,
+                    "sets_resume_command": false,
+                    "host_name": null
+                }]
+            }
+        })
+    );
+    let table = String::from_utf8(run(&["templates"])).expect("UTF-8");
+    assert_eq!(table, "NAME     SETS\nmy-codex agent codex\n");
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
@@ -1495,18 +1571,24 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             request,
             AgentVerb::Create {
                 host: Some("builder".to_string()),
-                cwd: "/srv/work".to_string(),
-                launch: Some(farhelm_proto::LaunchRequest::Command(
-                    farhelm_proto::CommandLaunch {
-                        command: "claude --model opus {farhelm_args}".to_string(),
-                        yolo: true,
-                        agent: Some(farhelm_proto::LaunchHarness::Claude),
-                        resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
-                    }
-                )),
-                title: Some("over there".to_string()),
+                templates: Vec::new(),
+                edits: farhelm_proto::launcher::TemplateFields {
+                    kind: Some(farhelm_proto::launcher::LauncherKind::Command),
+                    agent: Some(farhelm_proto::LaunchHarness::Claude),
+                    command: Some("claude --model opus {farhelm_args}".to_string()),
+                    yolo: Some(true),
+                    resume_command: Some(Some(
+                        "claude --resume {conversation} {farhelm_args}".to_string()
+                    )),
+                    destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                        "/srv/work".to_string()
+                    )),
+                    name: Some("over there".to_string()),
+                    ..Default::default()
+                },
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
+                spawn: None,
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -1730,15 +1812,17 @@ fn create_with_the_removed_profile_flag_is_refused_before_anything_is_sent() {
 
 /// Spec: `farhelm agent create --invocation`, replaced by `--command` with
 /// launch kinds, is refused by the CLI itself naming `--command` and the
-/// YOLO assertion; a create that makes no YOLO assertion, or both, or one
-/// twice, is refused naming the flags; and an unknown `--agent` is refused
-/// listing the agent types. Nothing is sent and nothing reaches stdout.
+/// YOLO assertion; a create that makes both YOLO assertions, or one twice,
+/// is refused naming the flags; and an unknown `--agent` is refused listing
+/// the agent types. Nothing is sent and nothing reaches stdout.
 ///
 /// Why: SPEC_impl.md's compatibility rule has a retired spelling refused
 /// with its replacement named, so an agent following older instructions
-/// learns the new form; and the assertion has no default, because Farhelm
-/// believes it and never reads the command to check it. No mock supervisor
-/// runs, so a regression into sending would fail differently.
+/// learns the new form; and SPEC.md refuses a contradicted or repeated
+/// command flag rather than resolving it by order. A MISSING assertion is
+/// the helm's refusal, not clap's, because a template may supply it
+/// (`farhelm-helm`'s `agent_launch` tests). No mock supervisor runs, so a
+/// regression into sending would fail differently.
 #[farhelm_testtrace::test]
 fn create_refuses_retired_and_malformed_launch_flags() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -1761,10 +1845,6 @@ fn create_refuses_retired_and_malformed_launch_flags() {
                 "--invocation was replaced by --command",
                 "--yolo or --no-yolo",
             ][..],
-        ),
-        (
-            &["create", "--cwd", "/w", "--host", "h", "--command", "sh"][..],
-            &["--yolo", "--no-yolo"][..],
         ),
         // The call an agent following older instructions actually makes.
         (
@@ -1832,28 +1912,6 @@ fn create_refuses_retired_and_malformed_launch_flags() {
     }
 }
 
-/// Spec: `farhelm agent create` without `--cwd` is refused by clap, since
-/// a create has no default working directory.
-///
-/// Not a defaulted field, and this is the test that keeps it that way. The
-/// tempting default — the asking session's own directory — would make
-/// `create` a `clone` wearing another verb's name, and the CLI is not even
-/// the party that knows it: the asking session's directory lives on the
-/// helm's side of the relay.
-#[farhelm_testtrace::test]
-fn create_without_a_cwd_is_refused() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let output = output_with_timeout(agent_command_with_args(&socket, &["create"]));
-    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("--cwd"),
-        "the refusal must name it: {stderr}"
-    );
-}
-
 /// Spec: every hyphen-leading VALUE a create can carry reaches the wire
 /// verbatim rather than being read as an unrecognized flag.
 ///
@@ -1883,22 +1941,22 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         };
         let AgentVerb::Create {
             host,
-            cwd,
-            launch,
-            title,
+            edits,
             intent_key,
-            confirm_yolo: _,
+            ..
         } = request
         else {
             panic!("expected a Create verb, got {request:?}");
         };
-        let Some(farhelm_proto::LaunchRequest::Command(command)) = launch else {
-            panic!("expected a command launch, got {launch:?}");
-        };
-        assert_eq!(command.command, "--weird-program --flag");
+        assert_eq!(edits.command.as_deref(), Some("--weird-program --flag"));
         assert_eq!(host.as_deref(), Some("-odd-host"));
-        assert_eq!(cwd, "-odd-dir");
-        assert_eq!(title.as_deref(), Some("-odd-title"));
+        assert_eq!(
+            edits.destination,
+            Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                "-odd-dir".to_string()
+            ))
+        );
+        assert_eq!(edits.name.as_deref(), Some("-odd-title"));
         assert_eq!(intent_key.as_deref(), Some("-odd-key"));
         Some(ControlMsg::AgentResponse {
             req_id,

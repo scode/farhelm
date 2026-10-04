@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 38;
+const SCHEMA_VERSION: i64 = 39;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -361,6 +361,45 @@ const LAUNCH_TEMPLATES_SCHEMA: &str = "CREATE TABLE launch_templates (
                  fields_json TEXT NOT NULL,
                  updated_at  INTEGER NOT NULL
              ) STRICT;";
+
+/// What a keyed agent create resolved to (schema version 39; SPEC.md,
+/// Agent-spawned sessions: "An idempotency key is bound to the launch the
+/// first accepted request resolved its templates and flags into").
+///
+/// One row per asker-scoped idempotency key (`agent_requests`'s
+/// `asker_scoped_intent_key`, the key the target supervisor reserves), with
+/// a digest of the request as the agent sent it (host name, template names,
+/// flags, spawn placement) and the resolution: the host, folder, launch and
+/// title the templates and flags produced. A retry whose request has the
+/// same digest reuses the stored resolution instead of re-reading the
+/// templates, so the supervisor's own fingerprint matches and it replays
+/// the session even after a template edit. A request with a different
+/// digest under the same key is resolved afresh and left to the
+/// supervisor's ordinary conflict.
+///
+/// The supervisor's reservation, not this row, is what makes a key live as
+/// long as its session: this table only spares a retry from template edits,
+/// so it is bounded. Every write prunes rows older than
+/// [`AGENT_CREATE_BINDING_TTL_SECS`] and, for the asking session that wrote,
+/// all but its newest [`AGENT_CREATE_BINDING_CAP`], so one busy agent cannot
+/// evict another's bindings. A retry past that is resolved afresh, which
+/// replays the session when no template it names has changed and is refused
+/// as a key conflict when one has.
+const AGENT_CREATE_BINDINGS_SCHEMA: &str = "CREATE TABLE agent_create_bindings (
+                 intent_key     TEXT NOT NULL PRIMARY KEY,
+                 asking_session TEXT NOT NULL,
+                 request_digest TEXT NOT NULL,
+                 resolved_json  TEXT NOT NULL,
+                 created_at     INTEGER NOT NULL
+             ) STRICT;";
+
+/// The most keyed agent-create resolutions the helm keeps per asking
+/// session; see [`AGENT_CREATE_BINDINGS_SCHEMA`].
+pub(crate) const AGENT_CREATE_BINDING_CAP: usize = 256;
+
+/// How long a keyed agent-create resolution is kept, in seconds: thirty
+/// days, far past any retry of a lost reply.
+const AGENT_CREATE_BINDING_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 
 /// The per-session "last seen" stamp (schema version 17): the activity
 /// stamp that was current the last time some client had this session open,
@@ -2007,10 +2046,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               {SESSION_SEEN_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
+              {AGENT_CREATE_BINDINGS_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 38;",
+              PRAGMA user_version = 39;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2892,6 +2932,16 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 38")?;
         version = 38;
     }
+    if version == 38 {
+        // `IF NOT EXISTS` for the reason the 37→38 step gives.
+        tx.execute_batch(&format!(
+            "{}
+             PRAGMA user_version = 39;",
+            AGENT_CREATE_BINDINGS_SCHEMA.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+        ))
+        .context("migrating helm.db to schema version 39")?;
+        version = 39;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3363,6 +3413,108 @@ impl HelmStore {
                         .execute("DELETE FROM launch_templates WHERE name = ?1", [name])
                         .context("deleting a launch template")?;
                     Ok(removed > 0)
+                },
+            )
+            .await
+    }
+
+    /// The resolution stored for a keyed agent create, if its request digest
+    /// matches; see [`AGENT_CREATE_BINDINGS_SCHEMA`]. `None` both when the
+    /// key has no row and when its row was written for another request.
+    pub(crate) async fn agent_create_binding(
+        &self,
+        intent_key: String,
+        request_digest: String,
+    ) -> anyhow::Result<Option<String>> {
+        self.conn
+            .call(
+                "agent create binding read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    conn.query_row(
+                        "SELECT resolved_json FROM agent_create_bindings
+                         WHERE intent_key = ?1 AND request_digest = ?2",
+                        [intent_key, request_digest],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading an agent create binding")
+                },
+            )
+            .await
+    }
+
+    /// Bind `intent_key` to a resolution unless it already has one,
+    /// reporting whether this call wrote it. The first binding stands: a
+    /// later request under the same key never replaces it (SPEC.md binds the
+    /// key to "the first accepted request"). Prunes expired and excess rows
+    /// in the same transaction.
+    pub(crate) async fn bind_agent_create(
+        &self,
+        intent_key: String,
+        asking_session: String,
+        request_digest: String,
+        resolved_json: String,
+    ) -> anyhow::Result<bool> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        self.conn
+            .call(
+                "agent create binding write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn.transaction().context("starting the binding write")?;
+                    tx.execute(
+                        "DELETE FROM agent_create_bindings WHERE created_at < ?1",
+                        [now - AGENT_CREATE_BINDING_TTL_SECS],
+                    )
+                    .context("pruning expired agent create bindings")?;
+                    let inserted = tx
+                        .execute(
+                            "INSERT INTO agent_create_bindings
+                                 (intent_key, asking_session, request_digest, resolved_json,
+                                  created_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5)
+                             ON CONFLICT (intent_key) DO NOTHING",
+                            rusqlite::params![
+                                intent_key,
+                                asking_session,
+                                request_digest,
+                                resolved_json,
+                                now
+                            ],
+                        )
+                        .context("storing an agent create binding")?;
+                    tx.execute(
+                        "DELETE FROM agent_create_bindings
+                         WHERE asking_session = ?1 AND intent_key NOT IN (
+                             SELECT intent_key FROM agent_create_bindings
+                             WHERE asking_session = ?1
+                             ORDER BY created_at DESC, rowid DESC LIMIT ?2
+                         )",
+                        rusqlite::params![asking_session, AGENT_CREATE_BINDING_CAP as i64],
+                    )
+                    .context("pruning excess agent create bindings")?;
+                    tx.commit().context("committing the binding write")?;
+                    Ok(inserted > 0)
+                },
+            )
+            .await
+    }
+
+    /// Remove a binding this create wrote, once the create was definitely
+    /// refused: a refused request is not "the first accepted request", so a
+    /// retry after fixing a template must see the fixed template.
+    pub(crate) async fn unbind_agent_create(&self, intent_key: String) -> anyhow::Result<()> {
+        self.conn
+            .call(
+                "agent create binding delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "DELETE FROM agent_create_bindings WHERE intent_key = ?1",
+                        [intent_key],
+                    )
+                    .context("removing an agent create binding")?;
+                    Ok(())
                 },
             )
             .await
@@ -9708,6 +9860,74 @@ mod tests {
         };
         store.put_launch_template(template.clone()).await.unwrap();
         assert_eq!(store.launch_templates().await.unwrap(), vec![template]);
+    }
+
+    /// Spec: schema 39 adds the agent-create bindings table to a schema-38
+    /// database. A key's first binding stands against a later one, is read
+    /// back only for the request digest it was written for, and can be
+    /// removed.
+    ///
+    /// Why: this table is what binds an agent's idempotency key to the
+    /// launch its first accepted request resolved to (SPEC.md); a second
+    /// write replacing the first would rebind a retry to an edited template,
+    /// and a read ignoring the digest would hand one request another's
+    /// launch.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v38_adds_agent_create_bindings_that_keep_the_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            conn.execute_batch(
+                "DROP TABLE agent_create_bindings;
+                 PRAGMA user_version = 38;",
+            )
+            .expect("rewind to schema 38");
+        }
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let key = || "agent-s1-k".to_string();
+        assert!(
+            store
+                .bind_agent_create(key(), "s1".into(), "d1".into(), "first".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .bind_agent_create(key(), "s1".into(), "d2".into(), "second".into())
+                .await
+                .unwrap(),
+            "a later binding never replaces the first"
+        );
+        assert_eq!(
+            store
+                .agent_create_binding(key(), "d1".into())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            store
+                .agent_create_binding(key(), "d2".into())
+                .await
+                .unwrap(),
+            None,
+            "another request under the key does not get the binding"
+        );
+        store.unbind_agent_create(key()).await.unwrap();
+        assert_eq!(
+            store
+                .agent_create_binding(key(), "d1".into())
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     /// Schema 37 gives every cached session the launch protocol 39

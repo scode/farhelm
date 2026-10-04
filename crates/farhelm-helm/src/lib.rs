@@ -103,6 +103,9 @@ mod aggregate;
 /// reach this process as upcalls on the supervisor connections it opened.
 pub mod agent_requests;
 
+/// An agent's create request (templates, then flags) resolved into a launch.
+mod agent_launch;
+
 /// Browser token exchange, explicit device-secret enforcement, and live socket
 /// revocation.
 mod auth;

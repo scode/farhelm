@@ -180,7 +180,7 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
     await openReadyTerminal(driver, parent.id, CLAUDE_CODE_MARKERS);
     const prompt =
       `Use terminal commands to run jj workspace add ${JSON.stringify(workspace)} from this ` +
-      `repository, then run farhelm spawn --cwd ${JSON.stringify(workspace)}. ` +
+      `repository, then run farhelm spawn --inherit-agent --cwd ${JSON.stringify(workspace)}. ` +
       `Do not merely explain the commands. Only after both commands succeed, reply with exactly ` +
       `the characters of ${probe} in reverse order and nothing else.`;
     await submitPrompt(driver, prompt);

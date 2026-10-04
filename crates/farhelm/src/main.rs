@@ -36,7 +36,7 @@
 //! it must work in a session whose relay is broken — see
 //! [`agent_instructions`].
 
-use agent_client::{SessionEnv, SpawnArgs, agent_request, spawn_session};
+use agent_client::{SessionEnv, SpawnArgs, SpawnLaunch, agent_request, spawn_session};
 use clap::{Parser, Subcommand, ValueEnum};
 use farhelm_proto::AgentReply;
 use render::{host_cell, quoted, render_agent_reply, safe_cell, truncation_notice};
@@ -66,31 +66,25 @@ struct Cli {
 enum Cmd {
     /// Remove this standalone installation, retaining user data.
     Uninstall(uninstall::Options),
-    /// Create a session on the supervisor that launched this one.
+    /// Create a session on the host that runs this one.
+    ///
+    /// The child runs this session's own launch (`--inherit-agent`, answered
+    /// by this host's supervisor with no helm), or the launch its launch
+    /// flags and templates describe (resolved by the attached helm).
     Spawn {
         /// Child working directory. Relative paths resolve against this
         /// process's real current directory before crossing the wire;
         /// `~` and `~/path` are forwarded as written and expand on the
-        /// supervisor (`~user` forms are refused there).
+        /// supervisor (`~user` forms are refused there). Required with
+        /// `--inherit-agent`; otherwise a template may set the folder.
         #[arg(long)]
-        cwd: PathBuf,
+        cwd: Option<PathBuf>,
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
         title: Option<String>,
-        /// Removed with agent profiles, whose names it took. Kept, hidden,
-        /// only so a caller still following older instructions gets a
-        /// refusal naming what to do instead rather than clap's generic
-        /// "unexpected argument". Its parser refuses every value, so a
-        /// parsed command never carries one.
-        #[arg(
-            long,
-            hide = true,
-            num_args = 0..=1,
-            default_missing_value = "",
-            value_parser = refuse_spawn_agent,
-        )]
-        agent: Option<String>,
-        /// Removed with agent profiles; refused the way `--agent` is.
+        /// Removed with agent profiles; its parser refuses every value, so
+        /// a caller following older instructions gets a refusal naming the
+        /// replacement rather than clap's "unexpected argument".
         #[arg(
             long,
             hide = true,
@@ -99,20 +93,22 @@ enum Cmd {
             value_parser = refuse_profile_id,
         )]
         profile_id: Option<String>,
-        /// Copy this session's stored agent bundle into the child. Required:
-        /// it is how a spawn says what the child runs.
-        #[arg(long, required = true)]
+        /// Run this session's own stored launch in the child. Exclusive
+        /// with every launch flag.
+        #[arg(long, conflicts_with_all = LAUNCH_FLAG_IDS)]
         inherit_agent: bool,
+        #[command(flatten)]
+        launch: LaunchFlags,
         /// Organizational parent id. Never defaults to this session.
         #[arg(long)]
         parent: Option<String>,
         /// Retry key, valid only for the child session's lifetime.
         #[arg(long)]
         idempotency_key: Option<String>,
-        /// Accepted, and currently without effect: a spawn copies this
-        /// session's own launch, which nothing asks about. Kept so spawn's
-        /// launch flags can use it again, and only with the user's explicit
-        /// approval for a YOLO launch.
+        /// Start a YOLO session even though this host asks before YOLO
+        /// launches; without it the helm refuses. Only with the user's
+        /// explicit approval for this launch. Without effect with
+        /// `--inherit-agent`, whose launch nothing asks about.
         #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
         confirm_yolo: bool,
     },
@@ -194,6 +190,12 @@ enum AgentCmd {
         #[arg(long)]
         json: bool,
     },
+    /// List the launch templates the helm holds and the fields each sets.
+    Templates {
+        /// Print the versioned machine-readable discovery envelope.
+        #[arg(long)]
+        json: bool,
+    },
     /// Removed with agent profiles. Kept, hidden, only so an agent still
     /// following older instructions gets a refusal saying so rather than
     /// clap's "unrecognized subcommand"; [`run_agent`] refuses it before
@@ -260,15 +262,13 @@ enum AgentCmd {
         stop_if_running: bool,
     },
     /// Create a session on any host; prints its id.
-    #[command(group(
-        clap::ArgGroup::new("yolo_assertion").required(true).args(["yolo", "no_yolo"])
-    ))]
     Create {
         /// Working directory for the new session, on the TARGET host.
         ///
-        /// Required, and never defaulted to this session's own directory:
-        /// a create that silently inherited it would be a clone wearing
-        /// another verb's name, and `clone` is right there.
+        /// Required unless a template sets the folder, and never defaulted
+        /// to this session's own directory: a create that silently
+        /// inherited it would be a clone wearing another verb's name, and
+        /// `clone` is right there.
         ///
         /// A plain `String`, not a `PathBuf`: this path is interpreted on
         /// whichever host the session lands on, so resolving it against
@@ -276,10 +276,11 @@ enum AgentCmd {
         /// spawn` correctly does for its own same-host create — would
         /// invent a path that means nothing over there.
         #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
-        cwd: String,
+        cwd: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
+        /// Required unless a template sets the host.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
-        host: String,
+        host: Option<String>,
         /// Removed with agent profiles. Kept, hidden, only so an agent still
         /// following older instructions gets a refusal naming what to do
         /// instead; its parser refuses every value.
@@ -311,24 +312,8 @@ enum AgentCmd {
             value_parser = refuse_invocation,
         )]
         invocation: Option<String>,
-        /// Command line to run on the target host, as written.
-        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
-        command: String,
-        /// The command runs without approval prompts. Farhelm believes this
-        /// and never reads the command to check it.
-        #[arg(long)]
-        yolo: bool,
-        /// The command asks before acting (it is not YOLO).
-        #[arg(long)]
-        no_yolo: bool,
-        /// Agent type the command runs, such as claude or codex (an unknown
-        /// value lists them all); the command then needs {farhelm_args}.
-        #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
-        agent: Option<farhelm_proto::LaunchHarness>,
-        /// Command that resumes a conversation, with {conversation} and
-        /// {farhelm_args}; needs --agent. Without it, no Restart.
-        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
-        resume_command: Option<String>,
+        #[command(flatten)]
+        launch: LaunchFlags,
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
         title: Option<String>,
@@ -385,6 +370,7 @@ impl AgentCmd {
         match self {
             AgentCmd::Hosts { .. } => Some(farhelm_proto::AgentVerb::Hosts {}),
             AgentCmd::Sessions { .. } => Some(farhelm_proto::AgentVerb::Sessions {}),
+            AgentCmd::Templates { .. } => Some(farhelm_proto::AgentVerb::Templates {}),
             // Refused in `run_agent` before this is asked; answering
             // `None` here would print the instructions instead.
             AgentCmd::Profiles { .. } => unreachable!("run_agent refuses agent profiles first"),
@@ -411,30 +397,18 @@ impl AgentCmd {
             AgentCmd::Create {
                 cwd,
                 host,
-                command,
-                yolo,
-                agent,
-                resume_command,
+                launch,
                 title,
                 idempotency_key,
                 confirm_yolo,
                 ..
             } => Some(farhelm_proto::AgentVerb::Create {
-                host: Some(host.clone()),
-                cwd: cwd.clone(),
-                // `--yolo`/`--no-yolo` are a required pair, so `yolo` alone
-                // carries the assertion.
-                launch: Some(farhelm_proto::LaunchRequest::Command(
-                    farhelm_proto::CommandLaunch {
-                        command: command.clone(),
-                        yolo: *yolo,
-                        agent: *agent,
-                        resume: resume_command.clone(),
-                    },
-                )),
-                title: title.clone(),
+                host: host.clone(),
+                templates: launch.templates.clone(),
+                edits: launch.edits(cwd.clone(), title.clone()),
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: *confirm_yolo,
+                spawn: None,
             }),
             AgentCmd::Clone {
                 source_session,
@@ -472,38 +446,30 @@ fn refuse_restart_mode(_value: &str) -> Result<String, String> {
     )
 }
 
-/// The refusal for `farhelm spawn --agent`, whatever value it was given.
-///
-/// Earlier releases resolved the value as an agent profile name. Profiles
-/// were removed outright (SPEC.md, the launch-kinds upgrade paragraph), so
-/// the message says what a spawn can still do rather than letting clap call
-/// the flag unknown.
-fn refuse_spawn_agent(_value: &str) -> Result<String, String> {
-    Err(
-        "farhelm spawn no longer takes --agent: agent profiles were removed. Pass \
-         --inherit-agent to start a child running this session's own agent, or use \
-         farhelm agent create --command <CMD> to run another command"
-            .to_string(),
-    )
-}
-
 /// The refusal for `--profile-id` on `farhelm spawn` and `farhelm agent
-/// create`, whatever value it was given; see [`refuse_spawn_agent`].
+/// create`, whatever value it was given.
+///
+/// Earlier releases resolved the value as an agent profile. Profiles were
+/// removed outright (SPEC.md, the launch-kinds upgrade paragraph), so the
+/// message says what replaced them rather than letting clap call the flag
+/// unknown.
 fn refuse_profile_id(_value: &str) -> Result<String, String> {
     Err(
-        "--profile-id is no longer accepted: agent profiles were removed. Use \
-         farhelm agent create --command <CMD> to run a command, or farhelm spawn \
-         --inherit-agent to start a child running this session's own agent"
+        "--profile-id is no longer accepted: agent profiles were removed. Name the launch \
+         with --agent <TYPE> (and --model, --effort, --permissions, --trust), with \
+         --command <CMD> and --yolo or --no-yolo, or with --template <NAME>; farhelm \
+         agent templates lists the templates"
             .to_string(),
     )
 }
 
 /// The refusal for `farhelm agent create --profile`, whatever value it was
-/// given; see [`refuse_spawn_agent`].
+/// given; see [`refuse_profile_id`].
 fn refuse_create_profile(_value: &str) -> Result<String, String> {
     Err(
-        "farhelm agent create no longer takes --profile: agent profiles were removed. Pass \
-         the command line to run with --command <CMD>"
+        "farhelm agent create no longer takes --profile: agent profiles were removed. Name \
+         the launch with --agent <TYPE>, with --command <CMD> and --yolo or --no-yolo, or \
+         with --template <NAME>; farhelm agent templates lists the templates"
             .to_string(),
     )
 }
@@ -538,8 +504,192 @@ fn parse_agent_type(value: &str) -> Result<farhelm_proto::LaunchHarness, String>
 }
 
 /// The refusal for the removed `farhelm agent profiles` listing.
-const AGENT_PROFILES_REMOVED: &str = "farhelm agent profiles was removed with agent profiles: \
-     there is no catalog to list. Create a session with farhelm agent create --command <CMD>";
+const AGENT_PROFILES_REMOVED: &str = "farhelm agent profiles was removed with agent profiles; \
+     launch templates replaced them, and farhelm agent templates lists them";
+
+/// A launch choice a flag can also reset: `default` puts the choice back to
+/// the agent type's own default, undoing a template that set it (SPEC.md:
+/// the flags "act as further edits" after the templates).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Choice<T>(Option<T>);
+
+/// Parse a launch choice by its protocol spelling, or `default`, listing
+/// every spelling when the value names none.
+fn parse_choice<T: serde::de::DeserializeOwned + serde::Serialize>(
+    value: &str,
+    all: &[T],
+    what: &str,
+) -> Result<Choice<T>, String> {
+    if value == "default" {
+        return Ok(Choice(None));
+    }
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map(|choice| Choice(Some(choice)))
+        .map_err(|_| {
+            let words: Vec<String> = all
+                .iter()
+                .filter_map(|choice| match serde_json::to_value(choice) {
+                    Ok(serde_json::Value::String(word)) => Some(word),
+                    _ => None,
+                })
+                .collect();
+            format!(
+                "{value:?} is not {what}; the choices are {}, or default",
+                words.join(", ")
+            )
+        })
+}
+
+/// `--effort`'s parser; see [`parse_choice`].
+fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffort>, String> {
+    parse_choice(value, &farhelm_proto::LaunchEffort::ALL, "an effort")
+}
+
+/// `--permissions`'s parser; see [`parse_choice`].
+fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermission>, String> {
+    parse_choice(value, &farhelm_proto::LaunchPermission::ALL, "a permission")
+}
+
+/// `--trust`'s parser: `true`, `false`, or `default`.
+fn parse_trust(value: &str) -> Result<Choice<bool>, String> {
+    match value {
+        "true" => Ok(Choice(Some(true))),
+        "false" => Ok(Choice(Some(false))),
+        "default" => Ok(Choice(None)),
+        _ => Err(format!(
+            "{value:?} is not a trust choice; use true, false, or default"
+        )),
+    }
+}
+
+/// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
+/// conflicts with: a spawn either reuses its own launch or describes one.
+const LAUNCH_FLAG_IDS: [&str; 11] = [
+    "templates",
+    "agent",
+    "model",
+    "effort",
+    "permissions",
+    "trust",
+    "command",
+    "yolo",
+    "no_yolo",
+    "resume_command",
+    "no_resume_command",
+];
+
+/// The launcher's fields as flags, shared by `farhelm agent create` and
+/// `farhelm spawn` (SPEC.md, Agent-spawned sessions).
+///
+/// The flags travel as launcher edits, not as a launch: the helm applies
+/// the `--template`s first, in order, then these as further edits, and
+/// validates the result exactly like a GUI launch (`farhelm-helm`'s
+/// `agent_launch`). Nothing is checked against a launch here, because a
+/// template may supply what a flag leaves out. Each flag may appear once;
+/// clap refuses a repeat, and `--yolo` with `--no-yolo`, rather than
+/// resolving them by order.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct LaunchFlags {
+    /// Apply a launch template by its exact name; repeat to apply several,
+    /// in order. `farhelm agent templates` lists them.
+    #[arg(long = "template", value_name = "NAME", allow_hyphen_values = true)]
+    templates: Vec<String>,
+    /// Agent type, such as claude or codex (an unknown value lists them
+    /// all). With --command, the agent type the command runs, which then
+    /// needs {farhelm_args}.
+    #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
+    agent: Option<farhelm_proto::LaunchHarness>,
+    /// Model for an agent launch, as the agent type names it; `default`
+    /// leaves it to the agent type.
+    #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+    model: Option<String>,
+    /// Reasoning effort for an agent launch, or `default`.
+    #[arg(long, value_name = "LEVEL", value_parser = parse_effort)]
+    effort: Option<Choice<farhelm_proto::LaunchEffort>>,
+    /// Permission mode for an agent launch (yolo, approve, smart_approve,
+    /// chat), or `default`.
+    #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
+    permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
+    /// Workspace trust for an agent launch: true, false, or default.
+    #[arg(long, value_name = "BOOL", value_parser = parse_trust)]
+    trust: Option<Choice<bool>>,
+    /// Make this a command launch running this command line, as written.
+    /// Needs --yolo or --no-yolo.
+    #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+    command: Option<String>,
+    /// The command runs without approval prompts. Farhelm believes this
+    /// and never reads the command to check it.
+    #[arg(long, conflicts_with = "no_yolo")]
+    yolo: bool,
+    /// The command asks before acting (it is not YOLO).
+    #[arg(long)]
+    no_yolo: bool,
+    /// Command that resumes a conversation, with {conversation} and
+    /// {farhelm_args}; needs --agent. Without it, no Restart.
+    #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+    resume_command: Option<String>,
+    /// Drop a resume command a template set, so the session cannot be
+    /// restarted.
+    #[arg(long, conflicts_with = "resume_command")]
+    no_resume_command: bool,
+}
+
+impl LaunchFlags {
+    /// Whether any launch flag was given.
+    fn any(&self) -> bool {
+        !self.templates.is_empty()
+            || self.agent.is_some()
+            || self.model.is_some()
+            || self.effort.is_some()
+            || self.permissions.is_some()
+            || self.trust.is_some()
+            || self.command.is_some()
+            || self.yolo
+            || self.no_yolo
+            || self.resume_command.is_some()
+            || self.no_resume_command
+    }
+
+    /// The flags, with the verb's folder and title, as the launcher edits
+    /// the helm applies after the templates. `--command` is what makes the
+    /// launch a command launch; the agent-launch flags set no launch kind,
+    /// so on a command template they are refused naming the flag, as the
+    /// same edit is refused in the GUI.
+    fn edits(
+        &self,
+        cwd: Option<String>,
+        title: Option<String>,
+    ) -> farhelm_proto::launcher::TemplateFields {
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+        TemplateFields {
+            kind: self.command.as_ref().map(|_| LauncherKind::Command),
+            agent: self.agent,
+            model: self
+                .model
+                .as_ref()
+                .map(|model| (model != "default").then(|| model.clone())),
+            effort: self.effort.map(|choice| choice.0),
+            permissions: self.permissions.map(|choice| choice.0),
+            workspace_trust: self.trust.map(|choice| choice.0),
+            command: self.command.clone(),
+            yolo: if self.yolo {
+                Some(true)
+            } else if self.no_yolo {
+                Some(false)
+            } else {
+                None
+            },
+            resume_command: if self.no_resume_command {
+                Some(None)
+            } else {
+                self.resume_command.clone().map(Some)
+            },
+            host: None,
+            destination: cwd.map(TemplateDestination::Folder),
+            name: title,
+        }
+    }
+}
 
 #[derive(Subcommand)]
 enum HelmCmd {
@@ -779,6 +929,7 @@ fn main() -> anyhow::Result<()> {
             cwd,
             title,
             inherit_agent,
+            launch,
             parent,
             idempotency_key,
             confirm_yolo,
@@ -789,7 +940,20 @@ fn main() -> anyhow::Result<()> {
                 SpawnArgs {
                     cwd,
                     title,
-                    inherit_agent,
+                    launch: if inherit_agent {
+                        SpawnLaunch::Inherit
+                    } else if launch.any() {
+                        SpawnLaunch::Flags {
+                            templates: launch.templates.clone(),
+                            edits: launch.edits(None, None),
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "farhelm spawn needs --inherit-agent to run this session's own \
+                             launch, or launch flags (--agent, --command with --yolo or \
+                             --no-yolo, --template) describing the child's"
+                        );
+                    },
                     parent,
                     idempotency_key,
                     confirm_yolo,
@@ -1147,7 +1311,9 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     // which makes its own `agent_request` call and returns — there
     // is nothing left for this arm to do with their reply, unlike
     // the four lifecycle verbs below.
-    if let AgentCmd::Hosts { json } | AgentCmd::Sessions { json } = &command {
+    if let AgentCmd::Hosts { json } | AgentCmd::Sessions { json } | AgentCmd::Templates { json } =
+        &command
+    {
         return print_agent_listing(verb, *json);
     }
     // The lifecycle and creating verbs share one `agent_request`
@@ -1276,6 +1442,7 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
         // variant.
         AgentCmd::Hosts { .. }
         | AgentCmd::Sessions { .. }
+        | AgentCmd::Templates { .. }
         | AgentCmd::Profiles { .. }
         | AgentCmd::Instructions
         | AgentCmd::Help => {
@@ -1296,7 +1463,8 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
     if json {
         let caller_host_id = match &reply {
             AgentReply::Hosts { caller_host_id, .. }
-            | AgentReply::Sessions { caller_host_id, .. } => caller_host_id,
+            | AgentReply::Sessions { caller_host_id, .. }
+            | AgentReply::Templates { caller_host_id, .. } => caller_host_id,
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
         // Bumped whenever a value an agent reads changes meaning or
@@ -1306,8 +1474,10 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         // agent type's word or `custom`, never a profile name, and the
         // profiles listing is gone. 5: `restart_offer` may be
         // `no_resume_command`, a command launch without a resume command.
+        // 6: the templates listing, whose reply is new (nothing earlier
+        // changed meaning).
         let envelope = serde_json::json!({
-            "schema_version": 5,
+            "schema_version": 6,
             "caller": {
                 "session_id": asking,
                 "host_id": caller_host_id,
@@ -1798,9 +1968,10 @@ mod tests {
     }
 
     /// Spec: the profile selectors removed with agent profiles —
-    /// `farhelm spawn --agent <name>` and `--profile-id`, and `farhelm agent
-    /// create --profile` and `--profile-id` — are refused at parse with a
-    /// message saying profiles were removed and naming what to pass instead.
+    /// `farhelm spawn --profile-id`, and `farhelm agent create --profile`
+    /// and `--profile-id` — are refused at parse with a message saying
+    /// profiles were removed and naming what to pass instead. (`spawn
+    /// --agent` took a profile name then; it is now the agent type flag.)
     ///
     /// Why: agents in sessions started before the upgrade may still follow
     /// instructions that used these flags (SPEC_impl.md, "What running
@@ -1812,10 +1983,8 @@ mod tests {
     fn removed_profile_selectors_are_refused_by_name() {
         let spawn = ["farhelm", "spawn", "--cwd", "/w"];
         let create = ["farhelm", "agent", "create", "--host", "h", "--cwd", "/w"];
-        let cases: [(&[&str], &[&str], &str); 6] = [
-            (&spawn, &["--agent", "claude"], "--inherit-agent"),
-            (&spawn, &["--agent"], "--inherit-agent"),
-            (&spawn, &["--profile-id", "builtin-claude"], "--command"),
+        let cases: [(&[&str], &[&str], &str); 4] = [
+            (&spawn, &["--profile-id", "builtin-claude"], "--template"),
             (&create, &["--profile", "claude"], "--command"),
             (&create, &["--profile"], "--command"),
             (&create, &["--profile-id", "builtin-claude"], "--command"),
@@ -1855,9 +2024,174 @@ mod tests {
             };
             let error = run_agent(command).expect_err("refused").to_string();
             assert!(
-                error.contains("farhelm agent profiles was removed"),
+                error.contains("farhelm agent profiles was removed")
+                    && error.contains("farhelm agent templates"),
                 "{args:?}: {error}"
             );
         }
+    }
+
+    /// Spec: `farhelm spawn --inherit-agent` is refused beside any launch
+    /// flag, `--yolo` with `--no-yolo` is refused, and a launch flag given
+    /// twice is refused, all at parse.
+    ///
+    /// Why: SPEC.md makes `--inherit-agent` exclusive with every launch flag
+    /// and requires a repeated or contradicted command flag to be refused
+    /// "rather than resolved by order"; clap's defaults would otherwise keep
+    /// the last value, launching something other than one of the two the
+    /// caller wrote.
+    #[farhelm_testtrace::test]
+    fn contradicting_or_repeated_launch_flags_are_refused() {
+        let spawn = ["farhelm", "spawn", "--cwd", "/w"];
+        let create = ["farhelm", "agent", "create", "--host", "h", "--cwd", "/w"];
+        let cases: [(&[&str], &[&str]); 7] = [
+            (&spawn, &["--inherit-agent", "--agent", "claude"]),
+            (&spawn, &["--inherit-agent", "--template", "t"]),
+            (&spawn, &["--inherit-agent", "--command", "sh", "--no-yolo"]),
+            (&create, &["--command", "sh", "--yolo", "--no-yolo"]),
+            (
+                &create,
+                &["--command", "sh", "--command", "bash", "--no-yolo"],
+            ),
+            (&create, &["--agent", "claude", "--agent", "codex"]),
+            (
+                &create,
+                &["--agent", "claude", "--effort", "high", "--effort", "low"],
+            ),
+        ];
+        for (base, extra) in cases {
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            assert!(
+                Cli::try_parse_from(&args).is_err(),
+                "{args:?} must be refused"
+            );
+        }
+        assert!(
+            Cli::try_parse_from(["farhelm", "spawn", "--cwd", "/w", "--inherit-agent"]).is_ok()
+        );
+    }
+
+    /// Spec: `--agent` given something that is not an agent type is refused
+    /// with the list of agent types, and an unknown effort or permission
+    /// with its choices.
+    ///
+    /// Why: SPEC.md requires the list in the refusal; the caller is an
+    /// agent whose only way to recover is the message.
+    #[farhelm_testtrace::test]
+    fn an_unknown_launch_choice_lists_the_choices() {
+        let create = |extra: &[&str]| {
+            let args: Vec<&str> = ["farhelm", "agent", "create", "--host", "h", "--cwd", "/w"]
+                .iter()
+                .chain(extra)
+                .copied()
+                .collect();
+            match Cli::try_parse_from(args) {
+                Ok(_) => panic!("{extra:?} must be refused"),
+                Err(error) => error.to_string(),
+            }
+        };
+        let agent = create(&["--agent", "gpt"]);
+        assert!(
+            agent.contains("is not an agent type") && agent.contains("codex, claude"),
+            "{agent}"
+        );
+        let effort = create(&["--agent", "codex", "--effort", "huge"]);
+        assert!(
+            effort.contains("high") && effort.contains("or default"),
+            "{effort}"
+        );
+        let permissions = create(&["--agent", "codex", "--permissions", "free"]);
+        assert!(permissions.contains("smart_approve"), "{permissions}");
+    }
+
+    /// Spec: the launch flags become the launcher edits the helm applies
+    /// after the templates: `--command` makes a command launch with the
+    /// YOLO answer given, `--cwd` is the folder and `--title` the name, and
+    /// `default` resets a choice (sent as `null`), as `--no-resume-command`
+    /// resets the resume command, while an omitted flag sends nothing.
+    ///
+    /// Why: absent-versus-reset is what lets a flag undo a template's choice
+    /// without the CLI knowing the template ("the other flags then act as
+    /// further edits"); collapsing the two would make every omitted flag
+    /// wipe what a template set.
+    #[farhelm_testtrace::test]
+    fn launch_flags_become_the_launcher_edits() {
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
+        let parse = |extra: &[&str]| {
+            let args: Vec<&str> = ["farhelm", "agent", "create"]
+                .iter()
+                .chain(extra)
+                .copied()
+                .collect();
+            let Cmd::Agent {
+                command: command @ AgentCmd::Create { .. },
+            } = Cli::try_parse_from(args).expect("parses").command
+            else {
+                panic!("a create");
+            };
+            let Some(farhelm_proto::AgentVerb::Create {
+                host,
+                templates,
+                edits,
+                ..
+            }) = command.verb()
+            else {
+                panic!("a create verb");
+            };
+            (host, templates, edits)
+        };
+        let (host, templates, edits) = parse(&[
+            "--template",
+            "a",
+            "--template",
+            "b",
+            "--agent",
+            "codex",
+            "--effort",
+            "default",
+            "--model",
+            "gpt-6-luna",
+        ]);
+        assert_eq!(host, None, "no --host leaves it to a template");
+        assert_eq!(templates, ["a", "b"], "templates keep their order");
+        assert_eq!(edits.kind, None, "agent-launch flags set no launch kind");
+        assert_eq!(edits.agent, Some(farhelm_proto::LaunchHarness::Codex));
+        assert_eq!(edits.model, Some(Some("gpt-6-luna".to_string())));
+        assert_eq!(edits.effort, Some(None), "default resets");
+        assert_eq!(edits.permissions, None, "an omitted flag sends nothing");
+        assert_eq!(edits.destination, None);
+
+        let (_, _, edits) = parse(&[
+            "--host",
+            "h",
+            "--cwd",
+            "/w",
+            "--title",
+            "t",
+            "--command",
+            "sh",
+            "--no-yolo",
+            "--resume-command",
+            "sh -r {conversation}",
+        ]);
+        assert_eq!(edits.kind, Some(LauncherKind::Command));
+        assert_eq!(edits.command.as_deref(), Some("sh"));
+        assert_eq!(edits.yolo, Some(false));
+        assert_eq!(
+            edits.resume_command,
+            Some(Some("sh -r {conversation}".to_string()))
+        );
+        assert_eq!(
+            edits.destination,
+            Some(TemplateDestination::Folder("/w".to_string()))
+        );
+        assert_eq!(edits.name.as_deref(), Some("t"));
+
+        let (_, _, edits) = parse(&["--command", "sh", "--no-yolo", "--no-resume-command"]);
+        assert_eq!(
+            edits.resume_command,
+            Some(None),
+            "--no-resume-command resets"
+        );
     }
 }
