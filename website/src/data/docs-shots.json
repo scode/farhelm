@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-04T21:31:39Z",
-  "captured_from": "14c6b8b8b57105dfce7edaae23ca908eb8e09369",
-  "commit": "066e8b09b587263191ef7b08517d2d82184722b1",
+  "captured_at": "2026-10-04T21:57:33Z",
+  "captured_from": "910a511362b8b4cfae6601a537157479fd9a0358",
+  "commit": "6c734dead6984c35926e4c7e8fb92d63f4a378df",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -22,7 +22,7 @@
       "width": 1754
     },
     "first-session/running-session": {
-      "height": 752,
+      "height": 746,
       "width": 1670
     },
     "first-session/statuses": {
@@ -37,6 +37,10 @@
       "height": 1310,
       "width": 1644
     },
+    "manage-hosts/details": {
+      "height": 684,
+      "width": 1332
+    },
     "manage-hosts/host-menu": {
       "height": 880,
       "width": 1830
@@ -50,7 +54,7 @@
       "width": 1024
     },
     "session-list/controls": {
-      "height": 698,
+      "height": 694,
       "width": 1392
     },
     "session-list/row": {
@@ -90,8 +94,8 @@
       "width": 1740
     },
     "start-a-session/new-button": {
-      "height": 518,
-      "width": 1088
+      "height": 516,
+      "width": 1134
     },
     "start-a-session/recent-setups": {
       "height": 730,
