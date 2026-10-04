@@ -111,6 +111,10 @@ pub mod launch;
 /// What counts as a YOLO launch (see the module's own docs).
 pub mod yolo;
 
+/// The feedback submission the UI composes and the helm forwards, with the
+/// caps both enforce (see the module's own docs).
+pub mod feedback;
+
 /// The one list of characters that must never be shown as themselves when
 /// peer-supplied text reaches a human (see the module's own docs).
 pub mod text;
