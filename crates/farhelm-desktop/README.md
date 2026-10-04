@@ -71,5 +71,6 @@ binary under Xvfb, which is the same `desktop::run` shell with the asset names f
 
 ## Environment overrides
 
-- `FARHELM_DESKTOP_FARHELM` — path to the `farhelm` CLI, instead of the sibling next to this binary.
+- `FARHELM_DESKTOP_FARHELM` — path to the `farhelm` CLI, instead of the sibling next to this binary (or, in the Mac
+  app's side-by-side version layout, this version's own `Contents/Versions/<version>/farhelm`).
 - `FARHELM_DESKTOP_STATE_DIR` — state directory for the embedded helm and managed local supervisor.

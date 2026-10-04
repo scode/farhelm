@@ -155,11 +155,13 @@ pub struct LaunchSpec {
     pub session_token: String,
     /// Exact unix socket path the spawn CLI must dial.
     pub supervisor_sock: PathBuf,
-    /// Directory containing the supervisor's own `farhelm` binary.
+    /// The directory whose `farhelm` the session should reach: the
+    /// supervisor's own binary's directory, or, in the Mac app's versioned
+    /// layout, the bundle forwarder's (see `Supervisor::session_farhelm_exe`).
     ///
     /// The shim prepends it to the PATH produced by login-shell startup,
-    /// so an agent invoking `farhelm` by name reaches the same artifact
-    /// that launched it before considering any ambient installation.
+    /// so an agent invoking `farhelm` by name reaches Farhelm's own CLI
+    /// before considering any ambient installation.
     pub farhelm_bin_dir: PathBuf,
     /// When present, the shim must prepare a git working copy inside this
     /// session's terminal — clone, run the post-clone hook, and only then

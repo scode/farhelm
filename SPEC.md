@@ -1145,9 +1145,11 @@ SSH-and-type test is the contract when shell sourcing subtleties (login vs. non-
 otherwise leave room for argument. A bare `claude` in a profile must work exactly as it does from the user's own shell;
 "command not found because a daemon launched it" is a bug, not a caveat. One deliberate exception: the directory holding
 the Farhelm binary that launched the session comes first on the session's `PATH`, so `farhelm` run inside a session
-reaches that exact build. Other programs in the same directory take precedence over the user's own `PATH` order as a
-result. The environment is evaluated at each launch: edit your rc files and the next launch or restart sees the change;
-already-running sessions do not.
+reaches that exact build; in the Mac app's side-by-side version layout that directory holds the app's forwarder instead,
+so `farhelm` reaches the version of Farhelm now running, which after an update and restart is the newer one. Other
+programs in the same directory take precedence over the user's own `PATH` order as a result. The environment is
+evaluated at each launch: edit your rc files and the next launch or restart sees the change; already-running sessions do
+not.
 
 When a host reboots, its supervisor starts automatically on hosts with the system-integration layer; on the v1 Mac it
 returns when the app or binary is next started, and interruption is classified at that point — whenever the supervisor

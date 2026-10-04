@@ -30,8 +30,12 @@
 //!
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
-//! the parent directory. Today's one file class: the generated tmux config
-//! (`tmux.rs`'s `TmuxDriver::ensure_server`). "Losable, never torn": the
+//! the parent directory. Two file classes: the generated tmux config
+//! (`tmux.rs`'s `TmuxDriver::ensure_server`), and the Running record
+//! (`crate::app_bundle::publish_running_record`). Losing a Running-record
+//! update to a power loss is acceptable for the same reason: the supervisor
+//! that wrote it died with the machine, and the next one to serve rewrites
+//! it before any session can reach it. "Losable, never torn": the
 //! file fsync means a torn/truncated INODE can never survive a power loss
 //! (unlike a bare `rename` with no file fsync at all, which can still
 //! persist a partially-flushed inode depending on write-back timing), but
@@ -483,8 +487,9 @@ pub fn write_private_file_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) 
 /// constructed INSIDE the closure so only that trivially-`Send`
 /// zero-sized type, not a `dyn FaultSeam`, crosses the thread boundary
 /// (see [`FaultSeam`]'s own docs on why it need not be `Send + Sync`).
-/// The best-effort tier has no async twin: its one caller (the tmux
-/// config, `tmux.rs`) writes from a synchronous context.
+/// The best-effort tier has no async twin: the tmux config (`tmux.rs`)
+/// writes from a synchronous context, and the Running record
+/// (`crate::app_bundle`) wraps it in `spawn_blocking` itself.
 pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let path = path.to_path_buf();
     let bytes = bytes.to_vec();

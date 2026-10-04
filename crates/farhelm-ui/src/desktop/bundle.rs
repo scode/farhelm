@@ -12,25 +12,63 @@ pub(super) fn desktop_state_dir() -> anyhow::Result<PathBuf> {
 
 /// Locate the `farhelm` CLI this app spawns its supervisor from.
 ///
-/// D6 ships two bare binaries that install side by side (`~/.local/bin`), so
-/// "next to me" is the whole contract — there is no bundle to look INSIDE.
-/// The installer-assembled `Farhelm.app` (SPEC_impl.md, "Native app
-/// packaging") satisfies the same contract from the other direction: it
-/// places a `farhelm` copy next to the executable in `Contents/MacOS/`,
-/// which is why this code needs no bundle awareness to run from either
-/// location. `FARHELM_DESKTOP_FARHELM` overrides it for developers and for
-/// `scripts/desktop-smoke.sh`, which runs a `dx` build tree where the sibling
-/// does not exist.
+/// D6 ships two bare binaries that install side by side, so "next to me" is
+/// the base contract. The Mac app bundle with side-by-side versions
+/// (SPEC_impl.md, "Side-by-side versions inside Farhelm.app") is the one
+/// place this code looks inside a bundle: there the sibling
+/// `Contents/MacOS/farhelm` is the forwarder, and the app starts its
+/// supervisor from its own version's folder instead (see
+/// [`resolve_supervisor_farhelm`]). `FARHELM_DESKTOP_FARHELM` overrides both
+/// for developers and for `scripts/desktop-smoke.sh`, which runs a `dx`
+/// build tree where no sibling exists.
 ///
 /// The failure text names the exact path that was tried and both ways out,
 /// because the person hitting it is looking at a GUI app that refused to
 /// start with no other diagnostic.
 pub(super) fn bundled_farhelm() -> anyhow::Result<PathBuf> {
     let current = std::env::current_exe().context("locating desktop executable")?;
-    resolve_sibling_farhelm(
+    resolve_supervisor_farhelm(
         &current,
         std::env::var_os("FARHELM_DESKTOP_FARHELM").as_deref(),
+        env!("CARGO_PKG_VERSION"),
     )
+}
+
+/// Decide which `farhelm` to start the managed supervisor from, given this
+/// executable's path, the override and this build's version.
+///
+/// The override wins, as in [`resolve_sibling_farhelm`]. Otherwise, when
+/// this executable is the main program of an app bundle
+/// (`<x>.app/Contents/MacOS/`, recognized exactly as the supervisor
+/// recognizes the layout) and that bundle has a `Contents/Versions/` folder, the answer is
+/// `Contents/Versions/<version>/farhelm`, where `<version>` is the version
+/// compiled into this app: the app and the supervisor it manages are one
+/// release, and the installer names each version's folder after it. A
+/// missing folder refuses with its path rather than falling back to the
+/// sibling, because in that layout the sibling is the forwarder, which may
+/// run a different version than this app (the Installed one, mid-update).
+/// Without a `Versions/` folder the sibling rule applies unchanged.
+fn resolve_supervisor_farhelm(
+    current_exe: &Path,
+    override_path: Option<&std::ffi::OsStr>,
+    version: &str,
+) -> anyhow::Result<PathBuf> {
+    if override_path.is_none()
+        && let Some(contents) =
+            farhelm_supervisor::app_bundle::bundle_contents_of_main_program(current_exe)
+        && contents.join("Versions").is_dir()
+    {
+        let versioned = contents.join("Versions").join(version).join("farhelm");
+        if versioned.is_file() {
+            return Ok(versioned);
+        }
+        bail!(
+            "farhelm-desktop {version} needs its own version of the farhelm binary at {} \
+             and did not find one; reinstall Farhelm or set FARHELM_DESKTOP_FARHELM",
+            versioned.display()
+        );
+    }
+    resolve_sibling_farhelm(current_exe, override_path)
 }
 
 /// Decide where `farhelm` is, given this executable's path and the override.
@@ -127,6 +165,117 @@ mod tests {
                 dir.path().join("farhelm").display()
             )
         );
+    }
+
+    // ---- the side-by-side version layout inside the Mac app ----
+
+    /// Build `Farhelm.app/Contents/{MacOS,Versions}` under `root`, with the
+    /// sibling forwarder present, and return `Contents`.
+    fn versioned_bundle(root: &Path) -> PathBuf {
+        let contents = root.join("Farhelm.app").join("Contents");
+        std::fs::create_dir_all(contents.join("MacOS")).expect("MacOS");
+        std::fs::create_dir_all(contents.join("Versions")).expect("Versions");
+        std::fs::write(contents.join("MacOS").join("farhelm"), b"#!/bin/sh\n")
+            .expect("writing the forwarder");
+        contents
+    }
+
+    /// In the versioned layout the app starts its supervisor from its own
+    /// version's folder, never from the sibling: the sibling is the
+    /// forwarder, which mid-update runs the newly Installed version, not
+    /// this app's.
+    #[farhelm_testtrace::test]
+    fn the_versioned_layout_starts_this_apps_own_version() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let own = contents.join("Versions").join("1.2.3").join("farhelm");
+        let other = contents.join("Versions").join("1.2.4").join("farhelm");
+        for program in [&own, &other] {
+            std::fs::create_dir_all(program.parent().unwrap()).expect("version folder");
+            std::fs::write(program, b"#!/bin/sh\n").expect("writing a versioned program");
+        }
+        let chosen = resolve_supervisor_farhelm(
+            &contents.join("MacOS").join("farhelm-desktop"),
+            None,
+            "1.2.3",
+        )
+        .expect("this app's version folder is found");
+        assert_eq!(chosen, own);
+    }
+
+    /// A missing version folder refuses and names the path, rather than
+    /// silently starting the forwarder's choice of version.
+    #[farhelm_testtrace::test]
+    fn a_missing_version_folder_refuses_instead_of_using_the_forwarder() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let error = resolve_supervisor_farhelm(
+            &contents.join("MacOS").join("farhelm-desktop"),
+            None,
+            "1.2.3",
+        )
+        .expect_err("the folder for this version does not exist");
+        assert!(
+            format!("{error}").contains(
+                &contents
+                    .join("Versions")
+                    .join("1.2.3")
+                    .display()
+                    .to_string()
+            ),
+            "{error}"
+        );
+    }
+
+    /// The override still wins in the versioned layout; the desktop smoke
+    /// depends on it wherever it runs.
+    #[farhelm_testtrace::test]
+    fn the_override_wins_in_the_versioned_layout_too() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let chosen = resolve_supervisor_farhelm(
+            &contents.join("MacOS").join("farhelm-desktop"),
+            Some(std::ffi::OsStr::new("/elsewhere/farhelm")),
+            "1.2.3",
+        )
+        .expect("an override is taken as given");
+        assert_eq!(chosen, PathBuf::from("/elsewhere/farhelm"));
+    }
+
+    /// A bundle without `Versions/` (the layout before this one) keeps the
+    /// sibling rule, so an app installed the old way still starts.
+    #[farhelm_testtrace::test]
+    fn a_bundle_without_versions_still_uses_the_sibling() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let macos = dir
+            .path()
+            .join("Farhelm.app")
+            .join("Contents")
+            .join("MacOS");
+        std::fs::create_dir_all(&macos).expect("MacOS");
+        std::fs::write(macos.join("farhelm"), b"#!/bin/sh\n").expect("sibling");
+        let chosen = resolve_supervisor_farhelm(&macos.join("farhelm-desktop"), None, "1.2.3")
+            .expect("the sibling");
+        assert_eq!(chosen, macos.join("farhelm"));
+    }
+
+    /// A `MacOS` folder outside an app bundle is not the layout, even with a
+    /// `Versions` folder beside it: the sibling still wins there, so an
+    /// installation that merely looks similar is not changed.
+    #[farhelm_testtrace::test]
+    fn a_macos_folder_outside_an_app_bundle_keeps_the_sibling() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let package = dir.path().join("package");
+        std::fs::create_dir_all(package.join("MacOS")).expect("MacOS");
+        std::fs::create_dir_all(package.join("Versions")).expect("Versions");
+        std::fs::write(package.join("MacOS").join("farhelm"), b"#!/bin/sh\n").expect("sibling");
+        let chosen = resolve_supervisor_farhelm(
+            &package.join("MacOS").join("farhelm-desktop"),
+            None,
+            "1.2.3",
+        )
+        .expect("the sibling");
+        assert_eq!(chosen, package.join("MacOS").join("farhelm"));
     }
 
     /// A DIRECTORY named `farhelm` next to the executable is not the CLI.
