@@ -125,7 +125,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Verify that agents keep running while Farhelm is closed on the Mac.** The docs' "Your first session" page says you
   can quit Farhelm while an agent works, reopen it, and find the session still running. Check that claim, and fix
   Farhelm or the page. Reminder for the maintainer: this is about how the agents' session hooks might block while the
-  helm is not available (details TBD).
+  helm is not available. Decided 2026-10-04: the conversation hooks stop reporting over the supervisor's socket and
+  instead write each report to a file the supervisor picks up, so tracking keeps working while the app (and with it the
+  Mac's supervisor) is closed and the hooks lose their retry and timeout machinery; the agents' `farhelm` commands not
+  working while the app is closed is accepted for now and stated in the spec. Plan: `plans/queue/hook-report-files.md`.
+
+- **Pick up hook report files immediately.** Once conversation hooks write their reports as files
+  (`plans/queue/hook-report-files.md`), the supervisor reads them on its periodic reconciliation pass, every two
+  seconds. Make pickup immediate with an inotify-style watch (or the macOS equivalent) on the report directories, so a
+  report is applied as soon as it is written rather than up to a pass later. Kept out of that plan on purpose, to keep
+  it small.
 
 ## Doc todo
 
@@ -688,6 +697,14 @@ are large mostly because of their tests.
   desktop app's webview has a native zoom Farhelm never uses (Cmd/Ctrl +/− do nothing there today), while on the web the
   browser's own page zoom already works but cannot be driven from a button. The rest of the UI uses about 110 hard-coded
   pixel sizes, so a CSS-based scale would be a refactor. Deferred 2026-10-02 as more work than the terminal control.
+
+- **Let the Mac's supervisor outlive the desktop app.** Quitting the app stops the Mac's local supervisor while its
+  sessions keep running, so until the app is reopened the agents' `farhelm` commands that need a supervisor
+  (`farhelm spawn`, and the `farhelm agent` verbs, which also need the helm) fail inside those sessions. Consider
+  letting the supervisor keep running after the app quits (the app already reuses a supervisor it finds running), or a
+  launchd agent like the Linux systemd units, so that those commands, and the skills and command-line features built on
+  them, keep working with the app closed. Deferred 2026-10-04 while planning `plans/queue/hook-report-files.md`, which
+  keeps conversation tracking working without a supervisor and states this gap in the spec as expected for now.
 
 ## Unbucketized
 

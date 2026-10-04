@@ -12,6 +12,14 @@ reason", so several of the warnings below move or change meaning. Hover help giv
 a `data-tooltip` attribute and a browser test that fails on a control without one; the bell this plan adds must follow
 that. Names below come from main at 7444371d and some will have moved. Read what both plans landed before starting.
 
+`plans/queue/hook-report-files.md`, planned 2026-10-04, also touches this plan's ground and is meant to land first; if
+it has, read what it landed before starting. It replaces the hook's socket round trip with report files the supervisor
+applies on its reconciliation pass, so conversation identity reports are no longer refused at a socket handler
+(`service/handlers.rs`) or answered to the hook: refusals happen when the supervisor reads a report file, and the
+65-second tripwire may see a report up to one pass later. Classify refusal sites (below) where that plan left them; the
+"transient errors whose own log line says a later report may recover" may no longer exist in that form. If it has not
+landed when you start, the names below still hold.
+
 ## The goal
 
 Farhelm notices several ways in which it has lost track of a session's agent conversation, which decides whether Restart
