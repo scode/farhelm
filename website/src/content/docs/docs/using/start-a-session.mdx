@@ -19,25 +19,25 @@ terminal opens, ready for your first prompt.
 
 <Screenshot
   name="start-a-session/launch-button"
-  alt="The launch button reading launch Codex, local (this machine), and the folder, with the summary under it."
+  alt="The launch button reading launch Codex, local (this machine), and the directory, with the summary under it."
 />
 
 **cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **reset choices** clears the
-agent and its choices but keeps the host and folder.
+agent and its choices but keeps the host and directory.
 
 ## Choose where it runs
 
 <Screenshot
   name="start-a-session/destination"
-  alt="The destination part of the launcher: the host menu, the folder field, and the recent folder links under it."
+  alt="The launcher's destination part: the host menu, the directory field, and recent directory links."
 />
 
 With no session open, the host menu starts on the machine you are using, listed as **local (this machine)**. A host that
 is not connected right now shows its state next to its name, such as "unreachable, retrying", and you cannot launch on
 it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
-**browse folders on** the host lists its folders one level at a time, for when you would rather find a folder than type
-it. **name (optional)** names the session in the session list; leave it empty and Farhelm picks a name.
+**browse folders on** the host lists its directories one level at a time, for when you would rather find a directory
+than type it. **name (optional)** names the session in the session list; leave it empty and Farhelm picks a name.
 
 ## Choose the agent and how it runs
 
@@ -89,10 +89,10 @@ them.
 
 <Screenshot
   name="start-a-session/recent-setups"
-  alt="The recent setups list under the launcher's search box, showing three setups for the chosen folder."
+  alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, trust, and folder of a launch you made with the harness buttons.
+A setup is the agent, model, effort, permissions, trust, and directory of a launch you made with the harness buttons.
 Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
 
 To start another session like one you already have, choose **clone** from that session's menu instead. It opens the
@@ -107,7 +107,7 @@ covers it, along with **replace with…**.
 />
 
 The search box has the keyboard focus when the launcher opens, so you can set up a whole launch without the mouse.
-Typing a path offers to use it as the folder or to browse it.
+Typing a path offers to use it as the directory or to browse it.
 
 <Screenshot
   name="start-a-session/search-name"
@@ -121,22 +121,22 @@ you are using.
 
 ## Start from a fresh GitHub checkout
 
-A session can also start in a new clone of a GitHub repository instead of an existing folder. Type `gh:` followed by the
-repository as `owner/repo` in the search box, then choose **Fresh checkout: owner/repo**. Farhelm suggests repositories
-you have launched or cloned before, but it does not search GitHub, so type a new one in full.
+A session can also start in a new clone of a GitHub repository instead of an existing directory. Type `gh:` followed by
+the repository as `owner/repo` in the search box, then choose **Fresh checkout: owner/repo**. Farhelm suggests
+repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
-Before you launch, the launcher shows the folder the clone will go into, and the launch button waits until it does. Each
-checkout gets a new folder of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so on), or
-named after the repository and the session if you gave the session a name (`farhelm-fix`). **use existing folder**
-switches back to an ordinary folder.
+Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
+Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
+on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **use existing
+folder** switches back to an ordinary directory.
 
 When you launch, the clone runs in the session's terminal, and the agent starts once it finishes. The clone is a plain
 `git clone` of the repository's default branch, using the host's own Git credentials, so anything Git asks for, such as
 a password, shows up in the terminal for you to answer. If the clone fails, the session's status shows error, the
 terminal says what went wrong, and the partial clone stays where it is.
 
-Fresh checkouts need one setup step first: telling Farhelm which folder new checkouts go into. Create that folder on
-each host you want to clone on, then run this on the machine that runs the helm (the program that serves the Farhelm
+Fresh checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that directory
+on each host you want to clone on, then run this on the machine that runs the helm (the program that serves the Farhelm
 app; see [The pieces](/docs/how-it-works/the-pieces/)):
 
 ```sh
@@ -144,18 +144,19 @@ farhelm helm checkout-config set-root '~/work'
 ```
 
 Keep the quotes, so that `~` means the home directory on each host rather than on the machine you run the command on.
-Until this is set, the launcher says "no checkout root is configured" where it would show the folder. The same command
-can also give one host a different folder, or run a command of your choice in every new clone before the agent starts
-(setting up a different version control tool, say); `farhelm helm checkout-config --help` lists the options.
+Until this is set, the launcher says "no checkout root is configured" where it would show the directory. The same
+command can also give one host a different directory, or run a command of your choice in every new clone before the
+agent starts (setting up a different version control tool, say); `farhelm helm checkout-config --help` lists the
+options.
 
 ## When a launch fails
 
 What you see depends on how far the launch got. When Farhelm can tell before starting anything that the launch will not
-work, for example because the folder does not exist on that host or the host just went offline, it shows the reason at
-the bottom of the launcher and keeps your choices, so you can fix it and launch again. No session is created. When the
-agent itself fails to start, for example because it is not installed on that host, the session is created and its status
-shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and then
-quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
+work, for example because the directory does not exist on that host or the host just went offline, it shows the reason
+at the bottom of the launcher and keeps your choices, so you can fix it and launch again. No session is created. When
+the agent itself fails to start, for example because it is not installed on that host, the session is created and its
+status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
+then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
 
 ## Next
 
