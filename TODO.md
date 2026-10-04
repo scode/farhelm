@@ -44,6 +44,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Refuse symlinked program directories during remote uninstall.** If a remote host's `~/.local/lib/farhelm` is a
+  symlink, uninstall currently removes the link, reports success and forgets the host, while the target directory and
+  Farhelm binary remain. Refuse that layout before changing the host, with a message naming the symlink target; keep the
+  host listed and its data untouched. Follow-up to the remote uninstall change in PRs #1565 and #1568.
+
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
   selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate
