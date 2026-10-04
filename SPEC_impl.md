@@ -3393,11 +3393,11 @@ reporting a resume command that adds the type's resume selector after the start 
 Farhelm's arguments, so an upgraded session and a new one spawn alike. At spawn the supervisor fills `{cwd}` (and the
 compiler's Codex trust markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch kinds and are
 filled in any launch that contains one, a command launch included, so a command copied from a composed Codex launch
-keeps working; SPEC.md's list of a command launch's placeholders does not name them), then replaces `{farhelm_args}`
-with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume and never shown
-the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the agent process alone,
-after scrubbing inherited reporter variables. Goose is the one kind whose integration the environment still switches:
-its reporter is persisted in the resumed session, so a resume carries no argument and only
+keeps working; SPEC.md states this as the one exception to a command launch running as written), then replaces
+`{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume
+and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the
+agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
+environment still switches: its reporter is persisted in the resumed session, so a resume carries no argument and only
 `FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
 (`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
 OMP's process attribution (`classify_omp_launch`), which reads the program word of every OMP launch, new ones included,

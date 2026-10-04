@@ -470,11 +470,14 @@ checkout; the agent choice is independent of that destination:
   that agent type's status reading and conversation reporting. It also allows opting into Resume, which requires a
   resume command containing `{conversation}` and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills
   those and `{cwd}` in and otherwise runs the resume command as written. `{conversation}` in the start command is
-  refused. A command launch with no declared agent type, or one that does not opt into Resume, can never be restarted
-  (see Lifecycle operations). The YOLO assertion covers the resume command too. Search while the command launch kind is
-  active still offers agent types, models, and recent setups, and accepting one switches to the agent launch kind;
-  accepting a folder, host, or name keeps the current launch kind, and a template keeps it unless the template sets one.
-  The declared agent type is chosen in the command tab's own field, not through search.
+  refused. The one exception to "as written" in either command: Codex's internal workspace-trust markers,
+  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument, exactly as in a
+  composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one that does not opt
+  into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume command too.
+  Search while the command launch kind is active still offers agent types, models, and recent setups, and accepting one
+  switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and a template
+  keeps it unless the template sets one. The declared agent type is chosen in the command tab's own field, not through
+  search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
