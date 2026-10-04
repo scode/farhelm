@@ -58,6 +58,15 @@
   --sl-content-width: 58rem;
   --sl-sidebar-width: 18rem;
   --sl-nav-height: 4.25rem;
+  /* Heading sizes on the same scale as the prose (see .sl-markdown-content).
+     Starlight's own steps go up to 42px titles and 29px h3s, and raise them
+     further on wide screens; these values replace both, since rules outside
+     its cascade layers win over its media-query ones. */
+  --sl-text-h1: 2.1rem;
+  --sl-text-h2: 1.3rem;
+  --sl-text-h3: 1.1rem;
+  --sl-text-h4: 1rem;
+  --sl-text-h5: 0.95rem;
   --farhelm-bg: #151d27;
   --farhelm-sidebar: #18222e;
   --farhelm-panel: #1b2633;
@@ -173,9 +182,11 @@ header.header {
   min-width: 0;
 }
 
+/* Prose sits just above the sidebar's 0.92rem, so the page reads as one
+   texture rather than a large-print column beside a compact navigation. */
 .sl-markdown-content {
-  font-size: 1.06rem;
-  line-height: 1.78;
+  font-size: 0.95rem;
+  line-height: 1.7;
 }
 
 .sl-markdown-content h1,
@@ -189,7 +200,7 @@ header.header {
 
 .sl-markdown-content h1 {
   font-family: var(--sl-font);
-  font-size: clamp(2.7rem, 6vw, 4.8rem);
+  font-size: clamp(1.9rem, 3vw, 2.3rem);
   font-weight: 700;
   letter-spacing: -0.06em;
   line-height: 1;
@@ -197,7 +208,7 @@ header.header {
 
 .sl-markdown-content h2 {
   border-bottom: 1px solid var(--farhelm-line);
-  font-size: 1.65rem;
+  font-size: 1.3rem;
   font-weight: 600;
   letter-spacing: -0.025em;
   padding-bottom: 0.7rem;
@@ -213,7 +224,6 @@ header.header {
 
 .sl-markdown-content > p:first-of-type {
   color: var(--sl-color-gray-1);
-  font-size: 1.12rem;
 }
 
 .sl-markdown-content a {
@@ -335,11 +345,7 @@ header.header {
 }
 
 @media (max-width: 50rem) {
-  .sl-markdown-content {
-    font-size: 1rem;
-  }
-
   .sl-markdown-content h1 {
-    font-size: 3rem;
+    font-size: 1.9rem;
   }
 }
