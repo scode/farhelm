@@ -493,19 +493,14 @@ are large mostly because of their tests.
   answer which sessions an agent created. This is largely unused complexity today; assess whether useful tracking is
   worth keeping before extending it. The current limitation is explicitly accepted in SPEC.md.
 
-- Close the cross-host execution hole in agent-requested session creation and cloning, then remove their temporary
-  exception from the host-isolation policy. The end state: only explicitly trusted environments may spawn sessions on,
-  or interrogate the session and profile data of, other hosts; arbitrary attached supervisors lose both. In scope next
-  to create, clone, and their retry paths: `ResolveProfile` (which hands any attached host any profile's full resolved
-  launch bundle today) and the fleet-wide session and host listings. These operations currently let a remote host cause
-  arbitrary execution on another host; this is explicitly accepted temporarily to defer redesign, not permission to add
-  more such operations. Preserve the eventual ability for agents to orchestrate sessions across hosts through an
-  explicitly authorized launch policy, potentially trusted profiles, without letting the requesting host choose
-  arbitrary execution. Include the existing agent/supervisor-originated creation and retry paths: a delayed resubmission
-  must be considered when deciding what launch authority remains valid, including whether a forgotten retry key can
-  launch a session again. Permanent retention of these agent-originated retry records is not required; their replay
-  exposure is accepted pending this work. Do not add further exceptions or infer a waiver of user-initiated GUI request
-  correctness. Cross-host stop and rename remain intentionally allowed bounded operations.
+- Close the read side of what attached hosts can learn about the fleet. Acting across hosts already needs the user's
+  approval (or the requesting host's "run farhelm commands without asking" setting), but any attached host can still
+  read the fleet-wide session and host listings and, through an approved spawn that applies a template, any template's
+  full contents including command lines, and through an approved clone any session's command line; SPEC.md's Local
+  authority section accepts that only until this lands. The end state: only explicitly trusted environments may
+  interrogate other hosts' session and template data. Preserve the eventual ability for agents to orchestrate sessions
+  across hosts through an explicitly authorized launch policy, potentially trusted templates, without a card for every
+  step.
 
 - Make agent hook installation an explicit step surfaced to the user: tell them which hooks Farhelm installs for which
   agents, and have them accept specific hooks, so Codex launches no longer need `--dangerously-bypass-hook-trust` and

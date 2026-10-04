@@ -164,16 +164,17 @@ wiping and reinstalling a supervisor produces a new host identity whose predeces
 install. Removing a host from the registry merely forgets it — the supervisor and its sessions are untouched and
 reappear on re-registration. Registry entries are editable: an SSH destination can be corrected without touching the
 host's identity or its sessions. Every host, the local one included, has a settings dialog in the GUI that holds its
-destination (SSH hosts), its alias, and whether it starts YOLO sessions without asking. Every host asks before YOLO
-launches until the user explicitly turns that off, including hosts that existed before the setting did. Adopting a new
-identity for a host, described next, resets it to asking before YOLO launches: the setting is a judgment about the
-install the user knew, and a new identity, whether a reinstall or a different machine, is one they have not judged. If a
-destination turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled address),
-the helm says so and asks whether to adopt the new host or fix the destination — it never silently merges. An entry that
-reaches a machine another entry already holds connects nothing: it says which entry holds the machine, by name, and asks
-the user to remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries
-to one machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed
-of by removing the host from the registry.
+destination (SSH hosts), its alias, whether it starts YOLO sessions without asking, and whether it runs `farhelm`
+commands from its sessions without asking (see Agent-spawned sessions). Every host asks before YOLO launches, and before
+carrying out an acting `farhelm` command from one of its sessions, until the user explicitly turns that off, including
+hosts that existed before the settings did. Adopting a new identity for a host, described next, resets both settings to
+asking: each is a judgment about the install the user knew, and a new identity, whether a reinstall or a different
+machine, is one they have not judged. If a destination turns out to present a different identity than recorded (a wiped
+and reinstalled host, a recycled address), the helm says so and asks whether to adopt the new host or fix the
+destination — it never silently merges. An entry that reaches a machine another entry already holds connects nothing: it
+says which entry holds the machine, by name, and asks the user to remove that entry or change this one's destination and
+then press Retry. Farhelm never connects two entries to one machine and never resolves this on its own. Last-known
+sessions of a host that is permanently gone are disposed of by removing the host from the registry.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
@@ -533,23 +534,19 @@ parameters — same directory, same launch — is a sanctioned workflow, not a d
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
 confirmation. An agent launch counts as YOLO when its effective permission is YOLO, including omitted permissions on Pi,
 OpenCode, OMP and Goose, and is classified exactly. A command launch counts as YOLO when its YOLO assertion says so, and
-only then: Farhelm does not parse command lines to second-guess the assertion, for the user or for an agent. Confirmed
-2026-10-03: an agent can therefore start a YOLO command on such a host by asserting that it is not YOLO. This is
-accepted until the permission prompts for actions requested through the `farhelm` CLI land (TODO.md); with them, an
-agent's command launch on such a host asks whatever its assertion says. The helm enforces the confirmation, so no client
-can skip it: every create, clone, replace, replace with, and restart with that reaches it on such a host without the
-override is refused before any supervisor is contacted, and nothing is started. The GUI answers that refusal with a
-prominent confirmation, shown with the control or surface that started the launch and scrolled into view, that names the
-host, says what YOLO means and why this launch is one (YOLO was chosen where the agent type offers other modes, the
-agent type has no mode with approval prompts, or the command was asserted to be YOLO), and retries with the override
-only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer first
-sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries with the override;
-if changing that setting fails, nothing is started and the confirmation stays up with the reason.
-`farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` other than `--inherit-agent` take `--confirm-yolo` as
-the override (its earlier name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A
-plain restart relaunches the session's own stored launch and is not asked again, and so does
-`farhelm spawn --inherit-agent`, which reuses the asking session's launch and is answered by its own supervisor with no
-helm involved.
+only then: Farhelm does not parse command lines to second-guess the assertion. Because an agent's assertion cannot be
+checked either, an agent may not start a command launch, or a YOLO launch, on such a host at all (see Agent-spawned
+sessions). The helm enforces the confirmation, so no client can skip it: every create, clone, replace, replace with, and
+restart with that reaches it on such a host without the override is refused before any supervisor is contacted, and
+nothing is started. The GUI answers that refusal with a prominent confirmation, shown with the control or surface that
+started the launch and scrolled into view, that names the host, says what YOLO means and why this launch is one (YOLO
+was chosen where the agent type offers other modes, the agent type has no mode with approval prompts, or the command was
+asserted to be YOLO), and retries with the override only when the user confirms. Besides a one-off confirmation it
+offers to stop asking for that host: that answer first sets the host to start YOLO sessions without asking, exactly as
+its settings would, and then retries with the override; if changing that setting fails, nothing is started and the
+confirmation stays up with the reason. The `farhelm` command line has no override: a request from inside a session is an
+agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
+relaunches the session's own stored launch and needs no YOLO confirmation again.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1420,27 +1417,25 @@ farhelm spawn --cwd /home/user/ws/auth-followup \
 
 The spawn CLI talks to the session's own supervisor, authenticated by a per-session credential present in the session's
 environment — any process inside the session may spawn, and that is the point. `farhelm spawn` targets the session's own
-host, and only that host: it is answered by the supervisor on the other end of its socket, which knows nothing about any
-other machine. That is a property of this command rather than a limit on what an agent can create —
-`farhelm agent create` and `farhelm agent clone` below go through the helm and reach any host in the fleet. The two
-coexist on purpose: spawn is the scripting primitive that works with no helm attached, and the agent verbs are the
-fleet-aware ones. The helm learns of new sessions automatically; they appear in all clients without manual registration
-or refresh.
+host, and only that host, however its launch is chosen; `farhelm agent create` and `farhelm agent clone` below reach any
+host in the fleet. Like every acting `farhelm` command, spawn needs the attached helm, which asks the user before it is
+carried out (see the permission prompts below), so it is refused when no helm is attached, `--inherit-agent` included.
+The helm learns of new sessions automatically; they appear in all clients without manual registration or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
-asking session's stored launch, and works with no helm attached. The launch flags are resolved by the attached helm,
-which owns templates and composes agent launches, and are refused with a remedy when no helm is attached. The title is
-generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a
-timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking
-session on its host and live as long as the child session does: the same key from another session is an unrelated
-request, never a replay of someone else's child, and a replay never returns the asking session itself. Confirmed
-2026-09-28, the same scoping applies to the idempotency keys of `farhelm agent create` and `farhelm agent clone`.
-Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
-Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
-see Durability.)
+asking session's stored launch, which the session's own supervisor supplies. The launch flags are resolved by the
+attached helm, which owns templates and composes agent launches. Either is refused with a remedy when no helm is
+attached. The title is generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the
+same key after a timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped
+to the asking session on its host and live as long as the child session does: the same key from another session is an
+unrelated request, never a replay of someone else's child, and a replay never returns the asking session itself.
+Confirmed 2026-09-28, the same scoping applies to the idempotency keys of `farhelm agent create` and
+`farhelm agent clone`. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the
+per-session credential; other Farhelm-specific variables are illustrative, not contract. (The user's login-shell
+environment is separately guaranteed; see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
@@ -1456,12 +1451,13 @@ applying its ordinary rules to the operation exactly as it would for a client re
 the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
 concurrent rename. Restart requires an explicit `--session` target that can resume its conversation (as in the GUI,
 there is no other kind of restart), and an explicit `--stop-if-running` consent when the target is working (an idle,
-waiting, or unknown target is stopped without it, as in the GUI). The owning supervisor revalidates both the resume
-offer and the target's status at handling time, and refuses rather than launching anything else when the conversation
-can no longer be resumed. An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose
-its acknowledgement, and leave resumed task continuation unconfirmed; it never prints an unobserved completion as
-success. There is no `farhelm agent replace`: an agent replacing its own session would be killing itself mid-request,
-which is a design question this version leaves open rather than answers by accident.
+waiting, or unknown target is stopped without it, as in the GUI). It runs only that session's stored launch on its
+owning host and accepts no replacement command. The owning supervisor revalidates both the resume offer and the target's
+status at handling time, and refuses rather than launching anything else when the conversation can no longer be resumed.
+An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose its acknowledgement, and
+leave resumed task continuation unconfirmed; it never prints an unobserved completion as success. There is no
+`farhelm agent replace`: an agent replacing its own session would be killing itself mid-request, which is a design
+question this version leaves open rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -1472,11 +1468,56 @@ confirmation on stderr. The preconditions are the helm's ordinary ones: a direct
 that supervisor's own refusal, reported verbatim rather than paraphrased on the way back, and an unreachable target is
 refused with its state named. The new session appears in every client the way any other create does.
 
-Agent-requested cross-host create and clone are temporary exceptions to the host-to-host security boundary below. They
-currently allow arbitrary execution on the target host; this exposure is explicitly accepted pending the guardrails
-tracked in TODO.md's Maybe later bucket. Their existence does not authorize additional cross-host execution
-capabilities. Cross-host stop, rename, and restart are separately permitted bounded operations. Restart uses only the
-selected session's stored launch configuration on its owning host; it accepts no replacement command.
+Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
+`farhelm agent create`, `clone`, `rename`, `stop` and `restart`, and the template writes below are carried out only once
+the user approves them in the GUI, including when an agent acts on its own session. The read-only verbs (the hosts,
+sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does Farhelm's own plumbing
+that runs in a session, such as the hooks that report a conversation's identity, which is not an agent verb. Farhelm
+cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the command in a session
+asks as that session. The helm decides, because the requesting host and its supervisor are not trusted to (see Local
+authority and trust between hosts), and it decides by the host connection the request arrived on, never by anything the
+request or its supervisor claims. A request from a host whose "run farhelm commands from this host without asking"
+setting is on (see Topology) is not asked about. Spawn is the exception that proves the rule: it is the one action the
+requesting host's own supervisor carries out, and the launch `--inherit-agent` reuses comes from that supervisor, so a
+compromised supervisor could carry out a spawn without asking, show a different launch on the card than the one it
+starts, or ignore the YOLO rule below. That is accepted, because spawn acts only on its own host, which the threat model
+already trusts. Waiting for the user holds nothing other operations wait on, apart from the asking session's own next
+change, which is refused while an earlier one is still waiting.
+
+While a request waits, the GUI shows a card for it in a fixed corner of the window. The card stays until it is answered
+or expires, several stack, and the rest of the app stays usable. It names the requesting session and its host, the
+action, and its target. For a launch it shows the target host, the folder, the agent type and its choices or the full
+command and resume command text, and whether the launch is YOLO. For a template write it shows the whole resulting
+template, including the command and resume command text that the templates listing withholds from agents, and for a
+template delete the template being deleted. Text an agent controls (session titles, folders, command lines) is shown as
+labelled data, never in a way that could pass for Farhelm's own wording. The card offers Allow, Always allow from the
+requesting host, and Deny. Always allow turns that host's setting on and then approves the request; if turning the
+setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
+answered on: other cards already waiting from that host stay until they are answered.
+
+If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
+refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
+waits for the user's answer for at most nine minutes, then is refused as not answered and its card disappears; nine
+rather than ten so that an agent whose shell commands are cut off at ten minutes, as Claude Code's are, still sees the
+answer. Declined, not answered, and no GUI are distinct messages on stderr with a nonzero exit, and nothing is carried
+out after any of them. While it waits, the CLI itself says once on stderr, after a couple of seconds without an answer,
+that it is waiting for the user to approve the request in Farhelm. Deleting a session first denies the requests it has
+waiting. An approval holds only for the host connection the request arrived on: a request whose host was replaced or
+re-identified while it waited is refused rather than carried out. An approval that arrives after the asking CLI was
+killed still carries out exactly what the card showed. A retry is a new request and is asked about like one; when it
+carries the first request's idempotency key, approving it returns the session the first approval created rather than
+creating another. A host's sessions can keep only a few cards waiting at a time; a misbehaving host that keeps asking is
+answered by denying its cards or removing the host, and that nuisance is accepted.
+
+On a host that asks before YOLO launches, an agent may only start what runs the way the user already approved. The helm
+refuses, without asking, an agent's create, clone or spawn (`--inherit-agent` included) whose launch is YOLO, and any of
+them that is a command launch whatever its YOLO assertion says, because Farhelm cannot check the assertion. It applies
+that rule again when the user approves, so a host whose setting changed during the wait is judged as it is then. The
+refusal names the host and says that turning on "start YOLO sessions here without asking" for it is how to let agents do
+this. A plain restart re-runs the session's own stored launch, which the user approved or a host setting allowed when
+the session was created (sessions agents created before these prompts existed included), so it is allowed and gets the
+ordinary card, and so do agent launches whose permission is not YOLO. There is no override an agent can pass: the
+command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
 
 `farhelm agent create` and `farhelm spawn` take the launcher's fields as flags. `--template <name>` applies a template
 by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,
@@ -1496,20 +1537,29 @@ is not an agent type is refused with the list of agent types. An idempotency key
 accepted request resolved its templates and flags into: a retry with the same key returns that session even if a
 template has been edited since. `farhelm agent clone` copies its explicitly selected source's stored launch onto an
 explicitly named host, verbatim. Clone carries no translation between hosts: a command written for one machine may name
-a binary that is absent, a different build, or one that takes different flags on another. Agents can apply templates but
-not create, edit, or delete them: template writes from agents wait for the permission prompts for actions requested
-through the `farhelm` CLI (TODO.md), because a template can carry a command line that every host the helm manages may
-later run.
+a binary that is absent, a different build, or one that takes different flags on another.
+
+Agents can also write templates, behind the same card, since a template can carry a command line that every host the
+helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd`, `--title`, `--host`
+and the launch flags other than `--template`; `--host` names a host by its display name, is resolved when the template
+is written, and is stored as that host's install. Edit, `farhelm agent template edit <name>`, takes the same flags and
+sets only the fields it is given, with no way to unset one: the templates listing withholds command text, so an agent
+cannot reproduce a template it did not write, and replacing the whole template would silently drop that text. To drop a
+field, delete the template with `farhelm agent template delete <name>` and create it again. A fresh GitHub checkout
+destination is refused, as it is when applying a template from the CLI. These writes go through the same path as the
+GUI's template editor.
 
 Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
 with their values except a command line or resume command, which are listed as set without their text. Discovery also
 has `--json` forms with a versioned envelope, exact names, the caller's host identity, and completeness fields.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
-the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no
-helm is attached". It is the one verb that reaches nothing — no supervisor, no helm, no credential — because it is what
-an agent runs first, and a manual that fails on an unattached session is a manual nobody reads at the moment they need
-it. The verb list it prints is derived from the CLI itself, so it cannot describe a set of verbs that does not exist.
+the verbs, the `*` marker, that a session's own credential is what authorizes the question, what to do about "no helm is
+attached", that acting verbs may wait up to nine minutes for the user (so run them with a long enough timeout, and give
+creates an idempotency key so a retry returns the same session), and what each refusal means. It is the one verb that
+reaches nothing — no supervisor, no helm, no credential — because it is what an agent runs first, and a manual that
+fails on an unattached session is a manual nobody reads at the moment they need it. The verb list it prints is derived
+from the CLI itself, so it cannot describe a set of verbs that does not exist.
 
 `$farhelm help` in a conversation asks the agent for a brief introduction, the available user-level actions, and a few
 natural-language examples, not a raw CLI help dump. The agent derives the actions from that generated inventory and does
@@ -1583,8 +1633,8 @@ that only the maintainer can read.
 ## Security
 
 The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below define local account authority, directional
-trust between hosts, and the exact temporary exceptions for agent-requested session creation and cloning. Apply those
-boundaries when interpreting the transport and credential rules here.
+trust between hosts, and the user's approval that agent-requested actions across hosts need. Apply those boundaries when
+interpreting the transport and credential rules here.
 
 Steady-state operation between Farhelm's own components has exactly two network edges — the browser to a standalone helm
 (token-authenticated) and the helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
@@ -1699,8 +1749,8 @@ The first usable version is complete when all of the following pass:
    the conversation.
 6. Quit the app and start a standalone `farhelm helm run` on the same state directory. Attach to the remote session from
    one authenticated browser tab, then another; the first tab visibly detaches.
-7. Ask Claude to create a new `jj workspace` and spawn a child session via the provided CLI; the child appears in the
-   client without refresh.
+7. Ask Claude to create a new `jj workspace` and spawn a child session via the provided CLI, and approve its card; the
+   child appears in the client without refresh.
 8. Restart the Linux supervisor while its session runs: the terminal is uninterrupted and no state is lost.
 9. Reboot the Linux host: its sessions show as interrupted; opening one offers resume, and the session's own
    conversation — not just the most recent one in that directory — is restored.
@@ -1876,29 +1926,33 @@ user-initiated paste is intentional delivery of the pasted content to the select
 program-initiated clipboard reads. Clipboard writes remain best-effort as specified in Terminal experience; an opt-out
 control is not a current requirement.
 
-Agents may intentionally stop, rename, and restart sessions on other hosts through the helm. Those named, bounded
-effects are authorized even when invoked by a malicious agent. Existing agent-requested session creation and cloning
-across hosts are the only temporary execution exceptions: they permit arbitrary execution on the target today, and that
-exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TODO.md#maybe-later). Existing
-agent/supervisor-originated creation retries share that acceptance; permanent retention of their retry records is not
-required. This does not waive correctness of user-initiated GUI requests or select a pruning implementation.
+An agent's acting `farhelm` commands, whichever host they reach, are carried out only with the user's approval or under
+the requesting host's own "run farhelm commands from this host without asking" setting (see Agent-spawned sessions).
+That is what keeps a session on one host from gaining execution on another through Farhelm: creating, cloning, renaming,
+stopping and restarting sessions across hosts, and writing the templates any host may launch from, are authorized by the
+user, not by the request. A user who turns that setting on for a host grants that host's sessions exactly that authority
+over the fleet, including changing what later launches from those templates run anywhere. A retried create is a new
+request and is asked about like one, so how long agent-originated retry records are kept is not a security question.
+None of this waives correctness of user-initiated GUI requests.
 
-The same temporary exception covers template resolution. Any attached host may obtain any template's full contents,
-including a command line and resume command it carries, because that exception already lets any host ask for any
-template to be applied to a launch on itself, which delivers the same contents to it. Until the guardrails land,
-templates are no place for secrets that must stay hidden from an attached host. This acceptance is not a standing grant:
-it ends with the cross-host creation exception, when spawning sessions on other hosts and reading their session and
-template data are limited to explicitly trusted environments.
+Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
+including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a
+host the user lets run commands without asking, delivers those contents to it. Until the read side is closed (TODO.md's
+[Maybe later bucket](TODO.md#maybe-later)), templates are no place for secrets that must stay hidden from an attached
+host. The fleet-wide session and host listings stay readable by every attached host under the same acceptance. This
+acceptance is not a standing grant: it ends when reading other hosts' session and template data is limited to explicitly
+trusted environments.
 
-Confirmed 2026-09-28, under that same temporary exception: command lines are not secret from agents either. An agent
-runs with the same account authority as its host's supervisor, which can already obtain any template's contents, so an
-agent may obtain any template's command line and resume command (for example by applying it in a spawn) and any
-session's command line (for example by cloning that session onto a host it can read). Until the guardrails land, neither
-templates nor session command lines are a place for secrets. This ends with the same exception.
+Confirmed 2026-09-28, under that same read-side acceptance: command lines are not secret from agents either. An agent
+runs with the same account authority as its host's supervisor, so an agent may obtain any template's command line and
+resume command (for example by applying it in a spawn) and any session's command line (for example by cloning that
+session onto a host it can read). Until the read side is closed, neither templates nor session command lines are a place
+for secrets. This ends with the same acceptance.
 
-Do not add other arbitrary cross-host execution capabilities by analogy with those exceptions. Future agent-driven
-orchestration, such as setting up several sessions on another host, is wanted with an explicitly authorized launch
-policy; trusted templates are a possible design, not a security property established for the current catalog.
+Do not add a way for one host to cause execution on another that does not go through the user's approval or that host's
+setting, by analogy with the commands above or otherwise. Future agent-driven orchestration, such as setting up several
+sessions on another host without a card for each, is wanted with an explicitly authorized launch policy; trusted
+templates are a possible design, not a security property established for the current catalog.
 
 ### Client hardening
 
@@ -1938,14 +1992,15 @@ displaced clients), which still hold whenever more than one client opens a sessi
 primary GUI (see Signing in again).
 
 The `farhelm` command line, and the agent skill through which agents act on the fleet, are a fully supported primary
-surface alongside the GUI, including while a GUI is open: operations they perform concurrently with a GUI must behave
-correctly, and the best-effort qualifier above applies only to several GUIs at once.
+surface alongside the GUI, including while a GUI is open (acting from inside a session needs a window open to approve
+it, unless the host's setting says not to ask; see Agent-spawned sessions): operations they perform concurrently with a
+GUI must behave correctly, and the best-effort qualifier above applies only to several GUIs at once.
 
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is
 explicitly allowed, not a confidentiality defect, and does not require a new discovery interface. Command lines are not
-part of that listing, but they are not protected from agents either while the temporary exception in
+part of that listing, but they are not protected from agents either while the read-side acceptance in
 [Local authority and trust between hosts](#local-authority-and-trust-between-hosts) lasts. Discovery also does not make
 current templates trusted execution guardrails; the separate host-authority rules still apply.
 
