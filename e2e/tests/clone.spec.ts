@@ -67,9 +67,9 @@ async function fillCloneTitle(form: Locator, title: string) {
   await form.getByLabel("name (optional)").fill(title);
 }
 
-/** Switch the shared harness picker to the typed-command controls. */
+/** Switch the launcher to its command tab. */
 async function chooseCommandMode(form: Locator) {
-  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");
   await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
 }
@@ -762,6 +762,7 @@ test("clone pre-fills the create form from a typed-command row, and the edited c
 
     // The destination belongs to the shared shell, while the two launch
     // drafts retain their own values across a round trip through a harness.
+    await form.getByRole("tab", { name: "agent", exact: true }).click();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "structured");
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);

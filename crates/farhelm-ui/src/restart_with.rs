@@ -1,8 +1,12 @@
 //! A fixed-destination editor for restarting one captured conversation.
 //!
 //! The session view owns the restart request and its result. This dialog owns
-//! only a draft of the stored launch selection, so a refusal can leave that
-//! draft visible without changing the session's authoritative state.
+//! only a draft of the stored launch, so a refusal can leave that draft
+//! visible without changing the session's authoritative state. It edits
+//! whichever launch kind the session has (SPEC.md, Restart with): an agent
+//! launch's model, effort, permissions and workspace trust, or a command
+//! launch's command, resume command and YOLO answer. The launch kind and the
+//! agent type stay fixed in both.
 //!
 //! ## Focus: the dialog sits over a live agent
 //!
@@ -50,7 +54,59 @@ use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
 use crate::launch_controls::LaunchControls;
 use crate::modal_isolation;
 use crate::peer::display_peer;
-use crate::{ApiBase, LaunchEffort, LaunchPermission, LaunchSelection, Session};
+use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
+
+/// The changed launch Restart with sends, one per launch kind.
+///
+/// An agent launch sends only its new choices, which the helm composes into
+/// commands exactly as it does for a create; a command launch sends the
+/// edited command launch whole. The two travel under different request
+/// fields (`with` and `with_command`), so the helm never has to guess which
+/// kind an edit is.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RestartEdit {
+    Agent(LaunchSelection),
+    Command(CommandLaunch),
+}
+
+impl RestartEdit {
+    /// The agent selection an agent edit carries, for the YOLO question's
+    /// wording; `None` for a command edit, whose YOLO is its assertion.
+    pub(crate) fn selection(&self) -> Option<&LaunchSelection> {
+        match self {
+            RestartEdit::Agent(selection) => Some(selection),
+            RestartEdit::Command(_) => None,
+        }
+    }
+}
+
+/// What a session's Restart with edits, or `None` when there is nothing it
+/// could edit: an agent launch's choices, or a command launch that declared
+/// an agent type and a resume command (the only command launches that can
+/// resume at all). The session view's availability rule decides whether the
+/// dialog opens; this is only how it reads the opening snapshot.
+fn restart_baseline(session: &Session) -> Option<RestartEdit> {
+    match &session.launch {
+        Some(crate::SessionLaunch::Agent { selection, .. }) => {
+            let mut selection = selection.clone();
+            // Old sessions can omit a permission that now means YOLO. Compare
+            // the effective choices, so pressing the already-selected mode is
+            // not a change.
+            selection.permissions = selection
+                .harness
+                .effective_permission(selection.permissions);
+            Some(RestartEdit::Agent(selection))
+        }
+        Some(crate::SessionLaunch::Command(command))
+            if command.agent.is_some() && command.resume.is_some() =>
+        {
+            Some(RestartEdit::Command(command.clone()))
+        }
+        Some(crate::SessionLaunch::Command(_))
+        | Some(crate::SessionLaunch::Legacy { .. })
+        | None => None,
+    }
+}
 
 /// Selector for the mounted dialog, shared by its focus trap, its isolation
 /// and the session view's close path that releases that isolation.
@@ -167,21 +223,48 @@ pub(crate) fn RestartWithDialog(
     yolo_error: Option<String>,
     stop_first: bool,
     offer_label: String,
-    on_submit: EventHandler<(LaunchSelection, bool, bool)>,
+    on_submit: EventHandler<(RestartEdit, bool, bool)>,
     on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let Some(mut baseline) = session.agent_selection().cloned() else {
+    // Fixed for the dialog's life: `session` is the opening snapshot, so
+    // the same branch (and the same hooks below) runs on every render.
+    let Some(opening) = restart_baseline(&session) else {
         return rsx! {};
     };
-    // Old sessions can omit a permission that now means YOLO. Compare the
-    // effective choices, so pressing the already-selected mode is not a change.
-    baseline.permissions = baseline.harness.effective_permission(baseline.permissions);
+    let opening_command = match &opening {
+        RestartEdit::Command(command) => Some(command.clone()),
+        RestartEdit::Agent(_) => None,
+    };
+    // The agent controls' state. A command launch's dialog never shows
+    // them; it seeds them from its declared agent type (which
+    // `restart_baseline` guarantees) only because hooks run unconditionally.
+    let baseline = match &opening {
+        RestartEdit::Agent(selection) => selection.clone(),
+        RestartEdit::Command(command) => LaunchSelection {
+            harness: command
+                .agent
+                .expect("restart_baseline admits only a command launch with a declared agent type"),
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        },
+    };
     let base = use_context::<ApiBase>().0;
     let catalog_base = base.clone();
+    // Only the agent controls use the model catalog; a command launch's
+    // dialog runs the hook but never fetches it.
+    let wants_catalog = opening_command.is_none();
     let catalog_resource = use_resource(move || {
         let base = catalog_base.clone();
-        async move { api::fetch_launch_catalog(&base).await }
+        async move {
+            if wants_catalog {
+                api::fetch_launch_catalog(&base).await
+            } else {
+                Ok(Default::default())
+            }
+        }
     });
     let catalog_result = catalog_resource.read();
     // `None` until a catalog is in hand: still loading, or the read failed.
@@ -203,13 +286,79 @@ pub(crate) fn RestartWithDialog(
     let mut model_error = use_signal(|| None::<String>);
     let mut reset_reason = use_signal(|| None::<String>);
     let mut model_edited = use_signal(|| false);
+    // The command launch's draft: its two command lines and its YOLO
+    // answer. Unused for an agent launch. The stored commands are
+    // peer-relayed text (an agent can write them), so each field shows them
+    // escaped and remembers whether it was edited; an untouched field sends
+    // the stored bytes exactly, as the launcher's own fields do
+    // (`list::create_form`'s `reseed_cloned_field` and `submitted_field`).
+    // Without that, a hidden or direction-changing character could make the
+    // field read differently from what Restart with sends.
+    let stored_command = opening_command
+        .as_ref()
+        .map(|c| c.command.clone())
+        .unwrap_or_default();
+    let stored_resume = opening_command
+        .as_ref()
+        .and_then(|c| c.resume.clone())
+        .unwrap_or_default();
+    let shown_command = display_peer(&stored_command);
+    let mut command_text = use_signal(move || shown_command);
+    let mut command_edited = use_signal(|| false);
+    let shown_resume = display_peer(&stored_resume);
+    let mut resume_text = use_signal(move || shown_resume);
+    let mut resume_edited = use_signal(|| false);
+    let yolo_seed = opening_command.as_ref().is_some_and(|c| c.yolo);
+    let mut command_yolo = use_signal(move || yolo_seed);
+
     let current = selection();
     let draft_pending = model_open() && !model_draft().is_empty();
     // A pending or failed catalog read cannot establish that a stored
     // selection became invalid (`launch_composer::selection_fits_catalog`).
     let compatible = launch_composer::selection_fits_catalog(&current, catalog_answer.as_deref());
-    let may_submit =
-        !busy && current != baseline && !draft_pending && model_error().is_none() && compatible;
+    // The edit as it stands, and why it cannot be sent yet, if it cannot.
+    // A command edit is checked by the same rules a create applies
+    // (`CommandLaunch::validate`), so a mistake shows here, before anything
+    // is stopped, rather than as the helm's refusal.
+    let (edit, edit_problem) = match &opening_command {
+        None => (RestartEdit::Agent(current.clone()), None),
+        Some(stored) => {
+            let draft = CommandLaunch {
+                command: if command_edited() {
+                    command_text()
+                } else {
+                    stored_command.clone()
+                },
+                yolo: command_yolo(),
+                agent: stored.agent,
+                resume: Some(if resume_edited() {
+                    resume_text()
+                } else {
+                    stored_resume.clone()
+                }),
+            };
+            let problem = draft.validate().err();
+            (RestartEdit::Command(draft), problem)
+        }
+    };
+    let ready = match &edit {
+        RestartEdit::Agent(_) => !draft_pending && model_error().is_none() && compatible,
+        RestartEdit::Command(_) => edit_problem.is_none(),
+    };
+    // Which fields the edit changes, judged on what it would send (an
+    // untouched field sends the stored bytes), for each field's marker.
+    let (command_changed, resume_changed, yolo_changed) = match (&edit, &opening_command) {
+        (RestartEdit::Command(draft), Some(stored)) => (
+            draft.command != stored.command,
+            draft.resume != stored.resume,
+            draft.yolo != stored.yolo,
+        ),
+        _ => (false, false, false),
+    };
+    let may_submit = !busy && edit != opening && ready;
+    // One copy per submit path: each handler is called again on the next
+    // click, and the edit it sends is the one on screen at this render.
+    let (edit_confirm, edit_stop_asking, edit_submit) = (edit.clone(), edit.clone(), edit);
     let host = session.host_name.as_deref().unwrap_or("unknown host");
     let title = display_peer(&session.title);
     let folder = display_peer(&session.cwd);
@@ -264,13 +413,97 @@ pub(crate) fn RestartWithDialog(
                 },
                 h2 { class: "restart-with-title", "restart with · {title}" }
                 dl { class: "restart-with-context",
-                    dt { "harness" } dd { "{harness}" }
+                    if opening_command.is_some() {
+                        dt { "launch" } dd { "command" }
+                        dt { "agent type" } dd { "{harness}" }
+                    } else {
+                        dt { "harness" } dd { "{harness}" }
+                    }
                     dt { "host" } dd { "{display_peer(host)}" }
                     dt { "folder" } dd { "{folder}" }
                     dt { "resumes" } dd { "this session's conversation" }
                 }
-                p { class: "restart-with-fixed-note", "harness, host and folder stay fixed; use replace with for another harness or folder, or clone for another host" }
+                if opening_command.is_some() {
+                    p { class: "restart-with-fixed-note", "launch kind, agent type, host and folder stay fixed; restart runs the resume command, so a changed command applies the next time this session is cloned or replaced" }
+                } else {
+                    p { class: "restart-with-fixed-note", "harness, host and folder stay fixed; use replace with for another harness or folder, or clone for another host" }
+                }
                 hr { class: "restart-with-rule" }
+                if opening_command.is_some() {
+                    div { class: "restart-with-command",
+                        label {
+                            span {
+                                "command"
+                                if command_changed { span { class: "restart-with-edited", " (edited)" } }
+                            }
+                            input {
+                                r#type: "text",
+                                class: "restart-with-command-input",
+                                autocomplete: "off",
+                                autocorrect: "off",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                dir: "ltr",
+                                value: "{command_text}",
+                                disabled: busy,
+                                oninput: move |evt| {
+                                    command_text.set(evt.value());
+                                    command_edited.set(true);
+                                },
+                            }
+                        }
+                        label {
+                            span {
+                                "resume command"
+                                if resume_changed { span { class: "restart-with-edited", " (edited)" } }
+                            }
+                            input {
+                                r#type: "text",
+                                class: "restart-with-resume-input",
+                                autocomplete: "off",
+                                autocorrect: "off",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                dir: "ltr",
+                                value: "{resume_text}",
+                                disabled: busy,
+                                oninput: move |evt| {
+                                    resume_text.set(evt.value());
+                                    resume_edited.set(true);
+                                },
+                            }
+                        }
+                        fieldset { class: "launch-command-yolo",
+                            legend {
+                                "runs without approval prompts"
+                                if yolo_changed { span { class: "restart-with-edited", " (edited)" } }
+                            }
+                            label {
+                                input {
+                                    r#type: "radio",
+                                    name: "restart-with-command-yolo",
+                                    checked: command_yolo(),
+                                    disabled: busy,
+                                    onchange: move |_| command_yolo.set(true),
+                                }
+                                "yes (YOLO)"
+                            }
+                            label {
+                                input {
+                                    r#type: "radio",
+                                    name: "restart-with-command-yolo",
+                                    checked: !command_yolo(),
+                                    disabled: busy,
+                                    onchange: move |_| command_yolo.set(false),
+                                }
+                                "no"
+                            }
+                        }
+                        if let Some(problem) = edit_problem.clone() {
+                            p { class: "restart-with-command-error", role: "status", "{problem}" }
+                        }
+                    }
+                } else {
                 LaunchControls {
                     harness: Some(baseline.harness),
                     model: current.model.clone(),
@@ -353,7 +586,8 @@ pub(crate) fn RestartWithDialog(
                         selection.set(after);
                     },
                 }
-                if let Some(message) = catalog_error {
+                }
+                if let Some(message) = catalog_error.filter(|_| opening_command.is_none()) {
                     p { class: "restart-with-catalog-error", role: "status", "model catalog unavailable: {message}" }
                 }
                 if let Some(message) = error {
@@ -374,7 +608,7 @@ pub(crate) fn RestartWithDialog(
                         on_confirm: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call((selection(), true, false));
+                                on_submit.call((edit_confirm.clone(), true, false));
                             }
                         },
                         // The question stays up while the host is marked
@@ -385,7 +619,7 @@ pub(crate) fn RestartWithDialog(
                         on_confirm_and_stop_asking: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call((selection(), true, true));
+                                on_submit.call((edit_stop_asking.clone(), true, true));
                             }
                         },
                         on_cancel: move |_| {
@@ -425,7 +659,7 @@ pub(crate) fn RestartWithDialog(
                         onclick: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call((selection(), false, false));
+                                on_submit.call((edit_submit.clone(), false, false));
                             }
                         },
                         if stop_first { "stop and restart" } else { "restart" }

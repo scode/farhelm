@@ -35,7 +35,7 @@ use crate::tabs::{
     sorted_tab_errors, tab_banner_element_id, tab_connecting_element_id, tab_label,
     tab_terminal_element_id, terminal_ws_path, terminal_ws_unowned_path, visible_tabs,
 };
-use crate::{ApiBase, LaunchSelection, RestartOffer, Session, SessionStatus};
+use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 
 /// The DOM id of the element carrying the restart offer's explanation, which
 /// the restart button names through `aria-describedby`.
@@ -93,12 +93,37 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
 
 /// Why this dialog cannot change the session's launch, when it cannot: a
 /// legacy session's launch is never changed (SPEC.md refuses Restart with
-/// for it, naming Replace with), and this dialog edits agent launches only.
+/// for it, naming Replace with), and an agent or command launch can be
+/// edited exactly when Restart could resume it.
 fn restart_with_reason(session: &Session) -> Option<String> {
     match &session.launch {
         Some(crate::SessionLaunch::Agent { .. }) => restart_with_unavailable(session),
-        Some(crate::SessionLaunch::Command(_)) => {
-            Some("this dialog changes agent launches; replace with changes a command".to_string())
+        // Restart with resumes, so a command launch needs a declared agent
+        // type and a resume command, and then a captured conversation.
+        Some(crate::SessionLaunch::Command(command)) => {
+            if command.agent.is_none() || command.resume.is_none() {
+                Some(
+                    "this command launch has no resume command, so it cannot be restarted; use \
+                     replace with"
+                        .to_string(),
+                )
+            } else {
+                match session.restart_offer {
+                    RestartOffer::Resume => None,
+                    // A declared type Farhelm has no conversation reporting
+                    // for can carry a resume command, and will never have a
+                    // conversation to fill it with.
+                    RestartOffer::NoConversationReporting => command.agent.map(|agent| {
+                        format!(
+                            "{} sessions can't be resumed",
+                            crate::launch_composer::harness_word(agent)
+                        )
+                    }),
+                    RestartOffer::NotCaptured | RestartOffer::NoResumeCommand => {
+                        Some("no captured conversation to resume".to_string())
+                    }
+                }
+            }
         }
         Some(crate::SessionLaunch::Legacy { .. }) | None => Some(
             "this session was created before launch kinds, so its launch cannot be changed; use \
@@ -1164,7 +1189,7 @@ pub(crate) fn SessionView(
     // from the question the user answered, not re-read from the session.
     // Only a restart WITH new settings ever passes it.
     let restart = move |stop_if_running: bool,
-                        with: Option<LaunchSelection>,
+                        with: Option<crate::restart_with::RestartEdit>,
                         allow_yolo: bool,
                         stop_asking: Option<(crate::HostId, String)>| {
         if restarting() {
@@ -1208,7 +1233,10 @@ pub(crate) fn SessionView(
                             .host_name
                             .clone()
                             .unwrap_or_else(|| "this host".to_string()),
-                        reason: crate::yolo_confirm::YoloReason::of_launch(with.as_ref()),
+                        reason: crate::yolo_confirm::YoloReason::of_launch(
+                            with.as_ref()
+                                .and_then(crate::restart_with::RestartEdit::selection),
+                        ),
                     }));
                 }
                 Err(e) if with.is_some() => restart_with_error.set(Some(e.text.clone())),
@@ -1807,8 +1835,9 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
-    // Whether Restart can run at all; Restart with additionally needs a
-    // structured launch (`restart_with_reason`).
+    // Whether Restart can run at all; Restart with additionally needs a launch
+    // it can edit, an agent launch or a resumable command launch
+    // (`restart_with_reason`).
     let restart_available = shown.restart_offer.can_restart();
     // The precondition the header delete's prompt, as rendered by THIS pass,
     // covered, captured by its confirm handler. It must come from the same
@@ -2270,7 +2299,7 @@ pub(crate) fn SessionView(
                         restart_yolo.set(None);
                         restart_yolo_error.set(None);
                     },
-                    on_submit: move |(selection, allow_yolo, stop_asking): (LaunchSelection, bool, bool)| {
+                    on_submit: move |(edit, allow_yolo, stop_asking): (crate::restart_with::RestartEdit, bool, bool)| {
                         if restarting() { return; }
                         // "Don't ask again" keeps the confirmation up through
                         // its first step; the restart task takes it down.
@@ -2292,13 +2321,21 @@ pub(crate) fn SessionView(
                             restart_with_error.set(Some("this session's launch settings changed; close and reopen restart with".to_string()));
                             return;
                         }
-                        if opening.agent_selection().is_none_or(|saved| selection.harness != saved.harness) {
-                            restart_with_error.set(Some("the session harness cannot be changed here".to_string()));
+                        // The dialog holds the launch kind and agent type fixed;
+                        // this re-check keeps an edit of another kind or type
+                        // from ever being sent.
+                        let same_kind_and_type = match (&edit, &opening.launch) {
+                            (crate::restart_with::RestartEdit::Agent(selection), Some(crate::SessionLaunch::Agent { selection: saved, .. })) => selection.harness == saved.harness,
+                            (crate::restart_with::RestartEdit::Command(command), Some(crate::SessionLaunch::Command(saved))) => command.agent == saved.agent,
+                            _ => false,
+                        };
+                        if !same_kind_and_type {
+                            restart_with_error.set(Some("the session's launch kind and agent type cannot be changed here".to_string()));
                             return;
                         }
                         with_restart(
                             restart_with_stops_first,
-                            Some(selection),
+                            Some(edit),
                             allow_yolo,
                             stop_asking,
                         );
@@ -3108,10 +3145,11 @@ mod tests {
         assert_eq!(copy_warning("command", "claude --resume"), None);
     }
 
-    /// This dialog changes an agent launch with a captured conversation;
-    /// the disabled explanation must identify which fact is missing
-    /// without treating a generic integration as resumable, and a legacy
-    /// session is pointed at Replace with.
+    /// This dialog changes an agent or command launch with a captured
+    /// conversation; the disabled explanation must identify which fact is
+    /// missing without treating a generic integration or a command without a
+    /// resume command as resumable, and a legacy session is pointed at
+    /// Replace with.
     #[farhelm_testtrace::test]
     fn restart_with_availability_explains_each_unavailable_case() {
         let mut session = live_session();
@@ -3129,7 +3167,7 @@ mod tests {
 
         let agent = |harness| {
             Some(crate::SessionLaunch::Agent {
-                selection: LaunchSelection {
+                selection: crate::LaunchSelection {
                     harness,
                     model: None,
                     effort: None,
@@ -3156,6 +3194,45 @@ mod tests {
         assert_eq!(
             restart_with_reason(&session).as_deref(),
             Some("muse sessions can't be resumed")
+        );
+
+        // A command launch can be edited exactly when it can resume: it
+        // declared an agent type and a resume command, and a conversation
+        // was captured.
+        let command = |resume: Option<&str>| {
+            Some(crate::SessionLaunch::Command(crate::CommandLaunch {
+                command: "claude {farhelm_args}".to_string(),
+                yolo: false,
+                agent: Some(LaunchHarness::Claude),
+                resume: resume.map(str::to_string),
+            }))
+        };
+        session.launch = command(Some("claude --resume {conversation} {farhelm_args}"));
+        session.restart_offer = RestartOffer::Resume;
+        assert_eq!(restart_with_reason(&session), None);
+        session.restart_offer = RestartOffer::NotCaptured;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("no captured conversation to resume")
+        );
+        session.launch = Some(crate::SessionLaunch::Command(crate::CommandLaunch {
+            command: "muse {farhelm_args}".to_string(),
+            yolo: false,
+            agent: Some(LaunchHarness::Muse),
+            resume: Some("muse --resume {conversation} {farhelm_args}".to_string()),
+        }));
+        session.restart_offer = RestartOffer::NoConversationReporting;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("muse sessions can't be resumed"),
+            "a declared type without conversation reporting never captures one"
+        );
+        session.launch = command(None);
+        assert!(
+            restart_with_reason(&session)
+                .is_some_and(|reason| reason.contains("no resume command")),
+            "{:?}",
+            restart_with_reason(&session)
         );
     }
 

@@ -5960,7 +5960,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await form.getByLabel("folder", { exact: true }).fill(cwd);
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
@@ -5976,7 +5976,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
     // Re-enter command mode so keyboard activation proves the same whole-draft
     // transition independently of the pointer path above.
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
     await expect(search).toBeFocused();
@@ -6653,6 +6653,8 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
     form.getByRole("button", { name: "reset folder to home", exact: true }),
     form.getByRole("button", { name: "reset destination to local home", exact: true }),
     form.getByLabel("name (optional)", { exact: true }),
+    // The launch-kind tab strip is one tab stop, its selected tab.
+    form.getByRole("tab", { name: "agent", exact: true }),
     harnessChoice,
   ];
   await expect(search).toHaveAttribute("aria-expanded", "false");

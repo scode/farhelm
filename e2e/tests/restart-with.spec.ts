@@ -8,7 +8,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { agentLaunchRow, SESSION_LISTING } from "./helpers/fleet";
+import { agentLaunchRow, commandLaunchRow, SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
 import {
@@ -917,4 +917,199 @@ test("restart with compares an older omitted permission by its effective mode", 
   await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
   await expect(permissions.locator(".launch-composer-changed-marker")).toHaveCount(0);
   await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+});
+
+/**
+ * Publish one command-launch row through the real listing, the command-launch
+ * counterpart of `injectSession`: `resume` null makes a command launch that
+ * cannot resume.
+ */
+async function injectCommandSession(page: Page, resume: string | null, offer: string) {
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const listing = await response.json();
+    const source = listing.sessions[0];
+    if (!source) throw new Error("the shared stack must list a source session");
+    listing.sessions.push({
+      ...source,
+      id: SESSION_ID,
+      title: TITLE,
+      cwd: "/tmp",
+      invocation: "claude {farhelm_args}",
+      launch: commandLaunchRow("claude {farhelm_args}", {
+        agent: "claude",
+        ...(resume === null ? {} : { resume }),
+      }),
+      status: { state: "interrupted" },
+      restart_offer: offer,
+    });
+    listing.total += 1;
+    await route.fulfill({ response, json: listing });
+  });
+}
+
+/**
+ * Spec: Restart with of a command launch edits its command, resume command
+ * and YOLO answer, with the launch kind and agent type shown as fixed; an
+ * edited field is marked, the submit stays inactive until something changes
+ * and while the edit breaks a create's rules (the reason shown), and the
+ * request carries the edit whole under `with_command`.
+ *
+ * Why: SPEC.md makes Restart with available exactly when Restart is, for a
+ * command launch too, and validates the edit as a create would before
+ * anything is stopped. Only the restart route is mocked; the dialog's
+ * behavior and the body it sends are what is under test.
+ */
+test("restart with edits a command launch's command, resume command and YOLO answer", async ({ page }) => {
+  const resume = "claude --resume {conversation} {farhelm_args}";
+  await injectCommandSession(page, resume, "resume");
+  const bodies: unknown[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "claude --model sonnet {farhelm_args}",
+        launch: commandLaunchRow("claude --model sonnet {farhelm_args}", { agent: "claude", resume }),
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  const dialog = await openInjectedDialog(page);
+  const context = dialog.locator(".restart-with-context");
+  await expect(context.locator("dt")).toHaveText(["launch", "agent type", "host", "folder", "resumes"]);
+  await expect(context.locator("dd").nth(0)).toHaveText("command");
+  await expect(context.locator("dd").nth(1)).toHaveText("claude");
+
+  const command = dialog.locator(".restart-with-command-input");
+  const submit = dialog.locator(".restart-with-submit");
+  await expect(command).toHaveValue("claude {farhelm_args}");
+  await expect(dialog.locator(".restart-with-resume-input")).toHaveValue(resume);
+  await expect(
+    dialog.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }),
+  ).toBeChecked();
+  await expect(submit).toBeDisabled();
+  await expect(dialog.locator(".restart-with-edited")).toHaveCount(0);
+
+  // An edit that breaks a create's rules is explained and cannot be sent.
+  await command.fill("claude --model sonnet");
+  await expect(dialog.locator(".restart-with-command-error")).toContainText("{farhelm_args}");
+  await expect(submit).toBeDisabled();
+  await command.fill("claude --model sonnet {farhelm_args}");
+  await expect(dialog.locator(".restart-with-command-error")).toHaveCount(0);
+  await expect(dialog.locator(".restart-with-edited")).toHaveCount(1);
+  await expect(submit).toBeEnabled();
+  // The other two fields reach the request too, each marked once edited.
+  const editedResume = "claude --model sonnet --resume {conversation} {farhelm_args}";
+  await dialog.locator(".restart-with-resume-input").fill(editedResume);
+  await expect(dialog.locator(".restart-with-edited")).toHaveCount(2);
+  await dialog
+    .getByRole("group", { name: "runs without approval prompts" })
+    .getByLabel("yes (YOLO)", { exact: true })
+    .check();
+  await expect(dialog.locator(".restart-with-edited")).toHaveCount(3);
+  await submit.click();
+  await expect(dialog).toHaveCount(0);
+  expect(bodies, "one consent must send one restart request").toEqual([{
+    stop_if_running: false,
+    with_command: {
+      command: "claude --model sonnet {farhelm_args}",
+      yolo: true,
+      agent: "claude",
+      resume: editedResume,
+    },
+  }]);
+});
+
+/**
+ * Spec: Restart with stays visible but unavailable for a command launch
+ * with no resume command, and says why.
+ *
+ * Why: such a launch can never resume (SPEC.md), so Restart with, which is
+ * available exactly when Restart is, must not open; the reason names the
+ * missing resume command rather than a capture that could still arrive.
+ */
+test("restart with is unavailable for a command launch without a resume command", async ({ page }) => {
+  await injectCommandSession(page, null, "no_resume_command");
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
+  await expect(row).toBeVisible();
+  await row.locator(".session-row-open").click();
+  const trigger = page.locator(".restart-with-trigger");
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAttribute("aria-disabled", "true");
+  await expect(trigger).toHaveAttribute("title", /no resume command/);
+});
+
+/**
+ * Spec: a command edit asserted YOLO that the helm refuses on a host that
+ * asks first raises the YOLO question inside the dialog, worded for an
+ * asserted command, and confirming resends the same edit with the override.
+ *
+ * Why: the question's wording comes from the launch kind (a command's YOLO
+ * is the user's own assertion, not a permission Farhelm chose), and the
+ * dialog is modal, so the question must appear inside it. The refusal is
+ * route-mocked with the helm's own header, as in the agent-launch test.
+ */
+test("a YOLO command restart-with asks inside the dialog, worded for an assertion", async ({ page }) => {
+  const resume = "claude --resume {conversation} {farhelm_args}";
+  await injectCommandSession(page, resume, "resume");
+  const bodies: any[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    const body = route.request().postDataJSON();
+    bodies.push(body);
+    if (!body.confirm_yolo) {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
+      });
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "claude {farhelm_args}",
+        launch: commandLaunchRow("claude {farhelm_args}", { yolo: true, agent: "claude", resume }),
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  const dialog = await openInjectedDialog(page);
+  await dialog
+    .getByRole("group", { name: "runs without approval prompts" })
+    .getByLabel("yes (YOLO)", { exact: true })
+    .check();
+  await dialog.locator(".restart-with-submit").click();
+  const confirmation = dialog.locator(".yolo-confirmation");
+  await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
+  await expect(confirmation).toContainText("This command was asserted to run without approval prompts.");
+  expect(bodies).toHaveLength(1);
+  await confirmation.locator(".yolo-confirm").click();
+  await expect(dialog).toHaveCount(0);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1].confirm_yolo).toBe(true);
+  expect(bodies[1].with_command).toEqual(bodies[0].with_command);
+  expect(bodies[1].with_command.yolo).toBe(true);
 });

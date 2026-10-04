@@ -2603,6 +2603,32 @@ samp {
   color: var(--warn);
 }
 
+/* A command launch's Restart with fields: the two command lines one per row
+   at the dialog's full width (they are commands, read whole), the YOLO
+   question beneath. An edited field says so beside its label, in the same
+   color `.launch-composer-changed-marker` marks an agent launch's edits. */
+.restart-with-command {
+  display: grid;
+  gap: 12px;
+}
+
+.restart-with-command > label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.restart-with-edited {
+  color: var(--info);
+  font-size: 12px;
+}
+
+.restart-with-command-error {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
+}
+
 .restart-with-footer {
   display: flex;
   align-items: center;
@@ -4344,6 +4370,57 @@ samp {
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--well);
+}
+
+/* The launch-kind tabs at the top of the choices column (SPEC.md: agent and
+   command, each showing only its own fields). A plain underlined strip
+   rather than another row of option buttons, because choosing a tab
+   changes which fields exist below it, not a value among them; the
+   selected tab carries the accent bar underneath, like every other
+   horizontal choice here. */
+.launch-kind-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.launch-kind-tab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--fg-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.launch-kind-tab.selected {
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The command tab's fields sit directly in the choices column, so its grid
+   gap spaces them; the YOLO question is a fieldset, whose default border and
+   padding would draw a box nothing else in the dialog has. */
+.launch-command-yolo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.launch-command-yolo > legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.launch-command-hint {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: 12px;
 }
 
 .launch-composer-choice {

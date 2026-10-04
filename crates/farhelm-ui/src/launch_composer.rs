@@ -228,8 +228,6 @@ pub(crate) enum ComposerSearchResult {
     /// Select one currently offered host without touching the agent draft.
     Host(ComposerHost),
     Harness(LaunchHarness),
-    /// Switch the shared composer to its raw-command controls.
-    Command,
     Model {
         id: String,
         harness: LaunchHarness,
@@ -523,7 +521,6 @@ pub(crate) fn grouped_search_results(
             ComposerSearchResult::Name(_) => names.push(result),
             ComposerSearchResult::Host(_) => hosts.push(result),
             ComposerSearchResult::Harness(_) => harnesses.push(result),
-            ComposerSearchResult::Command => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
             ComposerSearchResult::Permissions(_) => permissions.push(result),
@@ -777,9 +774,6 @@ pub(crate) fn search_results(
                 results.push(ComposerSearchResult::Harness(harness));
             }
         }
-        if query.is_empty() || "other / command".contains(&folded_query) {
-            results.push(ComposerSearchResult::Command);
-        }
     }
 
     if matches!(scope, SearchScope::All | SearchScope::Model) {
@@ -980,9 +974,6 @@ fn exact_word_group(
             Some(ComposerSearchGroup::Hosts)
         }
         ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
-            Some(ComposerSearchGroup::Harnesses)
-        }
-        ComposerSearchResult::Command if folded_query == "command" => {
             Some(ComposerSearchGroup::Harnesses)
         }
         ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
@@ -3303,16 +3294,14 @@ mod tests {
         );
     }
 
-    /// Command mode must be an explicit picker result. An unmatched query is
-    /// deliberately absent here: search text never becomes an invocation.
+    /// Search never turns its text into a command, and offers no result for
+    /// the command launch kind: that is the launcher's command tab (SPEC.md
+    /// lists everything search matches, and a launch kind is not among it).
     #[test]
-    fn search_offers_other_command_without_treating_text_as_a_command() {
+    fn search_never_treats_its_text_as_a_command() {
         let history = LaunchHistory::default();
 
-        assert_eq!(
-            search_results(&history, &[], "command", None, None),
-            vec![ComposerSearchResult::Command],
-        );
+        assert!(search_results(&history, &[], "command", None, None).is_empty());
         assert!(search_results(&history, &[], "run-this", None, None).is_empty());
     }
 
@@ -3608,18 +3597,13 @@ mod tests {
         }];
 
         let harnesses = search_results(&history, &catalog, "harness:", None, None);
-        assert_eq!(harnesses.len(), 10);
-        assert!(harnesses.iter().all(|result| {
-            matches!(
-                result,
-                ComposerSearchResult::Harness(_) | ComposerSearchResult::Command
-            )
-        }));
-        assert!(harnesses.contains(&ComposerSearchResult::Command));
-        assert_eq!(
-            search_results(&history, &catalog, "harness:other", None, None),
-            vec![ComposerSearchResult::Command]
+        assert_eq!(harnesses.len(), 9);
+        assert!(
+            harnesses
+                .iter()
+                .all(|result| matches!(result, ComposerSearchResult::Harness(_)))
         );
+        assert!(search_results(&history, &catalog, "harness:other", None, None).is_empty());
         let models = search_results(&history, &catalog, "model:", None, None);
         assert_eq!(models.len(), 1);
         assert!(models.contains(&ComposerSearchResult::Model {
@@ -3720,27 +3704,10 @@ mod tests {
         }
     }
 
-    /// Harness scope includes the legacy Other/Command action, and exact
-    /// selection compares the value after a label, including model colons.
+    /// Exact selection under a scope label compares the value after the
+    /// label, including model colons.
     #[test]
     fn scoped_harness_and_model_exact_words_select_the_matching_row() {
-        let command = search_results(
-            &LaunchHistory::default(),
-            &[],
-            "HARNESS:command",
-            None,
-            None,
-        );
-        let command_groups = grouped_search_results(command);
-        assert_eq!(
-            command_groups,
-            vec![(
-                ComposerSearchGroup::Harnesses,
-                vec![ComposerSearchResult::Command]
-            )]
-        );
-        assert_eq!(default_search_index(&command_groups, "harness:command"), 0);
-
         let catalog = vec![
             LaunchCatalogModel {
                 id: "provider/model:v2-preview".into(),

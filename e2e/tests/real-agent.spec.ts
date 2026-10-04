@@ -91,7 +91,7 @@ async function createSession(
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   // An arbitrary command belongs to the command path.
-  await form.getByRole("button", { name: "other / command" }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   await answerYolo(form);

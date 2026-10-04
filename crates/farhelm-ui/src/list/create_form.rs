@@ -109,13 +109,20 @@ fn command_intent(
     })
 }
 
-/// The active creation surface. Typed commands and structured
-/// harnesses are separate modes because values from one cannot safely become
-/// hidden inputs to the other's idempotency key.
+/// The launcher's active tab, one per launch kind (SPEC.md: "The two launch
+/// kinds are shown as two tabs, agent and command, each showing only its own
+/// fields; switching tabs keeps each tab's draft").
+///
+/// Each tab owns its own signals, so switching never copies a value from one
+/// draft into the other: a value from one kind cannot safely become a hidden
+/// input to the other's launch or idempotency key, and coming back finds the
+/// draft as it was left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CreationSurface {
-    Legacy,
-    Structured,
+enum LaunchTab {
+    /// An agent type and its choices, composed by the helm.
+    Agent,
+    /// A command line the user writes, with its YOLO answer.
+    Command,
 }
 
 /// Decode the helm's remembered `remembered_permissions` word into the
@@ -191,7 +198,7 @@ fn apply_composer_search_result(
     mut cwd: Signal<String>,
     mut cwd_raw_seed: Signal<Option<String>>,
     mut cwd_edited: Signal<bool>,
-    mut creation_surface: Signal<CreationSurface>,
+    mut launch_tab: Signal<LaunchTab>,
     mut structured_harness: Signal<Option<LaunchHarness>>,
     mut structured_model: Signal<Option<String>>,
     mut structured_model_raw_seed: Signal<Option<String>>,
@@ -248,12 +255,6 @@ fn apply_composer_search_result(
                 clone_host_state.set(CloneHostState::UserTookOver);
             }
         }
-        ComposerSearchResult::Command => {
-            // Search is a picker, including for the command mode. It never
-            // turns its query into an invocation; the existing command draft
-            // stays untouched until the person edits that field.
-            creation_surface.set(CreationSurface::Legacy);
-        }
         ComposerSearchResult::Github(repo) => {
             remembered_destination.set(None);
             destination_draft.set(DestinationDraft::github(repo));
@@ -286,7 +287,7 @@ fn apply_composer_search_result(
             return Some(folder);
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
-            creation_surface.set(CreationSurface::Structured);
+            launch_tab.set(LaunchTab::Agent);
             let before = LaunchSelection {
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
@@ -318,7 +319,7 @@ fn apply_composer_search_result(
             // A model carries its harness ownership, so selecting it is also
             // an explicit return to structured mode rather than leaving a
             // structured draft hidden behind command controls.
-            creation_surface.set(CreationSurface::Structured);
+            launch_tab.set(LaunchTab::Agent);
             let before = LaunchSelection {
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
@@ -377,7 +378,7 @@ fn apply_composer_search_result(
             structured_permissions_is_explicit.set(true);
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
-            creation_surface.set(CreationSurface::Structured);
+            launch_tab.set(LaunchTab::Agent);
             composer_reset_reason.set(None);
             let mut selection = crate::launch_composer::select_recent(&entry);
             selection.permissions = crate::launch_composer::normalized_permissions(
@@ -1414,9 +1415,9 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 ///
 /// ## The command path
 ///
-/// Ordinary New starts without a structured harness; choosing Other activates
-/// a raw-command draft. Clone and Replace instead seed their source's
-/// structured choices or exact command. Changing the host leaves the draft
+/// Ordinary New starts on the agent tab with no agent type chosen; the
+/// command tab holds a command launch's own draft. Clone and Replace instead
+/// seed their source's agent choices or exact command. Changing the host leaves the draft
 /// intact. The command path is what runs anything the composer does not
 /// describe, and the e2e harness's own creates go through it.
 ///
@@ -1562,8 +1563,13 @@ pub(super) fn CreateSessionForm(
     let mut command_agent = use_signal(|| None::<LaunchHarness>);
     let mut command_resume_on = use_signal(|| false);
     let mut command_resume = use_signal(String::new);
+    // A cloned resume command is peer-relayed text like the command itself:
+    // shown escaped, with its raw bytes kept to send back untouched (see
+    // `reseed_cloned_field` and `submitted_field`).
+    let mut command_resume_raw_seed = use_signal(|| None::<String>);
+    let mut command_resume_edited = use_signal(|| false);
     let mut title = use_signal(String::new);
-    let mut creation_surface = use_signal(|| CreationSurface::Structured);
+    let mut launch_tab = use_signal(|| LaunchTab::Agent);
     let mut structured_harness = use_signal(|| None::<LaunchHarness>);
     let mut structured_model = use_signal(|| None::<String>);
     // A restored custom id is peer text even though it is stored in a launch
@@ -1946,14 +1952,21 @@ pub(super) fn CreateSessionForm(
                         command_yolo.set(Some(command.yolo));
                         command_agent.set(command.agent);
                         command_resume_on.set(command.resume.is_some());
-                        command_resume.set(command.resume.clone().unwrap_or_default());
-                        creation_surface.set(CreationSurface::Legacy);
+                        reseed_cloned_field(
+                            &mut command_resume,
+                            &mut command_resume_raw_seed,
+                            &mut command_resume_edited,
+                            command.resume.as_deref().unwrap_or_default(),
+                        );
+                        launch_tab.set(LaunchTab::Command);
                     }
                     None => {
                         command_yolo.set(None);
                         command_agent.set(None);
                         command_resume_on.set(false);
                         command_resume.set(String::new());
+                        command_resume_raw_seed.set(None);
+                        command_resume_edited.set(false);
                     }
                 }
                 if let Some(launch) = &prefill.launch {
@@ -1962,7 +1975,7 @@ pub(super) fn CreateSessionForm(
                     // result. Preserve it for clone except for Pi's
                     // compatibility normalization: an older omitted
                     // permission is Pi's mandatory YOLO mode.
-                    creation_surface.set(CreationSurface::Structured);
+                    launch_tab.set(LaunchTab::Agent);
                     structured_harness.set(Some(launch.harness));
                     structured_model_raw_seed.set(launch.model.clone());
                     structured_model_edited.set(false);
@@ -1989,7 +2002,7 @@ pub(super) fn CreateSessionForm(
                     // filter recents exactly as it always has.
                     structured_permissions_is_explicit.set(true);
                 } else {
-                    creation_surface.set(CreationSurface::Legacy);
+                    launch_tab.set(LaunchTab::Command);
                     structured_harness.set(None);
                     structured_model_raw_seed.set(None);
                     structured_model_edited.set(false);
@@ -2076,14 +2089,14 @@ pub(super) fn CreateSessionForm(
     // Only the active creation surface determines the notice; the other
     // surface retains a draft that may describe a different harness. A typed
     // command is never classified as Cursor here.
-    let cursor_launch = creation_surface() == CreationSurface::Structured
-        && structured_harness() == Some(LaunchHarness::Cursor);
+    let cursor_launch =
+        launch_tab() == LaunchTab::Agent && structured_harness() == Some(LaunchHarness::Cursor);
     let displayed_invocation = invocation.read().clone();
 
     let preview_agent_now = move || {
         format!(
             "{:?}:{:?}:{:?}:{:?}:{:?}:{}",
-            creation_surface(),
+            launch_tab(),
             structured_harness(),
             structured_model(),
             structured_effort(),
@@ -2098,7 +2111,11 @@ pub(super) fn CreateSessionForm(
             command_yolo(),
             command_agent(),
             command_resume_on(),
-            command_resume()
+            submitted_field(
+                &command_resume(),
+                command_resume_edited(),
+                command_resume_raw_seed.peek().as_deref()
+            )
         )
     };
     // Configuration epochs are global and monotonic. Retain the highest
@@ -2281,12 +2298,12 @@ pub(super) fn CreateSessionForm(
     // isolates its host and folder, while the summary isolates its model, so a
     // strong RTL value cannot reorder the punctuation around another value.
     //
-    // The harness is named only on the structured surface. Switching to
-    // "other / command" deliberately keeps the structured draft (so a trip
-    // through Other and back loses nothing), but a legacy launch runs the
-    // typed command, never that harness — so the button must not
-    // promise "Codex" while the click would launch something else.
-    let launch_harness = if *creation_surface.read() == CreationSurface::Structured {
+    // The harness is named only on the agent tab. Switching to the command
+    // tab deliberately keeps the agent draft (so a trip there and back
+    // loses nothing), but a command launch runs the typed command, never
+    // that harness — so the button must not promise "Codex" while the click
+    // would launch something else.
+    let launch_harness = if *launch_tab.read() == LaunchTab::Agent {
         structured_harness()
             .map(|harness| crate::launch_composer::harness_label(harness).to_string())
     } else {
@@ -2307,7 +2324,7 @@ pub(super) fn CreateSessionForm(
     } else {
         (None, crate::DeleteGuard::NothingAlive)
     };
-    let current_launch = if creation_surface() == CreationSurface::Structured {
+    let current_launch = if launch_tab() == LaunchTab::Agent {
         structured_harness().map(|harness| {
             LaunchIntent::Structured(LaunchSelection {
                 harness,
@@ -2333,7 +2350,11 @@ pub(super) fn CreateSessionForm(
             command_yolo(),
             command_agent(),
             command_resume_on(),
-            &command_resume(),
+            &submitted_field(
+                &command_resume(),
+                command_resume_edited(),
+                command_resume_raw_seed.peek().as_deref(),
+            ),
         )
         .map(LaunchIntent::Command)
     };
@@ -2530,7 +2551,7 @@ pub(super) fn CreateSessionForm(
             // Once admitted, the row's meaning is the whole structured setup;
             // leaving command mode active would submit an unrelated dormant
             // invocation when Enter follows this callback.
-            creation_surface.set(CreationSurface::Structured);
+            launch_tab.set(LaunchTab::Agent);
             composer_reset_reason.set(None);
             intent_key.set(None);
             true
@@ -2639,10 +2660,10 @@ pub(super) fn CreateSessionForm(
             intent_key.set(None);
         }
     });
-    let active_search_harness = (*creation_surface.read() == CreationSurface::Structured)
+    let active_search_harness = (*launch_tab.read() == LaunchTab::Agent)
         .then(&*structured_harness)
         .flatten();
-    let active_search_model = (*creation_surface.read() == CreationSurface::Structured)
+    let active_search_model = (*launch_tab.read() == LaunchTab::Agent)
         .then(&*structured_model)
         .flatten();
     let search_text = composer_search();
@@ -2953,7 +2974,7 @@ pub(super) fn CreateSessionForm(
             // gives browser tests a synchronous observation point for races
             // that deliberately keep the visible result unchanged.
             "data-history-fetched-revision": "{fetched_history_revision}",
-            "data-composer-mode": if *creation_surface.read() == CreationSurface::Structured { "structured" } else { "command" },
+            "data-composer-mode": if *launch_tab.read() == LaunchTab::Agent { "structured" } else { "command" },
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
             "data-browse-activation-attempts": "{browse_activation_attempts}",
             "data-browse-reply-completions": "{browse_reply_completions}",
@@ -3014,7 +3035,7 @@ pub(super) fn CreateSessionForm(
                 // the minting await below can span further edits, and
                 // re-reading across it would let the request's MODE differ
                 // from the one the button was pressed on.
-                let launch = if *creation_surface.peek() == CreationSurface::Structured {
+                let launch = if *launch_tab.peek() == LaunchTab::Agent {
                     let Some(harness) = *structured_harness.peek() else {
                         error.set(Some("choose a structured harness before launching".to_string()));
                         ops.release();
@@ -3047,7 +3068,11 @@ pub(super) fn CreateSessionForm(
                         *command_yolo.peek(),
                         *command_agent.peek(),
                         *command_resume_on.peek(),
-                        &command_resume.peek(),
+                        &submitted_field(
+                            &command_resume.peek(),
+                            *command_resume_edited.peek(),
+                            command_resume_raw_seed.peek().as_deref(),
+                        ),
                     ) else {
                         error.set(Some(
                             "say whether this command runs without approval prompts (YOLO) before \
@@ -3181,11 +3206,11 @@ pub(super) fn CreateSessionForm(
                 }
                 let fresh_draft_snapshot = move || (
                     destination_draft.peek().repo().cloned(),
-                    *creation_surface.peek(), *structured_harness.peek(),
+                    *launch_tab.peek(), *structured_harness.peek(),
                     structured_model.peek().clone(), *structured_effort.peek(),
                     *structured_permissions.peek(),
                     submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
-                    (*command_yolo.peek(), *command_agent.peek(), *command_resume_on.peek(), command_resume.peek().clone()),
+                    (*command_yolo.peek(), *command_agent.peek(), *command_resume_on.peek(), submitted_field(&command_resume.peek(), *command_resume_edited.peek(), command_resume_raw_seed.peek().as_deref())),
                     submitted_title(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo().is_some()),
                     *chosen_host.peek(),
                 );
@@ -3350,7 +3375,7 @@ pub(super) fn CreateSessionForm(
                                     harness, *structured_workspace_trust.peek(),
                                 ),
                             };
-                            if *creation_surface.peek() != CreationSurface::Structured
+                            if *launch_tab.peek() != LaunchTab::Agent
                                 || !crate::launch_composer::selection_fits_catalog(
                                     &selection,
                                     catalog_for_recheck.as_deref(),
@@ -3626,7 +3651,7 @@ pub(super) fn CreateSessionForm(
                         || !fresh_destination_ready
                         || search_scope == crate::launch_composer::SearchScope::Github
                         || !remembered_destination_valid
-                        || (retry_binding.is_none() && *creation_surface.read() == CreationSurface::Structured
+                        || (retry_binding.is_none() && *launch_tab.read() == LaunchTab::Agent
                             && (structured_harness.read().is_none()
                                 || structured_choice_error.is_some())),
                     "{submit_verb}"
@@ -3655,7 +3680,7 @@ pub(super) fn CreateSessionForm(
                     },
                     "cancel"
                 }
-                if *creation_surface.read() == CreationSurface::Structured {
+                if *launch_tab.read() == LaunchTab::Agent {
                     button {
                         r#type: "button",
                         class: "btn btn-neutral launch-composer-reset",
@@ -3762,10 +3787,11 @@ pub(super) fn CreateSessionForm(
                     },
                 }
             }
-            // Search belongs to the shared shell. A query can choose a
-            // structured harness, a command mode, a folder, or a saved setup;
-            // it never manufactures a command from text alone.
-            if *creation_surface.read() == CreationSurface::Structured {
+            // Search belongs to the shared shell. A query can choose an
+            // agent type, a model, a folder, or a saved setup; it never
+            // manufactures a command from text alone, and it never chooses
+            // the command tab itself.
+            if *launch_tab.read() == LaunchTab::Agent {
                 div { class: "launch-composer-summary", aria_live: "polite",
                     "model: "
                     span { class: "peer-value", dir: "ltr", "{summary_model}" }
@@ -3849,12 +3875,12 @@ pub(super) fn CreateSessionForm(
                                     .then(|| history.clone())
                                 })
                                 .unwrap_or_default();
-                            let active_harness = (*creation_surface.peek()
-                                == CreationSurface::Structured)
+                            let active_harness = (*launch_tab.peek()
+                                == LaunchTab::Agent)
                                 .then(&*structured_harness)
                                 .flatten();
-                            let active_model = (*creation_surface.peek()
-                                == CreationSurface::Structured)
+                            let active_model = (*launch_tab.peek()
+                                == LaunchTab::Agent)
                                 .then(&*structured_model)
                                 .flatten();
                             let mut rows = crate::launch_composer::search_results(
@@ -3981,7 +4007,7 @@ pub(super) fn CreateSessionForm(
                                         cwd,
                                         cwd_raw_seed,
                                         cwd_edited,
-                                        creation_surface,
+                                        launch_tab,
                                             structured_harness,
                                             structured_model,
                                             structured_model_raw_seed,
@@ -4090,7 +4116,7 @@ pub(super) fn CreateSessionForm(
                                                                 history_target.clone(),
                                                                 live_destination, remembered_destination,
                                                                 history_activation_attempts, destination_draft, preview_revision, cwd, cwd_raw_seed, cwd_edited,
-                                                                creation_surface,
+                                                                launch_tab,
                                                                 structured_harness, structured_model,
                                                                 structured_model_raw_seed, structured_model_edited,
                                                                 custom_model_harness, structured_effort,
@@ -4122,7 +4148,6 @@ pub(super) fn CreateSessionForm(
                                                         | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
-                                                        crate::launch_composer::ComposerSearchResult::Command => rsx! { "Other / command" },
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
@@ -4287,7 +4312,7 @@ pub(super) fn CreateSessionForm(
             // its own, for whichever of these two reasons applies to it.
             // The two columns preserve the form's destination-first tab
             // order in every mode. Only the launch-specific controls in the
-            // choices column change when the user selects other / command.
+            // choices column change with the launch-kind tab.
             if search_scope == crate::launch_composer::SearchScope::Github {
                 if let Some(note) = repository_note {
                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
@@ -4499,14 +4524,72 @@ pub(super) fn CreateSessionForm(
                         }
                     }
                     div { class: "launch-composer-column-choices",
+                        // One tab per launch kind. Switching only changes
+                        // which draft is shown and submitted; each tab keeps
+                        // its own (see `LaunchTab`).
+                        // The tab pattern's keyboard half: one tab stop (the
+                        // selected tab), and the arrow, Home and End keys
+                        // select and focus the other tab, as screen readers
+                        // announcing "tab, 1 of 2" lead people to expect.
+                        div { class: "launch-kind-tabs", role: "tablist", "aria-label": "launch kind",
+                            for (tab, label) in [(LaunchTab::Agent, "agent"), (LaunchTab::Command, "command")] {
+                                button {
+                                    r#type: "button",
+                                    role: "tab",
+                                    class: if launch_tab() == tab { "launch-kind-tab selected" } else { "launch-kind-tab" },
+                                    "aria-selected": "{launch_tab() == tab}",
+                                    tabindex: if launch_tab() == tab { "0" } else { "-1" },
+                                    disabled: busy,
+                                    onkeydown: move |evt: KeyboardEvent| {
+                                        let target = match evt.key() {
+                                            Key::ArrowLeft | Key::ArrowRight => match tab {
+                                                LaunchTab::Agent => LaunchTab::Command,
+                                                LaunchTab::Command => LaunchTab::Agent,
+                                            },
+                                            Key::Home => LaunchTab::Agent,
+                                            Key::End => LaunchTab::Command,
+                                            _ => return,
+                                        };
+                                        evt.prevent_default();
+                                        if !draft_transition_allowed(ops) {
+                                            return;
+                                        }
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        launch_tab.set(target);
+                                        intent_key.set(None);
+                                        // After the render that moves the
+                                        // tab stop, so focus lands on the tab
+                                        // now selected.
+                                        document::eval(
+                                            "requestAnimationFrame(() => document.querySelector('.create-session-form .launch-kind-tab.selected')?.focus())",
+                                        );
+                                    },
+                                    onclick: move |_| {
+                                        if !draft_transition_allowed(ops) {
+                                            return;
+                                        }
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        launch_tab.set(tab);
+                                        intent_key.set(None);
+                                        focus_composer_surface();
+                                    },
+                                    "{label}"
+                                }
+                            }
+                        }
+                        if launch_tab() == LaunchTab::Agent {
                         div { class: "launch-composer-choice launch-composer-harness-choice",
                             span { class: "launch-composer-section-label", "harness" }
                             div { class: "launch-composer-options",
                                 for harness in crate::launch_composer::HARNESS_PICKER_ORDER {
                                     button {
                                         r#type: "button",
-                                        class: if creation_surface() == CreationSurface::Structured && *structured_harness.read() == Some(harness) { "selected" } else { "" },
-                                        aria_pressed: creation_surface() == CreationSurface::Structured && *structured_harness.read() == Some(harness),
+                                        class: if launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness) { "selected" } else { "" },
+                                        aria_pressed: launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness),
                                         disabled: busy,
                                         onclick: {
                                             let catalog = catalog_for_harness.clone();
@@ -4546,7 +4629,7 @@ pub(super) fn CreateSessionForm(
                                             structured_permissions.set(selection.permissions);
                                             structured_workspace_trust.set(selection.workspace_trust);
                                             custom_model_harness.set(owner);
-                                            creation_surface.set(CreationSurface::Structured);
+                                            launch_tab.set(LaunchTab::Agent);
                                             intent_key.set(None);
                                             focus_composer_surface();
                                             }
@@ -4554,29 +4637,10 @@ pub(super) fn CreateSessionForm(
                                         "{crate::launch_composer::harness_label(harness)}"
                                     }
                                 }
-                                button {
-                                    r#type: "button",
-                                    class: if *creation_surface.read() == CreationSurface::Legacy { "selected" } else { "" },
-                                    aria_pressed: *creation_surface.read() == CreationSurface::Legacy,
-                                    disabled: busy,
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
-                                        }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        creation_surface.set(CreationSurface::Legacy);
-                                        // Keep the command-mode draft intact so a
-                                        // clone's seeded command remains here.
-                                        intent_key.set(None);
-                                        focus_composer_surface();
-                                    },
-                                    "other / command"
-                                }
                             }
                         }
-                        if *creation_surface.read() == CreationSurface::Structured {
+                        }
+                        if *launch_tab.read() == LaunchTab::Agent {
                             // A failed catalog read leaves the model list empty but
                             // refuses nothing (`selection_fits_catalog`), so say why the
                             // list is empty and offer to read it again rather than
@@ -4759,7 +4823,7 @@ pub(super) fn CreateSessionForm(
                         if cursor_launch {
                             p { "Cursor session tracking and Resume are not supported." }
                         }
-                        if *creation_surface.read() == CreationSurface::Legacy {
+                        if *launch_tab.read() == LaunchTab::Command {
             // The raw command path: what the session runs, typed as one
             // command line.
             label {
@@ -4877,6 +4941,7 @@ pub(super) fn CreateSessionForm(
                             oninput: move |evt| {
                                 if !draft_transition_allowed(ops) { return; }
                                 command_resume.set(evt.value());
+                                command_resume_edited.set(true);
                                 intent_key.set(None);
                             },
                         }
@@ -5543,7 +5608,7 @@ mod tests {
 
     /// The raw invocation is carried on every prefill, a structured one
     /// included, which has no use for it until the user switches the mounted
-    /// form to "other / command": leaving it unset there would let a stale,
+    /// form to the command tab: leaving it unset there would let a stale,
     /// unrelated command surface then.
     #[farhelm_testtrace::test]
     fn prefill_from_carries_the_raw_invocation_even_for_a_structured_clone() {

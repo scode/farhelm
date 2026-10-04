@@ -288,6 +288,8 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
     await sourceRow.locator(".session-row-replace-with").click();
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
+    // A command-launch source opens the command tab.
+    await form.getByRole("tab", { name: "agent", exact: true }).click();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await selectRepo(page);
     // The copied source title is not a name for a fresh checkout, so the
@@ -358,6 +360,8 @@ for (const action of ["clone", "replace-with"] as const) {
       await sourceRow.locator(`.session-row-${action}`).click();
       const form = page.locator('.create-session-form[role="dialog"]');
       await expect(form).toBeVisible();
+      // A command-launch source opens the command tab.
+      await form.getByRole("tab", { name: "agent", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
       const name = form.getByLabel("name (optional)", { exact: true });
       const folder = form.getByLabel("folder", { exact: true });

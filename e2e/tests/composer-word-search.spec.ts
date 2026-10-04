@@ -258,7 +258,7 @@ test("empty composer search does not launch an incomplete selection", async ({ p
  * request. Those observables distinguish a coherent mode from controls that
  * merely remain visible while another draft is submitted.
  */
-test("New selects other command explicitly and preserves the raw invocation", async ({ page, request }) => {
+test("New's command tab keeps the agent draft dormant and preserves the raw invocation", async ({ page, request }) => {
   const model = await codexCatalogModel(request);
   await page.goto("/");
   await page.locator(".new-session-button").click();
@@ -270,11 +270,15 @@ test("New selects other command explicitly and preserves the raw invocation", as
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
   await form.getByRole("button", { name: "yolo", exact: true }).click();
 
+  // Search offers no result for the command tab; the tab is the choice.
   await search.fill("command");
-  await expect(form.getByRole("option", { name: "Other / command", exact: true })).toBeVisible();
-  await search.press("Enter");
+  // Scoped to the search box's results: the host picker's own options are
+  // also options.
+  await expect(form.locator(".launch-composer-search").getByRole("option")).toHaveCount(0);
+  await search.fill("");
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");
-  await expect(search, "search acceptance keeps the shared combobox focused in command mode").toBeFocused();
+  await expect(search, "the tab hands focus to the shared search box").toBeFocused();
   await expect(form.locator(".launch-composer-summary"), "structured settings are dormant in command mode").toHaveCount(0);
   await expect(form.locator(".create-session-host"), "destination controls stay mounted in command mode").toBeVisible();
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
@@ -289,7 +293,7 @@ test("New selects other command explicitly and preserves the raw invocation", as
   await expect(form, "accepting an owned model explicitly activates its structured harness").toHaveAttribute("data-composer-mode", "structured");
   await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
   await expect(search).toBeFocused();
-  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(command, "the command draft survives a structured search round trip").toHaveValue(FAKE_AGENT);
 
   await search.fill(model.efforts[0]);

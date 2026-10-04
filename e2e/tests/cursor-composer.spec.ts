@@ -40,6 +40,6 @@ test("Cursor launches without claiming session tracking", async ({ page, request
 
   // The inactive structured draft must not leak its notice into the
   // command path.
-  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+  await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form).not.toContainText("Cursor session tracking and Resume are not supported.");
 });
