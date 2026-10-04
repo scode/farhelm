@@ -555,7 +555,17 @@ test("discovery registers an answering supervisor through the real handler", asy
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe"]);
 });
 
-test("blank optional fields and same-task double submit produce one real probe", async ({
+/**
+ * The add dialog asks only for the ssh destination, so its probe must carry no
+ * remote binary or state directory, and two submits in one browser task must
+ * still retain only one setup plan.
+ *
+ * Specifies: the probe body's `remote_farhelm` and `remote_state_dir` are null,
+ * and the backend sees exactly one probe for a doubled submit. The dialog once
+ * had optional fields for both paths; null is what lets discovery and setup
+ * choose them instead of a value nobody adding a host knew how to fill in.
+ */
+test("the add dialog's probe sends no install paths, and a doubled submit produces one real probe", async ({
   page,
 }, testInfo) => {
   const remote = destination(testInfo, "probe-guard");
