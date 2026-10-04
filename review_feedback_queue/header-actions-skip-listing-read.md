@@ -21,6 +21,12 @@ replace-with composer, because otherwise the change is only learned when the fee
 
 When the feed is healthy, it covers this within moments. Under a latched build mismatch the feed and the fallback poll
 are both withdrawn, so after a header replace the sidebar keeps showing the deleted source row, whose actions all fail
-with not-found, and never shows the new session. After a header restart, the row keeps its old ended status, which is
-exactly the stale state F2 turns into an unconfirmed kill. The suggested fix is to make the success paths of header
-replace and restart request an explicit listing read, through a callback that `AppBody` routes to `ListView`.
+with not-found, and never shows the new session. After a header restart, the row keeps its old ended status. The
+suggested fix is to make the success paths of header replace and restart request an explicit listing read, through a
+callback that `AppBody` routes to `ListView`.
+
+Scope after later fixes: the original report also linked the stale ended status to an unconfirmed Delete killing a live
+agent (F2). Commit `7586c7292ee035388039fcff82d46f2e3cb8da4d`
+([#1152](https://github.com/scode/farhelm/pull/1152/changes)) fixed that consequence: unconfirmed Delete now checks
+current agent and tab liveness under the supervisor's lifecycle lock and refuses before teardown. An independent review
+confirmed this narrowing against `14c6b8b8`. The missing sidebar refresh remains unresolved.

@@ -30,5 +30,3 @@ One line per open item. This file must always match the feedback files in this d
 
 - `codex-draft-mistaken-for-question.md` — Pasting question-shaped diagnostics into an unsent Codex draft can make the
   sidebar say the agent needs an answer when it is idle.
-- `build-metadata-false-old-version.md` — A host running the same release can incorrectly show an old-version warning
-  when the helm or supervisor build includes metadata.
