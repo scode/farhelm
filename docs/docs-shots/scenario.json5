@@ -1,0 +1,93 @@
+// The fleet the docs website's screenshots are taken against
+// (docs/docs-shots/SPEC.md). Same format and loader as the README hero's
+// scenario (docs/readme-hero/scenario.json5 explains the shared fields), plus
+// three fields only the docs capture reads, explained where they appear.
+//
+// Unlike the hero's design, this file belongs to the docs: an agent writing a
+// page may extend it when a shot needs something the fleet lacks, as long as
+// existing shots still show what their pages say they show.
+//
+// Every name here is invented. Nothing may name a real host, user, or project
+// from the machine that takes the capture; the capture fails if the page shows
+// the capturing account's name, home directory, or temporary state.
+{
+  // Scale 2 so the images stay crisp: the docs show each one at half its
+  // pixel size. Wider than the hero's so the session launcher, which keeps
+  // its own width, leaves margins beside it for callouts to sit in rather
+  // than covering its controls.
+  viewport: { width: 1600, height: 1000, scale: 2 },
+
+  // `shown_ssh` is the destination the UI is shown in place of `ssh`. The real
+  // destinations are self-ssh spellings on the capturing machine, and one of
+  // them names its account.
+  hosts: [
+    { key: "local", alias: "this machine", kind: "local" },
+    { key: "build-box", alias: "build-box", kind: "remote", ssh: "localhost", shown_ssh: "dev@build-box" },
+    { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "$USER@localhost", shown_ssh: "dev@gpu-1" },
+  ],
+
+  sessions: [
+    {
+      title: "fix flaky attach test",
+      host: "local",
+      cwd: "~/src/farhelm",
+      wrapper: "claude",
+      status: "running",
+      age: 90,
+      open: true,
+      transcript: "transcript.txt",
+    },
+    {
+      title: "migrate auth tokens",
+      host: "build-box",
+      cwd: "~/src/api",
+      wrapper: "codex",
+      status: "waiting",
+      age: 420,
+      transcript: "filler-codex.txt",
+    },
+    {
+      title: "bench tokenizer",
+      host: "gpu-1",
+      cwd: "~/work/tok",
+      wrapper: "claude",
+      yolo: true,
+      status: "idle",
+      seen: false,
+      age: 2400,
+      transcript: "filler-claude.txt",
+    },
+    {
+      title: "release notes",
+      host: "local",
+      cwd: "~/src/farhelm",
+      wrapper: "codex",
+      status: "exited",
+      exit_code: 0,
+      age: 86400,
+      transcript: "filler-codex.txt",
+    },
+  ],
+
+  // What the session launcher remembers, shown as its recent setups. A fresh
+  // stack remembers nothing and staged sessions do not count as launches, so
+  // the capture rewrites the launcher's history reply from this list. Model
+  // and effort, when given, must be ones the launcher's own catalog offers for
+  // that harness, or the launcher will refuse the setup. `age` is seconds
+  // before the capture; the launcher ranks by how often, then how recently.
+  launch_history: [
+    { host: "local", cwd: "~/src/farhelm", harness: "claude", age: 600 },
+    { host: "local", cwd: "~/src/farhelm", harness: "claude", age: 7200 },
+    { host: "local", cwd: "~/src/farhelm", harness: "codex", permissions: "yolo", age: 3600 },
+    { host: "local", cwd: "~/src/farhelm", harness: "codex", workspace_trust: true, age: 90000 },
+    { host: "local", cwd: "~/src/api", harness: "claude", age: 172800 },
+  ],
+
+  // The folders the launcher offers under its folder field, from the same
+  // rewritten reply.
+  folders: [
+    { host: "local", cwd: "~/src/farhelm", age: 600 },
+    { host: "local", cwd: "~/src/api", age: 172800 },
+    { host: "local", cwd: "~/work/notes", age: 259200 },
+  ],
+}

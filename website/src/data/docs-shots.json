@@ -1,0 +1,53 @@
+{
+  "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
+  "base": "https://raw.githubusercontent.com/scode/farhelm",
+  "captured_at": "2026-10-04T00:49:20Z",
+  "captured_from": "090a4766339e416777f43914eda63aa9d2463094",
+  "commit": "5f2d7450b30089476fc92f05e5b94a0d7109c12b",
+  "shots": {
+    "start-a-session/destination": {
+      "height": 778,
+      "width": 1562
+    },
+    "start-a-session/effort-permissions-trust": {
+      "height": 722,
+      "width": 1562
+    },
+    "start-a-session/harness-and-model": {
+      "height": 636,
+      "width": 1600
+    },
+    "start-a-session/host-menu": {
+      "height": 542,
+      "width": 1830
+    },
+    "start-a-session/host-yolo-setting": {
+      "height": 626,
+      "width": 1586
+    },
+    "start-a-session/launch-button": {
+      "height": 628,
+      "width": 1740
+    },
+    "start-a-session/new-button": {
+      "height": 516,
+      "width": 1148
+    },
+    "start-a-session/recent-setups": {
+      "height": 730,
+      "width": 1800
+    },
+    "start-a-session/search": {
+      "height": 706,
+      "width": 1800
+    },
+    "start-a-session/search-name": {
+      "height": 354,
+      "width": 1800
+    },
+    "start-a-session/yolo-confirmation": {
+      "height": 772,
+      "width": 1860
+    }
+  }
+}

@@ -112,7 +112,24 @@ Rules the maintainer has stated or approved while reviewing drafts, recorded per
 [Learning from feedback](#learning-from-feedback). They bind as much as the sections above. Each one gives the guidance
 and the example that prompted it, with the date.
 
-None yet.
+- Show the UI with real screenshots, annotated with red arrows and callouts, instead of narrating it in prose. The
+  screenshots are captured from the real UI and can be refreshed against the latest main, the way the README screenshot
+  is; they are never drawn or edited by hand. (Prompted by the first draft of
+  [Start a session](/docs/using/start-a-session/), which walked through the session launcher's buttons in words only,
+  2026-10-03.)
+- Tell as much as possible with the annotated screenshot alone, starting with what matters most; where possible it
+  stands on its own. A callout may take a sentence or two to explain what a control does, not just point at it: the
+  permissions callout says what default and yolo each mean, not only "No approval prompts". The text then fills in what
+  the image does not carry: things outside it, and detail about something it calls out that is too much to keep in a
+  callout. Assume the reader can see the screenshots. Do not spend a run of sentences or bullets on what the screenshot
+  already shows; naming a control in the text is fine where plain readability calls for it, as a judgement call rather
+  than a ban. (Prompted by the second draft of Start a session, whose harness screenshot had terse callouts and was
+  followed by bullets restating the controls it showed, 2026-10-03.)
+
+- When a screenshot demonstrates something, use it the way a person actually would. Show the common case first, and
+  demonstrate an option (a prefix, a flag) with a case that needs it, not one where it is redundant. (Prompted by the
+  search shot on Start a session, which typed `harness:` when plain `claude` finds the same thing; it became two shots,
+  `claude` and `name: fix login bug`, 2026-10-03.)
 
 ## Learning from feedback
 

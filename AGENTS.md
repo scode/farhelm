@@ -164,6 +164,12 @@ that its required systemd or SSH substrate ran.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
+- `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
+  repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
+  ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,
+  incomplete, or since-modified captures are refused, that the manifest records the capture's main commit, and that a
+  snapshot stays until six weeks after it was replaced (the one main pins, always). Run it, with `shellcheck`, when the
+  script changes; seconds, no network, needs ImageMagick's `convert`.
 - `bash scripts/test-plans-watch.sh` — drives the plans monitor's watcher (`scripts/plans-watch.sh`) against a strict
   stub `gh` that runs the watcher's own `jq` filter over GitHub-shaped tree listings: change detection, baselines read
   from a commit, the wake check that keeps claims from waking idle executors, the idle cap, retried and persistent
@@ -575,6 +581,21 @@ placement until each one points at the right thing and hides nothing the viewer 
 `docs/readme-video/intent.md`, the scenario, and the transcripts are the maintainer's design and change only when asked.
 While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the machinery; say so when handing
 it over. The upload is manual; nothing in CI records or checks the video.
+
+# Docs screenshots
+
+The docs website's annotated screenshots are captured from the web UI against a staged fleet and published off main,
+governed by `docs/docs-shots/SPEC.md`; read it before touching anything under `docs/docs-shots/` or `e2e/docs-shots/`.
+Screenshots are regenerated in bulk, every page at once from one capture, and the manifest
+(`website/src/data/docs-shots.json`) records which main commit that capture ran on as `captured_from`. "Refresh the docs
+screenshots" means the procedure in the SPEC's "Refreshing" section: on the latest main, first read the UI changes since
+`captured_from` and update the shot specs and pages they affect, then run `scripts/docs-screenshots.sh`, rewrite any
+shot that no longer works on the current UI so it shows the same thing, look at every image it prints and fix annotation
+placement until each points at the right thing and hides nothing the reader needs, then run
+`scripts/publish-docs-shots.sh` and commit the manifest change it leaves. The publish script is the only thing that
+pushes `refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a
+gate: nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its
+whole validation and needs no network.
 
 # Agent screen fixtures
 

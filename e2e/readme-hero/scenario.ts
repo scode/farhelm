@@ -1,5 +1,6 @@
 // A staged-fleet scenario as TypeScript sees it: one parser for
-// `docs/readme-hero/scenario.json5` and `docs/readme-video/scenario.json5`,
+// `docs/readme-hero/scenario.json5`, `docs/readme-video/scenario.json5`, and
+// `docs/docs-shots/scenario.json5`,
 // shared by each Playwright config (which needs the host list and viewport
 // before the stack boots) and each capture spec (which needs everything).
 // One reader means a design file cannot mean two different things to its
@@ -32,6 +33,40 @@ export interface ScenarioHost {
   kind: HostKind;
   /** The ssh destination, `$USER` already expanded. Remote hosts only. */
   ssh?: string;
+  /**
+   * The destination the UI is shown instead of `ssh` (docs screenshots only,
+   * see docs/docs-shots/SPEC.md). The real one is a self-ssh spelling that may
+   * name the capturing machine's account, which must never be photographed.
+   */
+  shown_ssh?: string;
+}
+
+/** The structured harness names the launcher's history speaks (`LaunchHarness` in farhelm-proto). */
+export type LaunchHarness = "codex" | "claude" | "muse" | "cursor" | "grok" | "goose" | "pi" | "omp" | "open_code";
+
+/**
+ * One remembered launch, shown in the session launcher's recent setups
+ * (docs screenshots only). A fresh stack has no launch history, and staged
+ * sessions are not structured launches, so the docs capture rewrites the
+ * history reply from these instead; see docs/docs-shots/SPEC.md.
+ */
+export interface ScenarioLaunch {
+  host: string;
+  cwd: string;
+  harness: LaunchHarness;
+  model?: string;
+  effort?: string;
+  permissions?: string;
+  workspace_trust?: boolean;
+  /** Seconds before the capture that this launch happened; orders the history. */
+  age: number;
+}
+
+/** One remembered folder, offered under the launcher's folder field (docs screenshots only). */
+export interface ScenarioFolder {
+  host: string;
+  cwd: string;
+  age: number;
 }
 
 export interface ScenarioSession {
@@ -62,11 +97,16 @@ export interface Scenario {
   viewport: { width: number; height: number; scale: number };
   hosts: ScenarioHost[];
   sessions: ScenarioSession[];
+  launch_history?: ScenarioLaunch[];
+  folders?: ScenarioFolder[];
 }
 
 const STATUSES: TargetStatus[] = ["running", "waiting", "idle", "exited"];
 const THENS: ReplayThen[] = ["spin", "menu", "quiet", "exit"];
 const WRAPPERS: Wrapper[] = ["claude", "codex"];
+const HARNESSES: LaunchHarness[] = ["codex", "claude", "muse", "cursor", "grok", "goose", "pi", "omp", "open_code"];
+const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const PERMISSIONS = ["yolo", "approve", "smart_approve", "chat"];
 
 /** Read and validate `scenario.json5` in `dir`, expanding `$USER` in ssh destinations.
  *
@@ -112,6 +152,9 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
     }
     if (destinations.has(host.ssh)) fail(`two remote hosts share the destination ${host.ssh}`);
     destinations.add(host.ssh);
+    if (host.shown_ssh !== undefined && (typeof host.shown_ssh !== "string" || host.shown_ssh.includes("$USER"))) {
+      fail(`host ${host.key}: shown_ssh must be a literal destination (it is what gets photographed)`);
+    }
   }
   if (locals !== 1) fail("exactly one host must be kind: local");
 
@@ -143,7 +186,28 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
   }
   if (open !== 1) fail("exactly one session must carry open: true");
 
-  return { viewport, hosts, sessions };
+  const launchHistory = (raw.launch_history as ScenarioLaunch[] | undefined) ?? [];
+  for (const launch of launchHistory) {
+    const name = `launch_history entry ${JSON.stringify(launch)}`;
+    if (!keys.has(launch.host)) fail(`${name}: unknown host`);
+    if (!launch.cwd) fail(`${name}: cwd is required`);
+    if (!HARNESSES.includes(launch.harness)) fail(`${name}: harness must be one of ${HARNESSES.join(", ")}`);
+    if (launch.effort !== undefined && !EFFORTS.includes(launch.effort)) fail(`${name}: unknown effort`);
+    if (launch.permissions !== undefined && !PERMISSIONS.includes(launch.permissions)) fail(`${name}: unknown permissions`);
+    if (launch.workspace_trust !== undefined && typeof launch.workspace_trust !== "boolean") {
+      fail(`${name}: workspace_trust must be a boolean`);
+    }
+    if (!Number.isInteger(launch.age) || launch.age < 0) fail(`${name}: age must be a non-negative integer`);
+  }
+  const folders = (raw.folders as ScenarioFolder[] | undefined) ?? [];
+  for (const folder of folders) {
+    const name = `folders entry ${JSON.stringify(folder)}`;
+    if (!keys.has(folder.host)) fail(`${name}: unknown host`);
+    if (!folder.cwd) fail(`${name}: cwd is required`);
+    if (!Number.isInteger(folder.age) || folder.age < 0) fail(`${name}: age must be a non-negative integer`);
+  }
+
+  return { viewport, hosts, sessions, launch_history: launchHistory, folders };
 }
 
 /** The ssh destinations of the remote hosts, in scenario order. */
