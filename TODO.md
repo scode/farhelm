@@ -55,7 +55,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   retains only the newest 256 per requesting session. Once a resolution is evicted, a retry resolves templates again; if
   they changed, it can report a key conflict instead of returning the original session. Decide the lifetime of that
   guarantee and make storage, cleanup, the specification and tests agree, including retries past both retention limits
-  after a template edit. Follow-up to the agent CLI launch change in PR #1576.
+  after a template edit. Follow-up to the agent CLI launch change in PR #1576. Decided 2026-10-04: agent creates and
+  clones compare the request as the agent sent it rather than what it resolved to, so a retry is never limited, and the
+  helm's stored-resolution table is deleted; a keyed `farhelm agent create` must name `--host`, and a retry that a host
+  rename sends to another machine starting a second session is an accepted deficiency. Plan:
+  `plans/queue/agent-retry-by-request.md`.
 
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
