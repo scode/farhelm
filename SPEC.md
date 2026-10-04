@@ -860,22 +860,23 @@ required update when the host's protocol is lower. The dot keeps its color and t
 Hover names both builds (and both protocols for a skew), says whether updating is optional or required, and explains
 that clicking updates the host to the helm's version. Clicking starts the menu's Update without confirmation; inline
 progress replaces the button. Local hosts, hosts with update options still loading, and hosts occupied by setup or
-another run retain the plain words. A host whose supervisor is newer than the helm (a newer build on the same protocol,
-or a higher protocol version) says `too new` instead, is not offered Update, and its hover names the host's version, the
-helm's, and their protocol versions. If either build string cannot be parsed as a semantic version, or the helm is an
-unreleased development build, age is unknown and the row stays `connected`. The host count, its unpersisted details
-checkbox, and the secondary add action share one header row. Host actions open on demand from the row menu, with the
-older-host update button also available inline; details reveals the version, identity, session count, remedies,
-diagnostics, and provisioning progress under every row. Profiles use the neutral secondary tier for routine row actions
-and the normal blue tier for popup affirmatives, while the host selector stays a native control; session creation
-remains the blue primary action. Destructive confirmations use the danger tier, and explicit menu, tab, and composer
-controls retain their purpose-built styling. Sessions on an unreachable host stay in the list from the helm's last-known
-knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an
-unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows
-its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no terminal to
-show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status transitions —
-appear in all other connected clients automatically; the agent-spawn behavior below is one instance of this general
-rule, not a special case.
+another run retain the plain words. The helm's own machine is not updated from the panel: its row menu shows Update
+greyed out wherever it would otherwise be offered, saying to run the installer again, and choosing it sends nothing. A
+host whose supervisor is newer than the helm (a newer build on the same protocol, or a higher protocol version) says
+`too new` instead, is not offered Update, and its hover names the host's version, the helm's, and their protocol
+versions. If either build string cannot be parsed as a semantic version, or the helm is an unreleased development build,
+age is unknown and the row stays `connected`. The host count, its unpersisted details checkbox, and the secondary add
+action share one header row. Host actions open on demand from the row menu, with the older-host update button also
+available inline; details reveals the version, identity, session count, remedies, diagnostics, and provisioning progress
+under every row. Profiles use the neutral secondary tier for routine row actions and the normal blue tier for popup
+affirmatives, while the host selector stays a native control; session creation remains the blue primary action.
+Destructive confirmations use the danger tier, and explicit menu, tab, and composer controls retain their purpose-built
+styling. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
+restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
+with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
+directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
+one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
+clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
 
 ### Status
 

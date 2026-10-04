@@ -753,13 +753,31 @@ impl HostKind {
     }
 
     /// Whether the row menu offers provisioning actions (Update, Rerun) at
-    /// all. The local row is offered them even though the helm refuses a
-    /// local update and hands off to local setup; only an unrecognized kind
-    /// is offered nothing.
+    /// all. The local row is offered them too, but its Update is shown
+    /// greyed out (see [`HostKind::updates_from_panel`]); only an
+    /// unrecognized kind is offered nothing.
     pub(crate) fn offers_provisioning_actions(self) -> bool {
         match self {
             HostKind::Local | HostKind::Ssh => true,
             HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether the panel's Update can update this row's Farhelm: the UI's
+    /// counterpart of the helm's own `HostKind::panel_updates`, which plans
+    /// updates only for ssh rows. The helm refuses an Update of its own
+    /// machine (that machine is updated by re-running the installer), and
+    /// that refusal used to stick under the local row with no way to dismiss
+    /// it, so the local row's Update item is shown disabled and never sends
+    /// the request. Unrecognized kinds are not vouched for.
+    ///
+    /// Not the same question as [`HostKind::updates_automatically`], which
+    /// decides whether an offered Update skips its confirmation step; the two
+    /// happen to agree today.
+    pub(crate) fn updates_from_panel(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Unrecognized => false,
         }
     }
 

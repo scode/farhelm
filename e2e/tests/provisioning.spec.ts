@@ -1007,6 +1007,66 @@ test("a local setup phase transition republishes provisioning commands", async (
   await expect(local.locator(".provisioning-auto-setup")).toBeVisible();
 });
 
+/**
+ * The helm refuses to update its own machine, and that refusal used to stick
+ * under the local row with no way to dismiss it. So the local row's menu shows
+ * Update greyed out, pointing at the installer, and activating it by mouse or
+ * keyboard sends no update request at all. The item stays in the menu (greyed
+ * out, not hidden) so the menu still says how this machine is updated.
+ */
+test("the local row's update is greyed out, points at the installer, and sends nothing", async ({ page }) => {
+  const state = { down: false };
+  await controlLocalState(page, state, { greetOnConnect: false });
+  await page.route("**/api/hosts/*/provisioning", async (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").at(-2));
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": HELM_BUILD },
+      body: JSON.stringify({
+        host_id: id,
+        run_id: null,
+        operation: null,
+        status: "completed",
+        steps: [],
+        message: null,
+      }),
+    });
+  });
+
+  await page.goto("/");
+  const local = page.locator('[data-host-kind="local"]');
+  await expect(local).toBeVisible();
+  const localId = Number(await local.getAttribute("data-host-id"));
+  const updates = countUpdateRequests(page, localId);
+  await openHostMenu(local);
+  const item = local.locator(".provisioning-update");
+  await expect(item).toBeVisible();
+  await expect(item).toHaveAttribute("aria-disabled", "true");
+  await expect(item.locator(".session-row-menu-description")).toHaveText(
+    "run the installer again to update this machine",
+  );
+
+  // A sent update is not a POST from the handler itself: the click queues the
+  // row's request, a reactive effect consumes it, and a spawned task then
+  // POSTs the update plan. That is a few render turns, so each window allows a
+  // second for them on a loaded machine; nothing else in the page would
+  // announce the request's absence. Checking after each activation keeps a
+  // regression failing on the count rather than on the menu an accepted update
+  // closes. `force` because Playwright treats an aria-disabled button as not
+  // clickable, and the point is to click it anyway.
+  await item.click({ force: true });
+  // sleep-ok: observation window for an update request that must not be sent.
+  await page.waitForTimeout(1000);
+  expect(updates, "a click on the greyed-out item").toEqual({ plans: 0, confirms: 0 });
+  await item.focus();
+  await expect(item).toBeFocused();
+  await page.keyboard.press("Enter");
+  // sleep-ok: observation window for an update request that must not be sent.
+  await page.waitForTimeout(1000);
+  expect(updates, "Enter on the greyed-out item").toEqual({ plans: 0, confirms: 0 });
+  await expect(local.locator(".provisioning-error")).toHaveCount(0);
+});
+
 test("a failed local ADD keeps its rerun action in the local setup state", async ({ page }) => {
   const state: InjectedLocalState = { down: true };
   const feed = await controlLocalState(page, state, { greetOnConnect: false });
