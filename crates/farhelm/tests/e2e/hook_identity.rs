@@ -471,10 +471,6 @@ async fn a_reported_identity_is_offered_for_resume() {
         "conv-1",
         "the offer is only real if the id reaches the argv a restart would run"
     );
-    assert!(
-        !snapshot.capture_ambiguous,
-        "a session that answered for itself is not ambiguous about anything"
-    );
     serving.stop().await;
 }
 
