@@ -54,6 +54,23 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
     }
 }
 
+/// Hover text for an explicit permission-mode choice in the launcher.
+///
+/// The button's label is the mode's name; this says what the agent does
+/// under it, which the name alone leaves to the reader. The approval modes
+/// follow the agents that offer them (Goose's approve, smart approve and
+/// chat; OMP's approve, which launches with `--approval-mode always-ask`).
+pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static str {
+    match permission {
+        LaunchPermission::Yolo => "YOLO: the agent acts without asking for permission",
+        LaunchPermission::Approve => "approve: the agent asks before every tool action",
+        LaunchPermission::SmartApprove => {
+            "smart approve: the agent asks only before actions it judges risky"
+        }
+        LaunchPermission::Chat => "chat: the agent only talks and uses no tools",
+    }
+}
+
 /// Normalize a permission to the modes the selected harness can represent.
 ///
 /// Older saved selections resolve omissions through the same proto fact as
@@ -157,6 +174,64 @@ pub(crate) const fn workspace_trust_help(harness: LaunchHarness) -> Option<&'sta
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok => None,
+    }
+}
+
+/// Hover text for one workspace-trust choice (`None` is "default") with the
+/// selected harness, which decides what true and false actually do
+/// (SPEC.md, the launch composer's workspace-trust contract): Codex marks the
+/// launch's directory trusted or untrusted, Pi passes `--approve` or
+/// `--no-approve`, and Muse adds `--trust-workspace` for true and nothing for
+/// false, which cannot revoke trust YOLO or vendor settings already grant.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) const fn workspace_trust_tooltip(
+    harness: Option<LaunchHarness>,
+    choice: Option<bool>,
+) -> &'static str {
+    match (harness, choice) {
+        (_, None) => "default: the agent's own workspace-trust setting or prompt applies",
+        (Some(LaunchHarness::Codex), Some(true)) => {
+            "true: run this launch with its folder marked trusted"
+        }
+        (Some(LaunchHarness::Codex), Some(false)) => {
+            "false: run this launch with its folder marked untrusted"
+        }
+        (Some(LaunchHarness::Pi), Some(true)) => {
+            "true: approve the project's resources for this launch (--approve)"
+        }
+        (Some(LaunchHarness::Pi), Some(false)) => {
+            "false: do not approve the project's resources for this launch (--no-approve)"
+        }
+        (Some(LaunchHarness::Muse), Some(true)) => {
+            "true: trust this workspace for this launch (--trust-workspace)"
+        }
+        (Some(LaunchHarness::Muse), Some(false)) => {
+            "false: add no trust flag; YOLO or vendor settings may still trust this workspace"
+        }
+        (
+            None
+            | Some(
+                LaunchHarness::Cursor
+                | LaunchHarness::Claude
+                | LaunchHarness::Goose
+                | LaunchHarness::Omp
+                | LaunchHarness::OpenCode
+                | LaunchHarness::Grok,
+            ),
+            Some(true),
+        ) => "true: trust the session's folder for this launch",
+        (
+            None
+            | Some(
+                LaunchHarness::Cursor
+                | LaunchHarness::Claude
+                | LaunchHarness::Goose
+                | LaunchHarness::Omp
+                | LaunchHarness::OpenCode
+                | LaunchHarness::Grok,
+            ),
+            Some(false),
+        ) => "false: do not trust the session's folder for this launch",
     }
 }
 

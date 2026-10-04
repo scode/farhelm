@@ -178,6 +178,7 @@ pub(crate) fn RenameForm(
             button {
                 r#type: "submit",
                 class: "btn btn-primary rename-submit",
+                "data-tooltip": "save the new title",
                 disabled: submit_disabled,
                 aria_disabled: if busy { "true" },
                 onclick: move |evt| {
@@ -190,6 +191,7 @@ pub(crate) fn RenameForm(
             button {
                 r#type: "button",
                 class: "btn btn-neutral rename-cancel",
+                "data-tooltip": "cancel: keep the current title",
                 disabled: busy,
                 onclick: move |_| {
                     if busy_now.call(()) {

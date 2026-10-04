@@ -976,6 +976,13 @@ pub(super) fn SessionRow(
     } else {
         "mark unread"
     };
+    // The menu item has no description line, so its hover text says what
+    // the toggle changes: the dot's new-output color, in every client.
+    let mark_seen_tooltip = if unseen == Some(true) {
+        "mark read: treat this session's latest output as seen"
+    } else {
+        "mark unread: show this session as having new output again"
+    };
     // The value this row's toggle click sends: clearing the seen stamp
     // (`None`) when marking unread, or the row's current effective activity
     // (`Some`) when marking read — `api::mark_seen`'s own contract.
@@ -1399,7 +1406,15 @@ pub(super) fn SessionRow(
                     // DOM direction isolation, so every peer-derived hover
                     // text goes through `display_peer`, like the title's own
                     // tooltip.
-                    "data-tooltip": if compact { display_peer(&session.cwd) },
+                    // Outside compact mode the row's own parts (title,
+                    // marks, age, directory) each carry hover text, and the
+                    // button's tooltip only names what a click does for the
+                    // space between them.
+                    "data-tooltip": if compact {
+                        format!("{} — click to open", display_peer(&session.cwd))
+                    } else {
+                        "click to open this session".to_string()
+                    },
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1669,6 +1684,7 @@ pub(super) fn SessionRow(
                     // legally run to tens of KB and an accessible name is
                     // read aloud in full.
                     aria_label: menu_label(&session.title),
+                    "data-tooltip": "session actions: rename, clone, replace, stop, delete and more",
                     aria_expanded: menu_open,
                     // What this button opens, in the vocabulary the ARIA
                     // menu-button pattern uses — the counterpart of the
@@ -1858,6 +1874,7 @@ pub(super) fn SessionRow(
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger confirm-delete",
+                                "data-tooltip": "delete this session and its state now",
                                 // Disabled while the shared token is held:
                                 // the handler refuses then anyway (keeping
                                 // the prompt), and the attribute is that
@@ -1877,6 +1894,7 @@ pub(super) fn SessionRow(
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral confirm-cancel",
+                                "data-tooltip": "cancel: keep this session",
                                 // Safe default: land keyboard focus on
                                 // cancel, not confirm, the instant this
                                 // prompt appears — a stray Enter/Space
@@ -1917,6 +1935,7 @@ pub(super) fn SessionRow(
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger confirm-replace",
+                                "data-tooltip": "replace this session now, as described",
                                 // See confirm-delete: refusal made visible.
                                 disabled: busy,
                                 onclick: move |_| on_confirm_replace.call(confirm_replace_source.clone()),
@@ -1925,6 +1944,7 @@ pub(super) fn SessionRow(
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
+                                "data-tooltip": "cancel: keep this session as it is",
                                 autofocus: true,
                                 onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
                                 "cancel"
@@ -2007,6 +2027,7 @@ pub(super) fn SessionRow(
                                         class: "btn session-row-menu-item session-row-rename",
                                         role: "menuitem",
                                         aria_label: "rename",
+                                        "data-tooltip": "rename: give this session a new title",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
                                         onmounted: move |element| {
@@ -2053,6 +2074,7 @@ pub(super) fn SessionRow(
                                         class: "btn session-row-menu-item session-row-mark-seen",
                                         role: "menuitem",
                                         aria_label: "{mark_seen_label}",
+                                        "data-tooltip": "{mark_seen_tooltip}",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::MarkSeen) { "0" } else { "-1" },
                                         onmounted: move |element| {

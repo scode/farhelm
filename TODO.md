@@ -111,12 +111,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   when restart offers a fresh launch instead of Resume. Design settled 2026-10-03 in the plan:
   `plans/queue/session-notifications.md`.
 
-- **Hover help on icons and buttons.** Hovering any of these should show a short text saying what it is or does: the
-  icons that show a session's agent kind, the YOLO / not-YOLO / unknown (question mark) icons, and every clickable
-  button. Today a user has to guess what an unlabeled icon means or what a terse button will do before clicking it.
-  Native `title` tooltips are the cheap way to get there; the Maybe later entry on custom hover tooltips covers the
-  faster, themed alternative if the browser's built-in delay proves too slow. Plan: `plans/queue/hover-help.md`.
-
 - **Verify that agents keep running while Farhelm is closed on the Mac.** The docs' "Your first session" page says you
   can quit Farhelm while an agent works, reopen it, and find the session still running. Check that claim, and fix
   Farhelm or the page. Reminder for the maintainer: this is about how the agents' session hooks might block while the

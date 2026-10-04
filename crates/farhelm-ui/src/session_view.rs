@@ -2101,6 +2101,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger restart-confirm",
+                                    "data-tooltip": "confirm restart: stop the running agent, then resume its conversation",
                                     disabled: restarting(),
                                     onclick: move |_| {
                                         if !confirming() {
@@ -2120,6 +2121,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral restart-cancel",
+                                    "data-tooltip": "cancel: leave the agent running",
                                     autofocus: true,
                                     onclick: move |_| {
                                         // Only the click that closes the prompt
@@ -2174,6 +2176,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-primary header-replace",
+                            "data-tooltip": "replace: swap this session for a fresh conversation with the same settings",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_replace.is_open()}",
                             onclick: move |_| {
@@ -2197,6 +2200,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-danger",
                                     disabled: replacing(),
+                                    "data-tooltip": "replace this session now, as described",
                                     onclick: move |_| {
                                         if let Some(claim) = confirming_header_replace.take(&()) {
                                             header_confirm_replace(
@@ -2214,6 +2218,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-neutral",
                                     autofocus: true,
+                                    "data-tooltip": "cancel: keep this session as it is",
                                     onclick: move |_| confirming_header_replace.cancel_for(&()),
                                     "cancel"
                                 }
@@ -2223,6 +2228,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-primary header-clone",
+                        "data-tooltip": "clone: open the new-session form with these settings; this session keeps running",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
                         "clone"
@@ -2230,6 +2236,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-primary header-replace-with",
+                        "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
                         "replace with"
@@ -2247,6 +2254,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger header-delete",
+                            "data-tooltip": "delete: remove this session and its state, after you confirm",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
                             onclick: move |_| {
@@ -2272,6 +2280,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger header-delete-confirm-submit",
+                                    "data-tooltip": "delete this session and its state now",
                                     onclick: {
                                         let id = shown.id.clone();
                                         move |_| {
@@ -2291,6 +2300,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-neutral",
                                     autofocus: true,
+                                    "data-tooltip": "cancel: keep this session",
                                     onclick: move |_| confirming_header_delete.cancel_for(&()),
                                     "cancel"
                                 }
@@ -2534,6 +2544,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-primary replace-with-from-notice",
+                            "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                             disabled: lifecycle.busy(),
                             onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone()))),
                             "replace with"
@@ -2542,6 +2553,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-primary replace-from-notice",
+                            "data-tooltip": "replace: swap this session for a fresh conversation with the same settings",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_replace.is_open()}",
                             onclick: move |_| {
@@ -2558,6 +2570,7 @@ pub(crate) fn SessionView(
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger replace-confirm-submit",
+                                "data-tooltip": "replace this session now, as described",
                                 disabled: replacing(),
                                 onclick: move |_| {
                                     if let Some(claim) = confirming_replace.take(&()) {
@@ -2575,6 +2588,7 @@ pub(crate) fn SessionView(
                             button {
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
+                                "data-tooltip": "cancel: keep this session as it is",
                                 autofocus: true,
                                 onclick: move |_| confirming_replace.cancel_for(&()),
                                 "cancel"
@@ -2595,6 +2609,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
+                        "data-tooltip": "agent: show the session's agent terminal",
                         "data-terminal": "agent",
                         onclick: move |_| selected.set(None),
                         "agent"
@@ -2621,6 +2636,7 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral tab-add",
+                        "data-tooltip": "+ terminal: open a shell tab in the session's folder",
                         disabled: opening_tab() || lifecycle.busy(),
                         onclick: on_add_tab,
                         "+ terminal"
@@ -2645,6 +2661,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger confirm-delete confirm-close-tab",
+                            "data-tooltip": "close this tab, ending its shell and everything it started",
                             onclick: {
                                 let tab_id = tab_id.clone();
                                 move |_| confirm_close_tab(tab_id.clone())
@@ -2654,6 +2671,7 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral confirm-cancel",
+                            "data-tooltip": "cancel: keep the tab open",
                             // Safe default, exactly as the delete prompt does
                             // it: keyboard focus lands on the way OUT of the
                             // destructive action, via the plain HTML attribute

@@ -479,6 +479,7 @@ pub(crate) fn RestartWithDialog(
                                 if yolo_changed { span { class: "restart-with-edited", " (edited)" } }
                             }
                             label {
+                                "data-tooltip": "yes: you assert this command acts without asking for approval; Farhelm marks it YOLO and does not check",
                                 input {
                                     r#type: "radio",
                                     name: "restart-with-command-yolo",
@@ -489,6 +490,7 @@ pub(crate) fn RestartWithDialog(
                                 "yes (YOLO)"
                             }
                             label {
+                                "data-tooltip": "no: you assert this command asks before acting; Farhelm does not check",
                                 input {
                                     r#type: "radio",
                                     name: "restart-with-command-yolo",
@@ -636,6 +638,7 @@ pub(crate) fn RestartWithDialog(
                     }
                     button {
                         class: "btn btn-neutral restart-with-cancel",
+                        "data-tooltip": "cancel: close without restarting",
                         r#type: "button",
                         disabled: busy,
                         onclick: move |_| on_cancel.call(()),

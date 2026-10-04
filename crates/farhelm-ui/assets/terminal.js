@@ -1541,6 +1541,9 @@
       button.type = "button";
       button.className = "btn terminal-reconnect-now";
       button.textContent = controls.text.manual || "reconnect now";
+      // Farhelm's own hover tooltip (tooltip.js) reads this; every control
+      // in the page carries one, including the two this script builds.
+      button.dataset.tooltip = "reconnect now: try to reattach this terminal right away";
       // Closes over the ELEMENT ID, never this controller: the id is what
       // stays true across every rebuild of the recovery behind it, and
       // `reconnectNow` looks the current one up.
@@ -2619,6 +2622,7 @@
       button.type = "button";
       button.className = "btn banner-reclaim";
       button.textContent = "take control";
+      button.dataset.tooltip = "take control: attach this view again, detaching the client that took over";
       button.addEventListener("click", () => farhelmTerm.reclaim());
       banner.appendChild(button);
     }

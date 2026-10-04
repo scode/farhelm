@@ -284,6 +284,7 @@ pub(crate) fn TabStripItem(
                 r#type: "button",
                 class: if selected { "btn tab selected" } else { "btn tab" },
                 "data-terminal": "{tab_id}",
+                "data-tooltip": "{label}: show this shell tab",
                 onclick: move |_| on_select.call(select_id.clone()),
                 "{label}"
             }
@@ -295,6 +296,7 @@ pub(crate) fn TabStripItem(
                 // name has to carry the tab's identity instead, or every
                 // tab's close button would announce identically.
                 "aria-label": "close {label}",
+                "data-tooltip": "close {label}, ending its shell and everything it started",
                 disabled: busy,
                 onclick: move |_| on_close.call(close_id.clone()),
                 "×"

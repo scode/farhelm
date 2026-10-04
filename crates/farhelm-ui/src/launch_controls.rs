@@ -237,6 +237,7 @@ pub(crate) fn LaunchControls(
                                     role: "option",
                                     dir: "ltr",
                                     aria_selected: model_active == Some(index),
+                                    "data-tooltip": "use this model for the session",
                                     class: if model_active == Some(index) { "selected" } else { "" },
                                     disabled: busy,
                                     // Rows are not sequential tab stops. The keyboard reaches
@@ -289,6 +290,7 @@ pub(crate) fn LaunchControls(
                         button {
                             r#type: "button",
                             class: if effort.is_none() { "selected" } else { "" },
+                            "data-tooltip": "use the agent's default reasoning effort",
                             aria_pressed: effort.is_none(),
                             disabled: busy,
                             onclick: move |_| on_effort.call(None),
@@ -299,6 +301,7 @@ pub(crate) fn LaunchControls(
                                 key: "{launch_composer::effort_value(offered)}",
                                 r#type: "button",
                                 class: if effort == Some(offered) { "selected" } else { "" },
+                                "data-tooltip": "use {launch_composer::effort_value(offered)} reasoning effort",
                                 aria_pressed: effort == Some(offered),
                                 disabled: busy,
                                 onclick: move |_| on_effort.call(Some(offered)),
@@ -316,6 +319,7 @@ pub(crate) fn LaunchControls(
                         button {
                             r#type: "button",
                             class: if permissions.is_none() { "selected" } else { "" },
+                            "data-tooltip": "use the agent's default permission mode",
                             aria_pressed: permissions.is_none(),
                             disabled: busy,
                             onclick: move |_| on_permissions.call(None),
@@ -333,6 +337,7 @@ pub(crate) fn LaunchControls(
                             },
                             aria_pressed: permissions == Some(LaunchPermission::Yolo)
                                 || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)),
+                            "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Yolo),
                             disabled: busy,
                             onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
                             "yolo"
@@ -356,6 +361,7 @@ pub(crate) fn LaunchControls(
                             key: "{launch_composer::permission_value(permission)}",
                             r#type: "button",
                             class: if permissions == Some(permission) { "selected" } else { "" },
+                            "data-tooltip": launch_composer::permission_tooltip(permission),
                             aria_pressed: permissions == Some(permission),
                             disabled: busy,
                             onclick: move |_| on_permissions.call(Some(permission)),
@@ -378,6 +384,7 @@ pub(crate) fn LaunchControls(
                             key: "{label}",
                             r#type: "button",
                             class: if workspace_trust == choice { "selected" } else { "" },
+                            "data-tooltip": launch_composer::workspace_trust_tooltip(harness, choice),
                             aria_pressed: workspace_trust == choice,
                             disabled: busy,
                             onclick: move |_| on_workspace_trust.call(choice),

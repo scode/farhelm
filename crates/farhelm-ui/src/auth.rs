@@ -154,6 +154,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                     button {
                         class: "btn btn-primary auth-submit",
                         r#type: "button",
+                        "data-tooltip": "retry: try starting Farhelm again",
                         onclick: move |_| require_desktop_webview_reauth(),
                         "Retry"
                     }
@@ -502,6 +503,7 @@ pub(crate) fn TokenPrompt() -> Element {
                 button {
                     class: "btn btn-primary auth-submit",
                     r#type: "submit",
+                    "data-tooltip": "continue: sign in with this token",
                     disabled: *busy.read(),
                     if *busy.read() { "Checking…" } else { "Continue" }
                 }

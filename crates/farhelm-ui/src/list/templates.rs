@@ -300,6 +300,7 @@ fn Choice(
             span { "{label}" }
             select {
                 disabled,
+                "data-tooltip": "{label}: what applying the template does to this launcher field; leaving it unset keeps the launcher's own value",
                 onchange: move |evt| on_change.call(evt.value()),
                 for (option_value, option_label) in options {
                     option { value: "{option_value}", selected: option_value == value, "{option_label}" }
@@ -483,6 +484,7 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                                     button {
                                         r#type: "button",
                                         class: "btn btn-neutral templates-edit",
+                                        "data-tooltip": "edit: load this template into the form below",
                                         disabled,
                                         onclick: {
                                             let template = template.clone();
@@ -497,6 +499,7 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                                     button {
                                         r#type: "button",
                                         class: "btn btn-danger templates-delete",
+                                        "data-tooltip": "delete this template; sessions started from it are unaffected",
                                         disabled,
                                         onclick: {
                                             let name = template.name.clone();
@@ -621,6 +624,7 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                         button {
                             r#type: "button",
                             class: "btn btn-neutral templates-new",
+                            "data-tooltip": "new template: stop editing this one and start a blank form",
                             disabled,
                             onclick: move |_| {
                                 form.set(TemplateForm::default());
@@ -633,6 +637,7 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                     button {
                         r#type: "button",
                         class: "btn btn-primary templates-save",
+                        "data-tooltip": "save the template in the form",
                         disabled,
                         onclick: save,
                         "save"
@@ -640,6 +645,7 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                     button {
                         r#type: "button",
                         class: "btn btn-neutral templates-close",
+                        "data-tooltip": "close: done with templates; an unsaved form is discarded",
                         disabled,
                         onclick: move |_| on_close.call(()),
                         "close"

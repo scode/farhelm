@@ -1569,6 +1569,55 @@ fn copied_title_ignored(edited: bool, seed: Option<&str>, fresh_checkout: bool) 
     fresh_checkout && !edited && seed.is_some()
 }
 
+/// Hover text for one launcher search result.
+///
+/// A result's visible line is its kind and value ("Model: …"); the tooltip
+/// says what choosing it does to the draft, which the line leaves to the
+/// reader. A recent setup instead carries its complete description, because
+/// its two-line rendering may truncate the saved values. Peer-supplied values
+/// (names, paths, model ids) go through `display_peer`, as in the visible line.
+fn search_result_tooltip(
+    result: &crate::launch_composer::ComposerSearchResult,
+    selected_host_label: &str,
+    harness: Option<LaunchHarness>,
+) -> String {
+    use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
+    match result {
+        ComposerSearchResult::Recent(entry) => format!(
+            "{} · {} · {}",
+            display_peer(&crate::launch_composer::recent_destination_label(entry)),
+            selected_host_label,
+            display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
+        ),
+        ComposerSearchResult::Name(name) => {
+            format!("use \"{}\" as the session's name", display_peer(name))
+        }
+        ComposerSearchResult::Host(_) => "run the session on this host".to_string(),
+        ComposerSearchResult::UsePath(_) | ComposerSearchResult::Folder(_) => {
+            "use this folder: the session will start here".to_string()
+        }
+        ComposerSearchResult::BrowsePath(_) => "list the folders under this path".to_string(),
+        ComposerSearchResult::Harness(_) => "use this agent for the session".to_string(),
+        ComposerSearchResult::Template(_) => {
+            "apply this template's settings to the draft".to_string()
+        }
+        ComposerSearchResult::Github(_) => {
+            "start in a fresh checkout of this repository".to_string()
+        }
+        ComposerSearchResult::Model { .. } => "use this model for the session".to_string(),
+        ComposerSearchResult::Effort(_) => "use this reasoning effort for the session".to_string(),
+        ComposerSearchResult::Permissions(ComposerPermission::Default) => {
+            "use the agent's default permissions".to_string()
+        }
+        ComposerSearchResult::Permissions(ComposerPermission::Yolo) => {
+            crate::launch_composer::permission_tooltip(LaunchPermission::Yolo).to_string()
+        }
+        ComposerSearchResult::Trust(value) => {
+            crate::launch_composer::workspace_trust_tooltip(harness, Some(*value)).to_string()
+        }
+    }
+}
+
 /// The title a launch sends: [`submitted_field`]'s rule, except that a copied,
 /// unedited title is sent empty when the destination is a fresh checkout (see
 /// [`copied_title_ignored`]).
@@ -3162,6 +3211,7 @@ pub(super) fn CreateSessionForm(
         select {
             class: "create-session-host",
             aria_label: "host",
+            "data-tooltip": "host: the machine the session runs on",
             disabled: busy,
             value: selected.map(|id| id.to_string()).unwrap_or_default(),
             onchange: move |evt| {
@@ -3257,6 +3307,7 @@ pub(super) fn CreateSessionForm(
         button { r#type: "button", disabled: busy,
             class: "launch-composer-folder-reset",
             aria_label: "reset folder to home",
+            "data-tooltip": "home: start in your home folder on this host",
             onclick: move |_| {
                 if !draft_transition_allowed(ops) { return; }
                 remembered_destination.set(None);
@@ -3274,6 +3325,7 @@ pub(super) fn CreateSessionForm(
         button { r#type: "button", disabled: busy,
             class: "launch-composer-folder-reset",
             aria_label: "reset destination to local home",
+            "data-tooltip": "local home: start in your home folder on this machine",
             onclick: move |_| {
                 if !draft_transition_allowed(ops) { return; }
                 // This is an explicit local choice, unlike the ordinary
@@ -3975,6 +4027,7 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "submit",
                     class: "btn btn-primary create-session-submit",
+                    "data-tooltip": if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" },
                     aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
                     // `blocked` as well as this form's own flag: a create must
                     // not overlap a host mutation (see `ListView`'s operation
@@ -4008,6 +4061,7 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral launch-composer-cancel",
+                    "data-tooltip": "cancel: close without starting anything",
                     disabled: busy,
                     onclick: move |_| {
                         // The disabled attribute updates after this event's
@@ -4024,6 +4078,7 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral launch-composer-reset",
+                        "data-tooltip": "reset choices: clear the agent, model and effort, and go back to your remembered permissions and workspace trust",
                         disabled: busy,
                         onclick: move |_| {
                             if !draft_transition_allowed(ops) {
@@ -4435,14 +4490,7 @@ pub(super) fn CreateSessionForm(
                                                     class: if matches!(result, crate::launch_composer::ComposerSearchResult::Recent(_)) {
                                                         if composer_active_index == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
                                                     } else if composer_active_index == index { "selected" } else { "" },
-                                                    "data-tooltip": match &result {
-                                                        crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
-                                                            "{} · {} · {}",
-                                                                display_peer(&crate::launch_composer::recent_destination_label(entry)), selected_host_label,
-                                                            display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
-                                                        ),
-                                                        _ => String::new(),
-                                                    },
+                                                    "data-tooltip": search_result_tooltip(&result, &selected_host_label, *structured_harness.read()),
                                                     // Search recents use two visual spans as ordinary
                                                     // recents do. Their accessible label repeats the
                                                     // complete title with the result kind, instead of
@@ -4737,6 +4785,7 @@ pub(super) fn CreateSessionForm(
                                     // existing folder rather than "this path"
                                     // while checkout mode is active.
                                     aria_label: if checkout_mode { "browse existing folders" } else { "browse this path" },
+                                    "data-tooltip": if checkout_mode { "browse the existing folders on this host instead of a fresh checkout" } else { "browse: list the folders under this path on the host" },
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) { return; }
                                         request_directory_browse(
@@ -4795,6 +4844,7 @@ pub(super) fn CreateSessionForm(
                                 button {
                                     r#type: "button",
                                     class: "launch-composer-existing-folder",
+                                    "data-tooltip": "use an existing folder instead of a fresh checkout",
                                     disabled: busy,
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) { return; }
@@ -4918,6 +4968,7 @@ pub(super) fn CreateSessionForm(
                                     r#type: "button",
                                     role: "tab",
                                     class: if launch_tab() == tab { "launch-kind-tab selected" } else { "launch-kind-tab" },
+                                    "data-tooltip": if tab == LaunchTab::Agent { "agent: start a supported agent with its model, effort and permissions" } else { "command: run a command line you type, as written" },
                                     "aria-selected": "{launch_tab() == tab}",
                                     tabindex: if launch_tab() == tab { "0" } else { "-1" },
                                     disabled: busy,
@@ -4971,6 +5022,7 @@ pub(super) fn CreateSessionForm(
                                         r#type: "button",
                                         class: if launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness) { "selected" } else { "" },
                                         aria_pressed: launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness),
+                                        "data-tooltip": "use {crate::launch_composer::harness_label(harness)} for the session",
                                         disabled: busy,
                                         onclick: {
                                             let catalog = catalog_for_harness.clone();
@@ -5035,6 +5087,7 @@ pub(super) fn CreateSessionForm(
                                     button {
                                         r#type: "button",
                                         class: "btn btn-neutral",
+                                        "data-tooltip": "retry: ask the host for its model list again",
                                         // Cleared first so the line goes away while the
                                         // read is out and comes back only if it fails
                                         // again; left in place, a retry would look like a
@@ -5235,6 +5288,7 @@ pub(super) fn CreateSessionForm(
             fieldset { class: "launch-command-yolo",
                 legend { "runs without approval prompts" }
                 label {
+                    "data-tooltip": "yes: you assert this command acts without asking for approval; Farhelm marks it YOLO and does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
@@ -5249,6 +5303,7 @@ pub(super) fn CreateSessionForm(
                     "yes (YOLO)"
                 }
                 label {
+                    "data-tooltip": "no: you assert this command asks before acting; Farhelm does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
@@ -5267,6 +5322,7 @@ pub(super) fn CreateSessionForm(
                 "agent type"
                 select {
                     class: "launch-command-agent",
+                    "data-tooltip": "the agent this command runs, if any, so Farhelm can track and resume it",
                     disabled: busy,
                     onchange: move |evt| {
                         if !draft_transition_allowed(ops) { return; }
@@ -5293,6 +5349,7 @@ pub(super) fn CreateSessionForm(
                     "Put {{farhelm_args}} in the command where Farhelm adds its own arguments."
                 }
                 label {
+                    "data-tooltip": "resume: give the command a way to pick its conversation back up after a restart",
                     input {
                         r#type: "checkbox",
                         class: "launch-command-resume-toggle",
@@ -5359,6 +5416,7 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         dir: "ltr",
+                        "data-tooltip": "use this folder: the session will start here",
                         onclick: {
                             let selected_cwd = result.cwd.clone();
                             let authority = result_authority.clone();
@@ -5389,6 +5447,7 @@ pub(super) fn CreateSessionForm(
                         button {
                             r#type: "button",
                             dir: "ltr",
+                            "data-tooltip": "use the parent folder instead",
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
@@ -5422,6 +5481,7 @@ pub(super) fn CreateSessionForm(
                         button {
                             r#type: "button",
                             dir: "ltr",
+                            "data-tooltip": "use this folder: the session will start here",
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
@@ -6413,6 +6473,49 @@ mod tests {
             display,
             "edited: the user's own literal text travels, even when it happens to equal the \
              escaped rendering of what was there"
+        );
+    }
+
+    /// Why this matters: a launcher search result's hover text can quote a
+    /// value the user typed or a peer supplied (a session name), and a
+    /// tooltip is one attribute string that no DOM direction isolation
+    /// reaches, so escaping is its only defense against an override
+    /// character reordering what the user reads. Spec: a name result's
+    /// tooltip carries the escaped name, never the raw control character,
+    /// and the workspace-trust result says what false does for the selected
+    /// agent (Codex runs the folder untrusted; Muse only adds no flag).
+    #[farhelm_testtrace::test]
+    fn search_result_tooltips_escape_names_and_follow_the_agent() {
+        use crate::launch_composer::ComposerSearchResult;
+        let spoof = "build\u{202E}lanif".to_string();
+        let name =
+            super::search_result_tooltip(&ComposerSearchResult::Name(spoof.clone()), "local", None);
+        assert!(
+            !name.contains('\u{202E}'),
+            "a raw override reached the tooltip: {name:?}"
+        );
+        assert!(
+            name.contains(&crate::peer::display_peer(&spoof)),
+            "the escaped name is quoted: {name:?}"
+        );
+
+        let codex = super::search_result_tooltip(
+            &ComposerSearchResult::Trust(false),
+            "local",
+            Some(crate::LaunchHarness::Codex),
+        );
+        let muse = super::search_result_tooltip(
+            &ComposerSearchResult::Trust(false),
+            "local",
+            Some(crate::LaunchHarness::Muse),
+        );
+        assert!(
+            codex.contains("untrusted"),
+            "Codex false runs the folder untrusted: {codex:?}"
+        );
+        assert!(
+            muse.contains("no trust flag"),
+            "Muse false only adds no flag: {muse:?}"
         );
     }
 }

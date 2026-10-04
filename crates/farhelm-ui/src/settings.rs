@@ -58,6 +58,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 }
                 div {
                     label { class: "app-settings-choice",
+                        "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
                         input {
                             r#type: "checkbox",
                             checked: setup,
@@ -79,6 +80,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 }
                 div {
                     label { class: "app-settings-choice",
+                        "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
                         input {
                             r#type: "checkbox",
                             checked: remove,
@@ -102,6 +104,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     button {
                         r#type: "button",
                         class: "btn btn-neutral app-settings-close",
+                        "data-tooltip": "close: changes are already saved",
                         onclick: move |_| on_close.call(()),
                         "close"
                     }
