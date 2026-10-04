@@ -55,7 +55,7 @@ test("launch button", async ({ page, request }) => {
   // In the margin left of the launcher, pointing in at the button.
   await director.callout(
     submit,
-    "Spells out what it will start: the agent, the host, and the folder. Disabled until an agent is chosen and the host is connected.",
+    "Spells out what it will start: the agent, the host, and the directory. Disabled until an agent is chosen and the host is connected.",
     { side: "left" },
   );
   // Also in the left margin, under the first, so the crop stays narrow.
@@ -81,12 +81,12 @@ test("destination", async ({ page, request }) => {
   );
   await director.callout(
     destination.getByLabel("folder", { exact: true }),
-    "The folder the agent starts in. ~ is your home on that host, not on the machine in front of you.",
+    "The directory the agent starts in. ~ is your home on that host, not on the machine in front of you.",
     { side: "left", dy: 20 },
   );
   await director.callout(
     destination.getByLabel("recent folders"),
-    "Folders you launch in most on this host. Local home is your home on the machine in front of you.",
+    "Directories you launch in most on this host. Local home is your home on the machine in front of you.",
     { side: "left", dy: 80 },
   );
   await shot(page, `${PAGE}/destination`, [destination]);
@@ -137,7 +137,7 @@ test("effort, permissions, and trust", async ({ page, request }) => {
     "default keeps the agent's approval prompts. yolo turns them off: the agent runs commands and changes files without asking you.",
     { side: "right", dx: 290, dy: 25 },
   );
-  await director.callout(trust, "Whether the agent treats this folder as trusted. Only some agents have it.", {
+  await director.callout(trust, "Whether the agent treats this directory as trusted. Only some agents have it.", {
     side: "right",
     dy: 45,
   });
@@ -155,7 +155,7 @@ test("search", async ({ page, request }) => {
   await expect(results.getByRole("option").first()).toBeVisible();
   await director.callout(
     search,
-    "Type to find anything the launcher can set: hosts, agents, models, folders, recent setups.",
+    "Type to find anything the launcher can set: hosts, agents, models, directories, recent setups.",
     { side: "left" },
   );
   await director.callout(
@@ -193,7 +193,7 @@ test("recent setups", async ({ page, request }) => {
   // the list itself.
   await director.callout(
     recents,
-    "Setups you launched in this folder on this host, most used first. Click one to fill in the launcher; Enter on it launches straight away.",
+    "Setups you launched in this directory on this host, most used first. Click one to fill in the launcher; Enter on it launches straight away.",
     { side: "bottom", dx: 200 },
   );
   // The rows' right half is empty, so trimming it keeps the image readable
