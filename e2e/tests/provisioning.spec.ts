@@ -140,7 +140,7 @@ const RUN_SETTLE_TIMEOUT_MS = 30_000;
  * Remove one host, waiting first for any setup or update still running on it.
  *
  * Removal never waits for a run: while one holds the host, the helm refuses at
- * once with 409 "busy with a setup or update" (`hosts::remove_host`, SPEC.md
+ * once with 409 "busy with a setup, update or uninstall" (`hosts::remove_host`, SPEC.md
  * "Waiting between operations on one host"). Cleanup reaches here right after
  * `configureBackend()` releases whatever action a test left held, and the run
  * behind it is still finishing at that moment. Deleting straight away lost
@@ -175,7 +175,7 @@ async function removeHostOnceIdle(request: APIRequestContext, id: number): Promi
           last.body = response.ok() ? "" : await responseBody(response);
           last.state = response.ok()
             ? "removed"
-            : response.status() === 409 && last.body.includes("busy with a setup or update")
+            : response.status() === 409 && last.body.includes("busy with a setup, update or uninstall")
             ? "busy"
             : "refused";
           return last.state;

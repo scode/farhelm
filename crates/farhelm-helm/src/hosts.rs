@@ -828,9 +828,9 @@ async fn set_alias_owned(
 /// Same empty-object success body as the session verbs, so a caller never
 /// has to special-case a bodiless response.
 ///
-/// Removal never waits for an install or update of the host: while one runs
-/// (it holds the host's provisioning lock), removal answers 409 at once and
-/// leaves the run alone. SPEC.md "Waiting between operations on one host"
+/// Removal never waits for an install, update or uninstall of the host: while
+/// one runs (it holds the host's provisioning lock), removal answers 409 at
+/// once and leaves the run alone. SPEC.md "Waiting between operations on one host"
 /// requires removal to respond promptly whatever the host is doing, if only
 /// to refuse, and a run can sit in a throttled download or stalled upload for
 /// a long time. Otherwise removal takes the provisioning lock and then the
@@ -850,18 +850,20 @@ async fn remove_host_owned(state: Arc<AppState>, host: HostId) -> axum::response
     let Some(provisioning) = state.manager.try_host_provision_lock(host) else {
         return (
             axum::http::StatusCode::CONFLICT,
-            format!("host {host} is busy with a setup or update; remove it after that finishes"),
+            format!(
+                "host {host} is busy with a setup, update or uninstall; remove it after that finishes"
+            ),
         )
             .into_response();
     };
-    let serialized = state.manager.host_write_lock(host).await;
-    if let Err(e) = state.store.remove_ssh_host(host).await {
-        return http_error(e);
-    }
-    state.provisioning.forget_host(host).await;
-    let stopped = state.manager.stop_actor(host).await;
-    state.manager.forget_cache_lock(host);
-    drop(serialized);
+    let stopped = match state
+        .provisioning
+        .delete_registered_host(host, crate::provisioning::RunTask::Abort)
+        .await
+    {
+        Ok(stopped) => stopped,
+        Err(e) => return http_error(e),
+    };
     drop(provisioning);
     tracing::info!(
         host,

@@ -641,9 +641,9 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
         // Provisioning is separate from registry management: probe is
         // discovery-first. It changes nothing when no supervisor answers, and
-        // registers the host (on a helm-owned task) when one does; provision
-        // and update return run identities whose state is re-read after feed
-        // bumps. Their in-flight exclusion lives in AppState, not in one
+        // registers the host (on a helm-owned task) when one does; provision,
+        // update and uninstall return run identities whose state is re-read
+        // after feed bumps. Their in-flight exclusion lives in AppState, not in one
         // browser's operation lock.
         .route(
             "/api/hosts/probe",
@@ -657,6 +657,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/update",
             axum::routing::post(provisioning::update_host),
+        )
+        .route(
+            "/api/hosts/{id}/uninstall",
+            axum::routing::post(provisioning::uninstall_host),
         )
         .route(
             "/api/hosts/{id}/provisioning",

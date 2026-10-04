@@ -620,6 +620,17 @@ impl HostKind {
         }
     }
 
+    /// Whether the host panel's uninstall may remove Farhelm from this row's
+    /// host over its transport. The local row is refused: Farhelm on the
+    /// helm's own machine is removed with `farhelm uninstall`, which knows
+    /// that machine's layout and its own safeguards.
+    pub fn panel_uninstalls(self) -> bool {
+        match self {
+            HostKind::Local => false,
+            HostKind::Ssh => true,
+        }
+    }
+
     /// Whether a transport failure reaching this row's supervisor can mean
     /// "no supervisor is running on this machine", the case the UI turns
     /// into the local setup hand-off.

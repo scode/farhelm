@@ -8,13 +8,45 @@ use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// Whether a plan is converging an absent install or explicitly updating an
-/// existing one. ADD never turns into UPDATE implicitly.
+/// Whether a plan is converging an absent install, explicitly updating an
+/// existing one, or removing what provisioning installed. ADD never turns into
+/// UPDATE implicitly, and neither ever turns into UNINSTALL.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ProvisioningOperation {
     Add,
     Update,
+    /// Remove the supervisor's service, its unit file and Farhelm's private
+    /// lib directory from a remote host, keep the host's state directory, and
+    /// forget the host. Only ever planned for a remote row; the helm's own
+    /// machine is uninstalled with `farhelm uninstall`.
+    Uninstall,
+}
+
+impl ProvisioningOperation {
+    /// What the panel says instead of acting on a host whose supervisor unit
+    /// carries `farhelm helm setup`'s managed-by marker.
+    ///
+    /// One refusal per operation rather than one string for all of them:
+    /// setup owns that unit on the host (SPEC.md "Ownership during cleanup
+    /// and provisioning"), so the remedy depends on what the user was trying
+    /// to do. Installing or updating there is the host's own installer and
+    /// setup; removing is the host's own `farhelm uninstall`, which knows how
+    /// to take down a setup-owned service.
+    pub(super) fn setup_managed_refusal(self) -> String {
+        let unit = crate::units::SUPERVISOR_UNIT_NAME;
+        match self {
+            Self::Add | Self::Update => format!(
+                "{unit} on this host is managed by farhelm helm setup there, so the hosts panel does \
+                 not replace it. Update Farhelm on that host with its installer and farhelm helm \
+                 setup, or move the unit aside to let the panel provision the host."
+            ),
+            Self::Uninstall => format!(
+                "{unit} on this host is managed by farhelm helm setup there, so the hosts panel does \
+                 not remove it. Remove Farhelm on that host by running farhelm uninstall there."
+            ),
+        }
+    }
 }
 
 /// Transport facts retained in the plan so execution cannot silently switch
@@ -127,6 +159,39 @@ pub(crate) enum ProvisioningAction {
         unit: String,
     },
     AttachSupervisor,
+    /// UNINSTALL's first host change: stop the user manager from starting
+    /// the supervisor at boot or login, while leaving it running. Keeping it
+    /// running until the unit file is gone is what lets a failed run be
+    /// retried under the ordinary connected checks (see
+    /// `PlanLayout::plan_uninstall`).
+    DisableSupervisor {
+        unit: String,
+    },
+    /// Delete the supervisor's unit file. The remote command re-checks
+    /// setup's managed-by marker in the same shell that removes the file, as
+    /// the unit write does, because the plan was confirmed some time after
+    /// the host was inspected.
+    RemoveUnit {
+        unit: String,
+        destination: PathBuf,
+    },
+    /// Stop the supervisor. Its unit's `KillMode=process` means only the
+    /// supervisor process goes; nothing else was running there, because
+    /// uninstall refuses while any session or terminal tab is alive.
+    StopSupervisor {
+        unit: String,
+    },
+    /// Delete Farhelm's private lib directory: the `farhelm` binary and any
+    /// private tmux provisioning put beside it. Planning refuses a layout in
+    /// which the state directory lies inside it, so this never removes data.
+    RemoveDirectory {
+        path: PathBuf,
+    },
+    /// Delete the host's registry row, its cached sessions and the helm's
+    /// connection to it. Helm-side, like `AttachSupervisor`, and last, so a
+    /// failed run leaves the row in place to show what is left and to be
+    /// retried.
+    ForgetHost,
 }
 
 impl ProvisioningAction {
@@ -155,6 +220,11 @@ impl ProvisioningAction {
             Self::EnableLinger { .. } => "enable-linger",
             Self::RestartSupervisor { .. } => "restart-supervisor",
             Self::AttachSupervisor => "attach-supervisor",
+            Self::DisableSupervisor { .. } => "disable-supervisor",
+            Self::RemoveUnit { .. } => "remove-unit",
+            Self::StopSupervisor { .. } => "stop-supervisor",
+            Self::RemoveDirectory { .. } => "remove-directory",
+            Self::ForgetHost => "forget-host",
         }
     }
 
@@ -199,6 +269,18 @@ impl ProvisioningAction {
                     .to_string(),
             ),
             Self::RestartSupervisor { unit } => Some(format!("restart {unit}")),
+            Self::DisableSupervisor { unit } => {
+                Some(format!("disable user service {unit} so it no longer starts"))
+            }
+            Self::RemoveUnit { destination, .. } => {
+                Some(format!("remove its unit file {}", destination.display()))
+            }
+            Self::StopSupervisor { unit } => Some(format!("stop {unit}")),
+            Self::RemoveDirectory { path } => Some(format!(
+                "remove {} with the Farhelm binary and any private tmux in it",
+                path.display()
+            )),
+            Self::ForgetHost => Some("remove this host from the host list".to_string()),
         }
     }
 }
@@ -227,9 +309,18 @@ impl ProvisioningPlan {
     /// The heading names the destination, distribution, and architecture so
     /// distro-agnostic provisioning still gives the user a chance to notice
     /// an unexpected host before authorizing its durable changes.
+    ///
+    /// UNINSTALL's heading says so instead of "set up", and its text ends
+    /// with what it keeps: the host's state directory is not an action, but
+    /// the user is deciding whether to remove Farhelm and needs to know
+    /// where the data stays and that deleting it is theirs to do.
     pub(super) fn confirmation(&self) -> String {
         let mut rendered = format!(
-            "Farhelm will set up {} ({}, {}):\n",
+            "Farhelm will {} {} ({}, {}):\n",
+            match self.operation {
+                ProvisioningOperation::Add | ProvisioningOperation::Update => "set up",
+                ProvisioningOperation::Uninstall => "uninstall from",
+            },
             match &self.target {
                 ProvisioningTarget::Local => "the local host".to_string(),
                 ProvisioningTarget::Ssh { destination } => destination.clone(),
@@ -250,8 +341,49 @@ impl ProvisioningPlan {
                 }
             }
         }
+        if self.operation == ProvisioningOperation::Uninstall {
+            rendered.push_str(&format!(
+                "Kept: the host's Farhelm data in {}. Deleting that directory by hand removes the \
+                 data too.\n",
+                self.state_dir.display()
+            ));
+        }
         rendered
     }
+}
+
+/// The concrete paths an UNINSTALL acts on, from [`PlanLayout::uninstall_paths`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UninstallPaths {
+    pub(super) lib_dir: PathBuf,
+    pub(super) unit_path: PathBuf,
+    /// The layout's own state directory, when it overrides the host's.
+    /// Otherwise a row with no recorded state directory uses whatever the
+    /// supervisor's default resolves to on the host, which only the host
+    /// can say (`XDG_STATE_HOME` included); see `UninstallInspection`.
+    pub(super) state_dir_override: Option<PathBuf>,
+}
+
+/// What the host showed about the installation an UNINSTALL would remove,
+/// resolved by the service from its inspection of the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct UninstallFacts {
+    /// Whether the supervisor's unit file is still there.
+    pub(super) unit_file: bool,
+    /// The lib directory's canonical path when it still exists; `None`
+    /// when it is already gone.
+    pub(super) lib_dir: Option<PathBuf>,
+    /// The binary the supervisor was dialed through, when one answered.
+    pub(super) farhelm: Option<ResolvedPath>,
+    /// The state directory the host uses, which uninstall keeps.
+    pub(super) state_dir: ResolvedPath,
+}
+
+/// A path as named to the user, beside where it really leads on the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedPath {
+    pub(super) named: PathBuf,
+    pub(super) canonical: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -455,6 +587,130 @@ impl PlanLayout {
             target,
             farhelm_path,
             state_dir,
+            actions,
+            host_distro_id: reach.distro_id.clone(),
+            host_arch: reach.arch,
+        })
+    }
+
+    /// The paths an UNINSTALL would act on for a host with this reach,
+    /// frozen from the same layout and overrides an install uses.
+    ///
+    /// Never re-derived at run time from the host's home: the real-transport
+    /// test runs uninstall against the machine executing it with fixture
+    /// overrides, and a re-derived path would name the real
+    /// `~/.local/lib/farhelm` and `farhelm-supervisor.service`, which may be
+    /// the maintainer's own install.
+    pub(super) fn uninstall_paths(&self, reach: &Reach) -> UninstallPaths {
+        UninstallPaths {
+            lib_dir: self
+                .override_lib_dir
+                .clone()
+                .unwrap_or_else(|| reach.home.join(".local/lib/farhelm")),
+            unit_path: self
+                .override_unit_dir
+                .clone()
+                .unwrap_or_else(|| reach.user_unit_dir.clone())
+                .join(&self.unit_name),
+            state_dir_override: self.override_state_dir.clone(),
+        }
+    }
+
+    /// Freeze an UNINSTALL plan for a remote host, or refuse one that would
+    /// remove something provisioning does not own.
+    ///
+    /// Only the removals still outstanding are planned: the unit file's two
+    /// steps when it exists, the lib directory's when it exists. Stopping
+    /// the unit, reloading the user manager and forgetting the host are
+    /// always planned, because each tolerates having happened already. That
+    /// is what makes a failed run retryable from wherever it stopped.
+    ///
+    /// The order is disable, remove the unit file, stop, reload. Removing
+    /// the file before stopping keeps the supervisor answering until nothing
+    /// can start it again: until then the host stays connected and a retry
+    /// goes through the ordinary checks, and after it the service lets a
+    /// retry proceed without a connection. Stopping before reloading is what
+    /// keeps the unit's `KillMode=process`: systemd forgets a removed unit's
+    /// settings when the manager reloads, and stopping it then would end its
+    /// whole control group, the sessions' tmux server included. (Verified
+    /// against a real user manager while this was written: after removing
+    /// the file and reloading, `KillMode` reads `control-group` and a stop
+    /// empties the group.)
+    ///
+    /// Two refusals guard the `rm -rf` of the lib directory, both on the
+    /// host's canonical paths rather than their spelling. The binary the
+    /// host runs, when known, must be inside it, so the plan removes the
+    /// installation actually in use (SPEC.md "Supported host setup": other
+    /// setups get a clear refusal). And the host's state directory must not
+    /// be inside it, so data is never removed with it.
+    pub(super) fn plan_uninstall(
+        &self,
+        target: ProvisioningTarget,
+        reach: &Reach,
+        paths: &UninstallPaths,
+        facts: &UninstallFacts,
+    ) -> anyhow::Result<ProvisioningPlan> {
+        let refused =
+            |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
+        if !paths.lib_dir.is_absolute() || paths.lib_dir.parent().is_none() {
+            return Err(refused(format!(
+                "Farhelm's lib directory {} is not a directory uninstall can remove",
+                paths.lib_dir.display()
+            )));
+        }
+        if let Some(binary) = &facts.farhelm {
+            let inside = facts
+                .lib_dir
+                .as_ref()
+                .is_some_and(|lib| binary.canonical.starts_with(lib));
+            if !inside {
+                return Err(refused(format!(
+                    "the supervisor on this host runs {}, outside Farhelm's own directory {}; \
+                     uninstall only removes a supervisor set up from the hosts panel",
+                    binary.named.display(),
+                    paths.lib_dir.display()
+                )));
+            }
+        }
+        if let Some(lib) = &facts.lib_dir
+            && facts.state_dir.canonical.starts_with(lib)
+        {
+            return Err(refused(format!(
+                "the host's Farhelm data directory {} is inside {}, which uninstall would remove; \
+                 uninstall keeps the data, so it does not run on this layout",
+                facts.state_dir.named.display(),
+                paths.lib_dir.display()
+            )));
+        }
+        let mut actions = Vec::new();
+        if facts.unit_file {
+            actions.push(ProvisioningAction::DisableSupervisor {
+                unit: self.unit_name.clone(),
+            });
+            actions.push(ProvisioningAction::RemoveUnit {
+                unit: self.unit_name.clone(),
+                destination: paths.unit_path.clone(),
+            });
+        }
+        actions.push(ProvisioningAction::StopSupervisor {
+            unit: self.unit_name.clone(),
+        });
+        actions.push(ProvisioningAction::DaemonReload);
+        if facts.lib_dir.is_some() {
+            actions.push(ProvisioningAction::RemoveDirectory {
+                path: paths.lib_dir.clone(),
+            });
+        }
+        actions.push(ProvisioningAction::ForgetHost);
+        Ok(ProvisioningPlan {
+            operation: ProvisioningOperation::Uninstall,
+            target,
+            farhelm_path: facts
+                .farhelm
+                .as_ref()
+                .map(|binary| binary.named.clone())
+                .unwrap_or_else(|| paths.lib_dir.join("farhelm")),
+            state_dir: facts.state_dir.named.clone(),
             actions,
             host_distro_id: reach.distro_id.clone(),
             host_arch: reach.arch,

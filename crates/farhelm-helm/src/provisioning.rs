@@ -25,9 +25,11 @@ mod release_payloads;
 mod service;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
-pub(crate) use http::{probe_host, provision_host, provisioning_state, update_host};
+pub(crate) use http::{
+    probe_host, provision_host, provisioning_state, uninstall_host, update_host,
+};
 pub(crate) use payloads::PayloadSelection;
-pub(crate) use service::ProvisioningService;
+pub(crate) use service::{ProvisioningService, RunTask};
 
 #[cfg(test)]
 mod tests {
@@ -58,7 +60,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use farhelm_proto::ControlMsg;
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::path::{Component, Path, PathBuf};
     use std::process::Stdio;
     use std::sync::Arc;
@@ -327,6 +329,33 @@ mod tests {
         /// at a specific point in the run (the new supervisor coming up at
         /// `restart-supervisor`, say) rather than before the run starts.
         on_operation: Mutex<Option<OperationHook>>,
+        /// The paths an UNINSTALL inspection finds on the host; `None`
+        /// means every path asked about exists, which is a fully installed
+        /// host and what most uninstall tests start from.
+        present: Mutex<Option<Vec<PathBuf>>>,
+        /// An answering supervisor every probe reports once the one-shot
+        /// `probe` slot is spent: UNINSTALL probes at planning and again at
+        /// confirmation, and both must see the same supervisor.
+        repeat_probe: Mutex<Option<RepeatProbe>>,
+        /// Canonical paths an UNINSTALL inspection reports for named paths
+        /// (a symlink's target); any path not listed resolves to itself.
+        canonical: Mutex<HashMap<PathBuf, PathBuf>>,
+        /// The supervisor's default state directory the inspection reports.
+        default_state_dir: Mutex<PathBuf>,
+        /// The unit's `ActiveState` and loaded `KillMode`, as an inspection
+        /// reports them; a running provisioned unit by default.
+        unit_state: Mutex<(String, String)>,
+        /// Where an inspection says systemd loaded the unit from, when not
+        /// from the planned unit path (the first path asked about).
+        unit_fragment: Mutex<Option<PathBuf>>,
+    }
+
+    /// The supervisor `FakeBackend::repeat_probe` reports on every probe.
+    #[derive(Clone)]
+    struct RepeatProbe {
+        identity: Option<String>,
+        dial_farhelm: PathBuf,
+        dial_state_dir: Option<PathBuf>,
     }
 
     /// An operation name and what to run when [`FakeBackend`] records it; see
@@ -358,6 +387,12 @@ mod tests {
                 block_first: std::sync::atomic::AtomicBool::new(false),
                 stateful: std::sync::atomic::AtomicBool::new(false),
                 on_operation: Mutex::new(None),
+                present: Mutex::new(None),
+                repeat_probe: Mutex::new(None),
+                canonical: Mutex::new(HashMap::new()),
+                default_state_dir: Mutex::new(PathBuf::from("/home/test/.local/state/farhelm")),
+                unit_state: Mutex::new(("active".to_string(), "process".to_string())),
+                unit_fragment: Mutex::new(None),
             })
         }
 
@@ -429,11 +464,18 @@ mod tests {
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
         async fn probe(&self, _target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
-            self.probe
-                .lock()
-                .unwrap()
-                .take()
-                .unwrap_or(Ok(ProbeObservation::Absent))
+            if let Some(once) = self.probe.lock().unwrap().take() {
+                return once;
+            }
+            Ok(match self.repeat_probe.lock().unwrap().clone() {
+                Some(repeat) => ProbeObservation::Supervisor {
+                    build_version: "test-build".to_string(),
+                    host_identity: repeat.identity,
+                    dial_farhelm: repeat.dial_farhelm,
+                    dial_state_dir: repeat.dial_state_dir,
+                },
+                None => ProbeObservation::Absent,
+            })
         }
 
         async fn inspect(&self, _target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure> {
@@ -580,6 +622,78 @@ mod tests {
             _unit: &str,
         ) -> Result<ActionOutcome, BackendFailure> {
             self.record("restart-supervisor")
+        }
+
+        async fn inspect_uninstall(
+            &self,
+            _target: &ProvisioningTarget,
+            _unit: &str,
+            paths: &[&Path],
+        ) -> Result<UninstallInspection, BackendFailure> {
+            self.operations
+                .lock()
+                .unwrap()
+                .push("inspect-uninstall".to_string());
+            let present = self.present.lock().unwrap().clone();
+            let host_path = |path: &Path| HostPath {
+                path: path.to_path_buf(),
+                exists: present
+                    .as_ref()
+                    .is_none_or(|present| present.iter().any(|kept| kept == path)),
+                canonical: Some(
+                    self.canonical
+                        .lock()
+                        .unwrap()
+                        .get(path)
+                        .cloned()
+                        .unwrap_or_else(|| path.to_path_buf()),
+                ),
+            };
+            let (unit_active_state, unit_kill_mode) = self.unit_state.lock().unwrap().clone();
+            let fragment = self.unit_fragment.lock().unwrap().clone();
+            Ok(UninstallInspection {
+                paths: paths.iter().map(|path| host_path(path)).collect(),
+                default_state_dir: host_path(&self.default_state_dir.lock().unwrap().clone()),
+                unit_active_state,
+                unit_kill_mode,
+                // By default the unit loaded from the planned path.
+                unit_fragment: match fragment {
+                    Some(path) => Some(host_path(&path)),
+                    None => paths.first().map(|path| host_path(path)),
+                },
+            })
+        }
+
+        async fn disable(
+            &self,
+            _target: &ProvisioningTarget,
+            _unit: &str,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record("disable-supervisor")
+        }
+
+        async fn remove_unit(
+            &self,
+            _target: &ProvisioningTarget,
+            _destination: &Path,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record("remove-unit")
+        }
+
+        async fn stop(
+            &self,
+            _target: &ProvisioningTarget,
+            _unit: &str,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record("stop-supervisor")
+        }
+
+        async fn remove_directory(
+            &self,
+            _target: &ProvisioningTarget,
+            _path: &Path,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record("remove-directory")
         }
 
         async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
@@ -3238,6 +3352,774 @@ mod tests {
         );
     }
 
+    // ---- UNINSTALL -----------------------------------------------------
+    //
+    // The hosts panel's uninstall removes Farhelm from a remote host through
+    // the same plan/confirm/run machinery as ADD and UPDATE. These tests pin
+    // what the user is promised: nothing changes on the host until the plan
+    // is confirmed, nothing runs while a session or tab is alive, the data
+    // directory stays, the host leaves the list only after a successful run,
+    // and a failed run can be continued.
+
+    /// The identity every UNINSTALL fixture's supervisor reports, matching
+    /// the scripted host's hello so the probe agrees with the connection.
+    const UNINSTALL_IDENTITY: &str = "test-identity";
+
+    /// A connected remote host serving `sessions`, with a fake backend whose
+    /// probe keeps finding the supervisor installed in the fixture layout's
+    /// lib directory, and a service planning with that layout.
+    ///
+    /// The layout's paths are all under the returned temporary root, so
+    /// nothing here can name a real install; the fake backend touches no
+    /// files anyway.
+    async fn uninstall_fixture(
+        sessions: Vec<farhelm_proto::SessionInfo>,
+        truncated: bool,
+    ) -> (
+        Harness,
+        HostId,
+        tempfile::TempDir,
+        Arc<FakeBackend>,
+        Arc<ProvisioningService>,
+    ) {
+        let count = sessions.len();
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "uninstall.example",
+                HostScript {
+                    identity: Some(UNINSTALL_IDENTITY.to_string()),
+                    sessions,
+                    truncated,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_refreshed_as(host, UNINSTALL_IDENTITY, count)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.probe.lock().unwrap() = None;
+        *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
+            identity: Some(UNINSTALL_IDENTITY.to_string()),
+            dial_farhelm: root.path().join("lib/farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        });
+        let service = service(&harness, backend.clone(), root.path());
+        (harness, host, root, backend, service)
+    }
+
+    /// A session in `status` with `tabs` open, for the running-session
+    /// refusals.
+    fn uninstall_session(
+        title: &str,
+        status: farhelm_proto::SessionStatus,
+        tabs: usize,
+    ) -> farhelm_proto::SessionInfo {
+        let mut session = crate::rest_harness::session(title, 1);
+        session.status = status;
+        session.tabs = (0..tabs)
+            .map(|index| farhelm_proto::TabInfo {
+                id: format!("{title}-tab-{index}"),
+            })
+            .collect();
+        session
+    }
+
+    /// The plan's step labels, in order.
+    fn step_labels(plan: &ProvisioningPlan) -> Vec<&'static str> {
+        plan.actions.iter().map(ProvisioningAction::label).collect()
+    }
+
+    /// Wait until `host` is fully forgotten, which is how a successful
+    /// UNINSTALL ends: its progress view goes with the row, so
+    /// [`wait_finished`] has nothing to read.
+    ///
+    /// The oracle is the LAST effect of the run's removal sequence, the
+    /// connection actor gone, not the row: the row is deleted first, and a
+    /// test that asserted the purge right after seeing it gone could catch
+    /// the run between the two.
+    async fn wait_forgotten(harness: &Harness, host: HostId) {
+        let forgotten = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let row_gone = harness
+                    .store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .all(|row| row.id != host);
+                if row_gone && harness.manager.status(host).is_none() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(
+            forgotten.is_ok(),
+            "the uninstalled host was not forgotten: row present = {}, actor present = {}",
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host),
+            harness.manager.status(host).is_some()
+        );
+    }
+
+    /// The text of a planning refusal, asserting it is the 409 kind rather
+    /// than a transport failure or an internal error.
+    fn refusal_text(error: anyhow::Error) -> String {
+        match error.downcast_ref::<ProvisioningRequestError>() {
+            Some(ProvisioningRequestError::Refused(text)) => text.clone(),
+            _ => panic!("expected a provisioning refusal, got {error:#}"),
+        }
+    }
+
+    /// Why this matters: the user decides whether to remove Farhelm from a
+    /// host by reading this plan, so it has to name exactly what goes and
+    /// what stays, and producing it must not change anything.
+    ///
+    /// Spec: a connected host with no running sessions plans, in order,
+    /// disabling the unit, removing its unit file, stopping the unit while
+    /// its loaded kill policy still keeps the sessions' tmux server out of
+    /// the stop, reloading the user manager, removing the lib directory,
+    /// and forgetting the host. The confirmation names the unit, the unit file
+    /// and the lib directory by their concrete paths, says it is an
+    /// uninstall from that destination, and ends by naming the kept state
+    /// directory. Planning only inspects: the registry row is unchanged and
+    /// the backend saw no host action.
+    #[farhelm_testtrace::test]
+    async fn uninstall_plans_the_removals_and_names_the_kept_data() {
+        let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+        let before = harness.store.list_hosts().await.unwrap();
+
+        let preview = service.plan_uninstall(host).await.unwrap();
+
+        assert_eq!(preview.plan.operation, ProvisioningOperation::Uninstall);
+        assert_eq!(
+            step_labels(&preview.plan),
+            [
+                "disable-supervisor",
+                "remove-unit",
+                "stop-supervisor",
+                "daemon-reload",
+                "remove-directory",
+                "forget-host",
+            ]
+        );
+        let lib = root.path().join("lib");
+        let state = root.path().join("state");
+        let confirmation = &preview.confirmation;
+        assert!(
+            confirmation.starts_with("Farhelm will uninstall from uninstall.example"),
+            "{confirmation}"
+        );
+        assert!(
+            confirmation.contains(&lib.display().to_string()),
+            "{confirmation}"
+        );
+        assert!(
+            confirmation.contains(&root.path().join("units").display().to_string()),
+            "{confirmation}"
+        );
+        assert!(
+            confirmation.contains(&format!(
+                "Kept: the host's Farhelm data in {}",
+                state.display()
+            )),
+            "{confirmation}"
+        );
+        assert_eq!(preview.plan.state_dir, state);
+        assert_eq!(harness.store.list_hosts().await.unwrap(), before);
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+    }
+
+    /// Why this matters: the host may only leave the list once Farhelm is
+    /// really gone from it, and a run that removed it must not leave the
+    /// helm holding progress, plans or a connection for a host it forgot.
+    ///
+    /// Spec: confirming runs the planned host actions in plan order after a
+    /// second inspection, then deletes the registry row, stops the host's
+    /// connection actor, and purges its progress, busy marker and pending
+    /// plans, including a second plan made for the same host.
+    #[farhelm_testtrace::test]
+    async fn a_confirmed_uninstall_runs_in_order_and_forgets_the_host() {
+        let (harness, host, _root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+        let first = service.plan_uninstall(host).await.unwrap();
+        let second = service.plan_uninstall(host).await.unwrap();
+        backend.operations.lock().unwrap().clear();
+
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: first.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        wait_forgotten(&harness, host).await;
+
+        assert_eq!(
+            *backend.operations.lock().unwrap(),
+            [
+                "inspect-uninstall",
+                "disable-supervisor",
+                "remove-unit",
+                "stop-supervisor",
+                "daemon-reload",
+                "remove-directory",
+            ]
+        );
+        assert!(harness.manager.status(host).is_none());
+        let memory = service.memory.lock().await;
+        assert!(!memory.runs.contains_key(&host));
+        assert!(!memory.busy.contains(&host));
+        assert!(!memory.plans.contains_key(&second.probe_id));
+    }
+
+    /// Why this matters: uninstalling never kills anything; the user stops
+    /// their sessions first, and needs to be told which ones.
+    ///
+    /// Spec: planning refuses with a 409 naming, by title, every session
+    /// that has not ended (an unknown status counts) and every session with
+    /// a live terminal tab, even if its agent ended; an ended session with
+    /// no tabs is not named. The refusal comes before any host inspection.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_running_sessions_and_live_tabs_by_name() {
+        use farhelm_proto::SessionStatus;
+        let (_harness, host, _root, backend, service) = uninstall_fixture(
+            vec![
+                uninstall_session("alpha", SessionStatus::Running, 0),
+                uninstall_session("beta", SessionStatus::Unknown, 0),
+                uninstall_session("gamma", SessionStatus::Exited { exit_code: Some(0) }, 1),
+                uninstall_session("delta", SessionStatus::Exited { exit_code: Some(0) }, 0),
+            ],
+            false,
+        )
+        .await;
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+
+        for running in ["\"alpha\"", "\"beta\"", "\"gamma\""] {
+            assert!(refusal.contains(running), "{refusal}");
+        }
+        assert!(!refusal.contains("delta"), "{refusal}");
+        assert!(
+            refusal.contains("Stop those sessions and close their tabs"),
+            "{refusal}"
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Why this matters: a list the supervisor cut at its cap leaves
+    /// sessions unchecked, and "none of the ones I saw are running" is not
+    /// the promise uninstall makes.
+    ///
+    /// Spec: a truncated session list refuses planning even when every
+    /// listed session has ended.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_a_truncated_session_list() {
+        let (_harness, host, _root, _backend, service) = uninstall_fixture(
+            vec![uninstall_session(
+                "ended",
+                farhelm_proto::SessionStatus::Exited { exit_code: None },
+                0,
+            )],
+            true,
+        )
+        .await;
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+
+        assert!(
+            refusal.contains("cannot check that none are running"),
+            "{refusal}"
+        );
+    }
+
+    /// Why this matters: only a connected host can show that nothing is
+    /// running on it, but a run that failed after removing the unit file
+    /// has stopped the supervisor's way back, and refusing to finish then
+    /// would strand a half-removed host.
+    ///
+    /// Spec: an unconnected host whose unit file is still there is refused
+    /// with "get it connected first". Once the unit file is gone, and the
+    /// probe shows no supervisor answering, the same host plans only what is
+    /// left: stop, reload, remove the lib directory if it is still there,
+    /// and forget the host; confirming that plan runs it to the end.
+    #[farhelm_testtrace::test]
+    async fn an_unconnected_host_is_refused_unless_its_unit_file_is_gone() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "down.example",
+                HostScript {
+                    reachable: false,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_state(host, |state| !state.is_connected())
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(refusal.contains("Get it connected first"), "{refusal}");
+
+        *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
+        let retry = service.plan_uninstall(host).await.unwrap();
+        assert_eq!(
+            step_labels(&retry.plan),
+            [
+                "stop-supervisor",
+                "daemon-reload",
+                "remove-directory",
+                "forget-host"
+            ]
+        );
+        // Confirming replans while still disconnected, requires the same
+        // plan, and finishes the job.
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: retry.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        wait_forgotten(&harness, host).await;
+        assert!(backend.operations.lock().unwrap().ends_with(&[
+            "stop-supervisor".to_string(),
+            "daemon-reload".to_string(),
+            "remove-directory".to_string()
+        ]));
+    }
+
+    /// Why this matters: each of these is a host whose removal Farhelm does
+    /// not own or could not do safely, and the user needs a clear reason
+    /// rather than a partial removal.
+    ///
+    /// Spec: planning refuses, with a 409 and before any host action,
+    /// the helm's own machine (pointing at `farhelm uninstall`), a host
+    /// whose unit `farhelm helm setup` manages (pointing at `farhelm
+    /// uninstall` on that host), a supervisor running from outside
+    /// Farhelm's lib directory, a state directory that really lies inside
+    /// the lib directory that would be removed (through a symlink, so
+    /// spelling alone would not show it), a connected supervisor that its
+    /// unit is not running (one started by hand), and a running unit that
+    /// has lost its process-only kill policy.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_hosts_whose_removal_farhelm_does_not_own() {
+        let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+
+        let local = refusal_text(
+            service
+                .plan_uninstall(local_row(&harness).await)
+                .await
+                .unwrap_err(),
+        );
+        assert!(local.contains("farhelm uninstall"), "{local}");
+
+        *backend.reach.lock().unwrap() = ReachOutcome::SetupManaged;
+        let setup = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(setup.contains("managed by farhelm helm setup"), "{setup}");
+        assert!(setup.contains("farhelm uninstall"), "{setup}");
+
+        *backend.reach.lock().unwrap() = FakeBackend::absent(root.path().to_path_buf())
+            .reach
+            .lock()
+            .unwrap()
+            .clone();
+        let elsewhere = root.path().join("bin/farhelm");
+        backend
+            .repeat_probe
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .dial_farhelm = elsewhere.clone();
+        let outside = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            outside.contains(&elsewhere.display().to_string()),
+            "{outside}"
+        );
+        assert!(
+            outside.contains("outside Farhelm's own directory"),
+            "{outside}"
+        );
+
+        if let Some(repeat) = backend.repeat_probe.lock().unwrap().as_mut() {
+            repeat.dial_farhelm = root.path().join("lib/farhelm");
+        }
+        backend
+            .canonical
+            .lock()
+            .unwrap()
+            .insert(root.path().join("state"), root.path().join("lib/data"));
+        let data_inside = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(data_inside.contains("keeps the data"), "{data_inside}");
+        backend.canonical.lock().unwrap().clear();
+
+        *backend.unit_state.lock().unwrap() = ("inactive".to_string(), "process".to_string());
+        let hand_started = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(hand_started.contains("not running under"), "{hand_started}");
+
+        *backend.unit_state.lock().unwrap() = ("active".to_string(), "control-group".to_string());
+        let kill_mode = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(kill_mode.contains("KillMode=control-group"), "{kill_mode}");
+
+        assert_eq!(
+            backend
+                .operations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|operation| *operation != "inspect-uninstall")
+                .count(),
+            0,
+            "a refused uninstall acted on the host"
+        );
+    }
+
+    /// Why this matters: a host whose supervisor answers but cannot be used
+    /// has something running that uninstall cannot check, and an identity
+    /// problem means the destination may now reach a different machine;
+    /// removing files there because its unit file happens to be gone would
+    /// act on a host the user never inspected.
+    ///
+    /// Spec: a host frozen in identity mismatch is refused even when its
+    /// unit file is absent, the case that otherwise lets an unconnected
+    /// host continue, and nothing on the host is acted on.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_a_host_with_an_identity_problem() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "moved.example",
+                HostScript {
+                    identity: Some("identity-old".to_string()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed_as(host, "identity-old", 0).await;
+        let harness = harness
+            .restart_with(|fleet| {
+                fleet.edit(host, |script| {
+                    script.identity = Some("identity-new".to_string());
+                });
+            })
+            .await;
+        harness
+            .await_state(host, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
+        let service = service(&harness, backend.clone(), root.path());
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+
+        assert!(refusal.contains("identity-mismatch"), "{refusal}");
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Why this matters: the probe dials the destination afresh, and a
+    /// machine that answers without the identity on record may not be the
+    /// one whose sessions were just checked; uninstall removes files, so an
+    /// unverified peer is not good enough. Likewise a unit systemd loads from
+    /// somewhere other than the planned path is not the one uninstall would
+    /// remove, and could start the supervisor again afterwards.
+    ///
+    /// Spec: with a recorded identity, a probe reporting no identity is
+    /// refused; a unit whose loaded fragment is not the planned unit file is
+    /// refused; neither acts on the host.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_an_unverified_peer_and_a_foreign_unit() {
+        let (_harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+
+        if let Some(repeat) = backend.repeat_probe.lock().unwrap().as_mut() {
+            repeat.identity = None;
+        }
+        let unverified = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(unverified.contains("no identity"), "{unverified}");
+        if let Some(repeat) = backend.repeat_probe.lock().unwrap().as_mut() {
+            repeat.identity = Some(UNINSTALL_IDENTITY.to_string());
+        }
+
+        *backend.unit_fragment.lock().unwrap() =
+            Some(root.path().join("etc/farhelm-supervisor.service"));
+        let foreign = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(foreign.contains("is loaded from"), "{foreign}");
+
+        assert!(
+            backend
+                .operations
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|operation| operation == "inspect-uninstall"),
+            "a refused uninstall acted on the host"
+        );
+    }
+
+    /// Why this matters: a run can remove the lib directory and still fail
+    /// to forget the host (the helm exits, the last step fails, the ssh exit
+    /// status is lost), and a user may have deleted the directory by hand as
+    /// the old docs told them to. Choosing uninstall again must finish the
+    /// job rather than refusing over a binary whose directory is gone.
+    ///
+    /// Spec: an unconnected host whose row records an absolute binary inside
+    /// the lib directory, with neither the unit file nor the lib directory
+    /// left, plans stop, reload and forget, and confirming that plan forgets
+    /// the host.
+    #[farhelm_testtrace::test]
+    async fn a_retry_after_the_lib_directory_is_gone_still_finishes() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let farhelm = root.path().join("lib/farhelm");
+        let state = root.path().join("state");
+        let host = harness
+            .store
+            .add_ssh_host("half-removed.example", farhelm.to_str(), state.to_str())
+            .await
+            .unwrap();
+        harness.fleet.edit(host, |script| script.reachable = false);
+        harness.manager.sync_registry().await.unwrap();
+        harness
+            .await_state(host, |state| !state.is_connected())
+            .await;
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.present.lock().unwrap() = Some(vec![state.clone()]);
+        let service = service(&harness, backend.clone(), root.path());
+
+        let retry = service.plan_uninstall(host).await.unwrap();
+        assert_eq!(
+            step_labels(&retry.plan),
+            ["stop-supervisor", "daemon-reload", "forget-host"]
+        );
+        assert_eq!(retry.plan.state_dir, state);
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: retry.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        wait_forgotten(&harness, host).await;
+    }
+
+    /// Why this matters: the session check at planning can go stale while
+    /// the confirmation sits on screen, and SPEC.md requires it to hold at
+    /// confirmation, before anything is removed.
+    ///
+    /// Spec: a session that starts between planning and confirmation fails
+    /// the run at its first step with the refusal naming it; no host action
+    /// runs, the host stays registered, and its busy marker is released so
+    /// the user can plan again.
+    #[farhelm_testtrace::test]
+    async fn a_session_started_after_planning_fails_the_run_before_any_change() {
+        let (harness, host, _root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+        let preview = service.plan_uninstall(host).await.unwrap();
+        harness.fleet.edit(host, |script| {
+            script.sessions = vec![uninstall_session(
+                "late",
+                farhelm_proto::SessionStatus::Running,
+                0,
+            )];
+        });
+        backend.operations.lock().unwrap().clear();
+
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let view = wait_finished(&service, host).await;
+
+        assert_eq!(view.status, RunStatus::Failed, "{view:?}");
+        assert!(
+            view.message
+                .as_deref()
+                .is_some_and(|message| message.contains("\"late\"")),
+            "{view:?}"
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        );
+        assert!(!service.memory.lock().await.busy.contains(&host));
+    }
+
+    /// Why this matters: a run can fail partway (an ssh drop, a host
+    /// command refused), and the user must be able to see what is left and
+    /// finish the job by choosing uninstall again.
+    ///
+    /// Spec: a step failure leaves the host registered with the run marked
+    /// failed and every completed step recorded; planning again after the
+    /// unit file was removed plans only the remaining steps, and running
+    /// that plan forgets the host.
+    #[farhelm_testtrace::test]
+    async fn a_failed_uninstall_keeps_the_host_and_a_retry_finishes_it() {
+        let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+        *backend.fail.lock().unwrap() = Some("daemon-reload".to_string());
+        let preview = service.plan_uninstall(host).await.unwrap();
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let failed = wait_finished(&service, host).await;
+        assert_eq!(failed.status, RunStatus::Failed, "{failed:?}");
+        let statuses = failed
+            .steps
+            .iter()
+            .map(|step| (step.step.as_str(), step.status.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses[..4],
+            [
+                ("disable-supervisor", StepStatus::Completed),
+                ("remove-unit", StepStatus::Completed),
+                ("stop-supervisor", StepStatus::Completed),
+                ("daemon-reload", StepStatus::Failed),
+            ]
+        );
+        assert!(
+            failed
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("choose uninstall again")),
+            "{failed:?}"
+        );
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        );
+
+        *backend.fail.lock().unwrap() = None;
+        *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
+        let retry = service.plan_uninstall(host).await.unwrap();
+        assert_eq!(
+            step_labels(&retry.plan),
+            [
+                "stop-supervisor",
+                "daemon-reload",
+                "remove-directory",
+                "forget-host"
+            ]
+        );
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: retry.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        wait_forgotten(&harness, host).await;
+    }
+
+    /// Why this matters: the browser speaks to uninstall over HTTP, and its
+    /// two halves (show the plan, then confirm it) must keep the update
+    /// route's shape and status codes so the client can treat them alike.
+    ///
+    /// Spec: `POST /api/hosts/{id}/uninstall` without a body answers 200
+    /// with a probe id and the rendered confirmation; posting that id back
+    /// answers 202 with the run's identity; a spent id is a 409; the local
+    /// row is a 409.
+    #[farhelm_testtrace::test]
+    async fn uninstall_route_plans_confirms_and_refuses() {
+        let (mut harness, host, _root, _backend, service) =
+            uninstall_fixture(Vec::new(), false).await;
+        let state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+            crate::ServingMode::Standalone,
+        ));
+        harness.state = Arc::clone(&state);
+        let router = harness.router();
+        let request = |host: HostId, body: Option<serde_json::Value>| {
+            let builder = axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/hosts/{host}/uninstall"))
+                .header("host", "127.0.0.1:7433");
+            match body {
+                Some(body) => builder
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+                None => builder.body(Body::empty()).unwrap(),
+            }
+        };
+        let json = |bytes: axum::body::Bytes| -> serde_json::Value {
+            serde_json::from_slice(&bytes).unwrap()
+        };
+
+        let planned = router.clone().oneshot(request(host, None)).await.unwrap();
+        assert_eq!(planned.status(), StatusCode::OK);
+        let planned = json(to_bytes(planned.into_body(), usize::MAX).await.unwrap());
+        assert!(
+            planned["confirmation"]
+                .as_str()
+                .unwrap()
+                .starts_with("Farhelm will uninstall from")
+        );
+        assert_eq!(planned["plan"]["operation"], "uninstall");
+        let probe_id = planned["probe_id"].as_str().unwrap().to_string();
+
+        let confirm = || request(host, Some(serde_json::json!({ "probe_id": probe_id })));
+        let accepted = router.clone().oneshot(confirm()).await.unwrap();
+        assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+        let accepted = json(to_bytes(accepted.into_body(), usize::MAX).await.unwrap());
+        assert_eq!(accepted["host_id"], host);
+        let spent = router.clone().oneshot(confirm()).await.unwrap();
+        assert_eq!(spent.status(), StatusCode::CONFLICT);
+        wait_forgotten(&harness, host).await;
+
+        let local = local_row(&harness).await;
+        let refused = router.oneshot(request(local, None)).await.unwrap();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+    }
+
     /// Typed provisioning failures keep their router-level status mapping:
     /// invalid input 400, consumed plans and busy hosts 409, backend failures
     /// 502, and missing hosts 404.
@@ -3889,8 +4771,9 @@ mod tests {
     /// written by `farhelm helm setup` on that host, and replacing it strips
     /// setup's marker so setup and uninstall there refuse to manage it. The
     /// reach check reports that ownership, and the parser turns it into the
-    /// `Manual` outcome ADD and UPDATE both refuse on; any value other than
-    /// empty or `setup` is malformed output, not a silent "not setup's".
+    /// `SetupManaged` outcome every operation refuses on, each with its own
+    /// remedy; any value other than empty or `setup` is malformed output,
+    /// not a silent "not setup's".
     #[farhelm_testtrace::test]
     fn reach_output_refuses_a_setup_managed_supervisor_unit() {
         let with_owner = |owner: &str| {
@@ -3904,11 +4787,33 @@ mod tests {
         ));
         assert!(matches!(
             parse_reach_output(with_owner("setup").as_bytes()).unwrap(),
-            ReachOutcome::Manual(reason)
-                if reason.contains(crate::units::SUPERVISOR_UNIT_NAME)
-                    && reason.contains("farhelm helm setup")
+            ReachOutcome::SetupManaged
         ));
         assert!(parse_reach_output(with_owner("someone-else").as_bytes()).is_err());
+        // The refusal each operation turns that outcome into names the unit
+        // and its owner, and gives that operation's own remedy.
+        for operation in [
+            ProvisioningOperation::Add,
+            ProvisioningOperation::Update,
+            ProvisioningOperation::Uninstall,
+        ] {
+            let reason = operation.setup_managed_refusal();
+            assert!(
+                reason.contains(crate::units::SUPERVISOR_UNIT_NAME),
+                "{reason}"
+            );
+            assert!(reason.contains("farhelm helm setup"), "{reason}");
+        }
+        assert!(
+            ProvisioningOperation::Update
+                .setup_managed_refusal()
+                .contains("installer"),
+        );
+        assert!(
+            ProvisioningOperation::Uninstall
+                .setup_managed_refusal()
+                .contains("farhelm uninstall"),
+        );
     }
 
     /// Why this matters: GNU `install -d -m` chmods a directory that already
@@ -4033,7 +4938,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             backend.inspect(&target).await.unwrap(),
-            ReachOutcome::Manual(reason) if reason.contains("farhelm helm setup")
+            ReachOutcome::SetupManaged
         ));
         tokio::fs::remove_file(&unit).await.unwrap();
         // A directory at the unit's path exists but cannot be read as a file,
@@ -4146,7 +5051,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             backend.inspect(&target).await.unwrap(),
-            ReachOutcome::Manual(reason) if reason.contains("farhelm helm setup")
+            ReachOutcome::SetupManaged
         ));
 
         write_fake_tool(&bin, "busctl", "exit 1").await;
@@ -4176,6 +5081,229 @@ mod tests {
                 error.rendered()
             );
         }
+    }
+
+    /// Why this matters: UNINSTALL's host commands delete files and stop a
+    /// service on someone's machine, and a retry reruns them over whatever
+    /// an earlier run left. They must refuse setup's unit at the moment of
+    /// removal, treat work already done as done rather than as a failure,
+    /// and never run on the helm's own machine.
+    ///
+    /// Spec, for the real shell scripts run against fixture paths with a
+    /// fake `systemctl`: `inspect_uninstall` reports each path's existence
+    /// and canonical location in order (a symlink resolved to its target),
+    /// the default state directory under the host's HOME, and the unit's
+    /// run state and kill policy;
+    /// `remove_unit` refuses a unit whose first line is setup's marker
+    /// (with or without a trailing newline) and keeps it, removes an
+    /// unmarked one, and skips an absent one; `stop` refuses a running unit
+    /// whose loaded `KillMode` is not `process`, stops one whose is, and
+    /// skips one that is inactive without calling `stop`; `disable`
+    /// never reloads the user manager itself (`--no-reload`) and passes
+    /// `--runtime` exactly when the backend links units for this boot only; `remove_directory` removes a tree and then skips it; every
+    /// mutator refuses the local transport.
+    #[farhelm_testtrace::test]
+    async fn uninstall_host_commands_refuse_setup_units_and_skip_finished_work() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&bin).await.unwrap();
+        let log = root.path().join("systemctl.log");
+        let active = root.path().join("active-state");
+        let kill_mode = root.path().join("kill-mode");
+        tokio::fs::write(&kill_mode, "process\n").await.unwrap();
+        write_fake_tool(
+            &bin,
+            "systemctl",
+            &format!(
+                "printf '%s\\n' \"$*\" >> {log}\n\
+                 case \"$*\" in *'show -p ActiveState'*) cat {active} ;; \
+                 *'show -p KillMode'*) cat {kill_mode} ;; esac",
+                log = shell_words::quote(&log.display().to_string()),
+                active = shell_words::quote(&active.display().to_string()),
+                kill_mode = shell_words::quote(&kill_mode.display().to_string()),
+            ),
+        )
+        .await;
+        let backend = |runtime_units| SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher {
+                home: home.clone(),
+                bin: bin.clone(),
+            }),
+            runtime_units,
+            fail_before_rename: false,
+        };
+        let system = backend(false);
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        let unit = root.path().join("farhelm-supervisor.service");
+        let lib = root.path().join("lib");
+        tokio::fs::create_dir_all(&lib).await.unwrap();
+        tokio::fs::write(lib.join("farhelm"), b"binary")
+            .await
+            .unwrap();
+        tokio::fs::write(lib.join("tmux"), b"tmux").await.unwrap();
+
+        // The inspection reports existence and the host's canonical path
+        // for each asked path: a state directory reached through a symlink
+        // into the lib directory resolves to its real place inside it. It
+        // also reports the supervisor's default state directory as the
+        // host's environment resolves it, and the unit's run state.
+        tokio::fs::write(&unit, "[Unit]\n").await.unwrap();
+        tokio::fs::create_dir_all(lib.join("data")).await.unwrap();
+        let linked_state = root.path().join("state-link");
+        tokio::fs::symlink(lib.join("data"), &linked_state)
+            .await
+            .unwrap();
+        let missing = root.path().join("missing");
+        tokio::fs::write(&active, "active\n").await.unwrap();
+        let inspection = system
+            .inspect_uninstall(
+                &target,
+                "farhelm-supervisor.service",
+                &[&unit, &lib, &missing, &linked_state],
+            )
+            .await
+            .unwrap();
+        let canonical = |path: &Path| std::fs::canonicalize(path).unwrap();
+        assert_eq!(
+            inspection
+                .paths
+                .iter()
+                .map(|host_path| host_path.exists)
+                .collect::<Vec<_>>(),
+            [true, true, false, true]
+        );
+        assert_eq!(inspection.paths[1].canonical, Some(canonical(&lib)));
+        assert_eq!(
+            inspection.paths[3].canonical,
+            Some(canonical(&lib).join("data"))
+        );
+        assert_eq!(
+            inspection.default_state_dir.path,
+            home.join(".local/state/farhelm")
+        );
+        assert_eq!(inspection.unit_active_state, "active");
+        assert_eq!(inspection.unit_kill_mode, "process");
+        // The fake systemctl reports no fragment, which is systemd's answer
+        // for a unit it knows no file for.
+        assert_eq!(inspection.unit_fragment, None);
+        tokio::fs::remove_file(&linked_state).await.unwrap();
+        tokio::fs::remove_dir(lib.join("data")).await.unwrap();
+        tokio::fs::write(&log, "").await.unwrap();
+
+        for setup_unit in [
+            format!("{}\n[Unit]\n", crate::units::MANAGED_MARKER),
+            crate::units::MANAGED_MARKER.to_string(),
+        ] {
+            tokio::fs::write(&unit, &setup_unit).await.unwrap();
+            let refusal = system
+                .remove_unit(&target, &unit)
+                .await
+                .expect_err("a setup-managed unit must not be removed");
+            assert!(
+                refusal.rendered().contains("managed by farhelm helm setup"),
+                "{}",
+                refusal.rendered()
+            );
+            assert_eq!(tokio::fs::read_to_string(&unit).await.unwrap(), setup_unit);
+        }
+        tokio::fs::write(&unit, "[Unit]\n# written by provisioning\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            system.remove_unit(&target, &unit).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert!(!unit.exists());
+        assert!(matches!(
+            system.remove_unit(&target, &unit).await.unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+
+        // A running unit that lost its process-only kill policy is refused
+        // without a stop; with the policy it is stopped.
+        tokio::fs::write(&kill_mode, "control-group\n")
+            .await
+            .unwrap();
+        let refusal = system
+            .stop(&target, "farhelm-supervisor.service")
+            .await
+            .expect_err("a unit that would kill its whole control group must not be stopped");
+        assert!(
+            refusal.rendered().contains("KillMode is control-group"),
+            "{}",
+            refusal.rendered()
+        );
+        tokio::fs::write(&kill_mode, "process\n").await.unwrap();
+        assert!(matches!(
+            system
+                .stop(&target, "farhelm-supervisor.service")
+                .await
+                .unwrap(),
+            ActionOutcome::Completed
+        ));
+        tokio::fs::write(&active, "inactive\n").await.unwrap();
+        assert!(matches!(
+            system
+                .stop(&target, "farhelm-supervisor.service")
+                .await
+                .unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+        system
+            .disable(&target, "farhelm-supervisor.service")
+            .await
+            .unwrap();
+        backend(true)
+            .disable(&target, "farhelm-supervisor.service")
+            .await
+            .unwrap();
+        let calls = tokio::fs::read_to_string(&log).await.unwrap();
+        let calls = calls.lines().collect::<Vec<_>>();
+        assert_eq!(
+            calls,
+            [
+                "--user show -p ActiveState --value -- farhelm-supervisor.service",
+                "--user show -p KillMode --value -- farhelm-supervisor.service",
+                "--user show -p ActiveState --value -- farhelm-supervisor.service",
+                "--user show -p KillMode --value -- farhelm-supervisor.service",
+                "--user stop -- farhelm-supervisor.service",
+                "--user show -p ActiveState --value -- farhelm-supervisor.service",
+                "--user disable --no-reload -- farhelm-supervisor.service",
+                "--user --runtime disable --no-reload -- farhelm-supervisor.service",
+            ]
+        );
+
+        assert!(matches!(
+            system.remove_directory(&target, &lib).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert!(!lib.exists());
+        assert!(matches!(
+            system.remove_directory(&target, &lib).await.unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+
+        let local = ProvisioningTarget::Local;
+        assert!(
+            system
+                .disable(&local, "farhelm-supervisor.service")
+                .await
+                .is_err()
+        );
+        assert!(system.remove_unit(&local, &unit).await.is_err());
+        assert!(
+            system
+                .stop(&local, "farhelm-supervisor.service")
+                .await
+                .is_err()
+        );
+        assert!(system.remove_directory(&local, &lib).await.is_err());
     }
 
     /// Why this matters: a plan is confirmed some time after the reach check
@@ -7133,6 +8261,173 @@ mod tests {
         let client = wait_real_client(&manager, accepted.host_id).await;
         assert_session_operable(&client, &session.id).await;
         client.delete_session(&session.id).await.unwrap();
+
+        // UNINSTALL leg, for the ssh shapes only: the helm's own machine has
+        // no panel uninstall (it is `farhelm uninstall`'s). The panel's
+        // removal runs for real over ssh.
+        if use_ssh {
+            // An ENDED session keeps its dead pane, and with it the private
+            // tmux server, alive. Uninstall accepts ended sessions, and its
+            // stop must leave that server running: the unit's
+            // `KillMode=process` is what spares it, and systemd forgets that
+            // setting if the user manager reloads after the unit file is
+            // removed. Checking the server afterwards is the regression test
+            // for stopping before reloading.
+            let ended = client
+                .create_session_with_key(
+                    &cwd,
+                    "true",
+                    None,
+                    80,
+                    24,
+                    Some(uuid::Uuid::new_v4().to_string()),
+                )
+                .await
+                .unwrap();
+            let settled = tokio::time::timeout(Duration::from_secs(60), async {
+                loop {
+                    let listing = client.list_sessions().await.unwrap();
+                    if listing
+                        .sessions
+                        .iter()
+                        .any(|session| session.id == ended.id && session.status.has_ended())
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await; // sleep-ok: polling interval for the session's exit to be reported
+                }
+            })
+            .await;
+            assert!(
+                settled.is_ok(),
+                "the `true` session never reported having ended"
+            );
+            let tmux_socket = supervisor_state.join("tmux.sock");
+            let tmux_alive = || {
+                std::process::Command::new("tmux")
+                    .arg("-S")
+                    .arg(&tmux_socket)
+                    .arg("has-session")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|status| status.success())
+            };
+            if !remote {
+                assert!(
+                    tmux_alive(),
+                    "fixture premise: the ended session keeps the private tmux server alive"
+                );
+            }
+
+            let planned = service.plan_uninstall(accepted.host_id).await.unwrap();
+            // Before confirming, prove every path and unit the plan would
+            // remove is this test's own: the nonce unit everywhere, and on
+            // this machine the fixture's unit file and lib directory under
+            // the temporary root. Anything else here would be the developer's
+            // real install.
+            let mut removed_unit = None;
+            let mut removed_lib = None;
+            for action in &planned.plan.actions {
+                match action {
+                    ProvisioningAction::DisableSupervisor { unit: named }
+                    | ProvisioningAction::StopSupervisor { unit: named } => {
+                        assert_eq!(
+                            named, &unit,
+                            "uninstall named a unit that is not the fixture's"
+                        )
+                    }
+                    ProvisioningAction::RemoveUnit {
+                        unit: named,
+                        destination,
+                    } => {
+                        assert_eq!(named, &unit);
+                        if !remote {
+                            assert_eq!(destination, &unit_path);
+                        }
+                        removed_unit = Some(destination.clone());
+                    }
+                    ProvisioningAction::RemoveDirectory { path } => {
+                        if !remote {
+                            assert_eq!(path, &lib_dir);
+                        }
+                        removed_lib = Some(path.clone());
+                    }
+                    ProvisioningAction::DaemonReload | ProvisioningAction::ForgetHost => {}
+                    other => panic!("unexpected uninstall action {other:?}"),
+                }
+            }
+            let removed_unit = removed_unit.expect("the plan removes the unit file");
+            let removed_lib = removed_lib.expect("the plan removes the lib directory");
+            if !remote {
+                assert!(planned.plan.state_dir.starts_with(root.path()));
+            }
+            service
+                .start_uninstall(
+                    accepted.host_id,
+                    ProvisionRequest {
+                        probe_id: planned.probe_id,
+                    },
+                )
+                .await
+                .unwrap();
+            // The run's progress goes with the host's row, so its end is the
+            // host forgotten: the row gone and then, last, its actor.
+            // Bounded like `wait_real_run`'s stall window: five short host
+            // commands and a supervisor stop.
+            let forgotten = tokio::time::timeout(STEP_STALL_TIMEOUT, async {
+                loop {
+                    let rows = store.list_hosts().await.unwrap();
+                    if rows.iter().all(|row| row.id != accepted.host_id)
+                        && manager.status(accepted.host_id).is_none()
+                    {
+                        return;
+                    }
+                    if let Ok(view) = service.view(accepted.host_id).await
+                        && view.status == RunStatus::Failed
+                    {
+                        panic!("the real uninstall failed: {view:?}");
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await; // sleep-ok: polling interval while the real run finishes
+                }
+            })
+            .await;
+            if forgotten.is_err() {
+                service.abort_run(accepted.host_id).await;
+                if let Some(guard) = guard.as_mut() {
+                    guard.cleanup().expect("cleanup after timed-out UNINSTALL");
+                }
+                panic!("the real uninstall did not finish within {STEP_STALL_TIMEOUT:?}");
+            }
+            // Read the result back through the same ssh destination, which
+            // works for the remote container too: the unit file and lib
+            // directory are gone and the data directory is still there.
+            let inspector = SystemBackend::with_simulated_linger(helm_state.clone(), Ok(()), true);
+            let after = inspector
+                .inspect_uninstall(
+                    &planned.plan.target,
+                    &unit,
+                    &[&removed_unit, &removed_lib, &planned.plan.state_dir],
+                )
+                .await
+                .unwrap();
+            assert!(!after.paths[0].exists, "uninstall left the unit file");
+            assert!(!after.paths[1].exists, "uninstall left the lib directory");
+            assert!(
+                after.paths[2].exists,
+                "uninstall removed the data directory"
+            );
+            assert!(
+                !after.unit_running(),
+                "uninstall left the supervisor running"
+            );
+            if !remote {
+                assert!(
+                    tmux_alive(),
+                    "stopping the supervisor took the sessions' tmux server with it"
+                );
+            }
+        }
 
         service.abort_run(accepted.host_id).await;
         manager.shutdown();
