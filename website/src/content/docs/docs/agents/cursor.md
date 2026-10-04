@@ -6,8 +6,8 @@ sidebar:
 ---
 
 Farhelm can launch Cursor's `cursor-agent` CLI, with optional model selection and a YOLO permission choice.
-**Conversation tracking and Resume are not supported.** Restart starts a new conversation; clone preserves launch
-choices, not the conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
+**Conversation tracking and Resume are not supported**, so a Cursor session cannot be restarted: replace it to start
+over. Clone preserves launch choices, not the conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
 
 ## Launching
 
@@ -16,19 +16,20 @@ Farhelm starts it as `cursor-agent`, so that command must be on the host's PATH.
 Farhelm does not use that name: other tools install a command called `agent` too, so the name says nothing about which
 program will run.
 
-Choose Cursor in the launch composer, or use the `cursor` / `cursor-yolo` built-in profiles. These produce
-`cursor-agent` and `cursor-agent --force`, respectively. Omitting a model leaves Cursor's default in effect. The small
-suggested model list contains `auto` and `composer-2.5`; a custom Cursor model ID is passed as one literal `--model`
-argument. Saved structured choices survive history, clone and fresh restart.
+Choose Cursor in the session launcher. The default permissions run `cursor-agent`, and YOLO runs `cursor-agent --force`.
+Omitting a model leaves Cursor's default in effect. The small suggested model list contains `auto` and `composer-2.5`; a
+custom Cursor model ID is passed as one literal `--model` argument. Your choices are kept in recent setups and carried
+over by clone.
 
 Default permissions add no flag and retain Cursor's configuration. YOLO adds `--force`, which allows commands except
-those explicitly denied by Cursor's configuration. Other vendor modes can be used in raw commands. Farhelm does not
-provide a separate Cursor effort selector; use a vendor model variant or bracket parameters in a custom model ID.
+those explicitly denied by Cursor's configuration. Other vendor modes can be used in a
+[custom command](/docs/agents/custom-commands/). Farhelm does not provide a separate Cursor effort selector; use a
+vendor model variant or bracket parameters in a custom model ID.
 
 ## Limits
 
-Cursor uses Farhelm's Generic runtime integration. It has normal terminal interaction, activity status, stop and fresh
-restart, but no Cursor-specific waiting-state detection. Answer approval prompts in the terminal.
+Cursor uses Farhelm's generic integration. It has normal terminal interaction, activity status, stop and replace, but no
+Cursor-specific waiting-state detection. Answer approval prompts in the terminal.
 
 Farhelm installs no Cursor hooks, status wrappers, plugins or model instructions. It neither reads nor edits Cursor's
 configuration or conversation stores. There is no tracking setup command to enable: session tracking is outside this

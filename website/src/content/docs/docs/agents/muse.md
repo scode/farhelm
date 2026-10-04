@@ -15,5 +15,5 @@ This page is planned but not written yet. The text below says what it will cover
 :::
 
 Running Muse under Farhelm: what to install first, which launch choices Farhelm offers for it, how its status is
-detected, why Resume is not available for it, and its known quirks. How it compares with the other agents is in
-[Supported agents](/docs/agents/).
+detected, why Farhelm cannot resume its conversations (so its sessions cannot be restarted, only replaced), and its
+known quirks. How it compares with the other agents is in [Supported agents](/docs/agents/).

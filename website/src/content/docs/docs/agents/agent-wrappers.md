@@ -7,94 +7,90 @@ sidebar:
 
 Some environments do not start agents directly; they start a wrapper — `wrapper run <dir> <agent...>` — that `cd`s into
 the directory, does whatever bookkeeping it manages there, and runs the agent as a child while staying resident as its
-parent. Farhelm runs a profile like that like any other profile; there is no wrapper mode to turn on. Write `{cwd}`
-where the wrapper wants the directory and farhelm substitutes the session's own directory at every launch and every
-restart, so one profile serves every directory instead of one profile per directory. Set the profile's agent kind to the
-agent the wrapper ends up running — the field says `generic` until you change it, and generic turns every integration
-off. On stop the wrapper is killed along with the agent; being the agent's parent exempts it from nothing.
+parent. Farhelm runs a wrapper like any other [custom command](/docs/agents/custom-commands/); there is no wrapper mode
+to turn on. Write `{cwd}` where the wrapper wants the directory and Farhelm substitutes the session's own directory at
+every launch and every restart, so one command (or one [launch template](/docs/using/launch-templates/)) serves every
+directory. Declare the agent the wrapper ends up running as the command's agent, and put `{farhelm_args}` where that
+agent's arguments go: without a declared agent, the session gets no agent-specific status, no conversation tracking, and
+no restart. On stop the wrapper is killed along with the agent; being the agent's parent exempts it from nothing.
 
-## A wrapper profile, field by field
+## A wrapper command, field by field
 
-Three fields, and all three matter:
+On the session launcher's **command** tab, four fields matter:
 
-- **invocation**: `my-wrapper run {cwd} claude`
-- **agent kind**: `claude` — the agent the wrapper ends up running, never the wrapper itself
-- **resume invocation**: `my-wrapper run {cwd} claude --resume {conversation}`
+- **agent command**: `my-wrapper run {cwd} claude {farhelm_args}`
+- **runs without approval prompts**: your answer, **yes (YOLO)** or **no**. Farhelm believes it and never reads the
+  command to check it, and it covers the resume command too.
+- **agent type**: Claude — the agent the wrapper ends up running, never the wrapper itself
+- **resume command**, which appears once you tick **resume**:
+  `my-wrapper run {cwd} claude --resume {conversation} {farhelm_args}`
 
 `{cwd}` is a whole word or it is nothing. An argument either equals `{cwd}` exactly, in which case it is replaced, or it
 is passed through as literal text: `--dir={cwd}` reaches the wrapper unchanged, and so does a `{cwd}` written inside a
-`sh -c` script string, since that is part of one argument rather than an argument of its own. The same rule
-`{conversation}` has always had, for the same reason — substitution replaces a whole argument and never splices into
-part of one. Beyond that: every occurrence is filled, not just the first; it may not be the first word, because
-substituting there would make the working directory the program this session runs, and the profile editor refuses that
+`sh -c` script string, since that is part of one argument rather than an argument of its own. `{conversation}` and
+`{farhelm_args}` follow the same rule, and both must appear exactly once, as whole arguments, where they are required.
+Beyond that: every occurrence of `{cwd}` is filled, not just the first; it may not be the first word, because
+substituting there would make the working directory the program this session runs, and the launcher refuses that
 outright; and a directory whose name contains spaces arrives as a single argument, because the value goes into the
 argument's own slot with no quoting for you to get right.
 
 The value is the directory the session's terminal starts in, spelled the way you gave it after `~` expansion, symlinks
-intact. On a restart — and on the retry of an interrupted create — farhelm checks that the spelling still resolves to
-the canonical identity it recorded when the session was created and hands over that resolved path instead; a session old
-enough to have no recorded identity has nothing to check against and gets the spelling again. Either way the wrapper is
-handed exactly the string tmux is handed for the pane — one string, which is not quite one directory: on a fresh create
-each side resolves that spelling for itself, so a symlink retargeted in between puts them in different places. That race
-is yours rather than farhelm's, and the recorded directory closes it from the first restart onwards. Resume depends on
-the agent reporting its conversation; Farhelm does not use the working directory to guess which one it is.
+intact. On a restart — and on the retry of an interrupted create — Farhelm checks that the spelling still resolves to
+the canonical identity it recorded when the session was created and hands over that resolved path instead. Either way
+the wrapper is handed exactly the string the session's terminal is started in — one string, which is not quite one
+directory: on a fresh create each side resolves that spelling for itself, so a symlink retargeted in between puts them
+in different places. That race is yours rather than Farhelm's, and the recorded directory closes it from the first
+restart onwards. Resume depends on the agent reporting its conversation; Farhelm does not use the working directory to
+guess which one it is.
 
 ## A worked example with `sh`
 
-`sh` is a real wrapper of the minimal kind, and worth running once before you point a profile at the actual thing:
+`sh` is a real wrapper of the minimal kind, and worth running once before you point a command at the actual thing:
 
 ```
-sh -c 'cd "$1" && shift && "$@"; exit $?' w {cwd} claude
+sh -c 'cd "$1" && shift && "$@"; exit $?' w {cwd} claude {farhelm_args}
 ```
 
 `w` becomes `$0` for the inner shell, `{cwd}` lands in `$1` as a positional argument (not inside the script text, where
-it would stay literal), and `"$@"` is the agent command line with whatever farhelm appended to it. The trailing
-`; exit $?` is load-bearing: when `/bin/sh` is bash, the last command of a script is tail-`exec`ed as an optimization,
-so `... && "$@"` on its own replaces the shell with the agent and leaves no resident wrapper at all. With a command
-after it, bash and dash both stay put as the agent's parent, which is what a real wrapper does.
+it would stay literal), and `"$@"` is the agent command line with Farhelm's arguments where `{farhelm_args}` stood. The
+trailing `; exit $?` is load-bearing: when `/bin/sh` is bash, the last command of a script is tail-`exec`ed as an
+optimization, so `... && "$@"` on its own replaces the shell with the agent and leaves no resident wrapper at all. With
+a command after it, bash and dash both stay put as the agent's parent, which is what a real wrapper does.
 
-## Why the kind must be explicit
+## Why the agent must be declared
 
-A profile always states its kind — the field is part of the profile, and `generic` is the spelling for "no kind".
-Farhelm never second-guesses it: a generic profile whose invocation happens to start with `claude` stays generic,
-because that is what you picked. Basename derivation is the RAW-create rule, for a session started from a command line
-rather than a profile: the basename of the first word, exact equality, `claude` is Claude, `codex` is Codex, everything
-else generic. It is deliberately dumb rather than clever (see
-[Agent hook injection](/docs/agents/agent-hook-injection/)) because the shapes it would have to be clever about —
-wrappers, `env`, a command buried in a `bash -c` script string — cannot be recognized reliably, and the kind field is
-there so nothing has to try.
+Farhelm never reads a command line to decide which agent it runs: a command whose first word happens to be `claude` runs
+no Claude integration unless you declare Claude as its agent. That is deliberate, because the shapes it would have to be
+clever about — wrappers, `env`, a command buried in a `bash -c` script string — cannot be recognized reliably, and
+declaring the agent means nothing has to try.
 
-A wrapper profile left at generic launches and runs fine — no error, no warning. What it silently does not get is
-conversation-identity capture, the hook flags, per-agent status sharpening, and the resume that follows from them.
-Restart then offers a fresh launch in the same directory — unless the profile carries a resume invocation with no
-`{conversation}` in it, in which case restart offers to run that command as written, `{cwd}` still filled. That is
-SPEC.md's verbatim fallback, and it is the one thing a generic profile does still get.
+A wrapper command with no declared agent launches and runs fine — no error, no warning. What it does not get is
+conversation tracking, Farhelm's arguments, per-agent status, and the restart that follows from them: such a session
+cannot be restarted at all, only replaced.
 
 ## What the wrapper must pass through
 
-Farhelm appends exactly one thing to the END of the agent command line: the hook flags described in
-[Agent hook injection](/docs/agents/agent-hook-injection/), on a launch whose kind is integrated and whose argv
-qualifies — that document's table lists the shapes that disqualify it (a bare `--` anywhere, an existing `--settings`,
-codex hook configuration of your own), and a wrapper's own arguments are part of the argv those checks look at. A resume
-is not an exception to any of that. The resume invocation is a complete command line in its own right — farhelm replaces
-its `{conversation}` element and runs THAT instead of the launch invocation, which is why the wrapper has to appear in
-it too — and the hook flags go on the end of it exactly as they go on the end of any other qualifying launch.
+Farhelm puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes none it stands
+for nothing. They are what turns the agent's conversation reporting on, as
+[Agent hook injection](/docs/agents/agent-hook-injection/) describes. A resume is no exception: the resume command is a
+complete command line in its own right — Farhelm fills in its `{conversation}` and `{farhelm_args}` and runs THAT
+instead of the start command, which is why the wrapper has to appear in it too.
 
-So the hook flags are what a wrapper must forward, and one that treats everything after its own arguments as the command
-to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is indirect:
-the agent never reports its conversation, and a new session offers a fresh launch on restart. NOTE: that is the one
-thing farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR wrapper stops
-at the agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>` against a
-live session shows what actually reached the agent.
+So Farhelm's arguments are what a wrapper must forward, and one that treats everything after its own arguments as the
+command to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is
+indirect: the agent never reports its conversation, and the session cannot be restarted. NOTE: that is the one thing
+Farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR wrapper stops at the
+agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>` against a live
+session shows what actually reached the agent.
 
 For Claude there is one more condition on the shape: the wrapper must start Claude as its own direct child. Farhelm only
-accepts a Claude report from the session's pane process or that process's direct child, which is what keeps a `claude`
+accepts a Claude report from the session's own process or that process's direct child, which is what keeps a `claude`
 the session starts through its shell (a shelled-out sub-agent) from replacing the conversation you are in. A resident
 wrapper that runs Claude itself is exactly one level, so it keeps reporting. A chain of two resident launchers — a
-wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below the pane: its reports
-are refused, the hook log records a `refused conflict` line, and a new session offers a fresh launch on restart. A
-launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
-staying in the chain, so it adds no level.
+wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below: its reports are
+refused, the hook log records a `refused conflict` line, and the session cannot be restarted. A launcher that `exec`s
+(as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than staying in the chain, so
+it adds no level.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
@@ -103,18 +99,14 @@ selects on), `FARHELM_SESSION_TOKEN` (the bearer credential proving a spawn requ
 `FARHELM_SUPERVISOR_SOCK` (the supervisor socket to dial). A wrapper inherits all four and passes them to its child by
 default, so this needs no thought unless your wrapper deliberately scrubs the environment.
 
-Cosmetic, but worth knowing: a session created from a profile shows that profile's snapshotted NAME in the session list,
-while a raw create shows the basename of the first word — the wrapper's. The agent-kind field, not the displayed name,
-decides how farhelm treats the session.
-
 ## What happens on stop
 
 There are fewer processes involved than the launch chain suggests. tmux starts the pane's login shell, the shell `exec`s
-farhelm's launch shim, and the shim `exec`s your invocation — so the WRAPPER is the pane's own process and the agent is
-its child. Where farhelm's own probe finds a WORKING systemd user manager — it creates a throwaway scope, looks it up,
-kills it, and confirms it went away, rather than trusting a `systemd-run` on `PATH` — the launch also runs inside a
-per-launch cgroup scope, which is containment rather than a level of the tree (`systemd-run --scope` execs in place
-too). Each launch records what it selected, so a session can outlive the manager that scoped it.
+Farhelm's launch shim, and the shim `exec`s your command — so the WRAPPER is the pane's own process and the agent is its
+child. Where farhelm's own probe finds a WORKING systemd user manager — it creates a throwaway scope, looks it up, kills
+it, and confirms it went away, rather than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch
+cgroup scope, which is containment rather than a level of the tree (`systemd-run --scope` execs in place too). Each
+launch records what it selected, so a session can outlive the manager that scoped it.
 
 Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
 takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's
@@ -158,22 +150,15 @@ agent's lifetime needs no handler at all.
 
 ## Related shapes
 
-`env FOO=1 claude …` and `bash -c 'claude …'` are not wrappers in the sense above, and they need no `{cwd}` — the pane
-already starts in the session's directory and the command inherits it. `env` is for variables you do not mind being
-public: the value is stored verbatim in the profile and sits in the launch's argv, where `ps` shows it to anyone who can
-read the process table for as long as the process runs. A secret belongs in a file the agent reads, not on a command
-line. What these two shapes share with a wrapper is the first-word problem, and for them one field does not fix it.
-Setting the kind turns the integration on, but the DEFAULT resume invocation is derived from the invocation's first
-word, so kind `claude` on `env FOO=1 claude` synthesizes `env --resume {conversation}` — a command that resumes nothing.
-Write the resume invocation out yourself as well (`env FOO=1 claude --resume {conversation}`), or the first restart is
-what finds out.
+`env FOO=1 claude {farhelm_args}` and `bash -c` are not wrappers in the sense above, and they need no `{cwd}` — the
+session's terminal already starts in its directory and the command inherits it. `env` is for variables you do not mind
+being public: the value is stored verbatim with the session and sits in the launch's argv, where `ps` shows it to anyone
+who can read the process table for as long as the process runs. A secret belongs in a file the agent reads, not on a
+command line. Declare the agent and write the resume command out as for any wrapper:
+`env FOO=1 claude --resume {conversation} {farhelm_args}`.
 
-`bash -c` has a second problem, and the kind field does not reach it either. Appended flags become the shell's own
-positional parameters — `$0` and the ones following it, two elements for Claude and five for Codex — rather than
-arguments of the agent named inside the script string. Whether they reach the agent is up to the script: one ending in
-`"$@"`, with a dummy `$0` ahead of the real arguments exactly as the `sh` example does, forwards them like any other
-wrapper; `bash -c 'claude …'`, which names the agent and its arguments itself, drops them. Farhelm appends them and logs
-that it did — it is looking at an argv, not at the contents of your script — so the only sign the agent never saw them
-is the tripwire warning that no identity was reported. Without a report, a new session offers a fresh launch on restart.
-If you want the hook, either forward the positional parameters or make the agent the profile's own command — `env`, or a
-real wrapper — rather than a string handed to `-c`.
+`bash -c` needs one more step. `{farhelm_args}` written inside the script string is not a whole argument, so it does not
+count, and a command whose only `{farhelm_args}` is there is refused. Pass it after the script as positional parameters
+instead and forward them, with a dummy `$0` ahead of them exactly as the `sh` example does:
+`bash -c 'claude "$@"' sh {farhelm_args}`. A script that names the agent and its arguments itself and does not forward
+`"$@"` drops Farhelm's arguments, and the only sign is that the agent never reports its conversation.

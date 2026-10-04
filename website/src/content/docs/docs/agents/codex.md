@@ -11,9 +11,9 @@ both an attributable reporting process and matching root-conversation metadata i
 
 ## Workspace trust
 
-Codex may ask whether to trust the working directory at startup. A structured Farhelm launch offers an explicit
-workspace-trust choice: true sets that directory's project trust to `trusted` for this run, false sets it to
-`untrusted`, and the default adds no override. Codex 0.155.1 accepted this per-run
+Codex may ask whether to trust the working directory at startup. The session launcher offers an explicit workspace-trust
+choice for Codex: true sets that directory's project trust to `trusted` for this run, false sets it to `untrusted`, and
+the default adds no override. Codex 0.155.1 accepted this per-run
 [`projects.<path>.trust_level`](https://developers.openai.com/codex/config-reference/) override in a focused prompt
 reproduction. Farhelm fills the exact target directory after a fresh checkout is prepared, so the choice also applies to
 that path. It does not write Codex's persistent trust state or change its approval and sandbox policies. The existing
@@ -48,12 +48,12 @@ pane: shell script
         └── Farhelm hook
 ```
 
-Setting a wrapper's integration kind to Codex enables hook injection but does not bypass these checks. Prefer launchers
-that forward the injected arguments and replace themselves with the next program using `exec`; replaced processes do not
-add ancestry links. A package-manager installation is not automatically supported or refused: the surviving process
-chain decides. Renaming the native Codex executable also prevents attribution. See
-[agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
-[hook injection](/docs/agents/agent-hook-injection/) for invocation forms that skip injection.
+Declaring Codex as a [custom command](/docs/agents/custom-commands/)'s agent turns on the integration but does not
+bypass these checks. Prefer launchers that forward the injected arguments and replace themselves with the next program
+using `exec`; replaced processes do not add ancestry links. A package-manager installation is not automatically
+supported or refused: the surviving process chain decides. Renaming the native Codex executable also prevents
+attribution. See [agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
+[hook injection](/docs/agents/agent-hook-injection/) for how the integration is turned on.
 
 A rejected report leaves the saved conversation and Resume offer unchanged. On a new session with no accepted report,
 Resume remains unavailable. Farhelm does not scan for a different Codex conversation to compensate for an unsupported

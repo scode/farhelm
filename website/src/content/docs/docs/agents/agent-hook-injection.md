@@ -12,8 +12,10 @@ hook surface is configuration-based. Farhelm never edits that configuration for 
 
 For Claude and Codex, the injected flags ride on one command line and die with the process. On a Codex launch that gets
 the flags, Codex prints one warning line about hook trust, and with that bypass in place any hook of your own in that
-configuration home (`$CODEX_HOME` when it is set, `~/.codex` otherwise) that you have not trusted runs too. A few Claude
-and Codex invocation shapes turn injection off. Without a report, Farhelm cannot offer to resume that new conversation.
+configuration home (`$CODEX_HOME` when it is set, `~/.codex` otherwise) that you have not trusted runs too. Farhelm puts
+these flags where the launch's `{farhelm_args}` stands and never reads the rest of the command to decide whether they
+fit (see [Which launches get a reporter](#which-launches-get-a-reporter)). Without a report, Farhelm cannot offer to
+resume that new conversation.
 
 Farhelm does not guess which conversation to resume from files on disk. See the harness notes for
 [Goose's saved reporter and manual-resume dependency](/docs/agents/goose/),
@@ -48,15 +50,14 @@ and reports each conversation's exact id and, when one exists, its session file.
 authenticated supervisor message as the hooks, but they never inspect or search the vendors' own state directories.
 
 OMP's reporter is loaded the way Pi's is: Farhelm materializes a private extension under its own state directory
-(`integrations/omp/`, written with exact-bytes verification and private permissions) and loads it with `-e <path>` on
-launches whose invocation is an interactive-shaped `omp` command — utility subcommands, occurrences of `-p`/`--print`,
-`--mode`, `--export`, `--alias`, help/version/license/`--list-models` flags, reserved-word rejecting forms, internal
-worker selectors, a genuine end-of-options `--`, and `--trusted-extension` launches (which OMP refuses to combine with
-`-e`) get no extension. Farhelm's own instructions pointer also yields: an invocation that already carries
-`--append-system-prompt` (OMP keeps only the last occurrence) gets the reporter without a second occurrence that would
-silently replace the user's instructions. The reporter executable is named by the `FARHELM_OMP_REPORTER_EXE` environment
-variable, and the extension never reads or writes OMP's own state: what it knows comes from the session events it
-subscribes to.
+(`integrations/omp/`, written with exact-bytes verification and private permissions) and loads it with `-e <path>` where
+the launch's `{farhelm_args}` stands. Farhelm does not inspect the command, so a command declared as OMP that cannot
+take the extension (a utility subcommand, or `--trusted-extension`, which OMP refuses to combine with `-e`) is yours to
+fix. The same goes for an `--append-system-prompt` of your own: OMP keeps only the last one, and Farhelm's instructions
+pointer arrives as one where `{farhelm_args}` stands, so put yours after `{farhelm_args}`, or turn the pointer off with
+`FARHELM_AGENT_INSTRUCTIONS=off` (see [Turning it off](#turning-it-off)). The reporter executable is named by the
+`FARHELM_OMP_REPORTER_EXE` environment variable, and the extension never reads or writes OMP's own state: what it knows
+comes from the session events it subscribes to.
 
 ## The no-errors policy
 
@@ -72,50 +73,32 @@ credential-free reporter declaration persists in conversation metadata: outside 
 MCP server, but without Farhelm launch credentials it reports nothing and exposes no tools.
 
 If a reporter fails, the session itself is unaffected. Farhelm gains no new conversation to resume. A new session whose
-agent has not reported offers a fresh launch instead. The one visible thing is the Codex warning line, and that is Codex
-talking, not the reporter.
+agent has not reported cannot be restarted until it does. The one visible thing is the Codex warning line, and that is
+Codex talking, not the reporter.
 
-## Does my invocation get the hook?
+## Which launches get a reporter
 
-| invocation shape                                                                              | kind farhelm derives | hook injected?       | what you get instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| --------------------------------------------------------------------------------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude <any flags>`                                                                          | Claude               | yes                  | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `claude --settings <x> …`                                                                     | Claude               | no                   | a fresh launch on restart without a report — Claude honors only the LAST `--settings`, so injecting ours would silently drop yours                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `codex <any flags>`, `codex resume …`                                                         | Codex                | yes                  | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `codex --dangerously-bypass-hook-trust …`, `codex -c hooks.… …`, `codex -c features.hooks… …` | Codex                | no                   | no scanning fallback — you already control the hook configuration, and a second bypass flag could break the launch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `goose session …`                                                                             | Goose                | fresh only           | resumes use the reporter Goose already persisted; utility, help, ambiguous, and reporter-name-collision forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `pi …`                                                                                        | Pi                   | yes                  | the static extension reports the exact ID and optional persisted file; utility/help forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `omp …`                                                                                       | OMP                  | interactive launches | the static extension reports the exact ID and optional session file; utility subcommands, print/mode/export/alias/help/version/license/list-models occurrences, reserved-word rejecting forms, internal worker selectors, `--trusted-extension` launches (OMP refuses to combine those with our `-e`), and a genuine end-of-options `--` are left unchanged and runnable. A genuine `--` additionally cannot be CREATED with the derived OMP resume template (the appended `--resume` would land in prompt position); an explicit resume template or a `--` consumed as an option value creates normally |
-| `grok --no-leader …`                                                                          | Grok                 | configured manually  | the three entries in [the Grok guide](/docs/agents/grok/#configure-the-three-hooks) report selection and exact saved-record evidence. Farhelm injects no Grok hook and never edits Grok configuration                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `claude … -- <prompt>`, `codex … -- <prompt>`                                                 | either               | no                   | Without a report, restart offers a fresh launch. After a bare `--`, injected flags would become prompt text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `/opt/bin/my-wrapper …`                                                                       | generic              | no                   | set the kind explicitly and forward the injected flags; without a report, restart offers a fresh launch. See [agent wrappers](/docs/agents/agent-wrappers/)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `env FOO=1 claude …`                                                                          | generic              | no                   | no hook as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `bash -c 'claude …'`                                                                          | generic              | no                   | no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on                                                                                                                                                                                                                                                                                                                                                               |
-
-The wrapper path is absolute on purpose: farhelm does not expand `~` in an invocation. The fallback resume invocation
-also has to be runnable as written — one carrying an unfilled `{conversation}` is refused rather than garbled, which
-lands back on the fresh-launch offer. For the generic rows, setting the profile's agent kind is what turns the
-integration back on; farhelm then appends the flags to the END of whatever argv the profile names, which only helps if
-that argv's tail actually reaches the real agent. [Agent wrappers](/docs/agents/agent-wrappers/) covers both halves.
-
-## How the kind is decided
-
-Codex has additional process-chain restrictions even when injection succeeds; see
+Codex has additional process-chain restrictions even when its flags are in place; see
 [Codex launchers and wrappers](/docs/agents/codex/#launchers-and-wrappers). Grok has its own native process and
 `--no-leader` requirements in [the Grok guide](/docs/agents/grok/#launching).
 
-By the basename of the invocation's first word, compared for exact equality: `claude` is Claude, `codex` is Codex,
-`goose` is Goose, `pi` is Pi, `omp` is OMP, `grok` is Grok, and everything else is generic. A path in front makes no
-difference (`/opt/bin/goose` is still Goose); a decoration around it does (`goose-wrapper` and a raw `env FOO=1 goose`
-invocation are both generic). That is deliberately dumb rather than clever, because a wrapper that silently inherited an
-integration would look integrated and never capture anything. The profile's agent-kind field overrides the derivation,
-and is the supported way to tell farhelm what your wrapper really launches. Pi and OMP both additionally run a
-VENDOR-SPECIFIC shape check before the extension rides along, and the two checks are not the same: OMP's excludes its
-utility subcommands, print/mode/export/alias occurrences, reserved-word rejecting forms, worker selectors, and
-`--trusted-extension` launches, while Pi's excludes only its own utility commands and help/version/export forms — an
-unrecognized Pi flag or an option VALUE that merely looks excluded stays hooked for Pi (see the table above). Once a
-structured launch identifies the kind, injection can preserve a simple leading `env NAME=value …` prefix; option-bearing
-forms such as `env -i …` remain untouched.
+- **Claude, Codex, Goose, Pi or OMP picked in the session launcher** always gets its reporter, unless
+  [you turned it off](#turning-it-off): Farhelm builds that command itself and knows where the reporter goes. Cursor,
+  Muse and OpenCode have none.
+- **A [custom command](/docs/agents/custom-commands/) that declares its agent** gets the declared agent's reporter where
+  `{farhelm_args}` stands, which the command must contain exactly once. Farhelm does not read the rest of the command,
+  so it does not notice a `--settings` of your own for Claude (Claude honors only the last one), Codex hook
+  configuration of your own, an `--append-system-prompt` of your own before `{farhelm_args}` for OMP, or a bare `--`
+  before `{farhelm_args}` (after which the flags would become prompt text); those are yours to avoid. A wrapper has to
+  forward the arguments to the agent, as [Agent wrappers](/docs/agents/agent-wrappers/) describes.
+- **A custom command with no declared agent** gets no reporter at all, whatever its first word is: Farhelm never decides
+  from a command line which agent it runs.
+- **Grok** reports through the three hooks you configure yourself in
+  [the Grok guide](/docs/agents/grok/#configure-the-three-hooks); Farhelm injects no Grok hook.
+
+A session started before this release from a typed command line or a profile keeps the rules it was created under:
+Farhelm still adds its arguments where it used to, at the end of the command, and still leaves them off a Claude command
+that passes `--settings`, a Codex command that configures hooks itself, and a command with a bare `--`.
 
 ## What the hook does
 
@@ -209,9 +192,9 @@ supervisor starts, same as above. Anything else warns, names what you wrote, and
 whose off position removes a feature must not be flipped by a typo.
 
 Turning `FARHELM_AGENT_HOOKS` off prevents new conversations from being saved for Resume by Claude, Codex, Goose, Pi,
-and OMP. A session with no saved conversation offers a fresh launch on restart. Turning the switch off does not erase a
-conversation already saved for the current launch. Grok's manual hooks are independent of this switch; remove or disable
-those entries in Grok itself when you want them off.
+and OMP. A session with no saved conversation cannot be restarted. Turning the switch off does not erase a conversation
+already saved for the current launch. Grok's manual hooks are independent of this switch; remove or disable those
+entries in Grok itself when you want them off.
 
 ## When something goes wrong
 
@@ -259,10 +242,12 @@ timer can kill the reporter while the hook is still retrying.
 
 - `conversation hook flags injected` — at launch, naming the kind and carrying `announce=true` or `announce=false` for
   whether `--announce` was included (`FARHELM_AGENT_INSTRUCTIONS`'s only visible effect on this log).
-- `conversation hook flags not injected` — the skip and its reason: `invocation already passes --settings`,
-  `invocation already configures codex hooks`, `invocation contains a bare --`, or `disabled by FARHELM_AGENT_HOOKS`. A
-  generic session logs nothing — no integration means there was never a hook to skip. Every one of these launches still
-  runs. Sessions keep running without gaining a new conversation to resume from that launch.
+- `conversation hook flags not injected` — the skip and its reason, usually `disabled by FARHELM_AGENT_HOOKS`. A session
+  started before this release from a typed command line or a profile can also log
+  `invocation already passes --settings`, `invocation already configures codex hooks`, or
+  `invocation contains a bare --`. A session with no declared agent logs nothing — no integration means there was never
+  a hook to skip. Every one of these launches still runs. Sessions keep running without gaining a new conversation to
+  resume from that launch.
 - `recorded the conversation identity this session's agent reported` — an accepted report, with the conversation and the
   vendor's `source` word. When it displaced a claim naming a DIFFERENT id, a second line says so:
   `this session's
@@ -287,6 +272,5 @@ timer can kill the reporter while the hook is still retrying.
 confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the absolute Farhelm binary.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
-offer points at. Without an accepted report, a new session offers a fresh launch instead of Resume. Previously saved
-conversations remain available under the agent's usual Resume rules; a failed or skipped reporter supplies no new
-conversation to resume.
+offer points at. Without an accepted report, a new session cannot be restarted. Previously saved conversations remain
+available under the agent's usual Resume rules; a failed or skipped reporter supplies no new conversation to resume.

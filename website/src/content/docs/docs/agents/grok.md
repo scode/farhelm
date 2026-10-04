@@ -11,7 +11,8 @@ use a separate Farhelm session for each top-level conversation you need to keep 
 
 NOTE: The runtime behavior on this page was verified on Linux with Grok Build 1.0.40. The macOS process shape has not
 been verified. Wrappers, package-manager launchers, renamed executables, and shared-leader launches may run normally but
-remain FreshOnly because Farhelm cannot prove which foreground runtime sent their reports.
+never capture a conversation, so they cannot be restarted, because Farhelm cannot prove which foreground runtime sent
+their reports.
 
 ## Launching
 
@@ -29,10 +30,11 @@ contracts have not been verified.
 hooks do not carry this launch's Farhelm credential, so it cannot establish the ownership proof capture requires. A
 private leader gives up backend reuse and may consume more resources. Native subagents continue to work.
 
-Generated launches are the supported path. A custom invocation or resume template must preserve the native `grok`
-executable, put `--no-leader` before any real `--` boundary, and resume with `--resume <conversation-id>`. Farhelm
-refuses to derive a resume command beside an existing session selector or after `--`; it does not move or delete
-arguments whose meaning belongs to Grok.
+Choosing Grok in the session launcher is the supported path. A [custom command](/docs/agents/custom-commands/) that
+declares Grok as its agent must keep the native `grok` executable and `--no-leader`, before any `--`, and its resume
+command must resume with `--resume {conversation}`, for example
+`grok --no-leader --resume {conversation} {farhelm_args}`. Farhelm runs the commands you write as written; it does not
+move or delete arguments whose meaning belongs to Grok.
 
 ## Configure the three hooks
 
@@ -97,9 +99,9 @@ agent-instructions announcement from these manual hooks.
 
 ## What capture and Resume mean
 
-`SessionStart` selects the top-level UUID. A new conversation is usually FreshOnly at first because Grok has not yet
-created `updates.jsonl`. `UserPromptSubmit` normally supplies that exact path after the first prompt, and `Stop` is a
-later fallback. A loaded saved conversation may be ready immediately.
+`SessionStart` selects the top-level UUID. A new conversation usually cannot be restarted at first, because Grok has not
+yet created `updates.jsonl`. `UserPromptSubmit` normally supplies that exact path after the first prompt, and `Stop` is
+a later fallback. A loaded saved conversation may be ready immediately.
 
 Farhelm offers Resume only after two files agree with the selected UUID: the reported absolute `updates.jsonl` begins
 with the supported `_x.ai/session/update` record and matching `params.sessionId`, and its sibling `summary.json` is a
@@ -129,15 +131,16 @@ process attribution.
 
 ## Diagnose capture
 
-After the first prompt, the session's restart offer should change from Fresh to Resume. If it does not, inspect
+After the first prompt, the session should become restartable. If it does not, inspect
 `<state dir>/hook-log/<session id>.log`, where `<state dir>` is `$XDG_STATE_HOME/farhelm` or `~/.local/state/farhelm`.
 An `acked` line means the supervisor accepted the callback. `bad-payload`, `refused`, `connect-failed`, and `timeout`
 name the common failure classes; [Agent hook injection](/docs/agents/agent-hook-injection/) documents the complete log
 format.
 
-No log usually means Grok did not load or run the hook, or the command path is wrong. An `acked` line with a FreshOnly
-offer usually means the selected conversation does not yet have both exact files, or later verification withdrew the
-offer. The supervisor log distinguishes process-attribution refusals from file mismatch and ordering refusals.
+No log usually means Grok did not load or run the hook, or the command path is wrong. An `acked` line on a session that
+still cannot be restarted usually means the selected conversation does not yet have both exact files, or later
+verification withdrew the offer. The supervisor log distinguishes process-attribution refusals from file mismatch and
+ordering refusals.
 
 Farhelm uses generic running and idle activity for Grok. It does not recognize Grok approval prompts as waiting and does
 not take over Grok's status line. Continue handling approvals in Grok's terminal.

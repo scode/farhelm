@@ -2,7 +2,7 @@
 title: Read the session list
 description: What each session status means, and how to find the session you want.
 sidebar:
-  order: 2
+  order: 3
   badge:
     text: Stub
     variant: caution

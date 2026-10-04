@@ -204,8 +204,9 @@ annotation, exit code, and qualifier meaning remain in accessible text and toolt
 live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
 title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
 clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
-as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch metadata is
-authoritative, while a legacy row receives only shell-word executable recognition plus the shared YOLO classifier.
+as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and a command
+launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the unclassified
+permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a command line.
 C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed inline mark, and
 an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
 `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
@@ -232,8 +233,9 @@ summary, and the full truth stays one hover away.
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use three hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`)
 and a question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is
-non-optional. Structured non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a raw
-command never gets that shield merely because YOLO was not recognized. Both slots remain fixed-width.
+non-optional. Agent-launch non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a
+command launch gets the plain shield only from its own not-YOLO assertion, and a legacy command gets the question mark.
+Both slots remain fixed-width.
 
 The agent and permission SVGs sit in separate `title` targets, so hovering the permission mark explains its mode instead
 of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
@@ -568,9 +570,10 @@ stays open. A row that names no host at all (a session from a helm too old to re
 rather than retried. An explicit host interaction takes the host decision away from automatic reconciliation for the
 rest of that clone generation.
 
-Launch seeding is separate from host selection. Structured sources retain their stored launch selection, and legacy
-sources their raw invocation, both seeded once per clone generation. A delayed or unconfirmable host does not suppress
-that seed, and later host binding or withdrawal does not change it, so a late host read cannot overwrite an edit.
+Launch seeding is separate from host selection. An agent-launch source seeds its stored selection, a command-launch
+source its command fields, and a legacy source its stored command line, each once per clone generation. A delayed or
+unconfirmable host does not suppress that seed, and later host binding or withdrawal does not change it, so a late host
+read cannot overwrite an edit.
 
 A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
 session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so
@@ -1688,18 +1691,18 @@ evidence, but cannot authorize another directory move.
   each one; unknown versions preserve their data but refuse Resume and promotion. The deliberate Codex exception keeps
   valid `codex:` v1 tokens admitted before the column existed resumable at 0 through the existing exact-record verifier
   — bare IDs stay excluded, nothing is backfilled, and file existence or a valid header can never upgrade a version.
-  Relaunch clears provenance to 0 exactly when it clears the capture (Fresh/fallback) and preserves both together on
-  Resume; the restart claim compares the version alongside the identity, so a provenance change under an unchanged
-  conversation still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator
-  that the doorway gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness
-  variants. Senders predating either required variant fail closed at decode and at the missing CLI flag alike. Migration
-  21 adds `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file
-  name as installed by the session's current launch, written pre-spawn — after the launch spec publishes, before tmux
-  can start anything — from the one place that decides injection and fenced on the launch generation, so no report of
-  the generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program
-  that launch's argv started, retained beside the marker so admission classifies the current launch rather than the
-  resume template (a future resume's command). OMP admission requires the marker to name the current binary's asset with
-  the file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
+  Relaunch always resumes (see "Restart only resumes"), so it preserves the capture and its provenance together; the
+  restart claim compares the version alongside the identity, so a provenance change under an unchanged conversation
+  still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator that the doorway
+  gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness variants. Senders
+  predating either required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds
+  `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as
+  installed by the session's current launch, written pre-spawn — after the launch spec publishes, before tmux can start
+  anything — from the one place that decides injection and fenced on the launch generation, so no report of the
+  generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that
+  launch's argv started, retained beside the marker so admission classifies the current launch rather than the resume
+  template (a future resume's command). OMP admission requires the marker to name the current binary's asset with the
+  file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
   running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
   every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
 
@@ -1712,19 +1715,19 @@ evidence, but cannot authorize another directory move.
   have to track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the
   closed attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below
   the pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a
-  wrapper chain deeper than one level loses hook capture and takes the uncaptured-identity fallback without a report,
-  and a child the foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not
-  observed; the Bash tool always interposes a shell). Because this check runs before the capture claim, two nearby
-  Claude reports may attribute concurrently and a slower one may commit second within one generation. That race is
-  accepted because two session starts that close together are not a realistic sequence; the generation fence only keeps
-  a check made before a relaunch from committing into the new launch. The lifecycle does not justify another
-  coordination layer. The check writes no provenance and does not flip Claude's predicate, because flipping it would
-  make every existing Claude capture unresumable until its next proven report, and stopping replacement needs no
-  version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
-  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
-  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
-  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
-  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
+  wrapper chain deeper than one level loses hook capture and, without a report, cannot be restarted, and a child the
+  foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash
+  tool always interposes a shell). Because this check runs before the capture claim, two nearby Claude reports may
+  attribute concurrently and a slower one may commit second within one generation. That race is accepted because two
+  session starts that close together are not a realistic sequence; the generation fence only keeps a check made before a
+  relaunch from committing into the new launch. The lifecycle does not justify another coordination layer. The check
+  writes no provenance and does not flip Claude's predicate, because flipping it would make every existing Claude
+  capture unresumable until its next proven report, and stopping replacement needs no version. The offer gate has its
+  final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer
+  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
+  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
+  that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
+  closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
@@ -1759,7 +1762,7 @@ evidence, but cannot authorize another directory move.
   user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
   text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
   injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted
-  report, a new session keeps the uncaptured-identity fallback; no nearby record can supply a substitute identity.
+  report, a new session cannot be restarted; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
   hook has one 30 s budget covering stdin and the round trip under 60 s outer timers where Farhelm sets or documents
   them; it retries a refused or missing socket for about 4 s. A connection that lived for at least about a second before
@@ -2049,10 +2052,10 @@ manual repository selection. Browser requests debounce for 150 ms and discard st
 ### Composer history
 
 Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
-enters it once, whether the request was structured or raw. Structured suggestions are projections of the surviving
-admission rows, so 100 later raw creates evict an earlier structured setup and remove its frequency weight. Folder
-suggestions are separately bounded at 100 canonical destinations because they answer a different question: folders
-remain useful after several sessions in the same place have left the create window.
+enters it once, whether it was an agent launch or a command launch. Agent-launch suggestions are projections of the
+surviving admission rows, so 100 later command launches evict an earlier agent-launch setup and remove its frequency
+weight. Folder suggestions are separately bounded at 100 canonical destinations because they answer a different
+question: folders remain useful after several sessions in the same place have left the create window.
 
 The admission order is durable. A record with `creation_seq` sorts by its sequence until a sequence-less record enters
 the partition. That accepted legacy record switches the whole retained partition and its cutoff to the protocol fallback
@@ -2076,11 +2079,11 @@ history remains a bounded suggestion projection: browse may refine legacy unknow
 accepted-create destination.
 
 Schema 28 adds trusted repository provenance to the same bounded create-admission transaction. The helm records it from
-the accepted request, not arbitrary supervisor display metadata. Raw fresh creates age the same window and contribute
-repository recents; structured history additionally projects the saved selection. Fresh requests retain accepted cwd for
-diagnostics but skip the folder projection. Repository setups group by destination kind, canonical repository and
-complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's repository
-suggestions with its other history; ordinary history rows retain their existing semantics.
+the accepted request, not arbitrary supervisor display metadata. Command-launch fresh creates age the same window and
+contribute repository recents; agent-launch history additionally projects the saved selection. Fresh requests retain
+accepted cwd for diagnostics but skip the folder projection. Repository setups group by destination kind, canonical
+repository and complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's
+repository suggestions with its other history; ordinary history rows retain their existing semantics.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for default permission modes. The helm fills omissions
 before validation and still refuses unsupported explicit choices; display and reconciliation use `effective_permission`,
@@ -2096,7 +2099,7 @@ Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The 
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
 create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the
 supervisor's reply, per SPEC.md's rule that only explicit GUI selections shape GUI defaults and suggestions; a create
-without one (an agent's, a plain Replace, a raw create) writes neither. Codex true and false compile to a whole-argv
+without one (an agent's, a plain Replace, a command launch) writes neither. Codex true and false compile to a whole-argv
 config marker. The supervisor fills it at the shared spawn seam, after any GitHub checkout has fixed the final cwd, with
 one `projects.<cwd>.trust_level` override set to `trusted` or `untrusted`. The cwd is quoted as a TOML key and resolved
 on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false adds no trust
@@ -3309,8 +3312,9 @@ for a command launch that declared an agent type without opting into Resume. `re
 in running sessions read it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode`
 field from `RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose
 current offer is not `resume` is refused with a `Conflict` naming the reason, before anything is stopped, and the fresh
-relaunch of the stored invocation and the verbatim run of a placeholder-free template are gone. Such a template is still
-accepted at create on a non-integrated kind and stored, but never run.
+relaunch of the stored invocation and the verbatim run of a placeholder-free resume command are gone. Since launch kinds
+(protocol 39) a resume command must contain `{conversation}`, so no new session can carry one; a legacy session that
+stored one keeps it, but it is never run.
 
 Because every restart resumes, a relaunch keeps the captured identity, its source, and its ownership version; only the
 OMP launch-provenance columns clear, as they describe the launch rather than the conversation. The helm caches each

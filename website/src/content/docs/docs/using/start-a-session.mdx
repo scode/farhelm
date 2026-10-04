@@ -54,8 +54,8 @@ than type it. **name (optional)** names the session in the session list; leave i
 Not every agent has every choice, and some offer more permission modes than these two. Switching to another agent
 clears any choice it cannot take, and the launcher tells you when it does. [Supported agents](/docs/agents/) lists what
 each agent offers; workspace trust is explained on the [Codex](/docs/agents/codex/), [Muse](/docs/agents/muse/), and
-[Pi](/docs/agents/pi/) pages. To run something that is not one of these agents, choose **other / command**, covered in
-[Custom commands and profiles](/docs/agents/custom-commands/).
+[Pi](/docs/agents/pi/) pages. To run something that is not one of these agents, switch the launcher to its **command**
+tab, covered in [Custom commands](/docs/agents/custom-commands/).
 
 NOTE: The launcher remembers the permissions of your last launch, wherever you launched it from. After one YOLO launch,
 the next launcher opens on **yolo** too.
@@ -70,7 +70,8 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
 />
 
 It is not only the **yolo** choice that asks. Farhelm offers Pi only in YOLO mode, so every Pi launch asks, and so does
-a custom command that turns off its agent's approval prompts.
+a custom command you say runs without approval prompts. Farhelm goes by that answer alone and never reads the command
+to check it.
 
 To change your mind about a host later, use its settings. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
 them.
@@ -114,8 +115,10 @@ Typing a path offers to use it as the directory or to browse it.
   alt="The search box with name: fix login bug typed, offering to set that as the session's name."
 />
 
-`gh:` is the other prefix that does something no plain search does: it starts a
-[fresh GitHub checkout](#start-from-a-fresh-github-checkout). The rest only narrow a search to one kind of thing:
+`gh:` and `tl:` are the other prefixes that do something no plain search does: `gh:` starts a
+[fresh GitHub checkout](#start-from-a-fresh-github-checkout), and `tl:` applies one of your
+[launch templates](/docs/using/launch-templates/), saved sets of launcher choices. The rest only narrow a search to one
+kind of thing:
 `host:`, `harness:`, `model:`, `effort:`, `perms:`, `trust:`, `folder:`, and `recent:`. `host:local` picks the machine
 you are using.
 

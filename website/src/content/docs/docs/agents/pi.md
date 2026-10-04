@@ -16,9 +16,9 @@ Pi does not ask for permission before running shell commands or editing files, s
 permission option. Pi's `--approve` flag instead controls whether Pi trusts settings and extensions supplied by the
 project you opened; it does not enable approval prompts for the agent's actions. This was verified against Pi 0.85.1.
 
-The structured launch composer offers workspace trust separately from YOLO. Choosing true adds `--approve` for that
-launch; choosing false adds `--no-approve`. The last explicit choice from a successful user launch becomes the next new
-dialog's default. Farhelm does not write Pi's persistent trust settings.
+The session launcher offers workspace trust separately from YOLO. Choosing true adds `--approve` for that launch;
+choosing false adds `--no-approve`. The last explicit choice from a successful user launch becomes the next new dialog's
+default. Farhelm does not write Pi's persistent trust settings.
 
 ## Resume needs a saved conversation
 
@@ -30,7 +30,7 @@ Typing `/new` in Pi starts a new conversation. Until that conversation is saved,
 old one: restarting should not take you back to a conversation you already left.
 
 Farhelm checks the saved file before resuming. If it is missing or belongs to a different conversation, Farhelm refuses
-Resume and asks you to choose a fresh launch instead. This matters because Pi itself can silently start a new
+to restart the session; replace it to start over instead. This matters because Pi itself can silently start a new
 conversation when given a missing session file.
 
 The helper Farhelm uses to track Pi's active conversation is supplied at launch and is not saved with the conversation.

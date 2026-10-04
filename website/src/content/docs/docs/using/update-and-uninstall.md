@@ -2,7 +2,7 @@
 title: Update or uninstall Farhelm
 description: Update Farhelm to a new release, or remove it completely.
 sidebar:
-  order: 6
+  order: 7
   badge:
     text: Stub
     variant: caution
