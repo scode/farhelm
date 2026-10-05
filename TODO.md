@@ -105,6 +105,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Private dry-run release flow before signing.**
 
+- **Website human review deploy gating.**
+
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
   the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a
