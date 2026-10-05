@@ -773,12 +773,14 @@ struct UploadProgress {
 /// The optional fields a `CreateSession` may carry beyond the four that
 /// describe the session itself.
 ///
-/// Grouped rather than added as three more parameters because they share
-/// a property that is easy to lose sight of: all three are OPTIONAL and
-/// all three participate in the create's idempotency fingerprint, so a
-/// retry that changes any of them is a different request and is refused
-/// as a key reuse rather than merged (PLAN_M3.md item 6). `Default` is
-/// the pre-M3 create in every respect.
+/// Grouped rather than added as separate parameters because they share a
+/// property that is easy to lose sight of: all are OPTIONAL and all bear on
+/// the create's idempotency fingerprint (PLAN_M3.md item 6). The key and the
+/// parent and checkout join the resolved fields that a retry must repeat,
+/// so changing any of them is a different request, refused as a key reuse
+/// rather than merged. `request_fingerprint`, when present, replaces those
+/// resolved fields as what a retry is compared by. `Default` is the pre-M3
+/// create in every respect.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateExtras {
     /// See [`SupervisorClient::create_session_with_key`].
@@ -796,6 +798,11 @@ pub struct CreateExtras {
     /// whose key lives only as long as the child; see
     /// `ControlMsg::CreateSession::key_lives_with_session`.
     pub key_lives_with_session: bool,
+    /// The digest of an agent's request that a keyed retry is compared by
+    /// instead of the resolved launch; see
+    /// `ControlMsg::CreateSession::request_fingerprint`. `None` for every
+    /// create the helm makes on the user's behalf.
+    pub request_fingerprint: Option<String>,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -2689,6 +2696,7 @@ impl SupervisorClient {
                     // directory admission and allocates the checkout.
                     github_checkout: extras.github_checkout,
                     key_lives_with_session: extras.key_lives_with_session,
+                    request_fingerprint: extras.request_fingerprint,
                 },
             )
             .await?
