@@ -9783,7 +9783,7 @@ mod tests {
     /// describe — `Directory` always yields a working `DirectoryPayloads`;
     /// `Release` always yields a `ReleasePayloadSource` at the given URL,
     /// on a developer build as much as on a release build; `Default` splits
-    /// on `release_build`, downloading from this build's own GitHub release
+    /// on `release_build`, downloading from this build's own get.farhelm.io release
     /// when it is set and refusing with the `NoPayloads` message when it is
     /// not, except that a release-shaped development build (version `0.0.0`
     /// with a prerelease) refuses with the `UnreleasedPayloads` message,
@@ -9858,9 +9858,7 @@ mod tests {
             "a release build must download by default: {described}"
         );
         assert!(
-            described.contains(&format!(
-                "https://github.com/scode/farhelm/releases/download/v{real}/"
-            )),
+            described.contains(&format!("https://get.farhelm.io/v{real}/")),
             "the default source must name THIS build's release: {described}"
         );
 

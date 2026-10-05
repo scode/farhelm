@@ -320,9 +320,10 @@ pub struct HelmArgs {
     pub payload_dir: Option<PathBuf>,
 
     /// Base URL to download "add host" provisioning payloads from, in place
-    /// of the default GitHub release matching this build's own version.
-    /// Exists so tests and air-gapped mirrors can point at a server other
-    /// than github.com; selectable on any build, not only a release build.
+    /// of the default, this build's own release on get.farhelm.io. Exists
+    /// so tests and air-gapped mirrors can point at another server;
+    /// selectable on any build, not only a release build. The payloads are
+    /// verified against the signed checksums either way.
     ///
     /// Validated at parse time rather than at use (see
     /// [`parse_release_base_url`]): a URL this flag accepted but the

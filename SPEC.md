@@ -90,37 +90,38 @@ registers the host — no separate host-side setup. The setup question names the
 write, and that the supervisor runs persistently and starts at boot (or at login when lingering is refused). The user
 may choose to skip this setup question for later additions from the same helm; that choice is shared by every client and
 does not change discovery of an already-running supervisor. Passwordless SSH is the prerequisite on the HOST side, plus,
-on the helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory (a
-developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in place,
-provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no opened
-firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward story
-is separate; see Security.) Downloads go directly to that configured release-asset source — GitHub by default; neither
-GitHub nor a configured mirror is a relay or rendezvous service for Farhelm sessions or connections, and the no-relay
-guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all happen as
-the SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done without
-privileges on a given host, provisioning says so and continues without it rather than escalating. Before touching the
-host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it will place and
-where, the systemd units it will create, and that the supervisor will run persistently and start at boot — and proceeds
-only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but the user's
-Update click is the authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the
-helm's own build, so a host whose supervisor reports a newer build is refused with both versions named, and the user
-updates the helm instead. While an update is running, its host row stays folded and shows `updating…` until a progress
-snapshot is available, then shows the current step, completed-step count, and client-measured elapsed time inline in the
-status spot; hovering that status shows the count, the elapsed time, and every step of the run with its status and the
-current one highlighted (in a window too short for the whole list, the list keeps the current step in view), since the
-sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
-animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
-can tell when network transfer is still underway. Success returns the status spot to its normal label and leaves the row
-folded unless global details are on. Failure or an uncertain outcome still expands the row so its step list and
-diagnostic remain visible. The Hosts header's `update all` action makes the same authorized Update request for each
-remote host whose individual Update action is available at the click. A host already busy with setup or another run is
-skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
-progress, and result, so one failure does not hide or delay the others. V1 provisioning targets any Linux host with a
-usable systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is
-not a requirement — nothing provisioning does is distribution-specific — so the plan names whichever one it found rather
-than refusing; CI exercises Ubuntu. Everything else — no usable systemd user manager, or an architecture with no payload
-— falls back to the manual path (run the binary yourself), which always remains available, on the best-effort basis
-described in [Supported host setup](#supported-host-setup).
+on the helm's own machine, access to the configured release source (get.farhelm.io by default) or a staged payload
+directory (a developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in
+place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
+opened firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward
+story is separate; see Security.) Downloads go directly to that configured release-asset source — get.farhelm.io by
+default, whose archive links redirect to the project's GitHub releases; neither it, GitHub, nor a configured mirror is a
+relay or rendezvous service for Farhelm sessions or connections, and the no-relay guarantee below still holds. Nothing
+the supervisor does requires root: install, updates, and operation all happen as the SSH user (user-level systemd, files
+in user-owned directories). If some optional step cannot be done without privileges on a given host, provisioning says
+so and continues without it rather than escalating. Before touching the host for initial setup, the helm states exactly
+what it is about to do in concrete terms — the files it will place and where, the systemd units it will create, and that
+the supervisor will run persistently and start at boot — and proceeds only on confirmation. Remote updates use the same
+one-use plan mechanism behind the same authority, but the user's Update click is the authorization: no plan is shown for
+confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
+newer build is refused with both versions named, and the user updates the helm instead. While an update is running, its
+host row stays folded and shows `updating…` until a progress snapshot is available, then shows the current step,
+completed-step count, and client-measured elapsed time inline in the status spot; hovering that status shows the count,
+the elapsed time, and every step of the run with its status and the current one highlighted (in a window too short for
+the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let
+alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary
+upload appears as a separate step before installation, so the user can tell when network transfer is still underway.
+Success returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or
+an uncertain outcome still expands the row so its step list and diagnostic remain visible. The Hosts header's
+`update all` action makes the same authorized Update request for each remote host whose individual Update action is
+available at the click. A host already busy with setup or another run is skipped rather than queued for a later update;
+the local host is excluded. Each remote host keeps its own validation, progress, and result, so one failure does not
+hide or delay the others. V1 provisioning targets any Linux host with a usable systemd user manager, on the two
+architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement — nothing provisioning
+does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu.
+Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
+(run the binary yourself), which always remains available, on the best-effort basis described in
+[Supported host setup](#supported-host-setup).
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -312,12 +313,14 @@ on-demand checks keep working and the red readout still appears for a version in
 off, the user updates through either on-demand check or by running the installer, as before. None of this applies to the
 web UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
 
-The installer intentionally trusts GitHub over TLS and the upstream repository: it downloads release archives and their
-`SHA256SUMS` from the project's GitHub releases over HTTPS only (no plain-HTTP redirects) and checks archives against
-those checksums, but it does not verify the release signature the helm checks when provisioning other hosts, because a
-fresh machine has no pinned key or verifier to check it with. The helm's release mirror setting
-(`FARHELM_RELEASE_BASE_URL`) has no effect on the installer; a mirror that is safe for the helm, which verifies
-signatures, would not be safe for a download that does not.
+The installer intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from get.farhelm.io,
+downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no plain-HTTP
+redirects), and checks archives against those checksums, but it does not itself verify the release signature the helm
+checks when provisioning other hosts, because a fresh machine has no pinned key or verifier to check it with. A release
+get.farhelm.io does not publish is refused, with no fallback to another source; releases from before get.farhelm.io
+existed are not published there. The helm's release mirror setting (`FARHELM_RELEASE_BASE_URL`) has no effect on the
+installer; a mirror that is safe for the helm, which verifies signatures, would not be safe for a download that does
+not.
 
 Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches
 something the installer writes. The installer changes `Farhelm.app` only when it can show it built it, and replaces
@@ -1738,10 +1741,11 @@ Besides provisioning's release downloads (see [Topology](#topology)), two more k
 the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
 [Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks GitHub which stable release is the latest and, when it is
-newer, downloads and runs the installer, which downloads that release from GitHub. The updater does this automatically,
-at startup and about daily, unless the user turned automatic updates off, and also whenever the user checks for updates.
-It sends nothing about the user or the machine beyond what any HTTPS request to GitHub carries, and it trusts GitHub
-over TLS exactly as installing by hand does: it does not verify the release signature.
+newer, downloads the installer from GitHub and runs it, and the installer downloads that release from get.farhelm.io.
+The updater does this automatically, at startup and about daily, unless the user turned automatic updates off, and also
+whenever the user checks for updates. It sends nothing about the user or the machine beyond what any HTTPS request to
+GitHub or get.farhelm.io carries, and it trusts GitHub over TLS for the version and the installer, as the installer
+trusts get.farhelm.io: it does not verify the release signature.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -1838,11 +1842,11 @@ Further requirements:
 
 The first usable version is complete when all of the following pass:
 
-1. From the helm on the Mac (native app) — with helm-side access to the configured release source (GitHub by default) or
-   a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in one action:
-   supervisor installed and started without root, host registered, sessions operable with no further network setup. Also
-   quit the app, start a standalone `farhelm helm run` on the same state directory, and open that helm's web UI from a
-   browser (token-authenticated). Stop the standalone helm and relaunch the app before continuing.
+1. From the helm on the Mac (native app) — with helm-side access to the configured release source (get.farhelm.io by
+   default) or a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in
+   one action: supervisor installed and started without root, host registered, sessions operable with no further network
+   setup. Also quit the app, start a standalone `farhelm helm run` on the same state directory, and open that helm's web
+   UI from a browser (token-authenticated). Stop the standalone helm and relaunch the app before continuing.
 2. Create and launch an official Claude Code session in one action, in an existing `jj` workspace where Git reports
    detached HEAD.
 3. Create a local (Mac) session the same way; both appear in one list.

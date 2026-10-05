@@ -2814,13 +2814,13 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
   `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
   The last two select where "add host" provisioning payloads come from — an operator-staged directory (verified not at
-  all, D3) or a download source other than the default GitHub release (D2); `--payload-dir` wins if both are given
-  (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and
-  `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host
-  at once, so a flag naming one of them could only ever have meant the wrong thing; the last two live on as per-host
-  registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs. A release build
-  compiles its own web UI in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at runtime, and an
-  ordinary developer build with neither serves the API alone.
+  all, D3) or a download source other than the default, this build's own release on get.farhelm.io (D2); `--payload-dir`
+  wins if both are given (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`,
+  `--remote-farhelm`, and `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives
+  every registered host at once, so a flag naming one of them could only ever have meant the wrong thing; the last two
+  live on as per-host registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs.
+  A release build compiles its own web UI in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at
+  runtime, and an ordinary developer build with neither serves the API alone.
 - `farhelm helm setup [--state-dir DIR] [--port N] [--tmux PATH] [--no-supervisor] [--dry-run]`, and
   `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
   helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
@@ -3062,11 +3062,10 @@ writes that one path, so an app running from anywhere else would install every d
 record change. The same gate keeps the desktop smoke test and Linux CI off the network. Outside it nothing is registered
 in the context, and every surface behaves as before.
 
-The latest stable version is found the way `install.sh` finds it: a HEAD request to
-`https://github.com/scode/farhelm/releases/latest`, reading the redirect's `Location` without following it, and taking
-what follows the final slash without its leading `v`. That avoids the GitHub API's rate limit, and `releases/latest`
-already excludes prereleases. The answer must parse as a release version; anything else is a failed check. The probe is
-one function, so a later channel setting can replace it.
+The latest stable version is found with a HEAD request to `https://github.com/scode/farhelm/releases/latest`, reading
+the redirect's `Location` without following it, and taking what follows the final slash without its leading `v`. That
+avoids the GitHub API's rate limit, and `releases/latest` already excludes prereleases. The answer must parse as a
+release version; anything else is a failed check. The probe is one function, so a later channel setting can replace it.
 
 To install, the updater downloads `scripts/install.sh` from main on GitHub (the URL the README pipes to `sh`) over HTTPS
 into a private temporary directory and runs it with `/bin/sh`, rather than piping a `curl` into `sh`: a pipe exits 0
@@ -3117,7 +3116,8 @@ supervisor's stdin tether and its 20-second wait for the state directory cover t
 The new main program starts its own version's supervisor from its folder, as any launch does; nothing else is needed.
 Opening the releases page uses the same external-link path as the Documentation item.
 
-None of it verifies a release signature: it trusts GitHub over TLS, as installing by hand does.
+None of it verifies a release signature: it trusts GitHub over TLS for the version and the installer script, and the
+installer then trusts get.farhelm.io over TLS for the release.
 
 ## Provisioning
 
@@ -3267,11 +3267,12 @@ static tmux under our own lib dir keeps the no-root promise without asking the u
 The provisioning payloads — linux-musl `farhelm` binaries for both architectures plus the static tmux builds — are no
 longer embedded in the helm's own distribution (D2). This REVERSES the earlier "provisioning must work with no
 third-party downloads" posture: a release-shaped build (D13 — one that embedded the web UI) downloads them, on demand,
-from the GitHub release matching its own version, verifies them, and caches them under helm state before pushing them
-over SSH exactly as before. A release-shaped build of main, whose version is the development sentinel (see "Version and
-skew"), has no release to download from and refuses by default, naming `--payload-dir` and payloads built from the same
-commit (`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a
-download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
+from its own version's release on get.farhelm.io (`https://get.farhelm.io/v<version>/`, whose archive links redirect to
+where the archives are hosted, followed over https only), verifies them, and caches them under helm state before pushing
+them over SSH exactly as before. A release-shaped build of main, whose version is the development sentinel (see "Version
+and skew"), has no release to download from and refuses by default, naming `--payload-dir` and payloads built from the
+same commit (`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to
+a download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
 files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
 developer or release. The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which
 caches one release's assets, their extracted binaries, and the signed checksum file under
@@ -3293,8 +3294,8 @@ and assets at a newer version's URL and downgrade every host that helm provision
 carries the `v`, so the comment is `farhelm` plus the tag verbatim: signing without `-t`, or with a second `v`
 (`farhelm v$TAG` → `farhelm vv1.2.3`), produces a release no helm can install. `--payload-dir` is the one path that
 skips all of this — nothing there is downloaded, so nothing there is checked. SPEC.md's "no public relay, no third-party
-rendezvous service" line still holds: GitHub is a download source the helm's own machine reaches directly, never a relay
-or rendezvous point sessions or connections pass through.
+rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects, are download sources the helm's
+own machine reaches directly, never a relay or rendezvous point sessions or connections pass through.
 
 Release signing key. The key pair behind that chain is the project's one long-lived secret, and its handling is
 deliberately minimal. The public half is committed twice — `RELEASE_KEY_RING` in `release_payloads.rs` and
@@ -3312,7 +3313,7 @@ verify the next release with the key it already carries, so a rotation would the
 the old key but carrying the new one. Sequencing rotation before shipping such a feature, never in the same release, is
 the whole rule. The desktop app's updater (The desktop app's updater) does not verify signatures, so it does not trigger
 this rule; the rule stays for the day one does. Note also what the key does not protect: `install.sh` runs on a machine
-with nothing to pin a key in, so installing trusts GitHub over TLS and the `SHA256SUMS` served beside the archive; the
+with nothing to pin a key in, so installing by hand trusts get.farhelm.io over TLS and the `SHA256SUMS` it serves; the
 signature guards what a running helm provisions onto other hosts, not the first download of the helm itself.
 
 A release also carries cargo-dist's own metadata, none of which is signed and none of which Farhelm reads:
