@@ -6827,7 +6827,9 @@
   symlinks, and refuses with a clear message otherwise, changing nothing. `scripts/test-install-sh.sh` gains a fixture
   per linked folder with a sentinel file behind the link that survives the refused update. Run `sh -n`, `shellcheck`,
   and the installer test script. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
+- Execution: complete — change `nyuvkuwyytolmxqkvklzlxwoqkqzkuuv`, bookmark
+  `plan/triage-install-uninstall-gaps/03-installer-symlink`, PR
+  [#1656](https://github.com/scode/farhelm/pull/1656/changes).
 
 ## yolo-sidebar-cancel.md
 

@@ -1168,7 +1168,31 @@ EOF
     if current_record_is_ours "$contents/.farhelm-installation" "$canonical_bin/farhelm" ||
       current_record_moved_here "$contents/.farhelm-installation"; then
       updated_installation=1
-      if [ -d "$contents/Versions" ] && [ ! -L "$contents/Versions" ]; then
+      # An update writes into the app through these folders, and creating a
+      # folder or renaming a file into it would follow a symlink to wherever
+      # it points. SPEC.md forbids symlinks redirecting uninstall's removal,
+      # and the installer must not redirect its writes either, so a linked
+      # folder (deliberately made; nothing Farhelm writes is one) refuses the
+      # whole run before anything changes. Something other than a folder at
+      # one of these paths is refused the same way, rather than moved aside
+      # and deleted as an incomplete version would be. A folder that is
+      # simply missing is fine: an update recreates MacOS and Resources, and
+      # writes the new version's folder. Versions is checked here too, where
+      # a linked one used to send the run down the rebuild path instead.
+      for folder in "$app_path" "$contents" "$contents/MacOS" "$contents/Resources" \
+        "$contents/Versions" "$contents/Versions/$VERSION_NUM"; do
+        if [ -L "$folder" ]; then
+          error '%s is a symbolic link, and this installer only updates Farhelm.app through real folders; nothing was changed.\n' "$folder"
+          printf 'Replace the link with a real folder, or move Farhelm.app aside, and re-run.\n' >&2
+          exit 1
+        fi
+        if [ -e "$folder" ] && [ ! -d "$folder" ]; then
+          error '%s is not a folder, and this installer only updates Farhelm.app through real folders; nothing was changed.\n' "$folder"
+          printf 'Move it out of the way, or move Farhelm.app aside, and re-run.\n' >&2
+          exit 1
+        fi
+      done
+      if [ -d "$contents/Versions" ]; then
         install_mode=update
       else
         install_mode=rebuild
@@ -1217,7 +1241,8 @@ EOF
       # change. Only a folder without one is replaced, and it is put back
       # if the replacement fails, so a failure never loses a version.
       new_version_dir="$contents/Versions/$VERSION_NUM"
-      if [ ! -f "$new_version_dir/farhelm" ] || [ -L "$new_version_dir/farhelm" ] || [ -L "$new_version_dir" ]; then
+      # (A linked version folder never gets here: the run refused it above.)
+      if [ ! -f "$new_version_dir/farhelm" ] || [ -L "$new_version_dir/farhelm" ]; then
         stage_version_dir
         if [ -e "$new_version_dir" ] || [ -L "$new_version_dir" ]; then
           mv "$new_version_dir" "$UPDATE_WORK/replaced-version" || bundle_fail "moving the incomplete $VERSION_NUM folder aside"

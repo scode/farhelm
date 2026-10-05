@@ -993,6 +993,83 @@ check "repair: a version folder without its farhelm is completed" \
 rm -f "$REPAIR_APP/Contents/MacOS/.farhelm-new.4243.link"
 
 # ===========================================================================
+# Scenario: an update refuses to write through a symlinked folder of the app.
+# Why: creating a folder or renaming a file into one follows a symlink, so a
+# linked Contents, MacOS, Resources, Versions or version folder (or a linked
+# app) would send the update's writes somewhere else entirely. SPEC.md
+# forbids symlinks redirecting uninstall's removal, and the installer must
+# not do the opposite. Each case links one folder to a copy elsewhere holding
+# a sentinel; the update must refuse, name the link, and change nothing on
+# either side of it.
+# ===========================================================================
+echo
+echo "== update: refusing symlinked app folders =="
+# content_snapshot DIR: every file under DIR with its checksum, and every
+# symlink with its target, so a file whose bytes were rewritten in place (a
+# replaced program or icon) shows up as a change, which a listing of names
+# and types would miss.
+content_snapshot() {
+  find "$1" -type f -exec cksum {} + | sort
+  find "$1" -type l -exec sh -c 'for l; do printf "%s -> %s\n" "$l" "$(readlink "$l")"; done' _ {} + | sort
+}
+# links_to_sentinel PATH: PATH is a symlink whose target holds the sentinel.
+links_to_sentinel() { [ -L "$1" ] && [ -f "$1/sentinel" ]; }
+for linked in app Contents MacOS Resources Versions version; do
+  home="$WORKDIR/home-linked-$linked"
+  mkdir -p "$home"
+  run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
+  check "linked $linked: setup install exits 0" [ "$RC" -eq 0 ]
+  app="$home/Applications/Farhelm.app"
+  elsewhere="$WORKDIR/elsewhere-$linked"
+  case "$linked" in
+    app) path="$app" ;;
+    Contents) path="$app/Contents" ;;
+    version) path="$app/Contents/Versions/1.2.4" ;;
+    *) path="$app/Contents/$linked" ;;
+  esac
+  if [ "$linked" = version ]; then
+    mkdir -p "$elsewhere"
+  else
+    mv "$path" "$elsewhere"
+  fi
+  printf 'not the installer'"'"'s\n' >"$elsewhere/sentinel"
+  ln -s "$elsewhere" "$path"
+  before_elsewhere=$(content_snapshot "$elsewhere")
+  before_apps=$(content_snapshot "$home/Applications")
+  before_installed=$(cat "$app/Contents/Versions/installed")
+  check "linked $linked: premise: the folder is a symlink to the sentinel's folder" \
+    links_to_sentinel "$path"
+  run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
+  check "linked $linked: the update refuses" [ "$RC" -eq 1 ]
+  check "linked $linked: the refusal names the link" contains "$ERR" "$path is a symbolic link"
+  check "linked $linked: the sentinel survives" [ "$(cat "$elsewhere/sentinel")" = "not the installer's" ]
+  check "linked $linked: nothing behind the link changed, bytes included" \
+    [ "$(content_snapshot "$elsewhere")" = "$before_elsewhere" ]
+  check "linked $linked: nothing on the app's side of the link changed either" \
+    [ "$(content_snapshot "$home/Applications")" = "$before_apps" ]
+  check "linked $linked: the link is still the same link" [ "$(readlink "$path")" = "$elsewhere" ]
+  check "linked $linked: the Installed record is unchanged" \
+    [ "$(cat "$app/Contents/Versions/installed")" = "$before_installed" ]
+  check "linked $linked: the lock was released" [ ! -e "$home/Applications/.farhelm-app.lock" ]
+done
+
+# A regular file where the new version's folder belongs is refused the same
+# way, and kept: an update used to move it aside and delete it as if it were
+# an incomplete version.
+home="$WORKDIR/home-file-version"
+mkdir -p "$home"
+run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
+check "file version: setup install exits 0" [ "$RC" -eq 0 ]
+app="$home/Applications/Farhelm.app"
+printf 'a file of the user'"'"'s\n' >"$app/Contents/Versions/1.2.4"
+run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
+check "file version: the update refuses" [ "$RC" -eq 1 ]
+check "file version: the refusal names the file" contains "$ERR" "$app/Contents/Versions/1.2.4 is not a folder"
+check "file version: the file keeps its bytes" [ "$(cat "$app/Contents/Versions/1.2.4")" = "a file of the user's" ]
+check "file version: the Installed record is unchanged" [ "$(cat "$app/Contents/Versions/installed")" = 1.2.3 ]
+check "file version: the lock was released" [ ! -e "$home/Applications/.farhelm-app.lock" ]
+
+# ===========================================================================
 # Scenario: the forwarder's contract. Why: every session Farhelm started
 # holds the forwarder's path in its hook command lines, reporter variables
 # and PATH, so what it runs, and that it passes everything through unchanged
