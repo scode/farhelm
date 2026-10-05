@@ -75,3 +75,49 @@ file, a refusal that came only after the new MP4 was written, and wording, all f
 nothing, and Opus found that a manifest on main without a valid commit was read as pinning nothing (now refused), that
 the test never made the fetch genuinely shallow, and that it did not check the refusal's reason; all fixed. Nothing was
 declined.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as three squash commits on main, in order: #1649 (the demo-video recorder's own frames
+directory), #1650 (the recorder refuses a stills directory it did not make) and #1651 (the docs-screenshot publisher
+keeps the snapshot main pins). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Nothing that could interact: between the commit the stack was built on and the landing, main gained only the planning
+queue's own bookkeeping.
+
+#### Review before merging
+
+A separate reviewer that had not seen the work checked the stack before anything merged and found nothing blocking. It
+confirmed:
+
+- The demo-video wrapper (`scripts/readme-video.sh`) still prints the stills directory the recorder writes, and never
+  referred to the old frames directory.
+- The Playwright capture script is the recorder's only caller, and its new teardown step is safe whichever step fails.
+- The rule that recognises stills by name matches the names the recorder writes.
+- Nothing in the ignore rules or the demo-video and README-image docs describes where frames or stills go.
+- Every caller and description of the docs-screenshot publisher is still accurate.
+- The bookkeeping is consistent: each PR marks only its own triage outcome complete, with its change ID, bookmark and PR
+  link, and deletes exactly one feedback file together with its line in the review-feedback queue's index.
+
+#### Small wording points, not changed
+
+The reviewer noted three wording points, none affecting behaviour. The landing left them as they are; none seems worth a
+follow-up of its own, and they can ride along with the next change to those files:
+
+- The docs-screenshot SPEC says a publish that "would prune the keeper" (the snapshot main pins) stops when it cannot
+  read main's manifest. The publisher actually reads main whenever an earlier snapshot exists and the images changed, so
+  "would replace the keeper" is the more exact phrase, and "That manifest" in the same sentence could name main's
+  manifest outright.
+- The root agent instructions' summary of the publisher's self-test does not mention the new case where an unreadable
+  manifest on main refuses the publish.
+- #1651's title, "keep the docs screenshots main pins when publishing", reads awkwardly.
+
+#### Checks
+
+- Reused: the report's checks, which ran on the PRs' final content. The code on main after the last merge is identical
+  to the final stack, and the only other commits since the stack was based are the planning queue's bookkeeping.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
