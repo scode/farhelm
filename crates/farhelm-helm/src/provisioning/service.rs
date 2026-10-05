@@ -1252,23 +1252,35 @@ impl ProvisioningService {
                     } => {
                         // The fresh probe dials the destination again, so it
                         // must reach the same install the checked session list
-                        // came from: a recorded identity has to be reported
-                        // back exactly. Unlike UPDATE planning, a peer that
-                        // reports none is refused too, since uninstall removes
-                        // files and cannot afford to act on an unverified
-                        // machine.
-                        if let Some(recorded) = &row.host_identity
-                            && host_identity.as_ref() != Some(recorded)
-                        {
-                            return Err(refused(format!(
-                                "the supervisor answering at this host's destination reports {}, \
-                                 not the identity {} this host has on record, so uninstall cannot \
-                                 tell it is the same machine; resolve that first",
-                                host_identity
-                                    .as_deref()
-                                    .map_or_else(|| "no identity".to_string(), peer_text),
-                                peer_text(recorded),
-                            )));
+                        // came from: the reported identity has to equal the
+                        // recorded one exactly, a missing one included
+                        // (SPEC_impl.md). Unlike UPDATE planning, a peer that
+                        // reports none against a recorded identity is refused,
+                        // and so is a peer reporting one for a host with none
+                        // on record (the manager serves identityless
+                        // supervisors, so such a row can be connected): either
+                        // way the machine answering now may not be the one
+                        // whose sessions were checked, and uninstall removes
+                        // files.
+                        if host_identity != row.host_identity {
+                            let reported = host_identity
+                                .as_deref()
+                                .map_or_else(|| "no identity".to_string(), peer_text);
+                            return Err(refused(match &row.host_identity {
+                                Some(recorded) => format!(
+                                    "the supervisor answering at this host's destination reports \
+                                     {reported}, not the identity {} this host has on record, so \
+                                     uninstall cannot tell it is the same machine; resolve that \
+                                     first",
+                                    peer_text(recorded),
+                                ),
+                                None => format!(
+                                    "the supervisor answering at this host's destination reports \
+                                     {reported}, but this host has no identity on record, so \
+                                     uninstall cannot tell it is the same machine; resolve that \
+                                     first"
+                                ),
+                            }));
                         }
                         (Some(dial_farhelm), dial_state_dir)
                     }
