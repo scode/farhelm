@@ -120,15 +120,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   report is applied as soon as it is written rather than up to a pass later. Kept out of that plan on purpose, to keep
   it small.
 
-- **Lock down the release and update trust chain.** Auto-update installs the way a first install does: it fetches
-  `scripts/install.sh` from main over HTTPS and trusts the release's `SHA256SUMS` beside the archives. Once updates
-  install themselves, anyone who can push to main or upload release assets can run code on every Mac that updates,
-  without the user running anything. Tighten it. Two parts are required: verify what the updater installs with the
-  release signing system (minisign over `SHA256SUMS`, checked with the key the running app carries, with any key
-  rotation sequenced before that ships, per SPEC_impl.md "Release signing key"), possibly moving the installer off
-  main's raw file to a locked-down location; and make sure agents working on this machine cannot cause a release
-  directly (push a release tag, run the release workflow, or upload release assets). Plan:
-  `plans/queue/get-site-cutover.md`.
+- **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
+  checksums, and CI no longer signs. What remains: swap the maintainer's primary and backup keys into the release key
+  ring (their `.pub` files beside `release_payloads.rs` and `RELEASE_KEY_RING`); switch the README, the website and
+  `docs/install_uninstall.md` to `curl -fsSL https://get.farhelm.io/install.sh | sh` once the first release is on the
+  site; delete the old `MINISIGN_SECRET_KEY` repository secret; a Vercel user that holds only the get.farhelm.io
+  project; disconnect the docs project from Git (its automatic deploys are off only by a setting in agent-writable
+  `website/vercel.json`); tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts;
+  and review the source diff before signing, since the signature proves who published a release, not that its code is
+  sound.
 
 ## Doc todo
 

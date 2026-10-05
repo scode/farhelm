@@ -3062,22 +3062,32 @@ writes that one path, so an app running from anywhere else would install every d
 record change. The same gate keeps the desktop smoke test and Linux CI off the network. Outside it nothing is registered
 in the context, and every surface behaves as before.
 
-The latest stable version is found with a HEAD request to `https://github.com/scode/farhelm/releases/latest`, reading
-the redirect's `Location` without following it, and taking what follows the final slash without its leading `v`. That
-avoids the GitHub API's rate limit, and `releases/latest` already excludes prereleases. The answer must parse as a
-release version; anything else is a failed check. The probe is one function, so a later channel setting can replace it.
+The latest stable version is found with a plain GET of `https://get.farhelm.io/latest` (https only, at most 256 bytes,
+the probe's 30-second timeout): exactly one line, `v` and a stable release version, a final newline allowed. A
+prerelease there is refused rather than installed, since `/latest` never names one, and so is anything else that is not
+exactly that; either is a failed check. The probe is one function, so a later channel setting can replace it.
 
-To install, the updater downloads `scripts/install.sh` from main on GitHub (the URL the README pipes to `sh`) over HTTPS
-into a private temporary directory and runs it with `/bin/sh`, rather than piping a `curl` into `sh`: a pipe exits 0
-when the download fails, because `sh` reads an empty script, and a separate download has a status to check. The
-installer starts from the app's own environment with every `FARHELM_*` variable removed (an inherited
-`FARHELM_INSTALL_TEST_BASE_URL` would redirect the download) and `FARHELM_VERSION` set to the version the probe found,
-so `HOME`, `PATH` and proxy settings stay what the user's own run would see. Its output goes to the app's log. A
-Finder-launched app has no tmux on its `PATH`, so that log shows the installer's tmux advice, harmlessly. Success is
-judged only by `Contents/Versions/installed` naming the target version once the installer has exited, never by its exit
-status alone. The installer runs in its own process group, with stdin from `/dev/null` and its output written to a file
-beside the script rather than to a pipe the app reads, so that quitting the app mid-install neither kills nor signals
-it: an installer killed by a broken pipe would skip its own cleanup and leave its lock behind, and every later install,
+To install version X, nothing is trusted on TLS alone. The updater downloads `https://get.farhelm.io/vX/SHA256SUMS` and
+its `.minisig` and verifies them with `farhelm_helm::verify_signed_sums`, the rules the helm applies to its own
+downloads: a signature by any key in the compiled-in ring, and the trusted comment `farhelm vX`. It then downloads
+`https://get.farhelm.io/vX/install.sh` and refuses unless its SHA-256 equals the signed `install.sh` entry (a missing
+entry is a refusal too). Only then does it write the script and the verified checksum bytes into a private temporary
+directory and run the script with `/bin/sh`, rather than piping a `curl` into `sh`, so verification comes first and a
+failed download is an error before anything runs. The installer starts from the app's own environment with every
+`FARHELM_*` variable removed (an inherited `FARHELM_INSTALL_TEST_BASE_URL` would redirect the download) and exactly two
+set: `FARHELM_VERSION` to X, and `FARHELM_INSTALL_SUMS_FILE` to the verified checksum file, which the installer then
+uses instead of fetching its own, so every archive it downloads is checked against signed hashes. `HOME`, `PATH` and
+proxy settings stay what the user's own run would see. The installer's interface to the updater is a permanent contract,
+part of the site layout's contract ("Verification chain (D3)"): every shipped updater runs future releases' `install.sh`
+with exactly `FARHELM_VERSION` and `FARHELM_INSTALL_SUMS_FILE`, and with a checksum file that may list more entries than
+the installer needs. A later installer that renames or drops either variable, or rejects extra entries, breaks every
+installed app's updates. The install step is one function that takes the downloader and the runner (`install_release`),
+which is the seam its tests drive with signed fixtures. Its output goes to the app's log. A Finder-launched app has no
+tmux on its `PATH`, so that log shows the installer's tmux advice, harmlessly. Success is judged only by
+`Contents/Versions/installed` naming the target version once the installer has exited, never by its exit status alone.
+The installer runs in its own process group, with stdin from `/dev/null` and its output written to a file beside the
+script rather than to a pipe the app reads, so that quitting the app mid-install neither kills nor signals it: an
+installer killed by a broken pipe would skip its own cleanup and leave its lock behind, and every later install,
 automatic or by hand, would refuse until someone removed it. The worker copies that file into the app's log once the
 installer exits.
 
@@ -3103,11 +3113,20 @@ The updater publishes one state, read by the app bar: idle, checking, installing
 check with its reason, plus the version Installed names. Only a run the user started, or an automatic run that a user's
 request joined, shows its progress and outcome there; an automatic run leaves the published state idle from start to
 finish, so nothing on screen changes until the Installed record makes the update marker appear. A failed automatic check
-or install is logged, and the next check tries again. The outcome of a run the user saw (up to date, or failed with its
-reason) stays in the hover until the next run starts. While an update waits, the hover names the waiting version and
-that a restart finishes the update; a failed check the user started then names both. The readout renders it through pure
-functions (its class, glyph and hover text). "Update ready" is not a state of its own: it is Installed being newer than
-the running version, whatever the updater is doing.
+or install is logged, and the next check tries again. The exception is a release that fails verification (no key in the
+ring verifies its signature, its trusted comment names another version, or its `install.sh` does not match the signed
+checksum): nothing is run, and the app cannot update itself, which the user must not discover by accident. That sets a
+lasting notice in the published state, whether the check was automatic or the user's; the readout carries a warning mark
+and its hover says this Farhelm can no longer verify its updates and must be reinstalled with
+`curl -fsSL https://get.farhelm.io/install.sh | sh`. It stays while the app runs, until a later check verifies and
+installs or finds nothing newer, or the Installed record changes to a version newer than the running one (the user
+followed it, and the update marker now asks for the restart). It is held in memory only, so a relaunched app shows it
+again once a check fails the same way, which with automatic updates on is the startup check. Network and HTTP failures
+never set it. It is what an app more than one key rotation behind sees (see "Release signing key"). The outcome of a run
+the user saw (up to date, or failed with its reason) stays in the hover until the next run starts. While an update
+waits, the hover names the waiting version and that a restart finishes the update; a failed check the user started then
+names both. The readout renders it through pure functions (its class, glyph and hover text). "Update ready" is not a
+state of its own: it is Installed being newer than the running version, whatever the updater is doing.
 
 Restart to update spawns a detached helper in its own process group: a short `/bin/sh` script that waits, bounded at
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
@@ -3116,8 +3135,11 @@ supervisor's stdin tether and its 20-second wait for the state directory cover t
 The new main program starts its own version's supervisor from its folder, as any launch does; nothing else is needed.
 Opening the releases page uses the same external-link path as the Documentation item.
 
-None of it verifies a release signature: it trusts GitHub over TLS for the version and the installer script, and the
-installer then trusts get.farhelm.io over TLS for the release.
+What it trusts over TLS alone is the answer to "which release is the latest". A wrong answer cannot make it run anything
+unsigned, but it can withhold updates (by naming an old release), or, by naming one that fails verification, put up the
+reinstall notice, whose recovery command trusts get.farhelm.io over TLS alone. Anyone who controls the site can
+therefore get updating apps to ask their users to run that site's installer unverified, so the site's own integrity
+still matters for installed apps, not only for fresh installs.
 
 ## Provisioning
 
@@ -3290,7 +3312,8 @@ any release is published); `/<tag>/SHA256SUMS` lists, in `sha256sum` format sort
 release's `install.sh`; `/<tag>/SHA256SUMS.minisig` is the minisign signature over it, with trusted comment exactly
 `farhelm <tag>`; `/<tag>/install.sh` is the installer signed with the release; and `/<tag>/<payload>` for each payload
 is a temporary redirect to wherever the archive is hosted (today the GitHub release). `<tag>` is `v` plus the version,
-prereleases included. Installed software trusts a ring of public keys compiled into both shipped binaries
+prereleases included. The installer's two-variable interface to the desktop updater is part of this contract (see "The
+desktop app's updater"). Installed software trusts a ring of public keys compiled into both shipped binaries
 (`RELEASE_KEY_RING` in `release_payloads.rs`): a `SHA256SUMS` is accepted when its signature verifies under ANY key in
 the ring and its trusted comment is exactly `farhelm v{version}` for the version being installed, and then each payload
 must match its listed SHA-256. The helm checks its own version's release this way before provisioning a host;

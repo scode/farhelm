@@ -543,6 +543,17 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let updater = use_app_updater();
     let readout = updater.as_ref().map(AppUpdater::readout);
     let update_ready = readout.as_ref().is_some_and(|readout| readout.update_ready);
+    // This app can no longer verify its updates (SPEC.md "Installation and
+    // updates"): a warning mark on the readout while the app runs, the
+    // reinstall command in its hover, and the same words for a screen
+    // reader.
+    let needs_reinstall = readout
+        .as_ref()
+        .is_some_and(|readout| readout.needs_reinstall);
+    let marks = readout
+        .as_ref()
+        .map(crate::app_updater::readout_marks)
+        .unwrap_or_default();
     let version_tooltip = readout.map_or_else(
         || crate::app_updater::idle_tooltip(skew::CLIENT_BUILD),
         |readout| readout.tooltip,
@@ -595,15 +606,26 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     toggle_label: "Farhelm {version}, update ready: {version_tooltip}",
                     toggle_tooltip: version_tooltip.clone(),
                     hidden: !update_ready,
-                    span { class: "app-version-arrow", "aria-hidden": "true", "↑" }
+                    // The warning mark and the arrow (see `readout_marks`);
+                    // the warning's words are already in the label and
+                    // hover through the readout.
+                    for mark in marks.clone() {
+                        span { class: mark.class, "aria-hidden": "true", "{mark.glyph}" }
+                    }
                     span { dir: "ltr", "{version}" }
                 }
             }
             if !update_ready {
                 span {
-                    class: "app-version peer-value",
+                    class: if needs_reinstall { "app-version app-version-unverified peer-value" } else { "app-version peer-value" },
                     dir: "ltr",
                     "data-tooltip": "{version_tooltip}",
+                    for mark in marks {
+                        span { class: mark.class, "aria-hidden": "true", "{mark.glyph}" }
+                    }
+                    if needs_reinstall {
+                        span { class: "visually-hidden", "{version_tooltip}" }
+                    }
                     "{version}"
                 }
             }

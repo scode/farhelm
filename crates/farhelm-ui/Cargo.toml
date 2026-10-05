@@ -90,6 +90,9 @@ percent-encoding.workspace = true
 # not computed here: it comes from `farhelm_helm::build_is_newer`, so there
 # is one rule for which build is newer.
 semver.workspace = true
+# The desktop updater checks a downloaded `install.sh` against its entry in
+# the release's signed `SHA256SUMS` before running it.
+sha2.workspace = true
 # Non-wasm half of the list-view and session-detail poll sleep (src/list.rs,
 # src/session_view.rs). Not a new runtime dependency in practice:
 # `dioxus-desktop` already constructs and drives a multi-thread tokio

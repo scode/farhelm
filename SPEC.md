@@ -288,11 +288,16 @@ Package-manager installations are outside this initial scope.
 The installed Mac app also keeps itself up to date, the way Chrome does. An app running from
 `~/Applications/Farhelm.app` in this layout, and not a build from main, checks for the latest stable release shortly
 after it starts and again whenever a day of wall-clock time has passed since its last check, so a Mac that sleeps
-overnight still checks about daily. When that release is newer than the installed version, the app runs the same
-installer a user runs by hand, pinned to that release, in the background; nothing on screen changes while it works.
-While an installed update waits for a restart the automatic check does nothing more; only an on-demand check (below)
-replaces a waiting update with a newer one. A failed automatic check or install is logged and tried again at the next
-check, and is not shown. It follows the stable channel only; prereleases are not offered.
+overnight still checks about daily. When that release is newer than the installed version, the app verifies the
+release's signed checksums and its installer against the keys compiled into it, then runs that installer, pinned to that
+release and handed the verified checksums, in the background; nothing on screen changes while it works. While an
+installed update waits for a restart the automatic check does nothing more; only an on-demand check (below) replaces a
+waiting update with a newer one. A failed automatic check or install is logged and tried again at the next check, and is
+not shown, with one exception: a release that fails verification is never installed, and since the app then cannot
+update itself, its version readout carries a warning saying that this Farhelm can no longer verify its updates and must
+be reinstalled with the installer. The warning stays while the app runs, until a later check verifies and installs or
+finds nothing newer, or a newer Farhelm is installed some other way; after a relaunch it returns with the first check
+that fails the same way. It follows the stable channel only; prereleases are not offered.
 
 Whenever the installed version is newer than the running one, however it got there (the app's own background install, or
 the installer run by hand in a terminal, which the app notices within about a minute), the version readout in the
@@ -313,14 +318,14 @@ on-demand checks keep working and the red readout still appears for a version in
 off, the user updates through either on-demand check or by running the installer, as before. None of this applies to the
 web UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
 
-The installer intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from get.farhelm.io,
-downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no plain-HTTP
-redirects), and checks archives against those checksums, but it does not itself verify the release signature the helm
-checks when provisioning other hosts, because a fresh machine has no pinned key or verifier to check it with. A release
-get.farhelm.io does not publish is refused, with no fallback to another source; releases from before get.farhelm.io
-existed are not published there. The helm's release mirror setting (`FARHELM_RELEASE_BASE_URL`) has no effect on the
-installer; a mirror that is safe for the helm, which verifies signatures, would not be safe for a download that does
-not.
+The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
+get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
+plain-HTTP redirects), and checks archives against those checksums, but it does not itself verify the release signature
+the helm checks when provisioning other hosts, because a fresh machine has no pinned key or verifier to check it with. A
+release get.farhelm.io does not publish is refused, with no fallback to another source; releases from before
+get.farhelm.io existed are not published there. The helm's release mirror setting (`FARHELM_RELEASE_BASE_URL`) has no
+effect on the installer; a mirror that is safe for the helm, which verifies signatures, would not be safe for a download
+that does not.
 
 Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches
 something the installer writes. The installer changes `Farhelm.app` only when it can show it built it, and replaces
@@ -1740,12 +1745,14 @@ Steady-state operation between Farhelm's own components has exactly two network 
 Besides provisioning's release downloads (see [Topology](#topology)), two more kinds of outbound connection exist. When
 the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
 [Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
-[Installation and updates](#installation-and-updates)) asks GitHub which stable release is the latest and, when it is
-newer, downloads the installer from GitHub and runs it, and the installer downloads that release from get.farhelm.io.
-The updater does this automatically, at startup and about daily, unless the user turned automatic updates off, and also
-whenever the user checks for updates. It sends nothing about the user or the machine beyond what any HTTPS request to
-GitHub or get.farhelm.io carries, and it trusts GitHub over TLS for the version and the installer, as the installer
-trusts get.farhelm.io: it does not verify the release signature.
+[Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest and, when
+it is newer, verifies that release's signed checksums and its installer against the keys compiled into the app before
+running the installer, which downloads the release's archives from get.farhelm.io and checks them against those verified
+checksums. The updater does this automatically, at startup and about daily, unless the user turned automatic updates
+off, and also whenever the user checks for updates. It sends nothing about the user or the machine beyond what any HTTPS
+request to get.farhelm.io carries. A release that fails that verification is not installed, and the app then says that
+it can no longer verify its updates and must be reinstalled with the installer, which, like any fresh install, trusts
+get.farhelm.io over TLS alone.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
