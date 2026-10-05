@@ -334,6 +334,12 @@ what that layout's ownership record says it put there. Anything else at `~/.loca
 file or a Farhelm from before the record existed, is kept under a visible name and reported, and the install proceeds;
 no crash or interruption point may lose it.
 
+"Built it" covers the whole bundle. Once the installer recognizes `Farhelm.app` as one it made, everything inside it is
+the installer's to replace or remove, old version folders included, along with anything a user put in them. The same
+holds for the names the installer reserves for its own temporary files: `.farhelm-new.*` inside the app and
+`.farhelm-link.<pid>` beside the Terminal link. This does not change how a bundle is recognized, or how anything outside
+the bundle and those names is treated.
+
 An installation must have an equally discoverable removal path. The installation instructions document
 `farhelm uninstall` alongside installation, and a successful installer run prints that command. Users of releases
 without uninstall support on macOS may need to upgrade once before using it. The current installer cannot supply that
@@ -2027,6 +2033,12 @@ session credentials do not provide same-account containment. Running agents with
 remote environments is an intended use. Farhelm still keeps simple local guards against accidental interference where
 their identity is available, such as excluding a session's recorded agent pane from tab discovery and destructive tab
 cleanup. Future container or sandbox support would require a new, explicit isolation contract.
+
+That line between deliberate and accidental interference applies to files too. A filesystem state that only exists
+because something running as the user made it on purpose counts as deliberate interference, and the accidental guards
+need not handle it. Examples: a hand-made imitation of an installation record, a symlink whose target path contains a
+newline, a symlink planted at a path Farhelm reserves for its own marker files, or every name the installer would use to
+keep a user's file already being taken.
 
 A supervisor trusts its attached helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote

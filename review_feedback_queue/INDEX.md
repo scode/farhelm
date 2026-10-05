@@ -9,26 +9,18 @@ One line per open item. This file must always match the feedback files in this d
 - `uninstall-missing-id.md` — Connected uninstall omits missing recorded identity comparison.
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
 - `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
-- `uninstall-newline.md` — Canonical uninstall paths lose embedded newline bytes.
 - `template-clobber.md` — A new template can overwrite saved choices while its catalog is unavailable.
 - `yolo-sidebar-cancel.md` — Sidebar YOLO replacement can run after cancellation.
 - `yolo-launcher-cancel.md` — Launcher YOLO answer can restore cancelled consent.
 - `yolo-restart-cancel.md` — Restart with accepts a cancelled YOLO answer.
 - `installer-symlink.md` — App updates can overwrite files outside a symlinked bundle directory.
-- `installer-backup.md` — Preserving a foreign command can overwrite an occupied backup.
-- `installer-prune.md` — Old version cleanup can delete foreign user contents.
-- `installer-incomplete.md` — Repairing an incomplete app version can discard user files.
-- `installer-staging-glob.md` — Repairing a partial app removes unrelated staging-like files.
-- `installer-malformed-record.md` — Malformed app records may authorize foreign bundle replacement.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
-- `installer-link-staging.md` — Terminal link staging removes a colliding user file.
 - `recorder-frames-owner.md` — Starting video recording can erase an unrelated sibling directory.
 - `recorder-stills-owner.md` — Finishing a video can erase unrelated files in its stills directory.
 - `publisher-main-pin.md` — Publishing from an older checkout may stop retaining main’s pinned images.
 - `feedback-queued-close.md` — A queued close can discard feedback while sending starts.
 - `template-empty-name.md` — Editing a template silently drops its instruction to clear the name.
 - `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
-- `setup-marker-preflight.md` — Setup preflight can truncate a linked restart marker before unit publication fails.
 
 - `restart-parent-cancel.md` — Restart with parent accepts unrestricted consent after its question is cancelled.
 
