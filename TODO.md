@@ -72,6 +72,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
   learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
 
+- **Fix the "drag copies nothing" notice.** PR #1499 added a terminal notice for drags that copy nothing because the
+  program in the terminal handles the mouse itself, as Codex does. In a Codex session it misfires both ways: it shows
+  when selecting text where copy and paste do work, and dragging over text in Codex's prompt box selects nothing and
+  shows no notice, which is exactly the case it was written for. Work out when the notice should show, make it show then
+  and only then, and check that the release note's description of it holds.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
