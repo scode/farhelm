@@ -1608,6 +1608,13 @@ pub(crate) async fn do_create_session(
         }
         _ => None,
     };
+    // A create matched by its request can come back as an EARLIER attempt's
+    // session, created from what the request resolved to then: a template it
+    // names, or a clone's source, may have moved the folder since. The
+    // folder this attempt sent is then not the one the session has, so its
+    // history takes the reply's spelling instead (the cwd as that attempt
+    // sent it, `~` expanded). Every other create's reply is this request's.
+    let matched_by_request = request_fingerprint.is_some();
     let session = client
         .create_session_with_extras(
             supervisor_cwd,
@@ -1624,13 +1631,26 @@ pub(crate) async fn do_create_session(
             },
         )
         .await?;
+    // The reply spells a `~` folder expanded, so a reply ending in what
+    // follows the `~` is taken as this attempt's own folder and keeps the
+    // spelling the person recognizes; a bare `~` cannot be told apart that
+    // way and takes the reply's.
+    let reply_is_this_folder = session.cwd == cwd
+        || cwd
+            .strip_prefix('~')
+            .is_some_and(|rest| !rest.is_empty() && session.cwd.ends_with(rest));
+    let requested_cwd = if matched_by_request && !reply_is_this_folder {
+        session.cwd.clone()
+    } else {
+        cwd
+    };
     accept_created_session(
         state,
         claim,
         session,
         CreateAcceptance {
             github_repo: github_checkout.map(|checkout| checkout.repo),
-            requested_cwd: cwd,
+            requested_cwd,
             accept_result,
             explicit_selection,
         },

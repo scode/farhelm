@@ -154,7 +154,8 @@ fn render(agent: &Command) -> String {
          minutes, unless the user told Farhelm not to ask for this host; listings and\n\
          instructions never wait. Run acting verbs with a tool timeout of at least 10 minutes,\n\
          and give create, clone and spawn an --idempotency-key, so that a retry after your tool\n\
-         gave up returns the session the user approved instead of starting another. The\n\
+         gave up returns the session the user approved instead of starting another. A create\n\
+         with a key also needs --host, because the key is kept on the host it reached. The\n\
          refusals mean: the user declined (do not retry unless the user asks you to), nobody\n\
          answered in time (retry when the user is back), and no Farhelm window is open (ask the\n\
          user to open Farhelm, then retry). A change requested while an earlier one from this\n\
@@ -536,8 +537,9 @@ mod tests {
 
     /// Spec: the instructions say that acting verbs wait up to 9 minutes for
     /// the user, ask for a longer tool timeout and an idempotency key on
-    /// creating verbs, explain each refusal, and say an agent has no YOLO
-    /// override, naming the host setting the user can change instead.
+    /// creating verbs (with `--host` for a keyed create), explain each
+    /// refusal, and say an agent has no YOLO override, naming the host
+    /// setting the user can change instead.
     ///
     /// Why: SPEC.md has `farhelm agent instructions` explain the prompts. An
     /// agent that does not know a command may wait for a person kills it at its
@@ -553,6 +555,7 @@ mod tests {
             "The user approves every acting verb",
             "up to 9 minutes",
             "--idempotency-key",
+            "A create with a key also needs --host",
             "the user declined",
             "no Farhelm window is open",
             "there is no override",

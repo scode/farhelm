@@ -44,17 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Settle retry limits for template-based session creation.** A retry with the same idempotency key is promised the
-  first accepted session even after a template edit, but the helm prunes its saved launch resolutions after 30 days and
-  retains only the newest 256 per requesting session. Once a resolution is evicted, a retry resolves templates again; if
-  they changed, it can report a key conflict instead of returning the original session. Decide the lifetime of that
-  guarantee and make storage, cleanup, the specification and tests agree, including retries past both retention limits
-  after a template edit. Follow-up to the agent CLI launch change in PR #1576. Decided 2026-10-04: agent creates and
-  clones compare the request as the agent sent it rather than what it resolved to, so a retry is never limited, and the
-  helm's stored-resolution table is deleted; a keyed `farhelm agent create` must name `--host`, and a retry that a host
-  rename sends to another machine starting a second session is an accepted deficiency. Plan:
-  `plans/queue/agent-retry-by-request.md`.
-
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
   as one choice, and ideally a color as well, so a session's host can be told apart at a glance.

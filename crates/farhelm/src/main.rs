@@ -285,7 +285,8 @@ enum AgentCmd {
         #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
         cwd: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
-        /// Required unless a template sets the host.
+        /// Required unless a template sets the host, and always with
+        /// `--idempotency-key`.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         host: Option<String>,
         /// Removed with agent profiles. Kept, hidden, only so an agent still
@@ -324,7 +325,7 @@ enum AgentCmd {
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
         title: Option<String>,
-        /// Retry key: the same key creates the session only once.
+        /// Retry key: the same key creates the session only once. Needs `--host`.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
         /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,

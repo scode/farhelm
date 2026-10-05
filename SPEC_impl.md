@@ -1409,9 +1409,9 @@ is either the SOURCE or the ASKING session: a keyed replay must never be reporte
 fence on `agent_request_locks` that the lifecycle verbs take, since a create that completes while the asking credential
 is being invalidated would otherwise leave a session running that nobody was told about.
 
-A KEYED RETRY IS BOUND TO THE RESOLVED LAUNCH SENT TO THE SUPERVISOR. The fingerprint covers the whole launch, so a
-clone whose source launch changes between two attempts under one key makes the second request different and produces a
-conflict rather than replaying the first outcome under changed settings.
+A KEYED RETRY IS MATCHED BY THE REQUEST AS THE AGENT SENT IT, not by the launch it resolves to: a clone retried after
+its source's launch, folder or title changed replays the first copy, and the same key with a different request conflicts
+(see "Agent launches from the CLI").
 
 The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
 number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
@@ -3708,21 +3708,31 @@ than letting it fall back to another host. The helm sends the spawn's create wit
 40), which the supervisor honors only on the helm's full-authority connection, so the key gets a spawn's
 session-lifetime reservation rather than an interactive create's permanent one.
 
-A keyed create is bound to its first accepted resolution in `helm.db` (schema 39, table `agent_create_bindings`): the
-asker-scoped key the supervisor also reserves, the asking session, a SHA-256 digest of the request as sent (host name,
-templates, flags, spawn placement; not the `confirm_yolo` field an older CLI may still send, which the helm ignores),
-and the resolved host, folder, launch and title. A retry with the same digest reuses the resolution instead of reading
-the templates again, so the supervisor's fingerprint matches and it replays the session (or the refusal it recorded)
-after a template edit. Two attempts racing on one key both dispatch the resolution stored first. A different request
-under the same key is resolved afresh and meets the supervisor's ordinary key conflict unless it resolves identically.
-The binding is written before dispatch, because a lost reply is exactly when a retry comes. It is removed again, if this
-attempt wrote it, only when no supervisor holds the key's outcome: the helm refused before sending (the agent YOLO rule,
-the user's answer, an unconnected host), or a supervisor refused a spawn, whose session-lifetime key it does not keep
-for a refusal. A supervisor's refusal of an ordinary keyed create is recorded against the key, so the binding stays and
-the retry gets that refusal back. The table only spares retries from template edits, while the supervisor's reservation
-is what ties a key to its session, so every write prunes rows older than 30 days and all but the asking session's newest
-256; a retry past that is resolved afresh. A spawn's binding also outlives its child: a keyed spawn re-run after the
-child was deleted creates a new child from the stored resolution, not from the templates as they are now.
+A keyed agent create or clone is matched on its target by the request as the agent sent it (protocol 43). The helm
+digests a dedicated, versioned input (`agent_requests::AgentRequestDigest`): `agent_create_v1` holds the `--host` name,
+the template names in order, the flags as `TemplateFields`, and whether it is a spawn with its parent; `agent_clone_v1`
+holds the source session, the host name and the `--cwd`/`--title` overrides as given. Neither holds the `confirm_yolo`
+field an older CLI may still send. The SHA-256 of its JSON travels beside the asker-scoped key as
+`CreateSession::request_fingerprint`, and the supervisor stores `("agent_request_v1", digest)` as the reservation's
+fingerprint in place of the resolved fields, so a retry that resolves differently after a template or source edit still
+replays, and a deleted child's tombstone digests it like any fingerprint. The supervisor honors the field only beside a
+key and never beside a fresh checkout, and only the helm's full-authority connection can send it, since a
+session-authenticated create is refused before any field is read (protocol 41). Every attempt resolves afresh and the
+helm keeps no record of a key; a create the first attempt left pending is still relaunched from its stored row
+(`validate_retry`), never from the retry's resolution, and only when the launches, folders and titles agree: under a
+request fingerprint the helm approved and YOLO-checked the retry's launch, folder and title, so a stored one (the folder
+compared after `~` expansion, a title the retry leaves out not compared) that differs is refused as a `Conflict` rather
+than run unseen. A permanent key records that refusal; a spawn's session-lifetime key is freed with the stranded row
+instead, so its next retry creates afresh from the request as it resolves then. The digest input's JSON is frozen,
+because it lands in reservations that outlive builds: a new shape gets a new tag. `TemplateFields` is the one protocol
+type inside it, which is safe because its JSON is already the stored template format and omits unset fields, so a
+launcher field added later leaves existing digests alone. An inheriting spawn sends no request fingerprint and keeps the
+resolved-launch one. A keyed `farhelm agent create` without `--host` is refused at the helm (SPEC.md gives the reason).
+Reservations written before protocol 43 hold resolved-launch fingerprints, so a retry spanning the upgrade is refused as
+key reuse and never duplicated, the rule "Launch-kinds reservations" already applies. Helm schema 39 kept each keyed
+create's first resolution (`agent_create_bindings`, for 30 days) to spare retries from template edits; schema 42 drops
+that table, and the 38→39 step no longer creates it. A keyed spawn re-run after its child was deleted creates a new
+child from the templates as they are now, because the spawn's session-lifetime reservation is pruned with the child.
 
 ### Permission prompts for agent actions
 
