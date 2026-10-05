@@ -176,7 +176,7 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 ///
 /// `busy` disables all three answers while either step of a confirmed launch
 /// is in flight. `error` is the reason a "don't ask again" failed at its
-/// first step; the block stays up with it so the user can pick again.
+/// first step, shown with the question so the user can pick again.
 /// `confirm_submits` makes both starting buttons form submit buttons, for the
 /// launcher, whose resubmit is its surrounding form's own submit; otherwise
 /// they call their handlers.
