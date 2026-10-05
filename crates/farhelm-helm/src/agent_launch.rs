@@ -30,10 +30,10 @@ use farhelm_proto::{CommandLaunch, ErrorKind, LaunchRequest, LaunchSelection, Se
 
 use crate::hosts::{HostStateView, HostView};
 
-/// What an agent's create resolved to, before a host is chosen. Stored
-/// whole for a keyed create (`agent_requests::StoredResolution`), so it
-/// serializes.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// What an agent's create resolved to, before a host is chosen. Resolved
+/// afresh on every attempt; a keyed retry is matched on its host by the
+/// request, not by this (`agent_requests::AgentRequestDigest`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Resolution {
     pub(crate) cwd: String,
     pub(crate) launch: SessionLaunch,

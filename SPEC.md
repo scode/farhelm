@@ -1606,11 +1606,25 @@ there. A template whose destination is a fresh GitHub checkout is refused on the
 `--inherit-agent` is exclusive with every launch flag. A command flag repeated or contradicted (`--yolo` with
 `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
 `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
-is not an agent type is refused with the list of agent types. An idempotency key is bound to the launch the first
-accepted request resolved its templates and flags into: a retry with the same key returns that session even if a
-template has been edited since. `farhelm agent clone` copies its explicitly selected source's stored launch onto an
-explicitly named host, verbatim. Clone carries no translation between hosts: a command written for one machine may name
-a binary that is absent, a different build, or one that takes different flags on another.
+is not an agent type is refused with the list of agent types. A retry under an idempotency key is matched by the request
+as the agent sent it, not by what that request resolved to. Retrying `farhelm agent create` or `farhelm spawn` with the
+same key, host, template names, flags and spawn placement, or `farhelm agent clone` with the same key, source, host and
+`--cwd`/`--title` overrides (an override given counts as different from one left out), returns the first attempt's
+session, or the refusal its host recorded, even if a template it names or the clone's source was edited in between, for
+as long as the request still names something the helm can resolve. A retry that no longer resolves (a template deleted
+or edited into something the CLI refuses, an unconnected host, a clone source that is gone, unreachable or legacy) is
+refused, and never starts a second session. The same key with a different request is refused as key reuse. The approval
+card and the agent YOLO rule judge a keyed retry by what its request resolves to now, so a retry whose templates changed
+into a launch the host's YOLO rule refuses is refused even where a replay would have been harmless, and a retry whose
+first attempt was interrupted before its session started is refused, rather than started with what the first attempt
+resolved to, when its launch, folder or title differs. `farhelm spawn --inherit-agent` is the exception: its retry is
+compared by the launch it inherits. `farhelm agent create` requires `--host` with an idempotency key, because the key's
+record lives only on the host the first attempt reached, and a host taken from a template could change between an
+attempt and its retry. A host name that comes to mean another machine between the two (hosts renamed or reassigned) is a
+known, accepted gap: the retry is then a new create on that machine and starts a second session, with every check a
+fresh create gets. `farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named
+host, verbatim. Clone carries no translation between hosts: a command written for one machine may name a binary that is
+absent, a different build, or one that takes different flags on another.
 
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
 helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd`, `--title`, `--host`

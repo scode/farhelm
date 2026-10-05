@@ -1744,9 +1744,11 @@ pub enum AgentVerb {
         /// destination folder and `--title` the session's name.
         #[serde(default)]
         edits: crate::launcher::TemplateFields,
-        /// The create's idempotency key. The helm binds it to the launch
-        /// its first accepted request resolved to, so a retry under the
-        /// same key returns that session even after a template edit.
+        /// The create's idempotency key. The helm sends the target a digest
+        /// of this request beside it (`CreateSession::request_fingerprint`),
+        /// so a retry repeating the request returns the first attempt's
+        /// session even after a template it names was edited. A keyed create
+        /// that is not a spawn must name `host`.
         intent_key: Option<String>,
         /// The YOLO override an agent used to pass itself. The helm IGNORES it
         /// (SPEC.md, Agent-spawned sessions: there is no override an agent can

@@ -841,10 +841,8 @@ struct CreateRequest {
     intent_key: Option<String>,
 }
 
-/// What an agent's create asked for, as it asked: the part a keyed retry
-/// must repeat exactly to be bound to the first attempt's resolution
-/// (`store`'s `AGENT_CREATE_BINDINGS_SCHEMA`).
-#[derive(serde::Serialize)]
+/// What an agent's create asked for, as it asked: the templates and flags,
+/// the `--host` name, and for `farhelm spawn` where it creates.
 struct LaunchEditsRequest {
     host: Option<String>,
     templates: Vec<String>,
@@ -853,10 +851,81 @@ struct LaunchEditsRequest {
 }
 
 impl LaunchEditsRequest {
-    /// The digest a binding is matched by.
+    /// The request fingerprint a keyed create of this request sends, or
+    /// `None` for an inheriting spawn, which keeps the resolved-launch
+    /// fingerprint: its launch is the asking session's own, copied by its
+    /// supervisor, with no template for an edit to change.
+    fn request_fingerprint(&self) -> anyhow::Result<Option<String>> {
+        if self
+            .spawn
+            .as_ref()
+            .is_some_and(|placement| placement.inherit_agent)
+        {
+            return Ok(None);
+        }
+        AgentRequestDigest::Create {
+            host: self.host.as_deref(),
+            templates: &self.templates,
+            edits: &self.edits,
+            spawned: self.spawn.is_some(),
+            parent: self
+                .spawn
+                .as_ref()
+                .and_then(|placement| placement.parent.as_deref()),
+        }
+        .digest()
+        .map(Some)
+    }
+}
+
+/// The request an agent's keyed create or clone is matched by on its host,
+/// as the helm digests it (`ControlMsg::CreateSession::request_fingerprint`;
+/// SPEC.md, Agent-spawned sessions): what the agent sent, never what it
+/// resolved to, so a retry repeating the request replays its first attempt
+/// even after a template it names, or a clone's source, was edited.
+///
+/// ## The serialized shape is frozen
+///
+/// The digest lands in reservations that outlive builds, and a digest that
+/// moved between builds would turn every outstanding key into a key-reuse
+/// refusal after an upgrade. So this type, not the protocol request, is
+/// what is hashed, each verb under its own versioned tag so a create and a
+/// clone can never collide under one key; a different shape gets a new tag
+/// rather than an edit to an existing one. The one protocol type inside it
+/// is `TemplateFields`, whose JSON is already a stored format (the helm's
+/// template catalog keeps it) and which omits every unset field, so a field
+/// the launcher gains later leaves existing digests alone. `--confirm-yolo`
+/// is in neither: a retry that adds the confirmation it was asked for is the
+/// same request.
+#[derive(serde::Serialize)]
+#[serde(tag = "request")]
+enum AgentRequestDigest<'a> {
+    /// `farhelm agent create`, or `farhelm spawn` with launch flags.
+    #[serde(rename = "agent_create_v1")]
+    Create {
+        host: Option<&'a str>,
+        templates: &'a [String],
+        edits: &'a farhelm_proto::launcher::TemplateFields,
+        spawned: bool,
+        parent: Option<&'a str>,
+    },
+    /// `farhelm agent clone`, with its overrides as given (absent stays
+    /// absent, distinct from an override that repeats the source's value).
+    #[serde(rename = "agent_clone_v1")]
+    Clone {
+        source: &'a str,
+        host: &'a str,
+        cwd: Option<&'a str>,
+        title: Option<&'a str>,
+    },
+}
+
+impl AgentRequestDigest<'_> {
+    /// SHA-256 of the JSON encoding, as the 64 lowercase hex characters the
+    /// supervisor checks for.
     fn digest(&self) -> anyhow::Result<String> {
         use sha2::Digest as _;
-        let json = serde_json::to_vec(self).context("encoding the create request")?;
+        let json = serde_json::to_vec(self).context("encoding the agent request")?;
         Ok(sha2::Sha256::digest(&json)
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -864,11 +933,10 @@ impl LaunchEditsRequest {
     }
 }
 
-/// A keyed create's resolution as the helm stores it: the host chosen (with
-/// the registry's name for it when it was chosen, for the audit line) and
-/// what the templates and flags resolved to.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct StoredResolution {
+/// Where an agent's create resolved to: the host chosen (with the registry's
+/// name for it, for the audit line and the approval card) and what the
+/// templates and flags produced.
+struct ResolvedCreate {
     host: HostId,
     host_name: String,
     resolution: crate::agent_launch::Resolution,
@@ -1099,27 +1167,22 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
 /// wins; failing that, the install a template named; failing both, the
 /// create is refused, since SPEC.md's creation contract has no default host.
 ///
-/// ## What a keyed retry is bound to
+/// ## What a keyed retry is matched by
 ///
-/// The first accepted request's resolution (SPEC.md: "a retry with the same
-/// key returns that session even if a template has been edited since"). The
-/// resolution is stored before dispatch under the asker-scoped key and the
-/// request's digest; a retry repeating the request reuses it, so the
-/// supervisor sees the same launch and replays the session. Two attempts
-/// racing on one key both end up dispatching whichever resolution was
-/// stored first. A different request under the same key is resolved afresh,
-/// and the supervisor's fingerprint answers it with the ordinary idempotency
-/// conflict unless it resolves to the same launch.
+/// The request as the agent sent it, not what it resolves to (SPEC.md,
+/// Agent-spawned sessions). Every attempt resolves the templates and flags
+/// afresh and sends the target the request's digest
+/// ([`AgentRequestDigest`]) beside its key; the target compares the digest,
+/// so a retry repeating the request replays the first attempt's outcome even
+/// when a template it names was edited in between, and the same key with a
+/// different request is refused as key reuse. A retry that no longer
+/// resolves (a template deleted, the host unconnected) is refused here
+/// before anything is sent, which never starts a second session. An
+/// inheriting spawn is the exception: it keeps the resolved-launch
+/// fingerprint ([`LaunchEditsRequest::request_fingerprint`]).
 ///
-/// A binding this attempt wrote is removed again when no supervisor holds
-/// the key's outcome, so a retry after fixing the cause re-reads the
-/// templates: a refusal the helm made before sending (the YOLO
-/// confirmation, an unconnected host), and a supervisor's refusal of a
-/// spawn, whose session-lifetime key the supervisor does not keep for a
-/// refusal. A supervisor's refusal of an ordinary keyed create is recorded
-/// against the key and replayed by the supervisor, so the binding stays and
-/// the retry gets that refusal back rather than a key conflict; an
-/// outcome-unknown failure keeps it too, because the session may exist.
+/// A keyed `create` must name its host with `--host`; see the refusal below
+/// for why.
 ///
 /// ## What this function does NOT decide
 ///
@@ -1159,116 +1222,63 @@ async fn create_for_agent(
             ),
         }));
     }
-    let intent_key = asker_scoped_intent_key(asking_session, intent_key);
-    let digest = edits.digest()?;
-    let stored_binding = |key: String| {
-        let digest = digest.clone();
-        async move {
-            state
-                .store
-                .agent_create_binding(key, digest)
-                .await?
-                .map(|json| {
-                    serde_json::from_str::<StoredResolution>(&json)
-                        .context("reading a stored agent create resolution")
-                })
-                .transpose()
-        }
-    };
-    let existing = match &intent_key {
-        Some(key) => stored_binding(key.clone()).await?,
+    // A key's record lives only on the host the first attempt reached, so a
+    // retry has to reach that same host to be matched against it. A host
+    // taken from a template could change between the attempt and its retry
+    // (the template edited to name another machine), and the retry would then
+    // start a second session there, so a keyed create must name its host
+    // explicitly; `--host` also makes the templates' host fields irrelevant.
+    // A host NAME reassigned to another machine between the two attempts is
+    // the remaining gap, accepted (SPEC.md, Agent-spawned sessions): the
+    // retry is then an ordinary create on that machine, with every check a
+    // fresh create gets. A spawn always creates on its own host and takes no
+    // `--host`.
+    if intent_key.is_some() && !spawned && edits.host.is_none() {
+        return Err(crate::sessions::invalid_request(
+            "an idempotency key needs --host: the key is kept on the host the first attempt \
+             reached, so a retry must name that host rather than take it from a template"
+                .to_string(),
+        ));
+    }
+    let request_fingerprint = match &intent_key {
+        Some(_) => edits.request_fingerprint()?,
         None => None,
     };
-    let (stored, bound_here) = match existing {
-        Some(stored) => (stored, false),
-        None => {
-            let fresh = resolve_agent_create(state, origin, &edits).await?;
-            match &intent_key {
-                Some(key) => {
-                    let wrote = state
-                        .store
-                        .bind_agent_create(
-                            key.clone(),
-                            asking_session.to_string(),
-                            digest.clone(),
-                            serde_json::to_string(&fresh)
-                                .context("encoding an agent create resolution")?,
-                        )
-                        .await?;
-                    if wrote {
-                        (fresh, true)
-                    } else {
-                        // Another attempt under this key stored its
-                        // resolution first; send that one, so both attempts
-                        // present the supervisor the same launch.
-                        (stored_binding(key.clone()).await?.unwrap_or(fresh), false)
-                    }
-                }
-                None => (fresh, false),
-            }
-        }
-    };
+    let intent_key = asker_scoped_intent_key(asking_session, intent_key);
+    let resolved = resolve_agent_create(state, origin, &edits).await?;
     let verb = match &edits.spawn {
         Some(placement) if placement.inherit_agent => LaunchVerb::SpawnInherited,
         Some(_) => LaunchVerb::Spawn,
         None => LaunchVerb::Create,
     };
-    let result = match approve_launch(
+    approve_launch(
         state,
         origin,
         asking_session,
         LaunchApproval {
             verb,
-            host: stored.host,
-            host_name: stored.host_name.clone(),
-            cwd: stored.resolution.cwd.clone(),
-            title: stored.resolution.title.clone(),
-            launch: stored.resolution.launch.clone(),
+            host: resolved.host,
+            host_name: resolved.host_name.clone(),
+            cwd: resolved.resolution.cwd.clone(),
+            title: resolved.resolution.title.clone(),
+            launch: resolved.resolution.launch.clone(),
             source: None,
         },
     )
+    .await?;
+    dispatch_agent_create(
+        state,
+        origin,
+        asking_session,
+        resolved,
+        AgentCreateDispatch {
+            intent_key,
+            parent,
+            spawned,
+            request_fingerprint,
+        },
+    )
     .await
-    {
-        Ok(()) => {
-            dispatch_agent_create(
-                state,
-                origin,
-                asking_session,
-                &stored,
-                AgentCreateDispatch {
-                    intent_key: intent_key.clone(),
-                    parent,
-                    spawned,
-                },
-            )
-            .await
-        }
-        Err(refused) => Err(refused),
-    };
-    if let (Err(error), true, Some(key)) = (&result, bound_here, intent_key)
-        && no_supervisor_holds_the_outcome(error, spawned)
-        && let Err(unbind) = state.store.unbind_agent_create(key).await
-    {
-        // The refusal is what the caller needs; a binding left behind only
-        // pins this attempt's resolution for a retry.
-        tracing::warn!(error = %format!("{unbind:#}"), "could not remove an agent create binding");
-    }
-    result
-}
-
-/// Whether a failed agent create left no outcome behind that a supervisor
-/// would replay for the same key; see [`create_for_agent`]'s binding rule.
-fn no_supervisor_holds_the_outcome(error: &anyhow::Error, spawned: bool) -> bool {
-    use crate::SupervisorTransportError as Lost;
-    if matches!(
-        crate::find_cause::<Lost>(error),
-        Some(Lost::SentUnanswered | Lost::SentWrongReply { .. } | Lost::SentInvalidReply { .. })
-    ) {
-        return false;
-    }
-    let refused_by_target = crate::find_cause::<crate::SupervisorError>(error)
-        .is_some_and(|refusal| refusal.origin == crate::client::ErrorOrigin::SupervisorReply);
-    !refused_by_target || spawned
 }
 
 /// Resolve an agent's create request to a host and a launch; see
@@ -1277,7 +1287,7 @@ async fn resolve_agent_create(
     state: &AppState,
     origin: AgentOrigin,
     edits: &LaunchEditsRequest,
-) -> anyhow::Result<StoredResolution> {
+) -> anyhow::Result<ResolvedCreate> {
     let views = crate::hosts::host_views(state).await?;
     if let Some(placement) = &edits.spawn
         && placement.inherit_agent
@@ -1319,7 +1329,7 @@ async fn resolve_agent_create(
             "--host is required unless a template sets the host".to_string(),
         ));
     };
-    Ok(StoredResolution {
+    Ok(ResolvedCreate {
         host,
         host_name,
         resolution,
@@ -1341,7 +1351,7 @@ fn inherited_spawn_resolution(
     origin: AgentOrigin,
     edits: &LaunchEditsRequest,
     placement: &farhelm_proto::SpawnPlacement,
-) -> anyhow::Result<StoredResolution> {
+) -> anyhow::Result<ResolvedCreate> {
     let Some(launch) = placement.inherited_launch.as_deref().cloned() else {
         return Err(crate::sessions::invalid_request(
             "the asking session's supervisor did not supply the launch to inherit".to_string(),
@@ -1373,7 +1383,7 @@ fn inherited_spawn_resolution(
     else {
         return Err(crate::sessions::no_such_host(origin.host));
     };
-    Ok(StoredResolution {
+    Ok(ResolvedCreate {
         host: origin.host,
         host_name,
         resolution: crate::agent_launch::Resolution {
@@ -1479,12 +1489,15 @@ async fn cached_launch(state: &AppState, session_id: &str) -> Option<farhelm_pro
         .map(|info| info.launch)
 }
 
-/// The per-attempt inputs of an agent create's dispatch, beside the
-/// resolution it may share with an earlier attempt.
+/// The per-attempt inputs of an agent create's dispatch, beside its
+/// resolution.
 struct AgentCreateDispatch {
     intent_key: Option<String>,
     parent: Option<String>,
     spawned: bool,
+    /// What the target matches a keyed retry by; see
+    /// [`LaunchEditsRequest::request_fingerprint`].
+    request_fingerprint: Option<String>,
 }
 
 /// Send one resolved agent create to its host.
@@ -1492,14 +1505,14 @@ async fn dispatch_agent_create(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
-    stored: &StoredResolution,
+    resolved: ResolvedCreate,
     dispatch: AgentCreateDispatch,
 ) -> anyhow::Result<AgentReply> {
     // The claim and the client come from ONE read, which is what lets every
     // write the create goes on to make revalidate against the connection it
     // was actually sent on (see `sessions::host_client`).
-    let (claim, client) = crate::sessions::host_client(state, stored.host)?;
-    let host_name = stored.host_name.as_str();
+    let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+    let host_name = resolved.host_name.as_str();
     // The same paper trail [`resolve_target`] leaves for the lifecycle
     // verbs. `host_name` is the REGISTRY's own rendering of the matched row
     // rather than the string the request carried, so nothing
@@ -1510,7 +1523,7 @@ async fn dispatch_agent_create(
         verb = "create",
         "an agent is creating a session"
     );
-    let resolution = stored.resolution.clone();
+    let resolution = resolved.resolution;
     let session = on_host(
         crate::sessions::do_create_session(
             state,
@@ -1540,7 +1553,7 @@ async fn dispatch_agent_create(
                 settings_from_source: false,
                 parent: dispatch.parent,
                 spawned: dispatch.spawned,
-                request_fingerprint: None,
+                request_fingerprint: dispatch.request_fingerprint,
             },
         )
         .await,
@@ -1923,12 +1936,33 @@ async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<Ag
 /// onto a machine that does not have the source's checkout is a real and
 /// expected failure, and inventing a directory would be worse.
 ///
+/// ## What a keyed retry is matched by
+///
+/// The request as the agent sent it ([`AgentRequestDigest::Clone`]): the
+/// source session, the target host's name, and the overrides as given, as
+/// for `create`. A retry repeating them replays the first attempt's session
+/// even when the source's stored launch, folder or title changed in between;
+/// the copy is still read live on every attempt, and a retry whose source is
+/// gone, unreachable or legacy is refused before anything is sent.
 async fn clone_for_agent(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
     request: CloneRequest,
 ) -> anyhow::Result<AgentReply> {
+    let request_fingerprint = request
+        .intent_key
+        .as_ref()
+        .map(|_| {
+            AgentRequestDigest::Clone {
+                source: &request.source_session_id,
+                host: &request.host,
+                cwd: request.cwd.as_deref(),
+                title: request.title.as_deref(),
+            }
+            .digest()
+        })
+        .transpose()?;
     let (source_claim, source_client) =
         crate::sessions::route_session(state, &request.source_session_id).await?;
     // Marked as the read-only phase it is: this listing runs before any
@@ -2042,7 +2076,7 @@ async fn clone_for_agent(
                 settings_from_source: false,
                 parent: None,
                 spawned: false,
-                request_fingerprint: None,
+                request_fingerprint,
             },
         )
         .await,
@@ -4411,6 +4445,7 @@ mod tests {
         title: Option<String>,
         intent_key: Option<String>,
         parent: Option<String>,
+        request_fingerprint: Option<String>,
     }
 
     /// Script a supervisor that answers every `CreateSession`, recording
@@ -4435,6 +4470,18 @@ mod tests {
         peer: tokio::io::DuplexStream,
         refusal: Option<String>,
     ) -> std::sync::Arc<std::sync::Mutex<Vec<SeenCreate>>> {
+        spawn_create_responder_answering_in(peer, refusal, None)
+    }
+
+    /// [`spawn_create_responder`], answering every create with a session in
+    /// `reply_cwd` when it is set, whatever folder the request named: how a
+    /// supervisor answers a keyed retry it replays, with the session an
+    /// earlier attempt created.
+    fn spawn_create_responder_answering_in(
+        peer: tokio::io::DuplexStream,
+        refusal: Option<String>,
+        reply_cwd: Option<String>,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<SeenCreate>>> {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
@@ -4457,6 +4504,7 @@ mod tests {
                         title,
                         intent_key,
                         parent,
+                        request_fingerprint,
                         ..
                     } => {
                         recorded.lock().expect("seen mutex").push(SeenCreate {
@@ -4465,6 +4513,7 @@ mod tests {
                             title: title.clone(),
                             intent_key,
                             parent,
+                            request_fingerprint,
                         });
                         match refusal.clone() {
                             Some(message) => ControlMsg::Error {
@@ -4477,7 +4526,7 @@ mod tests {
                                 ControlMsg::SessionCreated {
                                     req_id,
                                     session: SessionInfo {
-                                        cwd,
+                                        cwd: reply_cwd.clone().unwrap_or(cwd),
                                         title: title.unwrap_or_default(),
                                         invocation: launch
                                             .as_ref()
@@ -4638,201 +4687,325 @@ mod tests {
         );
     }
 
-    /// Spec: a keyed create's retry under the same key and the same request
-    /// launches what the first attempt resolved to even after the template
-    /// it names was edited, and so does a retry after the target supervisor
-    /// refused the first attempt (it replays its own refusal for the key);
-    /// after a refusal the helm made before sending anything, a retry sees
-    /// the edited template.
+    /// Spec: a keyed create sends its host a digest of the request as the
+    /// agent sent it, and a retry repeating the request after the template it
+    /// names was edited sends the same digest and key while launching the
+    /// edited template; a different request under the key (another flag)
+    /// sends another digest; an unkeyed create sends none; a keyed create
+    /// without `--host` is refused naming it, with nothing sent.
     ///
-    /// Why: SPEC.md binds the key to "the launch the first accepted request
-    /// resolved its templates and flags into", so the supervisor's
-    /// fingerprint matches and it replays the session (or its recorded
-    /// refusal) rather than refusing the retry as a key conflict. A request
-    /// the helm itself refused never reached a supervisor, so nothing holds
-    /// its outcome and its binding must not outlive it.
+    /// Why: the host replays a keyed create by that digest (SPEC.md,
+    /// Agent-spawned sessions), so a retry across a template edit gets the
+    /// first session back rather than a key-reuse refusal, and a reused key
+    /// for another request is still refused. Only `--host` keeps a retry on
+    /// the host holding the key's record.
     #[farhelm_testtrace::test]
-    async fn a_keyed_retry_keeps_the_first_resolution_unless_the_helm_refused_it() {
+    async fn a_keyed_create_sends_its_request_digest_across_a_template_edit() {
         let launched = |seen: &SeenCreate| match &seen.launch {
             Some(farhelm_proto::SessionLaunch::Command(command)) => command.command.clone(),
             other => panic!("a command launch: {other:?}"),
         };
-        let builder_shell = |command: &str, yolo: bool| farhelm_proto::launcher::TemplateFields {
-            host: Some("identity-builder".to_string()),
-            yolo: Some(yolo),
-            ..command_template(command)
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let keyed = |key: Option<&str>, title: Option<&str>| {
+            let mut verb = template_create(&["t"], key);
+            if let AgentVerb::Create { host, edits, .. } = &mut verb {
+                *host = Some("user@builder".to_string());
+                edits.name = title.map(str::to_string);
+            }
+            verb
         };
-        let created = |outcome: &AgentOutcome| {
+        let send = async |verb: AgentVerb| {
+            let outcome = handler.handle(origin_of(&h, local), "asker", verb).await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Created { .. }
+                    }
+                ),
+                "{outcome:?}"
+            );
+        };
+        put_template(&h, "t", command_template("sh")).await;
+        send(keyed(Some("k"), None)).await;
+        put_template(&h, "t", command_template("bash")).await;
+        send(keyed(Some("k"), None)).await;
+        send(keyed(Some("k"), Some("renamed"))).await;
+        send(keyed(None, None)).await;
+
+        let sent = seen.lock().expect("seen mutex").clone();
+        assert_eq!(sent.len(), 4, "{sent:?}");
+        assert!(sent[0].request_fingerprint.is_some());
+        assert_eq!(sent[0].intent_key, sent[1].intent_key);
+        assert_eq!(
+            sent[0].request_fingerprint, sent[1].request_fingerprint,
+            "the retry repeats the request, so it repeats the digest"
+        );
+        assert_eq!(
+            (launched(&sent[0]), launched(&sent[1])),
+            ("sh".to_string(), "bash".to_string()),
+            "every attempt resolves the templates afresh"
+        );
+        assert_ne!(
+            sent[2].request_fingerprint, sent[0].request_fingerprint,
+            "another request under the key is another digest"
+        );
+        assert_eq!(
+            sent[3].request_fingerprint, None,
+            "an unkeyed create sends none"
+        );
+
+        // A template that supplies the host is enough for an unkeyed create,
+        // and exactly what a keyed one may not rely on.
+        put_template(
+            &h,
+            "hosted",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-builder".to_string()),
+                ..command_template("sh")
+            },
+        )
+        .await;
+        send(template_create(&["hosted"], None)).await;
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                template_create(&["hosted"], Some("k")),
+            )
+            .await;
+        let AgentOutcome::Err { message, .. } = outcome else {
+            panic!("a keyed create without --host is refused: {outcome:?}");
+        };
+        assert!(
+            message.contains("idempotency key needs --host"),
+            "{message}"
+        );
+        assert_eq!(
+            seen.lock().expect("seen mutex").len(),
+            5,
+            "the unkeyed create was sent and the refused keyed one was not"
+        );
+    }
+
+    /// Spec: when a keyed create is answered with a session in another
+    /// folder than the one this attempt resolved (a replay of an earlier
+    /// attempt, made before a template moved the folder), the host's folder
+    /// history records the folder the session has, not the retry's.
+    ///
+    /// Why: a request-matched retry resolves afresh, so its folder can differ
+    /// from the replayed session's; recording the retry's would offer the
+    /// user a folder no create used, paired with another folder's identity.
+    #[farhelm_testtrace::test]
+    async fn a_replayed_keyed_create_records_the_sessions_own_folder() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder_answering_in(peer, None, Some("/srv/first".to_string()));
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        put_template(&h, "t", command_template("sh")).await;
+        let mut keyed = template_create(&["t"], Some("k"));
+        if let AgentVerb::Create { host, .. } = &mut keyed {
+            *host = Some("user@builder".to_string());
+        }
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(origin_of(&h, local), "asker", keyed)
+            .await;
+        assert!(
             matches!(
                 outcome,
                 AgentOutcome::Ok {
                     reply: AgentReply::Created { .. }
                 }
-            )
-        };
-
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let seen = spawn_create_responder(peer, None);
-        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
-        let handler = HelmAgentRequests::for_state(&h.state);
-        put_template(&h, "t", builder_shell("sh", false)).await;
-        let first = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        assert!(
-            created(&first),
-            "premise: the first attempt created: {first:?}"
+            ),
+            "{outcome:?}"
         );
-        put_template(&h, "t", builder_shell("bash", false)).await;
-        let retry = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        assert!(created(&retry), "{retry:?}");
-        let other = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("other")),
-            )
-            .await;
-        assert!(created(&other), "{other:?}");
-        let seen = seen.lock().expect("seen mutex").clone();
-        assert_eq!(seen.len(), 3, "{seen:?}");
         assert_eq!(
-            launched(&seen[1]),
-            "sh",
-            "the retry keeps the first resolution"
+            seen.lock().expect("seen mutex")[0].cwd,
+            "/srv/t",
+            "premise: this attempt sent the template's current folder"
         );
-        assert_eq!(seen[0].intent_key, seen[1].intent_key);
-        assert_eq!(launched(&seen[2]), "bash", "another key resolves afresh");
-
-        // A refusal by the target supervisor keeps the binding.
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let seen = spawn_create_responder(peer, Some("cwd does not exist".to_string()));
-        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
-        let handler = HelmAgentRequests::for_state(&h.state);
-        put_template(&h, "t", builder_shell("sh", false)).await;
-        let first = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        assert!(
-            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("cwd does not exist")),
-            "premise: the target refused the first attempt: {first:?}"
-        );
-        put_template(&h, "t", builder_shell("bash", false)).await;
-        handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        let seen = seen.lock().expect("seen mutex").clone();
-        assert_eq!(seen.len(), 2, "{seen:?}");
-        assert_eq!(
-            launched(&seen[1]),
-            "sh",
-            "the target holds the key's outcome"
-        );
-
-        // A refusal the helm made before sending removes it: the builder host
-        // asks before YOLO launches, so the agent YOLO rule refuses an agent's
-        // command launch there.
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let seen = spawn_create_responder(peer, None);
-        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
-        h.store
-            .set_yolo_without_asking(remote, false)
+        let folders = h
+            .store
+            .folder_history(remote, "identity-builder")
             .await
             .unwrap();
-        let handler = HelmAgentRequests::for_state(&h.state);
-        put_template(&h, "t", builder_shell("sh", true)).await;
-        let first = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        assert!(
-            matches!(&first, AgentOutcome::Err { message, .. } if message.contains("may not start a YOLO launch")),
-            "premise: the helm refused the YOLO launch: {first:?}"
+        assert_eq!(
+            folders
+                .iter()
+                .map(|entry| entry.display_cwd.as_str())
+                .collect::<Vec<_>>(),
+            ["/srv/first"],
+            "the template now resolves to /srv/t, which this session never used"
         );
-        h.store.set_yolo_without_asking(remote, true).await.unwrap();
-        put_template(&h, "t", builder_shell("bash", false)).await;
-        let retry = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                template_create(&["t"], Some("k")),
-            )
-            .await;
-        assert!(created(&retry), "{retry:?}");
-        let seen = seen.lock().expect("seen mutex").clone();
-        assert_eq!(seen.len(), 1, "{seen:?}");
-        assert_eq!(launched(&seen[0]), "bash", "a helm refusal binds nothing");
     }
 
-    /// Spec: a failed agent create leaves its binding in place exactly when
-    /// a supervisor may hold the key's outcome: the request went out and
-    /// its answer was lost, or a supervisor refused an ordinary create
-    /// (it records that refusal against the key). A refusal the helm made,
-    /// a request never sent, and a supervisor's refusal of a spawn (whose
-    /// session-lifetime key it does not record) leave none.
+    /// Spec: the request digest covers the request as the agent sent it and
+    /// nothing else. For a create: the `--host` name, the template list (in
+    /// order), the flags (a sample here: title, folder, and a reset to the
+    /// default), whether it is a spawn and its parent. For a clone:
+    /// the source, the host name, and each override, an absent override
+    /// distinct from one that names a value. A create and a clone never
+    /// share a digest, and an inheriting spawn sends none. One request of
+    /// each kind is pinned to its encoding, because the shape is frozen.
     ///
-    /// Why: a lost reply is the moment a keyed retry exists for, and the
-    /// supervisor-refusal and spawn cases follow the supervisor's own
-    /// reservation rules; a scripted supervisor cannot drop a reply
-    /// mid-request without also dropping the host, so the classifier is
-    /// pinned on the errors themselves.
+    /// Why: each field the digest missed would let a reused key for a
+    /// different request replay the first session, and each field it wrongly
+    /// covered (the resolution) would refuse an honest retry; the inheriting
+    /// spawn keeps the resolved-launch fingerprint (Decision 5 of the plan
+    /// that made this change).
     #[farhelm_testtrace::test]
-    fn a_binding_stays_exactly_when_a_supervisor_may_hold_the_outcome() {
-        use crate::SupervisorTransportError as Lost;
-        let target = |kind| {
-            anyhow::Error::new(crate::SupervisorError {
-                origin: crate::client::ErrorOrigin::SupervisorReply,
-                kind,
-                message: "refused".to_string(),
-            })
+    fn agent_request_digests_follow_the_request_as_sent() {
+        use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
+        let create =
+            |host: Option<&str>, templates: &[&str], edits: TemplateFields| LaunchEditsRequest {
+                host: host.map(str::to_string),
+                templates: templates.iter().map(|name| name.to_string()).collect(),
+                edits,
+                spawn: None,
+            };
+        let fingerprint = |request: &LaunchEditsRequest| {
+            request
+                .request_fingerprint()
+                .unwrap()
+                .expect("a create has a digest")
         };
-        let helm = anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "refused".to_string(),
+        let base = fingerprint(&create(Some("a"), &["x", "y"], TemplateFields::default()));
+        assert_eq!(base.len(), 64);
+        assert_eq!(
+            base,
+            fingerprint(&create(Some("a"), &["x", "y"], TemplateFields::default())),
+            "the same request is the same digest"
+        );
+        let variants = [
+            create(Some("b"), &["x", "y"], TemplateFields::default()),
+            create(None, &["x", "y"], TemplateFields::default()),
+            create(Some("a"), &["y", "x"], TemplateFields::default()),
+            create(
+                Some("a"),
+                &["x", "y"],
+                TemplateFields {
+                    name: Some("t".to_string()),
+                    ..Default::default()
+                },
+            ),
+            create(
+                Some("a"),
+                &["x", "y"],
+                TemplateFields {
+                    destination: Some(TemplateDestination::Folder("/w".to_string())),
+                    ..Default::default()
+                },
+            ),
+            create(
+                Some("a"),
+                &["x", "y"],
+                TemplateFields {
+                    resume_command: Some(None),
+                    ..Default::default()
+                },
+            ),
+        ];
+        for variant in &variants {
+            assert_ne!(fingerprint(variant), base, "{:?}", variant.edits);
+        }
+        let mut spawned = create(None, &["x", "y"], TemplateFields::default());
+        let unspawned = fingerprint(&spawned);
+        spawned.spawn = Some(farhelm_proto::SpawnPlacement::default());
+        let orphan = fingerprint(&spawned);
+        spawned.spawn = Some(farhelm_proto::SpawnPlacement {
+            parent: Some("asker".to_string()),
+            ..Default::default()
         });
-        assert!(!no_supervisor_holds_the_outcome(
-            &anyhow::Error::new(Lost::SentUnanswered).context("on host"),
-            false
-        ));
-        assert!(!no_supervisor_holds_the_outcome(
-            &anyhow::Error::new(Lost::SentUnanswered),
-            true
-        ));
-        assert!(!no_supervisor_holds_the_outcome(
-            &target(ErrorKind::InvalidRequest),
-            false
-        ));
-        assert!(no_supervisor_holds_the_outcome(
-            &target(ErrorKind::InvalidRequest),
-            true
-        ));
-        assert!(no_supervisor_holds_the_outcome(&helm, false));
-        assert!(no_supervisor_holds_the_outcome(
-            &anyhow::Error::new(Lost::NotSent),
-            false
-        ));
+        let parented = fingerprint(&spawned);
+        assert!(unspawned != orphan && orphan != parented && unspawned != parented);
+        spawned.spawn = Some(farhelm_proto::SpawnPlacement {
+            parent: Some("asker".to_string()),
+            inherit_agent: true,
+            ..Default::default()
+        });
+        assert_eq!(spawned.request_fingerprint().unwrap(), None);
+
+        let clone = |cwd: Option<&str>, title: Option<&str>| {
+            AgentRequestDigest::Clone {
+                source: "s",
+                host: "a",
+                cwd,
+                title,
+            }
+            .digest()
+            .unwrap()
+        };
+        let clones = [
+            clone(None, None),
+            clone(Some(""), None),
+            clone(None, Some("")),
+            AgentRequestDigest::Clone {
+                source: "other",
+                host: "a",
+                cwd: None,
+                title: None,
+            }
+            .digest()
+            .unwrap(),
+            AgentRequestDigest::Clone {
+                source: "s",
+                host: "b",
+                cwd: None,
+                title: None,
+            }
+            .digest()
+            .unwrap(),
+        ];
+        let distinct: std::collections::HashSet<_> = clones.iter().collect();
+        assert_eq!(distinct.len(), clones.len(), "{clones:?}");
+        assert_eq!(clone(None, None), clone(None, None));
+        let as_create = AgentRequestDigest::Create {
+            host: Some("a"),
+            templates: &[],
+            edits: &TemplateFields::default(),
+            spawned: false,
+            parent: None,
+        }
+        .digest()
+        .unwrap();
+        assert!(
+            !clones.contains(&as_create),
+            "a create never shares a clone's digest"
+        );
+
+        // Pinned: outstanding keys on every host are stored under digests of
+        // these encodings. A failure here means the encoding moved (a renamed
+        // field, or a change inside `TemplateFields` or its enums), which
+        // must get a new tag rather than an updated constant.
+        let pinned_create = AgentRequestDigest::Create {
+            host: Some("builder"),
+            templates: &["base".to_string()],
+            edits: &TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Codex),
+                model: Some(None),
+                destination: Some(TemplateDestination::Folder("/srv/w".to_string())),
+                name: Some("t".to_string()),
+                ..Default::default()
+            },
+            spawned: true,
+            parent: Some("asker"),
+        };
+        assert_eq!(
+            serde_json::to_string(&pinned_create).unwrap(),
+            r#"{"request":"agent_create_v1","host":"builder","templates":["base"],"edits":{"agent":"codex","model":null,"destination":{"folder":"/srv/w"},"name":"t"},"spawned":true,"parent":"asker"}"#
+        );
+        let pinned_clone = AgentRequestDigest::Clone {
+            source: "s",
+            host: "builder",
+            cwd: Some("/srv/w"),
+            title: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&pinned_clone).unwrap(),
+            r#"{"request":"agent_clone_v1","source":"s","host":"builder","cwd":"/srv/w","title":null}"#
+        );
     }
 
     /// Spec: an explicit `--host` wins over a template's host, even one
@@ -5264,6 +5437,81 @@ mod tests {
                 "the target stores the key scoped to the asking session"
             );
         }
+    }
+
+    /// Spec: a keyed clone retried with the same source, host and overrides
+    /// sends the same request digest and key even after the source's stored
+    /// launch and title changed, while copying the source as it is now; an
+    /// override that names a value, even the source's own, is another
+    /// request and another digest.
+    ///
+    /// Why: the target replays a keyed clone by that digest (SPEC.md,
+    /// Agent-spawned sessions), so the retry gets the first copy back rather
+    /// than a key-reuse refusal after the source was edited; an override the
+    /// agent spelled out differs from one it left to the source.
+    #[farhelm_testtrace::test]
+    async fn a_keyed_clone_sends_its_request_digest_across_a_source_change() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let source = |command: &str, title: &str| {
+            let launch = farhelm_proto::SessionLaunch::plain_command(command);
+            SessionInfo {
+                cwd: "/srv/project".to_string(),
+                canonical_cwd: None,
+                invocation: launch.display_command(),
+                launch,
+                title: title.to_string(),
+                ..session("source", 1)
+            }
+        };
+        let (h, local, _remote) = creating_fleet(client_side, vec![source("sh", "before")]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let clone = |title: Option<&str>| AgentVerb::Clone {
+            source_session_id: Some("source".to_string()),
+            host: Some("user@builder".to_string()),
+            cwd: None,
+            title: title.map(str::to_string),
+            intent_key: Some("clone-key".to_string()),
+            confirm_yolo: false,
+        };
+        let created = |outcome: &AgentOutcome| {
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            )
+        };
+        let first = handler
+            .handle(origin_of(&h, local), "asker", clone(None))
+            .await;
+        assert!(created(&first), "{first:?}");
+        h.fleet.edit(local, |script| {
+            script.sessions = vec![source("bash", "after")];
+        });
+        let retry = handler
+            .handle(origin_of(&h, local), "asker", clone(None))
+            .await;
+        assert!(created(&retry), "{retry:?}");
+        let spelled = handler
+            .handle(origin_of(&h, local), "asker", clone(Some("after")))
+            .await;
+        assert!(created(&spelled), "{spelled:?}");
+
+        let seen = seen.lock().expect("seen mutex").clone();
+        assert_eq!(seen.len(), 3, "{seen:?}");
+        assert!(seen[0].request_fingerprint.is_some());
+        assert_eq!(seen[0].intent_key, seen[1].intent_key);
+        assert_eq!(seen[0].request_fingerprint, seen[1].request_fingerprint);
+        assert_eq!(
+            (seen[0].title.as_deref(), seen[1].title.as_deref()),
+            (Some("before"), Some("after")),
+            "each attempt copies the source as it is now"
+        );
+        assert_ne!(
+            seen[2].request_fingerprint, seen[1].request_fingerprint,
+            "a title spelled out is another request than one left to the source"
+        );
     }
 
     /// A clone refuses a source row whose owner changes after the live read.
