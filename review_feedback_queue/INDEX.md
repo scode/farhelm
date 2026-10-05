@@ -12,8 +12,6 @@ One line per open item. This file must always match the feedback files in this d
 - `template-empty-name.md` — Editing a template silently drops its instruction to clear the name.
 - `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
 
-- `restart-parent-cancel.md` — Restart with parent accepts unrestricted consent after its question is cancelled.
-
 ## High priority: material UX degradation
 
 - `tab-cleanup-blocks-status-sampling.md` — Automatic cleanup of an exited terminal tab can leave every session on that
