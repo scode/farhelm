@@ -282,7 +282,35 @@ supported on the Mac: the running Farhelm keeps working on the version it starte
 sessions start, and agents' `farhelm` commands and conversation tracking keep working; quitting and reopening Farhelm
 finishes the update, after which sessions started before it use the new version too. An update of an installation
 already in this layout, stopped at any point, leaves an app that launches either the old version or the new one.
-Automatic updates are outside this initial scope, as are package-manager installations.
+Package-manager installations are outside this initial scope.
+
+The installed Mac app also keeps itself up to date, the way Chrome does. An app running from
+`~/Applications/Farhelm.app` in this layout, and not a build from main, checks for the latest stable release shortly
+after it starts and again whenever a day of wall-clock time has passed since its last check, so a Mac that sleeps
+overnight still checks about daily. When that release is newer than the installed version, the app runs the same
+installer a user runs by hand, pinned to that release, in the background; nothing on screen changes while it works.
+While an installed update waits for a restart the automatic check does nothing more; only an on-demand check (below)
+replaces a waiting update with a newer one. A failed automatic check or install is logged and tried again at the next
+check, and is not shown. It follows the stable channel only; prereleases are not offered.
+
+Whenever the installed version is newer than the running one, however it got there (the app's own background install, or
+the installer run by hand in a terminal, which the app notices within about a minute), the version readout in the
+sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the whole readout red instead of
+grey. Its hover says which version is installed and that a restart finishes the update. Clicking it opens a small menu
+with **Restart to update**, which quits Farhelm and opens it again on the new version (sessions keep running, as they do
+across any quit), and **What's new**, which opens the project's GitHub releases page in the system browser. Without an
+update waiting, the readout behaves as it always has, apart from showing the result of a check the user started in its
+hover.
+
+The update can also be checked for on demand: the local machine's host row offers Update (see
+[Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Either checks
+now and installs a newer release if there is one, even while an earlier update already waits for a restart. A check
+started this way always ends in a visible state, shown in the readout's hover: up to date, installing, update ready (the
+red readout), or the check failed, with the reason. The desktop settings dialog has a checkbox for installing updates
+automatically, on by default; unticking it stops the startup and daily checks and the background installs, while the two
+on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
+off, the user updates through either on-demand check or by running the installer, as before. None of this applies to the
+web UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
 
 The installer intentionally trusts GitHub over TLS and the upstream repository: it downloads release archives and their
 `SHA256SUMS` from the project's GitHub releases over HTTPS only (no plain-HTTP redirects) and checks archives against
@@ -827,19 +855,22 @@ remembered by the helm as one preference shared by every client, together with t
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a client
 that has already loaded its preferences keeps its previous behavior until it reloads. The gear immediately to the right
-of the sidebar version opens a settings dialog with exactly two checkboxes: `set up new hosts without asking` and
+of the sidebar version opens a settings dialog with two checkboxes: `set up new hosts without asking` and
 `remove hosts without asking`, ticked when the respective confirmation is skipped. Unticking one restores that
 confirmation; ticking one makes the same choice as the host dialog's permanent answer. Changes take effect immediately
 in the current client. Each checkbox explains the current behavior, and each host dialog's permanent answer points to
-the gear as the place to undo it. These choices apply to every host and client of this helm; existing controls with a
-natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
-after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
-same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
-different answers — is not wanted for these shared preferences (terminal text size, by contrast, is deliberately per
-device; see Terminal experience). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+the gear as the place to undo it. The installed desktop app's dialog has a third checkbox, for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the other two it is a setting of that
+app installation, kept with the app rather than by the helm, and a browser never shows it. The other two choices apply
+to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client keeps
+its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a browser
+tab and the desktop app open in the same order and on the same session. Per-client persistence — browser storage, a
+desktop state file, anything that lets two clients remember different answers — is not wanted for these shared
+preferences (terminal text size, by contrast, is deliberately per device; see Terminal experience). A client that asks
+the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
+reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
+is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
+the asking session.
 
 The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
 idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed
@@ -918,22 +949,24 @@ Hover names both builds (and both protocols for a skew), says whether updating i
 that clicking updates the host to the helm's version. Clicking starts the menu's Update without confirmation; inline
 progress replaces the button. Local hosts, hosts with update options still loading, and hosts occupied by setup or
 another run retain the plain words. The helm's own machine is not updated from the panel: its row menu shows Update
-greyed out wherever it would otherwise be offered, saying to run the installer again, and choosing it sends nothing. A
-host whose supervisor is newer than the helm (a newer build on the same protocol, or a higher protocol version) says
-`too new` instead, is not offered Update, and its hover names the host's version, the helm's, and their protocol
-versions. If either build string cannot be parsed as a semantic version, or the helm is an unreleased development build,
-age is unknown and the row stays `connected`. The host count, its unpersisted details checkbox, and the secondary add
-action share one header row. Host actions open on demand from the row menu, with the older-host update button also
-available inline; details reveals the version, identity, session count, remedies, diagnostics, and provisioning progress
-under every row. Templates use the neutral secondary tier for routine row actions and the normal blue tier for popup
-affirmatives, while the host selector stays a native control; session creation remains the blue primary action.
-Destructive confirmations use the danger tier, and explicit menu, tab, and composer controls retain their purpose-built
-styling. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
-restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused
-with a clear error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title,
-directory, last-known status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of
-one. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
-clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
+greyed out wherever it would otherwise be offered, saying to run the installer again, and choosing it sends nothing. The
+installed desktop app is the exception: there the local row always offers Update, and choosing it checks for a newer
+release and installs it (see [Installation and updates](#installation-and-updates)). A host whose supervisor is newer
+than the helm (a newer build on the same protocol, or a higher protocol version) says `too new` instead, is not offered
+Update, and its hover names the host's version, the helm's, and their protocol versions. If either build string cannot
+be parsed as a semantic version, or the helm is an unreleased development build, age is unknown and the row stays
+`connected`. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host
+actions open on demand from the row menu, with the older-host update button also available inline; details reveals the
+version, identity, session count, remedies, diagnostics, and provisioning progress under every row. Templates use the
+neutral secondary tier for routine row actions and the normal blue tier for popup affirmatives, while the host selector
+stays a native control; session creation remains the blue primary action. Destructive confirmations use the danger tier,
+and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an unreachable host stay
+in the list from the helm's last-known knowledge (which survives helm restarts), clearly marked stale, rather than
+vanishing. Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later
+delivery in v1. Opening such a session shows its metadata — title, directory, last-known status — behind a clear
+host-unreachable notice; there is no terminal to show and no pretense of one. Changes made from any client — creates,
+renames, stops, deletes, status transitions — appear in all other connected clients automatically; the agent-spawn
+behavior below is one instance of this general rule, not a special case.
 
 ### Status
 
@@ -1014,8 +1047,6 @@ agent. Grok is the explicit opt-in exception for conversation capture: users ins
 themselves, while an unconfigured Grok still launches normally and cannot be restarted. OMP and Grok both use generic
 activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
 decision, not a reader waiting to be written.
-
-Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 
 ## Terminal experience
 
@@ -1197,8 +1228,8 @@ Sessions depend on exactly one thing staying up: their host. Every other compone
 - Clients and the helm can close, crash, or restart freely — closing the app, network loss, Mac sleep, a helm upgrade —
   and every session keeps running, local and remote.
 - The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and
-  agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes
-  user-controlled updates routine instead of scary.
+  agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes updates,
+  the desktop app's automatic ones included, routine instead of scary.
 
 Local sessions have full behavioral parity with remote ones; what differs in v1 is availability, not behavior. The Mac's
 supervisor runs while the app runs (or when started manually — see Topology), and per the rule above, its sessions keep
@@ -1609,7 +1640,8 @@ the agent creates it.
   reconnection, and resume attempts.
 - Long-lived input/output/paste paths have health checks, so "typing goes nowhere" is detected and reported rather than
   left for the user to infer.
-- Mixed versions across helm and supervisors are a normal steady state, since updates are user-controlled. Incompatible
+- Mixed versions across helm and supervisors are a normal steady state, since each host is updated on its own schedule
+  (remote hosts when the user updates them, the Mac app when it restarts into an installed update). Incompatible
   versions refuse to connect with a clear, actionable error; there is no silent degradation.
 - There is no compatibility across protocol versions. When a release changes the helm–supervisor protocol version, the
   user upgrades the supervisors it manages; until then those hosts refuse to connect and show that they need an update.
@@ -1623,7 +1655,8 @@ the agent creates it.
 The sidebar's top bar has a **?** button immediately to the right of the settings gear, in the desktop app and the web
 UI alike. It opens a small menu with two items: **Send feedback** and **Documentation**. Documentation opens the docs
 site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop
-app.
+app. The installed desktop app's menu has a third item, **Check for updates** (see
+[Installation and updates](#installation-and-updates)).
 
 Send feedback is a lightweight, private way to tell the maintainer something. It opens a dialog with a required message,
 an optional field for how to reach the user, and a plain display of everything else that will be sent: the Farhelm
@@ -1651,9 +1684,14 @@ interpreting the transport and credential rules here.
 
 Steady-state operation between Farhelm's own components has exactly two network edges — the browser to a standalone helm
 (token-authenticated) and the helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
-Besides provisioning's release downloads (see [Topology](#topology)), one more outbound connection exists, only on
-explicit user action: when the user sends feedback, the helm posts that submission, and nothing else, to the project's
-feedback endpoint (see [Feedback](#feedback)).
+Besides provisioning's release downloads (see [Topology](#topology)), two more kinds of outbound connection exist. When
+the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
+[Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
+[Installation and updates](#installation-and-updates)) asks GitHub which stable release is the latest and, when it is
+newer, downloads and runs the installer, which downloads that release from GitHub. The updater does this automatically,
+at startup and about daily, unless the user turned automatic updates off, and also whenever the user checks for updates.
+It sends nothing about the user or the machine beyond what any HTTPS request to GitHub carries, and it trusts GitHub
+over TLS exactly as installing by hand does: it does not verify the release signature.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -1725,11 +1763,12 @@ Further requirements:
 - Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
   configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
   directly with a consumer subscription, unmodified.
-- Updates are user-controlled: optional or version-pinnable, never silently forced.
+- Updates are never forced: the desktop app installs new stable releases in the background by default, but the user can
+  turn that off and then update by hand or pin a version with the installer; an installed update takes effect at the
+  next start of Farhelm, which Restart to update only brings forward; remote hosts are updated only when the user asks.
 
 ## Non-goals for v1
 
-- Notifications of any kind.
 - Automatic initial-prompt delivery (at creation or spawn).
 - Terminal history persistence beyond what the live terminal retains. A durable history store is a possible future
   add-on; v1 leans on agent conversation resume instead.

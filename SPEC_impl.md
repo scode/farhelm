@@ -153,9 +153,10 @@ old `{helm, id}` record was keyed by helm identity only because origin-scoped st
 swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word
 still reads as the UI default (`activity`) on the client, because the row outlives the build that validated it. Nothing
 is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no credentials either, only the
-webview readiness counter the desktop smoke reads), no eval round trip. The visible consequences are the ones SPEC.md
-names — one answer shared by every client, and a second client attaching to whatever was selected most recently
-anywhere.
+webview readiness counter the desktop smoke reads and the desktop app's automatic-updates setting, which is a setting of
+that app installation rather than one of these shared preferences), no eval round trip. The visible consequences are the
+ones SPEC.md names — one answer shared by every client, and a second client attaching to whatever was selected most
+recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -460,12 +461,14 @@ exception is an update or uninstall whose status is showing inline: the trace wo
 until that status clears.
 
 The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
-cap the backdrop below main-pane surfaces. It holds only the two app-wide host-confirmation choices, with state-specific
-help and an explanation that other open clients see changes on reload. Each reads `Some(true)` as without asking,
-updates `SharedPreferences` immediately and sends an explicit boolean through the existing sparse preference queue.
-Preference failures retain that queue's silent behavior. The dialog uses the host dialogs' shared focus/isolation helper
-with its own selector; opening focuses the first checkbox, Escape or `close` releases isolation and returns focus to the
-gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back on.
+cap the backdrop below main-pane surfaces. It holds the two app-wide host-confirmation choices, with state-specific help
+and an explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active,
+the automatic-updates checkbox, which reads and writes the desktop state file instead (see The desktop app's updater).
+Each host-confirmation checkbox reads `Some(true)` as without asking, updates `SharedPreferences` immediately and sends
+an explicit boolean through the existing sparse preference queue. Preference failures retain that queue's silent
+behavior. The dialog uses the host dialogs' shared focus/isolation helper with its own selector; opening focuses the
+first checkbox, Escape or `close` releases isolation and returns focus to the gear. The host setup and removal permanent
+answers each name that gear as the way to turn confirmation back on.
 
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
@@ -2629,7 +2632,7 @@ device authentication as every other UI route and absent from the agent request 
 submission: the message, the optional contact, the version the sidebar already shows, `desktop` or `web`, and the
 operating system the browser or webview reports. The helm validates the submission against the shared request type and
 forwards that type as JSON: it adds nothing, trims nothing, and stores nothing. Forwarding through the helm rather than
-posting from the page keeps the webview and the browser off the internet and gives one place where the outbound
+posting from the page keeps the webview and the browser off the internet and gives one place where the feedback
 connection lives.
 
 The request type and its caps live in `farhelm-proto`, shared by the UI and the helm, so both enforce the same numbers:
@@ -3005,6 +3008,78 @@ bundle has a `Contents/Versions/` folder, and refuses with an error naming the m
 to its sibling, which in that layout is the forwarder. `FARHELM_DESKTOP_FARHELM` still overrides the choice, and an app
 without the folder still uses its sibling.
 
+### The desktop app's updater
+
+The updater is native code in the desktop build of `farhelm-ui` (`desktop/updater.rs`), in the same process as the
+component tree, which reaches it through the Dioxus context the way it reaches `WebviewBootstrap`. It has no helm part:
+no endpoint, no helm state, nothing a standalone helm or a browser could see. Its network requests are native reqwest
+calls, so the webview still never talks to the internet; feedback goes through the helm because it starts in page
+JavaScript, which nothing here does.
+
+It is active only when the running program is the main program of `$HOME/Applications/Farhelm.app` (both sides
+canonicalized; `app_bundle::bundle_contents_of_main_program` recognizes the layout), that bundle has
+`Contents/Versions/`, and the compiled version is a release rather than a development build. `install.sh` only ever
+writes that one path, so an app running from anywhere else would install every day and never see its own Installed
+record change. The same gate keeps the desktop smoke test and Linux CI off the network. Outside it nothing is registered
+in the context, and every surface behaves as before.
+
+The latest stable version is found the way `install.sh` finds it: a HEAD request to
+`https://github.com/scode/farhelm/releases/latest`, reading the redirect's `Location` without following it, and taking
+what follows the final slash without its leading `v`. That avoids the GitHub API's rate limit, and `releases/latest`
+already excludes prereleases. The answer must parse as a release version; anything else is a failed check. The probe is
+one function, so a later channel setting can replace it.
+
+To install, the updater downloads `scripts/install.sh` from main on GitHub (the URL the README pipes to `sh`) over HTTPS
+into a private temporary directory and runs it with `/bin/sh`, rather than piping a `curl` into `sh`: a pipe exits 0
+when the download fails, because `sh` reads an empty script, and a separate download has a status to check. The
+installer starts from the app's own environment with every `FARHELM_*` variable removed (an inherited
+`FARHELM_INSTALL_TEST_BASE_URL` would redirect the download) and `FARHELM_VERSION` set to the version the probe found,
+so `HOME`, `PATH` and proxy settings stay what the user's own run would see. Its output goes to the app's log. A
+Finder-launched app has no tmux on its `PATH`, so that log shows the installer's tmux advice, harmlessly. Success is
+judged only by `Contents/Versions/installed` naming the target version once the installer has exited, never by its exit
+status alone. The installer runs in its own process group, with stdin from `/dev/null` and its output written to a file
+beside the script rather than to a pipe the app reads, so that quitting the app mid-install neither kills nor signals
+it: an installer killed by a broken pipe would skip its own cleanup and leave its lock behind, and every later install,
+automatic or by hand, would refuse until someone removed it. The worker copies that file into the app's log once the
+installer exits.
+
+Version order uses the helm's SemVer precedence (`farhelm_helm::build_is_newer`), the same comparison the host list uses
+for a host's build, so there is one rule for which build is newer.
+
+One worker thread does all checks and installs, so they are single-flight across every trigger: an on-demand request
+that arrives while a run is in progress joins it, and that run's outcome is then shown as the user's. The thread wakes
+about once a minute, re-reads the Installed record (cheap, and how a terminal install shows up), and runs the automatic
+check when automatic updates are on and 24 hours of wall-clock time have passed since the last check, or the clock now
+reads earlier than the last check, so a corrected clock cannot postpone checks. A plain 24-hour timer would not do: the
+timers on macOS stop counting while the Mac sleeps. The last check time is kept in memory only; the check shortly after
+startup covers restarts. While Installed is newer than the running version the automatic check does nothing: it saves a
+download a day while an update waits, and it avoids a third version replacing the folder of the one still running (the
+installer keeps only Installed, the version it replaced, and Running, and Running is recorded by a supervisor this app
+may not own). A check the user asked for still installs, accepting that rare case because the user asked; with the
+default state directory the Running record still protects the version that is running.
+
+The automatic-updates setting is `install_updates_automatically` in `desktop-client.json`, through that file's locked
+read-modify-write. It is optional, and absence means on, so every existing file reads as on.
+
+The updater publishes one state, read by the app bar: idle, checking, installing a version, up to date, or a failed
+check with its reason, plus the version Installed names. Only a run the user started, or an automatic run that a user's
+request joined, shows its progress and outcome there; an automatic run leaves the published state idle from start to
+finish, so nothing on screen changes until the Installed record makes the update marker appear. A failed automatic check
+or install is logged, and the next check tries again. The outcome of a run the user saw (up to date, or failed with its
+reason) stays in the hover until the next run starts. While an update waits, the hover names the waiting version and
+that a restart finishes the update; a failed check the user started then names both. The readout renders it through pure
+functions (its class, glyph and hover text). "Update ready" is not a state of its own: it is Installed being newer than
+the running version, whatever the updater is doing.
+
+Restart to update spawns a detached helper in its own process group: a short `/bin/sh` script that waits, bounded at
+about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
+anything if the app has not exited by then. The app then quits the way closing its window does, so the managed
+supervisor's stdin tether and its 20-second wait for the state directory cover the handover, and sessions keep running.
+The new main program starts its own version's supervisor from its folder, as any launch does; nothing else is needed.
+Opening the releases page uses the same external-link path as the Documentation item.
+
+None of it verifies a release signature: it trusts GitHub over TLS, as installing by hand does.
+
 ## Provisioning
 
 Implemented in the helm over the same system-ssh access: stream the cross-compiled `farhelm` binary (plus a private
@@ -3193,12 +3268,13 @@ maintainer chooses. Rotating is one PR: `minisign -G` a fresh pair, `gh secret s
 secret file, shred it, replace both committed copies of the public key, and cut the next release. Nothing in the field
 notices, because under D2 a helm only downloads the release built from the same commit as itself, which is signed by the
 key that commit compiled in; old helms keep verifying their old releases with the old key. The one future feature that
-changes this is a cross-version download such as an auto-updater: it would verify the next release with the key it
-already carries, so a rotation would then need a transition release signed by the old key but carrying the new one.
-Sequencing rotation before shipping such a feature, never in the same release, is the whole rule. Note also what the key
-does not protect: `install.sh` runs on a machine with nothing to pin a key in, so installing trusts GitHub over TLS and
-the `SHA256SUMS` served beside the archive; the signature guards what a running helm provisions onto other hosts, not
-the first download of the helm itself.
+changes this is a cross-version download that verifies signatures, such as an auto-updater that checks them: it would
+verify the next release with the key it already carries, so a rotation would then need a transition release signed by
+the old key but carrying the new one. Sequencing rotation before shipping such a feature, never in the same release, is
+the whole rule. The desktop app's updater (The desktop app's updater) does not verify signatures, so it does not trigger
+this rule; the rule stays for the day one does. Note also what the key does not protect: `install.sh` runs on a machine
+with nothing to pin a key in, so installing trusts GitHub over TLS and the `SHA256SUMS` served beside the archive; the
+signature guards what a running helm provisions onto other hosts, not the first download of the helm itself.
 
 A release also carries cargo-dist's own metadata, none of which is signed and none of which Farhelm reads:
 `dist-manifest.json`, a `<archive>.tar.gz.sha256` beside each of the four archives, and a lowercase `sha256.sum` over
@@ -3308,7 +3384,11 @@ stamp is reported (agreement means the two are the same string), and the reporte
 the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
 use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
 without a desktop asset-parity entry. A nonshrinking settings gear follows the version, outside the macOS drag region;
-long versions ellipsize before it or the wordmark shrinks.
+long versions ellipsize before it or the wordmark shrinks. In a desktop app whose updater is active, the version is also
+the update marker: grey as always, or red with a one-character up-arrow before it while Installed is newer than the
+running version, and then a button that opens the update menu (Restart to update, What's new). Its hover text carries
+the updater's state, so a check the user started ends visibly there. The update menu and the `?` menu are one bar-menu
+component given different items.
 
 ### What running sessions hold across versions
 
