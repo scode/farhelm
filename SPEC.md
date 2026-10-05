@@ -2246,6 +2246,18 @@ helm's machine and on every host, including wherever Farhelm places sockets or o
 in length. Beyond 20 characters, failures caused by those system limits are acceptable, but should say what limit was
 hit rather than reporting an unrelated error.
 
+Confirmed 2026-10-05: hosts that need an interactive approval (a second factor, say) for every new SSH login are
+supported on a best-effort basis only, as an exception to the passwordless-SSH requirement, including when their SSH
+server also allows only one session per connection. The helm keeps its supervisor connection and provisioning on two
+separate shared SSH connections per host, so the two never compete for one connection's sessions, and such a host works
+when the user starts both of the helm's shared-connection sockets for it by hand, for the same destination the host was
+registered with, and the username is short enough for both sockets to fit (the provisioning socket's limit is one
+character below the supervisor connection's). Only provisioning steps that run one at a time are promised to work there.
+Restarting those connections when they drop is the user's job, and port forwards set up by a connection the user started
+are theirs. Farhelm need not add complexity for such hosts. The separate provisioning connection applies to every host:
+on an ordinary host it means one more SSH login when provisioning starts with no provisioning connection open, which a
+user whose key needs a hardware touch or an agent confirmation per login sees as one more prompt.
+
 Filesystem aliasing beyond symlinks is unsupported: bind mounts, and any similar mechanism that makes the same files or
 folders appear at more than one path even after symlinks are resolved, including hard links. Farhelm compares canonical
 paths (symlinks resolved, as the checkout rules above require) and treats each canonical path as the location it names.
