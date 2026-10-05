@@ -96,6 +96,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   dialog starts with it filled in. Decide where it is remembered (the helm, so the desktop app and the web UI share it,
   or the browser) and say so in SPEC.md's Feedback section.
 
+- **Release-gate coverage for sending feedback.** A Farhelm release has to be able to send feedback to the endpoint that
+  is live at farhelm.io, but nothing in the release gate checks that. The endpoint handler's tests run only in the
+  on-demand CI website job, the browser test for the feedback dialog is in the disabled browser job, and nothing checks
+  that what a release's helm sends is still accepted by the deployed endpoint, which ships separately and can change
+  without an app release. Decide what the release gate should cover, including whether it sends to the live endpoint
+  (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
