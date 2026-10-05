@@ -1750,7 +1750,7 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "farhelm"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-desktop"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "farhelm-ui",
@@ -1783,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-fixtures"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-helm"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-proto"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "farhelm-testtrace",
  "serde",
@@ -1851,7 +1851,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-supervisor"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-teststate"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "farhelm-testtrace",
  "libc",
@@ -1886,7 +1886,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-testtrace"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "farhelm-testtrace-macros",
  "futures-util",
@@ -1901,7 +1901,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-testtrace-macros"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "libc",
  "proc-macro2",
@@ -1913,7 +1913,7 @@ dependencies = [
 
 [[package]]
 name = "farhelm-ui"
-version = "0.0.0-unreleased"
+version = "0.24.0"
 dependencies = [
  "anyhow",
  "arboard",
