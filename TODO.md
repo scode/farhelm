@@ -90,6 +90,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   intact. The old half must be a real released artifact, not this tree's build — same-version update tests are exactly
   what could never see this bug.
 
+- **Remember the feedback contact.** Send feedback's optional field for how to reach the user starts empty every time,
+  so someone who sends feedback more than once retypes it. When a contact is entered, show a "Re-use for future
+  feedback" checkbox, on by default; when it is checked, a successful send remembers the contact and the next feedback
+  dialog starts with it filled in. Decide where it is remembered (the helm, so the desktop app and the web UI share it,
+  or the browser) and say so in SPEC.md's Feedback section.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
