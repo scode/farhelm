@@ -1095,10 +1095,20 @@ sequences) get debugged at the tmux layer first; the generated config is the kno
 
 ## Helm ↔ supervisor transport: system ssh + stdio protocol
 
-The helm shells out to the user's `ssh` binary (tokio::process), one ControlMaster per host (`ControlPersist`) so
-interactive latency stays low and reconnects are cheap. The master's socket is the helm's state directory plus OpenSSH's
-own `%C` (a hash of the resolved host, port and user) and nothing else, so it fits the Unix socket limit for the
-usernames SPEC.md supports on Linux and most of them on macOS; where it cannot fit, ssh runs with connection sharing
+The helm shells out to the user's `ssh` binary (tokio::process) with connection sharing (`ControlMaster`,
+`ControlPersist`) so interactive latency stays low and reconnects are cheap. Each host gets two shared connections, one
+per purpose: the long-lived supervisor connection's master socket is the helm's state directory plus OpenSSH's own `%C`
+(a hash of the resolved host, port and user) and nothing else, and every provisioning step rides a second master at the
+same directory plus `p%C`. The two exist so Farhelm stays workable on hosts that restrict how a connection may be used.
+Every ssh command is one session on its master, and on a host whose sshd allows one session per connection, a single
+shared master would spend that session on the supervisor connection for as long as the helm is connected and refuse
+every provisioning command; OpenSSH then falls back to a fresh connection, which cannot succeed under `BatchMode` where
+every new login also needs an interactive approval. The split is unconditional, so both paths run on every host; on an
+ordinary host it costs one more login when provisioning starts with no provisioning master open. Provisioning's name
+carries its letter as a prefix because only a trailing `%C` stays an expansion token; the expanded names differ in
+length, so a provisioning socket can never share a name with a supervisor socket. The supervisor socket fits the Unix
+socket limit for the usernames SPEC.md supports on Linux and most of them on macOS; provisioning's is one character
+longer, and each connection decides its own fit. Where a socket cannot fit, that connection runs with connection sharing
 explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The supervisor is reached by executing
 `farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
 that unix socket only — no network port, exactly as SPEC.md requires.

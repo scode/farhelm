@@ -34,6 +34,30 @@
 //! remote command built on top of it. `ssh_stdio_args` builds the steady-state
 //! `farhelm internal stdio` proxy; provisioning reuses the prefix for its
 //! discovery, reach checks, convergence commands, and payload uploads.
+//!
+//! ## Two shared connections per host, and why
+//!
+//! The helm shares one ssh connection (an OpenSSH `ControlMaster`) per host
+//! and PURPOSE, not per host: the long-lived supervisor connection rides one
+//! master and every provisioning command rides another (see
+//! [`SharedConnection`]). The point is to keep Farhelm workable on hosts that
+//! restrict how a connection may be used. Every ssh command is one session on
+//! its master, and sshd's `MaxSessions` caps how many sessions one connection
+//! may carry at a time. With a cap of one, a single shared master spends its
+//! only session on `farhelm internal stdio` for as long as the helm is
+//! connected, and the master refuses every provisioning command. OpenSSH then
+//! falls back to a fresh connection, which on a host that needs an
+//! interactive approval for every new login (a second factor, say) cannot
+//! succeed under `BatchMode`. With two masters, the supervisor connection and
+//! provisioning never compete for one connection's sessions, and a user on
+//! such a host can start both masters by hand at the helm's socket paths
+//! (SPEC.md "Supported user environments" describes that, best effort).
+//!
+//! The split applies to every host, not only to restricted ones, so both
+//! paths are exercised everywhere. On an ordinary host it costs one more
+//! login when provisioning starts with no provisioning master open, and it
+//! leaves the supervisor connection's socket name and limits exactly as they
+//! were.
 
 use anyhow::Context;
 use farhelm_proto::io::ClosedBeforeHello;
@@ -112,8 +136,52 @@ fn options_with_overrides(options: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// Which of the helm's two shared ssh connections to a host a command rides.
+///
+/// Each purpose gets its own `ControlMaster` socket, so the long-lived
+/// supervisor session never occupies a session slot provisioning needs (see
+/// the module docs for why that matters). Nothing else differs between the
+/// two: the connection overrides, `BatchMode`, the option terminator and the
+/// destination's placement are identical, because both are the same
+/// security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SharedConnection {
+    /// The `farhelm internal stdio` proxy that stays up for as long as the
+    /// helm is connected to the host's supervisor.
+    Supervisor,
+    /// Every provisioning step: discovery, reach checks, install, payload
+    /// upload, update, repair and uninstall.
+    Provisioning,
+}
+
+impl SharedConnection {
+    /// The socket's file name inside the control directory, still holding
+    /// OpenSSH's `%C` token.
+    ///
+    /// The supervisor connection keeps the bare `%C` it has always had, so
+    /// its socket-path budget and the reasoning around renaming it (see
+    /// [`CONNECTION_OVERRIDES`]) are unchanged. Provisioning's name is `p%C`:
+    /// - a PREFIX, because [`ssh_control_path_option`] only keeps a trailing
+    ///   `%C` as an expansion token, and a suffix would turn it into a literal
+    ///   that every host's provisioning shared;
+    /// - and the two expanded names differ in length (41 characters against
+    ///   40), so no provisioning socket can ever share a name with a
+    ///   supervisor socket, whatever host either belongs to.
+    ///
+    /// The extra character is the socket-path budget cost of the split. It
+    /// falls on provisioning alone, because [`control_socket`] decides each
+    /// purpose's fit separately.
+    fn socket_name(self) -> &'static str {
+        match self {
+            SharedConnection::Supervisor => "%C",
+            SharedConnection::Provisioning => "p%C",
+        }
+    }
+}
+
 /// The ssh argv prefix shared by every remote command: the options, the
-/// terminator, and the destination.
+/// terminator, and the destination, with `connection` choosing which of the
+/// host's shared connections the command rides.
 ///
 /// **`--` goes before the DESTINATION, not after it**, and that ordering is
 /// a security boundary rather than a stylistic choice. A destination is
@@ -140,8 +208,9 @@ fn options_with_overrides(options: &[&str]) -> Vec<String> {
 pub(crate) fn ssh_base_args(
     dest: &str,
     control_dir: &std::path::Path,
+    connection: SharedConnection,
 ) -> anyhow::Result<Vec<String>> {
-    let Some(control_path) = control_socket(control_dir) else {
+    let Some(control_path) = control_socket(control_dir, connection) else {
         // Too long to bind: connection sharing is an optimization, so ssh
         // runs without it rather than failing every connection. Both
         // options are needed: `ControlMaster=no` only stops ssh creating a
@@ -208,7 +277,7 @@ pub(crate) fn ssh_stdio_args(
     remote_farhelm: &str,
     remote_state_dir: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
-    let mut args = ssh_base_args(dest, control_dir)?;
+    let mut args = ssh_base_args(dest, control_dir, SharedConnection::Supervisor)?;
     args.extend([
         shell_quote(remote_farhelm),
         "internal".to_string(),
@@ -237,9 +306,9 @@ const MAX_SOCKET_PATH: usize = 107;
 /// `<ControlPath>.<16 random characters>` first and renames it into place.
 const MASTER_TEMP_SUFFIX: usize = 17;
 
-/// The connection-sharing socket inside `control_dir`, as a ControlPath
-/// still holding OpenSSH's `%C` token, or `None` when its expansion would be
-/// too long for OpenSSH to bind.
+/// The connection-sharing socket for `connection` inside `control_dir`, as a
+/// ControlPath still holding OpenSSH's `%C` token, or `None` when its
+/// expansion would be too long for OpenSSH to bind.
 ///
 /// `%C` is kept because it is a hash of the resolved connection (local
 /// host, remote host, port, user), so a master is only ever reused for the
@@ -252,20 +321,32 @@ const MASTER_TEMP_SUFFIX: usize = 17;
 /// directory for usernames up to 22 characters on Linux and 17 on macOS;
 /// longer ones, which SPEC.md "Supported user environments" still requires
 /// to work, run without connection sharing (see [`ssh_base_args`]).
-pub(crate) fn control_socket(control_dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    control_socket_within(control_dir, MAX_SOCKET_PATH)
+///
+/// Those limits are the supervisor connection's. Provisioning's name is one
+/// character longer (see [`SharedConnection::socket_name`]), so its limits
+/// are 21 and 16, and each purpose falls back on its own: at exactly the
+/// supervisor's limit, the supervisor connection still shares while
+/// provisioning runs without sharing.
+pub(crate) fn control_socket(
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+) -> Option<std::path::PathBuf> {
+    control_socket_within(control_dir, connection, MAX_SOCKET_PATH)
 }
 
 /// [`control_socket`] against an explicit socket-path limit, so both
 /// platforms' limits can be tested on either.
 fn control_socket_within(
     control_dir: &std::path::Path,
+    connection: SharedConnection,
     max_socket_path: usize,
 ) -> Option<std::path::PathBuf> {
     // What `%C` expands to: 40 hex digits of a SHA-1.
     const EXPANDED_TOKEN: usize = 40;
-    let expanded = control_dir.as_os_str().len() + 1 + EXPANDED_TOKEN;
-    (expanded + MASTER_TEMP_SUFFIX <= max_socket_path).then(|| control_dir.join("%C"))
+    let name = connection.socket_name();
+    let literal = name.len() - "%C".len();
+    let expanded = control_dir.as_os_str().len() + 1 + literal + EXPANDED_TOKEN;
+    (expanded + MASTER_TEMP_SUFFIX <= max_socket_path).then(|| control_dir.join(name))
 }
 
 /// Encode a ControlPath for OpenSSH's config-value parser.
@@ -345,6 +426,7 @@ pub(crate) fn annotate_ssh_handshake_eof(
 
 #[cfg(test)]
 mod tests {
+    use super::SharedConnection;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use farhelm_proto::{ControlMsg, Frame};
     use tokio::io::AsyncWriteExt;
@@ -393,39 +475,156 @@ mod tests {
     /// `ControlPath=none` too, or a ControlPath from the user's own ssh
     /// config would still be used. Specified, per platform limit: the
     /// default state directory of a 20-character Linux username and a
-    /// 17-character macOS one get a `%C` socket; a 20-character macOS one
-    /// gets none; and the argv for a directory with no socket carries
-    /// `ControlMaster=no` and `ControlPath=none`.
+    /// 17-character macOS one get a `%C` supervisor socket; a 20-character
+    /// macOS one gets none; and the argv for a directory with no socket
+    /// carries `ControlMaster=no` and `ControlPath=none`, for either shared
+    /// connection.
     #[farhelm_testtrace::test]
     fn sharing_is_used_where_the_socket_fits_and_turned_off_where_it_cannot() {
-        let default_dir = |home: &str, user_len: usize| {
-            std::path::PathBuf::from(format!(
-                "{home}/{}/.local/state/farhelm",
-                "u".repeat(user_len)
-            ))
-        };
-        let linux = default_dir("/home", 20);
+        let linux = default_state_dir("/home", 20);
         assert_eq!(
-            super::control_socket_within(&linux, 107),
+            super::control_socket_within(&linux, SharedConnection::Supervisor, 107),
             Some(linux.join("%C"))
         );
-        let mac_17 = default_dir("/Users", 17);
+        let mac_17 = default_state_dir("/Users", 17);
         assert_eq!(
-            super::control_socket_within(&mac_17, 103),
+            super::control_socket_within(&mac_17, SharedConnection::Supervisor, 103),
             Some(mac_17.join("%C"))
         );
         assert_eq!(
-            super::control_socket_within(&default_dir("/Users", 20), 103),
+            super::control_socket_within(
+                &default_state_dir("/Users", 20),
+                SharedConnection::Supervisor,
+                103
+            ),
             None
         );
 
         let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
-        let args = super::ssh_base_args("user@host", &deep).unwrap();
-        assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
-        assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
+        for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let args = super::ssh_base_args("user@host", &deep, connection).unwrap();
+            assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
+            assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
+            assert!(
+                !args.iter().any(|arg| arg == "ControlPersist=60"),
+                "{args:?}"
+            );
+        }
+    }
+
+    /// The default state directory for a username of `user_len` characters
+    /// under `home` (`/home` on Linux, `/Users` on macOS): the path whose
+    /// length SPEC.md's username guarantee is about.
+    fn default_state_dir(home: &str, user_len: usize) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!(
+            "{home}/{}/.local/state/farhelm",
+            "u".repeat(user_len)
+        ))
+    }
+
+    /// Why this matters: the split into two shared connections exists so the
+    /// long-lived supervisor session never holds the only session a host
+    /// allows per connection while provisioning needs one. That only works
+    /// if the two purposes get different sockets for the same host, and if
+    /// the provisioning name keeps OpenSSH's `%C` live (a literal `%C` would
+    /// make every host's provisioning share one master). Spec: in the same
+    /// control directory, the supervisor connection's ControlPath ends in
+    /// `/%C` and provisioning's in `/p%C`, and a state directory holding
+    /// ssh_config syntax is escaped identically for both, leaving only the
+    /// trailing token active.
+    #[farhelm_testtrace::test]
+    fn the_supervisor_connection_and_provisioning_use_different_sockets() {
+        let dir = std::path::Path::new("/home/u/%d/\"quoted\"/state");
+        let supervisor =
+            super::ssh_base_args("user@host", dir, SharedConnection::Supervisor).unwrap();
+        let provisioning =
+            super::ssh_base_args("user@host", dir, SharedConnection::Provisioning).unwrap();
         assert!(
-            !args.iter().any(|arg| arg == "ControlPersist=60"),
-            "{args:?}"
+            supervisor.contains(&"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/state/%C\"".to_string()),
+            "{supervisor:?}"
+        );
+        assert!(
+            provisioning
+                .contains(&"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/state/p%C\"".to_string()),
+            "{provisioning:?}"
+        );
+    }
+
+    /// Why this matters: the socket name is the only thing allowed to differ
+    /// between the two shared connections. Provisioning runs the same
+    /// user-supplied destination through the same security boundary (the
+    /// connection overrides, `BatchMode`, and `--` before the destination),
+    /// and a purpose-specific branch that dropped any of it would reopen
+    /// what the shared prefix exists to close. Spec: with the ControlPath
+    /// option masked out, both purposes produce the identical argv, with
+    /// connection sharing and without it.
+    #[farhelm_testtrace::test]
+    fn both_shared_connections_build_the_same_argv_apart_from_the_socket() {
+        let mask = |args: Vec<String>| -> Vec<String> {
+            args.into_iter()
+                .map(|arg| {
+                    if arg.starts_with("ControlPath=\"") {
+                        "ControlPath=<socket>".to_string()
+                    } else {
+                        arg
+                    }
+                })
+                .collect()
+        };
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
+        for dir in [std::path::Path::new("/state"), deep.as_path()] {
+            let hostile = "-oProxyCommand=touch /tmp/pwned";
+            assert_eq!(
+                mask(super::ssh_base_args(hostile, dir, SharedConnection::Supervisor).unwrap()),
+                mask(super::ssh_base_args(hostile, dir, SharedConnection::Provisioning).unwrap()),
+            );
+        }
+    }
+
+    /// Why this matters: provisioning's socket name is one character longer
+    /// than the supervisor connection's, and SPEC.md "Supported user
+    /// environments" requires 20-character usernames to keep working, so
+    /// that character must cost provisioning alone and must never take
+    /// connection sharing away from the supervisor connection. Spec: each
+    /// purpose decides its own fit. The default state directory of a
+    /// 17-character macOS username (the supervisor's limit there) shares the
+    /// supervisor connection but runs provisioning without sharing; on Linux
+    /// the limits are 22 and 21, so 20- and 21-character usernames share both
+    /// and a 22-character one shares only the supervisor connection.
+    #[farhelm_testtrace::test]
+    fn each_shared_connection_decides_its_own_socket_fit() {
+        let mac_17 = default_state_dir("/Users", 17);
+        assert_eq!(
+            super::control_socket_within(&mac_17, SharedConnection::Supervisor, 103),
+            Some(mac_17.join("%C"))
+        );
+        assert_eq!(
+            super::control_socket_within(&mac_17, SharedConnection::Provisioning, 103),
+            None
+        );
+        let mac_16 = default_state_dir("/Users", 16);
+        assert_eq!(
+            super::control_socket_within(&mac_16, SharedConnection::Provisioning, 103),
+            Some(mac_16.join("p%C"))
+        );
+        let linux_20 = default_state_dir("/home", 20);
+        assert_eq!(
+            super::control_socket_within(&linux_20, SharedConnection::Provisioning, 107),
+            Some(linux_20.join("p%C"))
+        );
+        let linux_21 = default_state_dir("/home", 21);
+        assert_eq!(
+            super::control_socket_within(&linux_21, SharedConnection::Provisioning, 107),
+            Some(linux_21.join("p%C"))
+        );
+        let linux_22 = default_state_dir("/home", 22);
+        assert_eq!(
+            super::control_socket_within(&linux_22, SharedConnection::Supervisor, 107),
+            Some(linux_22.join("%C"))
+        );
+        assert_eq!(
+            super::control_socket_within(&linux_22, SharedConnection::Provisioning, 107),
+            None
         );
     }
 
@@ -438,9 +637,15 @@ mod tests {
     /// it outranks the config file.
     #[farhelm_testtrace::test]
     fn every_connection_overrides_forwarding_and_the_remote_command() {
-        let shared = super::ssh_base_args("user@host", std::path::Path::new("/state")).unwrap();
+        let shared = super::ssh_base_args(
+            "user@host",
+            std::path::Path::new("/state"),
+            SharedConnection::Supervisor,
+        )
+        .unwrap();
         let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
-        let unshared = super::ssh_base_args("user@host", &deep).unwrap();
+        let unshared =
+            super::ssh_base_args("user@host", &deep, SharedConnection::Supervisor).unwrap();
         assert!(shared.iter().any(|arg| arg == "ControlPersist=60"));
         assert!(unshared.iter().any(|arg| arg == "ControlPath=none"));
         for args in [shared, unshared] {

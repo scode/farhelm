@@ -547,14 +547,26 @@ impl SystemBackend {
     }
 
     /// Build a remote shell command on the same option-safe prefix used by
-    /// steady-state supervisor connections.
+    /// steady-state supervisor connections, riding provisioning's own shared
+    /// connection rather than the supervisor connection's.
+    ///
+    /// The separate connection is what lets provisioning run while the helm
+    /// is connected on a host whose sshd allows one session per connection:
+    /// the supervisor connection's master spends that session on the
+    /// long-lived proxy (see the `crate::ssh` module docs). Every caller in
+    /// this file goes through here, so no provisioning step can land on the
+    /// supervisor connection by accident.
     fn ssh_command(
         &self,
         destination: &str,
         remote_command: String,
     ) -> anyhow::Result<tokio::process::Command> {
         let mut command = tokio::process::Command::new("ssh");
-        command.args(crate::ssh::ssh_base_args(destination, &self.control_dir)?);
+        command.args(crate::ssh::ssh_base_args(
+            destination,
+            &self.control_dir,
+            crate::ssh::SharedConnection::Provisioning,
+        )?);
         // ssh concatenates its trailing argv and reparses it remotely. Keep
         // the complete `sh -c` invocation in one shell-quoted string so the
         // script cannot absorb words from a destination or path.
