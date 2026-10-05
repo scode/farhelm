@@ -36,14 +36,16 @@
  */
 import type { Page } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export interface RecorderOptions {
   /**
    * The MP4 to write. Its directory also receives `<name>.marks.json` and
-   * `<name>-stills/`, and, while recording, a hidden scratch directory of
-   * the recorder's own making (see `Recorder`'s `frameDir`).
+   * `<name>-stills/` (an existing one is replaced only when the recorder can
+   * tell it made it; see `ensureStillsReplaceable`), and, while recording, a
+   * scratch directory of the recorder's own making (see `Recorder`'s
+   * `frameDir`).
    */
   output: string;
   /** Output frame rate. Frames arriving faster than this collapse into the latest one per slot. */
@@ -165,13 +167,18 @@ export class Recorder {
    * Fails if the screencast API is missing (it arrived in Playwright 1.59;
    * e2e's lockfile pins 1.62 while `package.json` still admits older
    * versions), if no frame arrives within {@link FIRST_FRAME_TIMEOUT_MS},
-   * or if the first frame is not the viewport's size.
+   * if the first frame is not the viewport's size, or if `<name>-stills/`
+   * exists but is not one the recorder may replace.
    */
   static async start(page: Page, options: RecorderOptions): Promise<Recorder> {
     if (typeof (page as any).screencast?.start !== "function") {
       throw new Error("page.screencast is missing: the recorder needs Playwright 1.59 or newer (e2e/package-lock.json pins it)");
     }
     const settings = { fps: 30, quality: 92, crf: 18, ...options };
+    // Checked here as well as before the stills are written, so a directory
+    // the recorder may not replace stops the run before a long recording
+    // rather than after it.
+    ensureStillsReplaceable(stillsDir(settings.output));
     const outputDir = path.dirname(settings.output);
     mkdirSync(outputDir, { recursive: true });
     const frameDir = mkdtempSync(path.join(outputDir, `${path.basename(settings.output)}.frames-`));
@@ -384,6 +391,10 @@ export class Recorder {
     writeFileSync(list, `${lines.join("\n")}\n`);
 
     const { output, fps, crf } = this.options;
+    // Checked again before the encode overwrites the MP4: a refusal after it
+    // would leave a new video beside the previous recording's marks and
+    // stills, which no longer describe it.
+    ensureStillsReplaceable(stillsDir(output));
     await run("ffmpeg", [
       "-hide_banner", "-loglevel", "error", "-y",
       "-f", "concat", "-safe", "0", "-i", list,
@@ -396,7 +407,7 @@ export class Recorder {
     ]);
 
     const base = output.replace(/\.mp4$/, "");
-    const stillDir = `${base}-stills`;
+    const stillDir = stillsDir(output);
     rmSync(stillDir, { recursive: true, force: true });
     mkdirSync(stillDir, { recursive: true });
     const marks: Mark[] = [];
@@ -413,6 +424,67 @@ export class Recorder {
     }
     writeFileSync(`${base}.marks.json`, `${JSON.stringify({ duration: Number(end.toFixed(3)), marks }, null, 2)}\n`);
     return marks;
+  }
+}
+
+/**
+ * Where the review stills for `output` go: `<name>-stills/` beside the MP4,
+ * where docs/readme-video/SPEC.md and the refresh procedure look for them.
+ */
+function stillsDir(output: string): string {
+  return `${output.replace(/\.mp4$/, "")}-stills`;
+}
+
+/**
+ * The name `finish` gives a still: the mark's position, at least two
+ * digits, then the label's slug, which is lowercase letters, digits and
+ * dashes, possibly empty.
+ */
+const STILL_NAME = /^\d{2,}-[a-z0-9-]*\.png$/;
+
+/**
+ * Files an operating system's file browser leaves in a folder someone looked
+ * at (macOS Finder, Windows Explorer). Reviewing the stills that way is the
+ * refresh procedure, so their presence must not make an earlier recording's
+ * stills unreplaceable; they hold nothing anyone would miss.
+ */
+const BROWSER_LITTER = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+/**
+ * Throw unless `dir` is absent or a directory holding nothing but files
+ * named the way the recorder names stills (and file-browser litter), which
+ * is what the recorder may replace wholesale.
+ *
+ * The stills directory's name is derived from the output path, so it can be
+ * a directory the maintainer made for something else, and replacing it
+ * would delete their files. Recognizing the recorder's own file names, rather
+ * than a marker file written on creation, keeps stills directories from
+ * recordings made before this check replaceable without any migration. A
+ * symlink is refused rather than followed, and so is anything else that is
+ * not a plain directory.
+ */
+function ensureStillsReplaceable(dir: string): void {
+  const refuse = (what: string): never => {
+    throw new Error(
+      `the stills directory ${dir} ${what}; move it aside and record again ` +
+        "(the recorder only replaces a stills directory of its own)",
+    );
+  };
+  let stat;
+  try {
+    stat = lstatSync(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (!stat.isDirectory()) refuse("is not a plain directory (a symlink, or not a directory at all)");
+  const foreign = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !(entry.isFile() && (STILL_NAME.test(entry.name) || BROWSER_LITTER.has(entry.name))))
+    .map((entry) => entry.name)
+    .sort();
+  if (foreign.length > 0) {
+    const more = foreign.length > 3 ? ` and ${foreign.length - 3} more` : "";
+    refuse(`holds ${foreign.slice(0, 3).join(", ")}${more}, which the recorder did not make`);
   }
 }
 

@@ -6668,7 +6668,9 @@
   directory only when it can show it made that directory (for example a marker file it writes there), and otherwise
   refuses with a message naming the directory. A fresh directory and one from an earlier recording keep working as
   today. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
+- Execution: complete — change `voutwopkxvqqnpxnmnmknksursmpwnot`, bookmark
+  `plan/triage-tooling-output-ownership/02-recorder-stills`, PR
+  [#1650](https://github.com/scode/farhelm/pull/1650/changes).
 
 ## publisher-main-pin.md
 
