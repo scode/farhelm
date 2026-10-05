@@ -6652,7 +6652,7 @@
 - Completion criteria: raw frames go to a private directory allocated for the run (for example with `mkdtemp`), and only
   that directory is removed; nothing derived from the output path is deleted. Remove this feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
 
 ## recorder-stills-owner.md
 
@@ -6666,7 +6666,7 @@
   directory only when it can show it made that directory (for example a marker file it writes there), and otherwise
   refuses with a message naming the directory. A fresh directory and one from an earlier recording keep working as
   today. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
 
 ## publisher-main-pin.md
 
@@ -6682,7 +6682,7 @@
   rather than the checkout, and refuses to prune when it cannot read it. `--self-test` gains a case where the local
   manifest differs from main's and main's aged snapshot survives. Run the self-test and `shellcheck` on the script.
   Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
 
 ## installer-prune.md
 
@@ -6821,7 +6821,7 @@
   symlinks, and refuses with a clear message otherwise, changing nothing. `scripts/test-install-sh.sh` gains a fixture
   per linked folder with a sentinel file behind the link that survives the refused update. Run `sh -n`, `shellcheck`,
   and the installer test script. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
 
 ## yolo-sidebar-cancel.md
 
@@ -6844,7 +6844,7 @@
   replacement nor the host preference change; a genuine confirmation still works; a regression covers the queued order.
   Remove this feedback file and its index entry. If the gate trips, the plan blocks on this item with what was found
   instead.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
 
 ## yolo-launcher-cancel.md
 
@@ -6858,7 +6858,7 @@
 - Completion criteria: a stale answer leaves the form unauthorized and changes no host setting; a genuine confirmation
   still lets the same request be retried; a regression covers the queued order. Remove this feedback file and its index
   entry, or block with findings if the gate trips.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
 
 ## yolo-restart-cancel.md
 
@@ -6871,7 +6871,7 @@
 - Completion criteria: Cancel followed by either answer in one event burst requests no restart and no host setting
   change; a permanent answer without its bound host is refused; a regression covers the queued order. Remove this
   feedback file and its index entry, or block with findings if the gate trips.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
 
 ## restart-parent-cancel.md
 
@@ -6885,7 +6885,7 @@
   current dialog opening and the settings being approved, and refuses a permanent answer without its host; a regression
   delivers a stale approval after cancellation and shows nothing is dispatched. Remove this feedback file and its index
   entry, or block with findings if the gate trips.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
 
 ## feedback-queued-close.md
 
@@ -6900,7 +6900,7 @@
 - Completion criteria: Send followed by Cancel or Escape in one event burst does not close the dialog while the send is
   unresolved; closing before Send still works; a regression covers both close paths. Remove this feedback file and its
   index entry, or block with findings if the gate trips.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
 
 ## linger-control.md
 
@@ -6915,7 +6915,7 @@
   product or spec judgement or new complexity to be recorded as `fix code`; this is one of them.
 - Completion criteria: the stderr goes through the existing control-escaping helper (or a Debug-escaped field) before it
   is logged; a focused test shows control bytes come out as escaped text. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
 
 ## template-clobber.md
 
@@ -6930,7 +6930,7 @@
   failed, the save is refused with a message saying so and a way to retry the list. Saving the template already open
   under its own name keeps working. A focused test holds or fails the list read while saving an existing name. Remove
   this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-template-gaps.md`.
 
 ## template-successor.md
 
@@ -6947,7 +6947,7 @@
   with the client equals the template's identity, with a message saying the host now reaches a different install; a
   focused test retargets the row between resolution and dispatch and shows nothing is created. Remove this feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-template-gaps.md`.
 
 ## uninstall-missing-id.md
 
@@ -6962,4 +6962,4 @@
 - Completion criteria: the check requires the reported and recorded identities to be equal as optional values, refusing
   when either side has one the other lacks; a focused test covers a connected identityless row and a probe that reports
   an identity. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
