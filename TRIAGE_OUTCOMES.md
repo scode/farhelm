@@ -6852,7 +6852,14 @@
   replacement nor the host preference change; a genuine confirmation still works; a regression covers the queued order.
   Remove this feedback file and its index entry. If the gate trips, the plan blocks on this item with what was found
   instead.
-- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
+- Execution: complete in jj change `rtmuuvrr`, bookmark `plan/triage-dialog-cancel-races/01-sidebar-yolo`, PR
+  https://github.com/scode/farhelm/pull/1658. The sidebar question is on `ConfirmSlot`, keyed by its opening and the
+  question; both answers, the host preference write included, act only by taking it. Sweep of the other confirm and
+  cancel handlers in `crates/farhelm-ui/src`: the header Restart and YOLO replace, the sidebar Delete and Replace
+  prompts, host removal, the update and uninstall confirmations and the rename dialog all check their question when they
+  run. Two prompts have the same bug, both already queued and not yet triaged: `addhost-cancel.md` (a queued answer
+  behind Add host's cancel still sets up the host) and `setup-inline-cancel.md` (the permanent setup answer queued
+  behind cancel still turns off future setup questions).
 
 ## yolo-launcher-cancel.md
 
