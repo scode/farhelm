@@ -130,6 +130,40 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and review the source diff before signing, since the signature proves who published a release, not that its code is
   sound.
 
+- **Clear a session's notification once its problem goes away.** A session notification (the bell on the sidebar row) is
+  a record of something that happened, not a live state, so it stays until the user clears it even after the problem it
+  describes has resolved itself. Two cases where that happens today: a Codex or Grok session whose resume offer was
+  withdrawn because the agent's conversation record went missing or stopped matching gets a notification saying Restart
+  can no longer resume, and when the record comes back and Restart can resume again, the notification still says it
+  cannot; and a session told that its agent never reported which conversation it is in keeps that notification after a
+  late report arrives and Restart works. The bell then shows a stale warning, red and unread if the user has not opened
+  it yet, about a problem that no longer exists. Make a notification go away, or visibly mark itself resolved, when its
+  condition stops holding. Deciding which of the two, and whether "resolved" counts as read, is part of the work.
+  Deliberately left out of the session-notifications plan (its report lists it as a possible follow-up).
+
+- **Keep checking for a silent conversation hook after a supervisor restart.** A session notification tells the user
+  when an agent launched with Farhelm's conversation hook still has not said which conversation it is in a minute after
+  the first Enter, since Restart will then be unable to resume it. That check only covers launches the running
+  supervisor started itself: whether a launch got the hook is kept in the supervisor's memory, and a restarted
+  supervisor that adopts the sessions still running in tmux has lost it, so for those launches the check never fires
+  until the session is relaunched. The launches that miss out are the ones not typed into yet, or typed into less than
+  about a minute before the restart, when the supervisor restarted; on the Mac that is any quit and reopen of the app,
+  and every update. A user who starts a session, quits Farhelm before typing, reopens it and then types gets no bell if
+  the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
+  for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report.
+
+- **Update the docs that still say Farhelm comes from GitHub.** Since the get.farhelm.io cutover, installs, the helm's
+  payload downloads and the Mac app's updates come from get.farhelm.io and are checked against signed checksums, but
+  several pages and texts still describe GitHub. Known gaps: the website's "Update and uninstall" and "Security model"
+  pages (they say updates come from GitHub and that no release signature is checked); the website's "Add a remote host"
+  page (it says the Mac downloads Farhelm for a host from GitHub and needs to reach GitHub); `docs/install_uninstall.md`
+  (it says the app checks GitHub for updates, and its `FARHELM_VERSION=0.2.1` example names a release the installer now
+  refuses, because old releases are not on get.farhelm.io); the helm's `--payload-dir` help text, which users see in
+  `--help` and which says the option is for tests that would rather not reach GitHub; and a comment in the workspace's
+  `Cargo.toml` saying a release build downloads its payloads from the GitHub release. Switching the install command
+  itself waits for the first release on the site and is part of "Lock down the release and update trust chain" above;
+  the rest is true now and need not wait. Found in the `get-site-cutover` plan's report and its landing review.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
