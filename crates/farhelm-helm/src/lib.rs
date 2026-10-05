@@ -189,6 +189,9 @@ mod preferences;
 /// cap eviction, and the session id bound.
 pub mod session_cache;
 
+/// Acting agent requests waiting for the user's approval (see the module's
+/// own docs).
+mod approvals;
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
 mod sessions;
@@ -502,6 +505,10 @@ struct AppState {
     /// than a constant so a test helm can point it at a stand-in server it
     /// started itself (see `feedback.rs`).
     feedback: feedback::FeedbackForwarder,
+    /// Acting agent requests waiting for the user's answer (see
+    /// `approvals`). A field rather than a global so each helm in a test
+    /// process has its own table, and so a test can shorten the wait.
+    approvals: approvals::Approvals,
 }
 
 /// The two serving surfaces share their handlers, but the desktop's embedded
@@ -577,6 +584,7 @@ impl AppState {
             feedback: feedback::FeedbackForwarder::production(),
             #[cfg(test)]
             feedback: feedback::FeedbackForwarder::offline(),
+            approvals: approvals::Approvals::new(farhelm_proto::approvals::APPROVAL_WAIT),
         }
     }
 }
@@ -707,6 +715,15 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/yolo-without-asking",
             axum::routing::post(hosts::set_yolo_without_asking),
+        )
+        .route(
+            "/api/hosts/{id}/commands-without-asking",
+            axum::routing::post(hosts::set_commands_without_asking),
+        )
+        .route("/api/approvals", get(approvals::list_approvals))
+        .route(
+            "/api/approvals/{id}",
+            axum::routing::post(approvals::answer_approval),
         )
         .route(
             "/api/hosts/{id}/adopt",
@@ -2354,6 +2371,7 @@ mod tests {
             "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
             ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
             ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+            ALTER TABLE hosts DROP COLUMN commands_without_asking;
             ALTER TABLE hosts DROP COLUMN yolo_without_asking;
              PRAGMA user_version = 29;",
         )

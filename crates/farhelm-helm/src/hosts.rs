@@ -77,6 +77,10 @@ pub(crate) struct HostView {
     /// user changes it. A row missing from the registry read reports that confirmation is
     /// required.
     pub(crate) yolo_without_asking: bool,
+    /// Whether the helm carries out acting `farhelm` commands from this host's sessions
+    /// without asking the user; `false` (ask first) until the user changes it. A row missing
+    /// from the registry read reports that asking is required, like the YOLO setting.
+    pub(crate) commands_without_asking: bool,
     pub(crate) state: HostStateView,
     /// Which CONNECTION this host is on — an opaque, monotonic token that
     /// changes whenever the host's client does, including when it goes away
@@ -424,6 +428,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 remote_farhelm: registry.and_then(|row| row.remote_farhelm.clone()),
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
                 yolo_without_asking: registry.is_some_and(|row| row.yolo_without_asking),
+                commands_without_asking: registry.is_some_and(|row| row.commands_without_asking),
                 state: (&snapshot.state).into(),
                 incarnation: snapshot.incarnation,
             }
@@ -542,6 +547,68 @@ async fn set_yolo_without_asking_owned(
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// The body of `POST /api/hosts/{id}/commands-without-asking`: the new setting, required.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CommandsWithoutAskingSpec {
+    pub(crate) commands_without_asking: bool,
+}
+
+/// `POST /api/hosts/{id}/commands-without-asking` — set whether the helm carries out acting
+/// `farhelm` commands from this host's sessions without asking the user, answering with the
+/// updated host view.
+///
+/// The sibling of [`set_yolo_without_asking`], with the same locking and announcement rules
+/// for the same reasons. The approval cards' "Always allow from this host" answer goes
+/// through [`set_commands_without_asking_for`] rather than this route, so the two cannot
+/// disagree about what turning the setting on means.
+pub(crate) async fn set_commands_without_asking(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<CommandsWithoutAskingSpec>,
+) -> impl IntoResponse {
+    crate::run_owned(async move {
+        if let Err(error) =
+            set_commands_without_asking_for(&state, host, spec.commands_without_asking).await
+        {
+            return http_error(error);
+        }
+        match host_view(&state, host).await {
+            Ok(view) => axum::Json(view).into_response(),
+            Err(error) => http_error(error),
+        }
+    })
+    .await
+}
+
+/// Store a host's "run farhelm commands without asking" setting under the host write
+/// lock and announce a real change on the event feed.
+///
+/// Callers run this on a helm-owned task (`crate::run_owned`) for the reason
+/// [`set_yolo_without_asking`] does: a request dropped between the save and the bump
+/// would leave other clients showing the old value.
+pub(crate) async fn set_commands_without_asking_for(
+    state: &AppState,
+    host: HostId,
+    commands_without_asking: bool,
+) -> anyhow::Result<()> {
+    let serialized = state.manager.host_write_lock(host).await;
+    let changed = state
+        .store
+        .set_commands_without_asking(host, commands_without_asking)
+        .await?;
+    if changed {
+        state.manager.events().bump();
+    }
+    drop(serialized);
+    tracing::info!(
+        host,
+        commands_without_asking,
+        "host commands-without-asking setting changed"
+    );
+    Ok(())
 }
 
 /// The body of `POST /api/hosts/{id}/alias`.
@@ -1789,6 +1856,56 @@ mod tests {
             "POST",
             &format!("/api/hosts/{host}/yolo-without-asking"),
             Some(serde_json::json!({ "yolo_without_asking": true })),
+        )
+        .await;
+        assert_eq!(events.revision(), after_set, "a repeat must not bump again");
+    }
+
+    /// Spec: `POST /api/hosts/{id}/commands-without-asking` stores the setting, answers
+    /// with the host view carrying it, leaves the YOLO setting alone, bumps the fleet's
+    /// revision on a real change, and stays silent on a repeat of the same value.
+    ///
+    /// Why: the settings dialog's switch and every other open window read the setting from
+    /// the host list, so a change that did not bump the feed would leave another window
+    /// showing a host as asking when its agents already act unasked, or the reverse.
+    #[farhelm_testtrace::test]
+    async fn setting_commands_without_asking_stores_it_and_bumps_the_revision_only_on_a_real_change()
+     {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@commands-check" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        assert_eq!(
+            added["commands_without_asking"], false,
+            "a new host starts asking before farhelm commands"
+        );
+
+        let events = Arc::clone(harness.manager.events());
+        let before = events.revision();
+        let (status, view, _) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/commands-without-asking"),
+            Some(serde_json::json!({ "commands_without_asking": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(view["commands_without_asking"], true);
+        assert_eq!(view["yolo_without_asking"], false, "a separate setting");
+        let after_set = events.revision();
+        assert!(after_set > before, "a real change must bump the revision");
+
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/commands-without-asking"),
+            Some(serde_json::json!({ "commands_without_asking": true })),
         )
         .await;
         assert_eq!(events.revision(), after_set, "a repeat must not bump again");

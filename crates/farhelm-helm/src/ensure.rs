@@ -259,6 +259,7 @@ mod tests {
                 host_identity: None,
                 cache_truncated: false,
                 yolo_without_asking: false,
+                commands_without_asking: false,
             }
         };
         let rows = vec![

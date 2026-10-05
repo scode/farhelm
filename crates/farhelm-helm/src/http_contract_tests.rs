@@ -104,6 +104,7 @@ fn host_list_body() -> serde_json::Value {
         remote_farhelm: (kind == "ssh").then(|| "~/.local/bin/farhelm".to_string()),
         remote_state_dir: (kind == "ssh").then(|| "~/.local/state/farhelm".to_string()),
         yolo_without_asking: false,
+        commands_without_asking: false,
         state,
         incarnation: 4,
     };

@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 39;
+const SCHEMA_VERSION: i64 = 40;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -648,6 +648,10 @@ pub struct HostRow {
     /// Whether the host starts YOLO sessions without asking. `false` (asks first) for every
     /// host until [`HelmStore::set_yolo_without_asking`] says otherwise.
     pub yolo_without_asking: bool,
+    /// Whether the helm carries out acting `farhelm` commands from this host's sessions
+    /// without asking the user (SPEC.md, Agent-spawned sessions). `false` (asks first) for
+    /// every host until [`HelmStore::set_commands_without_asking`] says otherwise.
+    pub commands_without_asking: bool,
 }
 
 /// One `hosts` row's columns, read positionally by [`HelmStore::list_hosts`]
@@ -665,6 +669,7 @@ type RawHostRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    bool,
     bool,
     bool,
 );
@@ -1763,6 +1768,13 @@ pub struct HelmStore {
 ///   by the rule the supervisors' own rows follow
 ///   (`SessionLaunch::from_pre_launch_kinds`), and lose `resume_template`,
 ///   so a down host's cached sessions keep decoding and keep being listed.
+/// - 38: `launch_templates`, the helm's template catalog.
+/// - 39: `agent_create_bindings`, an agent create's key bound to its first
+///   resolution.
+/// - 40: `hosts.commands_without_asking`, 0 for every existing and new row:
+///   every host asks the user before carrying out a `farhelm` command from
+///   one of its sessions until the user turns that off (SPEC.md, Agent-spawned
+///   sessions).
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1841,6 +1853,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- (added in schema 31, renamed in 34); 0 asks first. After
                  -- `alias` for the same reason `alias` is last above.
                  yolo_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (yolo_without_asking IN (0, 1)),
+                 -- Whether the host's sessions run acting `farhelm` commands
+                 -- without the user's approval (added in schema 40); 0 asks
+                 -- first. Last for the reason `yolo_without_asking` is.
+                 commands_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (commands_without_asking IN (0, 1)),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2050,7 +2066,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 39;",
+              PRAGMA user_version = 40;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2941,6 +2957,33 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         ))
         .context("migrating helm.db to schema version 39")?;
         version = 39;
+    }
+    if version == 39 {
+        // Every existing host, the local one included, starts asking: no
+        // earlier schema recorded a user's choice to let a host's sessions act
+        // without asking. Added only when absent, for the reason the 37→38
+        // step gives: the ladder's downgrade fixtures rewind `user_version`
+        // over a current database, and SQLite has no `ADD COLUMN IF NOT
+        // EXISTS`.
+        let present: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') \
+                 WHERE name = 'commands_without_asking'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking for hosts.commands_without_asking")?
+            > 0;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE hosts ADD COLUMN commands_without_asking INTEGER NOT NULL DEFAULT 0 \
+                 CHECK (commands_without_asking IN (0, 1));",
+            )
+            .context("migrating helm.db to schema version 40")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 40;")
+            .context("migrating helm.db to schema version 40")?;
+        version = 40;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4102,7 +4145,8 @@ impl HelmStore {
                     let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
-                     host_identity, cache_truncated, yolo_without_asking FROM hosts ORDER BY id ASC",
+                     host_identity, cache_truncated, yolo_without_asking, commands_without_asking \
+                     FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
                     let raw: Vec<RawHostRow> = stmt
@@ -4117,6 +4161,7 @@ impl HelmStore {
                                 r.get(6)?,
                                 r.get(7)?,
                                 r.get(8)?,
+                                r.get(9)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -4134,6 +4179,7 @@ impl HelmStore {
                                 host_identity,
                                 cache_truncated,
                                 yolo_without_asking,
+                                commands_without_asking,
                             )| {
                                 Ok(HostRow {
                                     id,
@@ -4145,6 +4191,7 @@ impl HelmStore {
                                     host_identity,
                                     cache_truncated,
                                     yolo_without_asking,
+                                    commands_without_asking,
                                 })
                             },
                         )
@@ -4692,6 +4739,83 @@ impl HelmStore {
             .await
     }
 
+    /// Set whether the helm carries out acting `farhelm` commands from this host's sessions
+    /// without asking the user. The sibling of [`Self::set_yolo_without_asking`], with the
+    /// same contract: any row, the local one included, since the trust belongs to the
+    /// machine; returns whether anything changed; an unknown id is
+    /// [`HostStoreError::HostNotFound`].
+    pub async fn set_commands_without_asking(
+        &self,
+        host: HostId,
+        commands_without_asking: bool,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "set commands-without-asking task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning set commands-without-asking transaction")?;
+                    let current: Option<bool> = tx
+                        .query_row(
+                            "SELECT commands_without_asking FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("looking up host before setting commands-without-asking")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current == commands_without_asking {
+                        tx.commit()
+                            .context("committing unchanged commands-without-asking")?;
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "UPDATE hosts SET commands_without_asking = ?2 WHERE id = ?1",
+                        rusqlite::params![host, commands_without_asking],
+                    )
+                    .context("updating commands-without-asking")?;
+                    tx.commit().context("committing commands-without-asking")?;
+                    Ok(true)
+                },
+            )
+            .await
+    }
+
+    /// Turn on the "run farhelm commands without asking" setting for `host` only if the row
+    /// still holds `identity`, the install a request was made from. Returns whether the row
+    /// matched (and now has the setting on).
+    ///
+    /// An approval card's "Always allow" uses this rather than
+    /// [`Self::set_commands_without_asking`]: the card was raised by one install, and
+    /// adopting a new identity resets the setting precisely so that a different install is
+    /// judged afresh. Checking the identity in the same statement as the write closes the
+    /// window in which an adoption lands between the card being answered and the setting
+    /// being stored, which a check before the write could not.
+    pub async fn allow_commands_for_identity(
+        &self,
+        host: HostId,
+        identity: Option<String>,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "allow commands for identity task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
+                        .execute(
+                            "UPDATE hosts SET commands_without_asking = 1 \
+                             WHERE id = ?1 AND host_identity IS ?2",
+                            rusqlite::params![host, identity],
+                        )
+                        .context("allowing farhelm commands for a host's identity")?;
+                    Ok(changed == 1)
+                },
+            )
+            .await
+    }
+
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
         self.conn
@@ -4930,9 +5054,11 @@ impl HelmStore {
     /// one. A separate follow-up call could leave the two writes torn by a
     /// crash or a concurrent reader between them; one transaction cannot.
     ///
-    /// The host's "start YOLO sessions without asking" setting (`yolo_without_asking`)
-    /// is cleared in the same statement, so the adopted install asks before
-    /// YOLO launches again. Sensitivity is a property of the machine, and a
+    /// The host's "start YOLO sessions without asking" setting
+    /// (`yolo_without_asking`) is cleared in the same statement, so the adopted
+    /// install asks before YOLO launches again, and so is its "run farhelm
+    /// commands without asking" setting (`commands_without_asking`), for the
+    /// same reason. Sensitivity is a property of the machine, and a
     /// new identity at this destination means a different machine or a fresh
     /// install the user has not judged yet (SPEC.md: the host settings
     /// paragraph). Only adoption resets it; a stale settings dialog, and a
@@ -5001,12 +5127,13 @@ impl HelmStore {
                     // flag was the PREDECESSOR install's word about the rows being
                     // purged below, and an empty successor cache marked incomplete
                     // would show the notice indefinitely if the first refresh under
-                    // the new identity failed. `yolo_without_asking` is reset too: the user's
-                    // "start YOLO sessions without asking" was a judgment about the
-                    // install being replaced, not this one.
+                    // the new identity failed. `yolo_without_asking` and
+                    // `commands_without_asking` are reset too: the user's "without
+                    // asking" choices were judgments about the install being replaced,
+                    // not this one.
                     tx.execute(
-                        "UPDATE hosts SET host_identity = ?2, cache_truncated = 0, yolo_without_asking = 0 \
-                         WHERE id = ?1",
+                        "UPDATE hosts SET host_identity = ?2, cache_truncated = 0, yolo_without_asking = 0, \
+                         commands_without_asking = 0 WHERE id = ?1",
                         rusqlite::params![host, new],
                     )
                     .context("adopting new host identity")?;
@@ -6981,6 +7108,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 27;",
             )
@@ -7376,6 +7504,73 @@ mod tests {
                 creation_seq: Some(4),
             }],
             "deduplication uses the supervisor-accepted identity while the composer presents the submitted spelling"
+        );
+    }
+
+    /// Spec: every host, the reserved local row and a newly added ssh row
+    /// alike, starts asking before carrying out `farhelm` commands from its
+    /// sessions (`commands_without_asking` false);
+    /// `set_commands_without_asking` flips it on either kind, independently
+    /// of the YOLO setting, reports whether anything changed, and refuses an
+    /// unknown host.
+    ///
+    /// Why: "ask until the user says otherwise" is what makes the permission
+    /// prompts a guard at all (SPEC.md, Agent-spawned sessions). A default
+    /// that started permissive would let every host's agents act on the fleet
+    /// unasked, and a setter that wrote the YOLO column would grant one trust
+    /// while the user meant the other.
+    #[tokio::test]
+    async fn hosts_start_asking_and_commands_without_asking_is_set_per_host() {
+        let (_dir, store) = fresh_store().await;
+        let ssh = store
+            .add_ssh_host("user@commands", None, None)
+            .await
+            .unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert!(
+            rows.iter().all(|row| !row.commands_without_asking),
+            "{rows:?}"
+        );
+        let local = rows
+            .iter()
+            .find(|row| row.kind.is_reserved_local())
+            .expect("the reserved local row")
+            .id;
+
+        assert!(
+            store
+                .set_commands_without_asking(local, true)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_commands_without_asking(local, true)
+                .await
+                .unwrap(),
+            "unchanged"
+        );
+        assert!(store.set_commands_without_asking(ssh, true).await.unwrap());
+        assert!(store.set_commands_without_asking(ssh, false).await.unwrap());
+        let rows = store.list_hosts().await.unwrap();
+        let find = |id| rows.iter().find(|row| row.id == id).unwrap();
+        assert!(find(local).commands_without_asking);
+        assert!(!find(ssh).commands_without_asking);
+        assert!(
+            !find(local).yolo_without_asking,
+            "the YOLO setting is a separate column"
+        );
+
+        let missing = store
+            .set_commands_without_asking(9_999, true)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                missing.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::HostNotFound(9_999))
+            ),
+            "{missing:#}"
         );
     }
 
@@ -8894,6 +9089,73 @@ mod tests {
         );
     }
 
+    /// Spec: `allow_commands_for_identity` turns the setting on only while the
+    /// row still holds the identity it is given, and reports whether it did.
+    ///
+    /// Why: an approval card's "Always allow" was raised by one install. If
+    /// the row adopted a new identity while the card waited, the write must
+    /// not grant the never-judged successor what the user meant for its
+    /// predecessor; checking in the same statement as the write leaves no
+    /// window for an adoption to land in between.
+    #[farhelm_testtrace::test]
+    async fn allowing_commands_is_conditional_on_the_identity_that_asked() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "allow@commands", "asked-from").await;
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+        assert!(
+            !store
+                .allow_commands_for_identity(host, Some("successor".to_string()))
+                .await
+                .unwrap(),
+            "a different install is not allowed"
+        );
+        assert!(!row(store.list_hosts().await.unwrap()).commands_without_asking);
+        assert!(
+            store
+                .allow_commands_for_identity(host, Some("asked-from".to_string()))
+                .await
+                .unwrap()
+        );
+        assert!(row(store.list_hosts().await.unwrap()).commands_without_asking);
+    }
+
+    /// Adopting a new identity also resets the host to asking before
+    /// carrying out `farhelm` commands from its sessions.
+    ///
+    /// Why: like the YOLO setting, "run farhelm commands from this host
+    /// without asking" is trust the user gave one install. Carried over to a
+    /// reinstall or a different machine at the same address, it would let
+    /// that machine's sessions act on the whole fleet without a card the user
+    /// never waived for it (SPEC.md, Topology's host settings paragraph).
+    #[farhelm_testtrace::test]
+    async fn adoption_resets_the_host_to_asking_before_farhelm_commands() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "adopt@commands", "old-identity").await;
+        store
+            .set_commands_without_asking(host, true)
+            .await
+            .expect("allow without asking");
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+        assert!(
+            row(store.list_hosts().await.unwrap()).commands_without_asking,
+            "premise: the host runs farhelm commands without asking"
+        );
+
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "old-identity",
+                "new-identity",
+            )
+            .await
+            .expect("adopt");
+        assert!(
+            !row(store.list_hosts().await.unwrap()).commands_without_asking,
+            "the adopted install must ask before farhelm commands again"
+        );
+    }
+
     /// The 501st seed evicts the OLDEST cached row rather than growing the
     /// slice or refusing the new one, and records the cut on the host.
     ///
@@ -9279,6 +9541,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 28;",
             )
@@ -10149,6 +10412,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
@@ -10270,6 +10534,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
@@ -10323,6 +10588,7 @@ mod tests {
                 .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                ALTER TABLE hosts DROP COLUMN commands_without_asking;
                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
@@ -10518,6 +10784,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
@@ -11996,6 +12263,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;

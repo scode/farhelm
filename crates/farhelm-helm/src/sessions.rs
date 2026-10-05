@@ -2400,6 +2400,11 @@ pub(crate) async fn delete_session(
             Ok(routed) => routed,
             Err(e) => return http_error(e),
         };
+        // Before the supervisor sees the delete, and held until it answers: a
+        // request this session has waiting for the user, or on its way to a
+        // card, holds its request fence there, which the delete would
+        // otherwise wait out (see `approvals::Approvals::deny_session`).
+        let _deleting = state.approvals.deny_session(&id);
         match client
             .delete_session_with(
                 &id,
@@ -2956,6 +2961,10 @@ async fn finish_replacement(
     // with an overridden folder or a fresh checkout can release the source's
     // last reference, and that delete's notice must reach the user like any
     // other Delete's (SPEC.md "Fresh GitHub checkouts").
+    // As for an ordinary delete: requests the source has waiting for the
+    // user, or on their way to a card, would otherwise hold the delete behind
+    // their request fence. Held until the delete answers.
+    let _deleting = state.approvals.deny_session(id);
     let delete_notice = match client.delete_session_with(id, guard).await {
         Ok(notice) => notice,
         Err(delete_error) => {
