@@ -224,6 +224,30 @@ async function runCleanupSteps(steps: Array<() => Promise<void>>): Promise<void>
   }
 }
 
+/**
+ * Set, on every registered host, whether its agents' `farhelm` commands run
+ * without asking and whether it starts YOLO sessions without asking.
+ *
+ * This suite is about the relay reaching across hosts, not about the
+ * permission prompts (spawn.spec.ts answers those through real cards). With
+ * the settings off every clone would wait for a card, and the agent YOLO rule
+ * would refuse every clone of these command-launch sources. The suite shares
+ * one helm, so `afterAll` puts both back.
+ */
+async function trustAllHosts(request: APIRequestContext, trusted: boolean): Promise<void> {
+  for (const host of await listHosts(request)) {
+    for (const [route, field] of [
+      ["commands-without-asking", "commands_without_asking"],
+      ["yolo-without-asking", "yolo_without_asking"],
+    ]) {
+      const response = await request.post(`/api/hosts/${host.id}/${route}`, {
+        data: { [field]: trusted },
+      });
+      expect(response.ok(), `setting ${field} on host ${host.id}: ${await response.text()}`).toBe(true);
+    }
+  }
+}
+
 test.describe("agent relay: an agent clones its own session across hosts", () => {
   test.beforeAll(async ({ request }) => {
     test.setTimeout(180_000);
@@ -239,7 +263,12 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
         message: "waiting for the harness's ssh host to connect",
       })
       .toBe("connected");
+    await trustAllHosts(request, true);
     fleetReady = true;
+  });
+
+  test.afterAll(async ({ request }) => {
+    if (fleetReady) await trustAllHosts(request, false);
   });
 
   /**

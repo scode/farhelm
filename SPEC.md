@@ -1516,8 +1516,11 @@ that rule again when the user approves, so a host whose setting changed during t
 refusal names the host and says that turning on "start YOLO sessions here without asking" for it is how to let agents do
 this. A plain restart re-runs the session's own stored launch, which the user approved or a host setting allowed when
 the session was created (sessions agents created before these prompts existed included), so it is allowed and gets the
-ordinary card, and so do agent launches whose permission is not YOLO. There is no override an agent can pass: the
-command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
+ordinary card, and so do agent launches whose permission is not YOLO. An agent launch counts as one only when its
+command lines are exactly what this version of Farhelm composes for its choices: a clone copies its source's launch as
+the source's supervisor reports it, which the helm does not trust, and a session started by an older Farhelm may have
+been composed differently, so such a launch is refused like a command launch. There is no override an agent can pass:
+the command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
 
 `farhelm agent create` and `farhelm spawn` take the launcher's fields as flags. `--template <name>` applies a template
 by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,

@@ -194,7 +194,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_40` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_41` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 40;
+pub const PROTOCOL_VERSION: u32 = 41;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1556,10 +1556,11 @@ pub enum AgentVerb {
         /// its first accepted request resolved to, so a retry under the
         /// same key returns that session even after a template edit.
         intent_key: Option<String>,
-        /// Start a YOLO launch even though the target host asks before YOLO launches.
-        /// Without it the helm refuses such a launch; an agent passes it only with the
-        /// user's explicit approval (the agent instructions say so). Serialized only when
-        /// true, so a request without the override keeps its wire shape.
+        /// The YOLO override an agent used to pass itself. The helm IGNORES it
+        /// (SPEC.md, Agent-spawned sessions: there is no override an agent can
+        /// pass) and the CLI no longer sends it; it stays on the wire only so a
+        /// request carrying it still decodes and is judged by the agent rule
+        /// rather than refused as malformed.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
         /// Present for `farhelm spawn`: create on the asking session's own
@@ -1592,7 +1593,7 @@ pub enum AgentVerb {
         title: Option<String>,
         /// See [`AgentVerb::Create::intent_key`].
         intent_key: Option<String>,
-        /// See [`AgentVerb::Create::confirm_yolo`].
+        /// Ignored by the helm; see [`AgentVerb::Create::confirm_yolo`].
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
     },
@@ -1632,6 +1633,30 @@ impl AgentVerb {
             | AgentVerb::Clone { .. } => true,
         }
     }
+
+    /// Whether answering this verb may wait for the user's approval in the
+    /// GUI (SPEC.md, Agent-spawned sessions): every acting verb, and no
+    /// listing.
+    ///
+    /// The relay's supervisor half reads it to give such a verb an answer
+    /// budget of [`approvals::APPROVAL_WAIT`] beyond its ordinary one, so the
+    /// helm's own expiry answer always arrives before the relay gives up. It
+    /// is a separate question from [`Self::is_mutating`] even though the two
+    /// sets are equal today: one decides what a lost answer means, the other
+    /// how long an answer can take, and a future mutation that never asks
+    /// (or a question that does) must be able to answer them differently.
+    ///
+    /// Exhaustive for the reason `is_mutating` is.
+    pub fn may_wait_for_user(&self) -> bool {
+        match self {
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
+            AgentVerb::Rename { .. }
+            | AgentVerb::Stop { .. }
+            | AgentVerb::Restart { .. }
+            | AgentVerb::Create { .. }
+            | AgentVerb::Clone { .. } => true,
+        }
+    }
 }
 
 /// Where a `farhelm spawn` create lands: the asking session's own host,
@@ -1641,6 +1666,20 @@ impl AgentVerb {
 #[serde(deny_unknown_fields)]
 pub struct SpawnPlacement {
     pub parent: Option<String>,
+    /// `farhelm spawn --inherit-agent`: run the asking session's own stored
+    /// launch rather than one resolved from templates and flags. The asking
+    /// CLI sets this and nothing else; the launch itself is filled in by the
+    /// session's supervisor ([`Self::inherited_launch`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inherit_agent: bool,
+    /// The asking session's stored launch, which its supervisor reads from
+    /// its own store and puts here as it relays an `inherit_agent` spawn up
+    /// to the helm (protocol 41). The supervisor overwrites whatever the CLI
+    /// sent, so the launch is the session's own; the helm believes it because
+    /// a spawn only ever acts on the asking session's own host (SPEC.md
+    /// accepts that a compromised supervisor could misreport it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_launch: Option<Box<SessionLaunch>>,
 }
 
 /// One launch template as an agent sees it: what [`AgentVerb::Templates`]
@@ -2095,18 +2134,19 @@ pub enum ControlMsg {
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     ///
-    /// ## Resolved launch, or inherited spawn
+    /// ## Resolved launch
     ///
     /// `launch` is the resolved launch the session will run (an agent
     /// launch the helm composed, or a command launch as the user wrote it;
-    /// never a legacy one). A session-authenticated spawn may instead set
-    /// `inherit_agent` to copy its asking session's stored launch.
+    /// never a legacy one). Only the helm sends this message now: since
+    /// protocol 41 a session-authenticated peer's create is refused outright,
+    /// because every `farhelm spawn` goes through the helm, which asks the
+    /// user (`--inherit-agent` included, as [`SpawnPlacement`]).
     ///
-    /// **A request naming both, or neither, is refused with
-    /// [`ErrorKind::InvalidRequest`]**: inheritance is an explicit selector
-    /// rather than an omitted value. The exclusivity is enforced by the
-    /// supervisor's create handler rather than made structurally impossible
-    /// by the type, so the refusal has a message.
+    /// **A request carrying no launch, or setting `inherit_agent`, is refused
+    /// with [`ErrorKind::InvalidRequest`]**: the inheritance selector is a
+    /// relic of the session-answered spawn, kept on the wire so the refusal
+    /// has a message rather than a decode error.
     ///
     /// The resolved bundle joins the idempotency fingerprint (`intent_key`
     /// below), as does `parent`: a retry under the same key with different
@@ -2130,12 +2170,11 @@ pub enum ControlMsg {
         cwd: String,
         /// What the new session runs (SPEC.md's launch kinds), resolved by
         /// the helm: an agent launch it composed or a command launch the user
-        /// wrote. Absent exactly when `inherit_agent` is set, which copies the
-        /// authenticated parent's stored launch instead. A legacy launch is
-        /// refused: nothing creates one.
+        /// wrote. Required; a legacy launch is refused, since nothing creates
+        /// one.
         launch: Option<SessionLaunch>,
-        /// Explicit opt-in for a restricted spawn to copy the authenticated
-        /// parent's stored launch bundle. Omission is not inheritance.
+        /// The session-answered spawn's inheritance selector, refused since
+        /// protocol 41 (see this variant's docs).
         #[serde(default)]
         inherit_agent: bool,
         title: Option<String>,
@@ -2534,6 +2573,18 @@ pub enum ControlMsg {
         /// stopped. Absent means a plain restart with the stored launch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         with: Option<SessionLaunch>,
+        /// The stored launch the requester showed the user, or `None` for
+        /// no precondition (protocol 41). When set, the supervisor refuses
+        /// with `Conflict`, before stopping anything, unless the session's
+        /// stored launch is exactly this, checked under the session's
+        /// lifecycle claim so no Restart with can land between the check and
+        /// the relaunch. The helm sets it for an agent's restart, whose
+        /// approval card showed the launch: SPEC.md has an approval carry out
+        /// exactly what its card showed, and a Restart with from the GUI
+        /// while the card waited would otherwise resume a launch the user
+        /// never saw on it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_launch: Option<SessionLaunch>,
     },
     /// Success reply to `RestartSession`, shaped like `SessionCreated`:
     /// `session` carries the session's resulting state (including its
@@ -4136,8 +4187,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_40() {
-        assert_eq!(PROTOCOL_VERSION, 40);
+    fn protocol_version_is_pinned_at_41() {
+        assert_eq!(PROTOCOL_VERSION, 41);
     }
 
     /// Spec: a listed template carries every field it sets except the text
@@ -5798,6 +5849,7 @@ mod tests {
             session_id: "s1".to_string(),
             stop_if_running: true,
             with: None,
+            expected_launch: None,
         };
         let mut wire = Vec::new();
         Frame::control(&msg).encode(&mut wire).unwrap();
@@ -5855,6 +5907,7 @@ mod tests {
             session_id: "s1".to_string(),
             stop_if_running: true,
             with: None,
+            expected_launch: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -5921,6 +5974,7 @@ mod tests {
                 agent: Some(LaunchHarness::Claude),
                 resume: None,
             })),
+            expected_launch: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["with"]["kind"], "command");
@@ -6023,6 +6077,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 stop_if_running: false,
                 with: None,
+                expected_launch: None,
             }
         );
     }
@@ -7180,6 +7235,7 @@ mod tests {
                 confirm_yolo: true,
                 spawn: Some(SpawnPlacement {
                     parent: Some("fh-parent".to_string()),
+                    ..Default::default()
                 }),
             },
         };

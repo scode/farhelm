@@ -395,6 +395,13 @@ pub struct SupervisorTimeouts {
     /// wait AFTER the request reached the connection; getting it there is
     /// [`Self::agent_deliver`]'s budget.
     pub agent_upcall: Duration,
+    /// How much longer than [`Self::agent_upcall`] the relay waits for the
+    /// helm's answer to a verb that may wait for the user's approval
+    /// (`AgentVerb::may_wait_for_user`): the helm's own approval wait,
+    /// [`farhelm_proto::approvals::APPROVAL_WAIT`], so the helm's "not
+    /// answered" refusal always arrives first. Injectable so a test of the
+    /// longer budget need not sit through nine minutes.
+    pub agent_approval_wait: Duration,
     /// See [`AGENT_DELIVER_TIMEOUT`]: how long the relay waits for room on
     /// the helm connection's writer queue before reporting the request as
     /// undelivered.
@@ -425,6 +432,7 @@ impl Default for SupervisorTimeouts {
             sink_ready: SINK_READY_TIMEOUT,
             delete_sink_reap: super::terminals::DELETE_SINK_REAP_WAIT,
             agent_upcall: AGENT_UPCALL_TIMEOUT,
+            agent_approval_wait: farhelm_proto::approvals::APPROVAL_WAIT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
             tab_attach_lifecycle: TAB_ATTACH_LIFECYCLE_TIMEOUT,
@@ -747,11 +755,6 @@ fault_hooks! {
     lifecycle_mutation_panic: LifecycleMutationPanic,
     /// See [`CreateIntentWaiting`]. `None` in production.
     create_intent_waiting: CreateIntentWaiting,
-    /// Reports the parent ID only after restricted create's lifecycle
-    /// acquisition returns Pending. This lets revocation tests change the
-    /// durable credential after the edge check but before protected admission.
-    /// `None` in production; the callback must not block.
-    create_parent_waiting: CreateIntentWaiting,
     /// Reports an actual Pending directory-admission acquisition. Race tests
     /// use this to establish that a create is queued behind a real Delete or
     /// Restart, rather than merely scheduled later. `None` in production.
@@ -1828,12 +1831,11 @@ pub(crate) struct KeyedGuard {
 
 /// Admission held from protected request resolution through create settlement.
 ///
-/// Acquisition is intent, directory, then restricted parent lifecycle, and
-/// fields drop in the reverse order. Keeping this value explicit lets
-/// the wire handler resolve inherited metadata under the same guards the
-/// shared launch path consumes, without reacquiring a non-reentrant lock.
+/// Acquisition is intent, then directory, and fields drop in the reverse
+/// order. Keeping this value explicit lets the wire handler validate under the
+/// same guards the shared launch path consumes, without reacquiring a
+/// non-reentrant lock.
 pub(crate) struct CreateGuards {
-    _parent: Option<KeyedGuard>,
     _directory: tokio::sync::OwnedMutexGuard<()>,
     _intent: Option<KeyedGuard>,
 }
@@ -2048,8 +2050,8 @@ pub(crate) struct CreateInputs<'a> {
     /// helm's RESOLVED value, never raw repo text (the helm refuses
     /// unparsable repo text before this ever reaches the supervisor).
     pub(crate) github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
-    /// What the new session runs, already resolved: the request's own
-    /// launch, or the authenticated parent's for an inherited spawn.
+    /// What the new session runs, already resolved by the helm (an inherited
+    /// spawn's launch included, filled in on its way to the helm).
     pub(crate) launch: SessionLaunch,
     pub(crate) title: Option<String>,
     pub(crate) cols: u16,
@@ -3876,14 +3878,12 @@ pub(crate) struct SessionCells {
 /// | 6 | `sessions` |
 ///
 /// The create chain: `intent_locks` (intent key), then
-/// `working_copy_operations`, then, for a restricted create, the ASKING
-/// session's `lifecycle_locks` claim, held until the launch settles; then,
-/// when retrying an earlier attempt, the created session's own lifecycle
+/// `working_copy_operations`; then, when retrying an earlier attempt, the created session's own lifecycle
 /// claim (for a takeover, through the takeover transaction and its map
 /// removal; for a refusal the retry's validation retains, through that
 /// refusal's settlement and publication); then rows 5 and 6 above. Directory admission comes before any lifecycle
-/// claim in both chains, which is what lets a restricted create and a delete or restart
-/// of its parent wait on each other without a cycle. How long it is held
+/// claim in both chains, which is what lets a create and a delete or restart wait on
+/// each other without a cycle. How long it is held
 /// differs by path: a create holds it until the launch settles, a delete
 /// for its whole teardown (sweep included, so the last-reference decision
 /// and the final membership removal see the same world), and a restart
@@ -6580,22 +6580,18 @@ impl Supervisor {
         claim: Option<IntentClaim>,
     ) -> anyhow::Result<SessionInfo> {
         let guards = self
-            .admit_create(claim.as_ref().map(|claim| claim.intent_key.as_str()), None)
+            .admit_create(claim.as_ref().map(|claim| claim.intent_key.as_str()))
             .await?;
         self.create_session_admitted(inputs, claim, guards).await
     }
 
-    /// Acquire create admission before reading authorization-dependent inputs.
-    ///
-    /// The restricted credential is checked after waiting for its lifecycle
-    /// claim; an earlier network-edge check cannot authorize a request whose
-    /// parent was deleted or whose credential changed during that wait.
-    /// Inherited bundle reads belong after this method. Credentials are
-    /// neither retained in the guards nor logged.
+    /// Acquire create admission: the request's intent key, then the host-wide
+    /// directory lock. Every create now arrives from the helm with its launch
+    /// resolved (a session's own spawn is relayed there first, protocol 41),
+    /// so there is no session credential or parent lifecycle to hold here.
     pub(crate) async fn admit_create(
         &self,
         intent_key: Option<&str>,
-        restricted_auth: Option<&farhelm_proto::SessionAuth>,
     ) -> anyhow::Result<CreateGuards> {
         let intent = match intent_key {
             Some(key) => Some(self.claim_create_intent(key).await),
@@ -6614,37 +6610,7 @@ impl Supervisor {
             result
         })
         .await;
-        let parent = if let Some(auth) = restricted_auth {
-            let acquisition = self.lifecycle_locks.claim(&auth.session_id);
-            tokio::pin!(acquisition);
-            let mut observer = self.seams.faults.create_parent_waiting();
-            let parent = std::future::poll_fn(|cx| {
-                let result = std::future::Future::poll(acquisition.as_mut(), cx);
-                if result.is_pending()
-                    && let Some(observer) = observer.take()
-                {
-                    observer(&auth.session_id);
-                }
-                result
-            })
-            .await;
-            if !self
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await?
-            {
-                return Err(RequestError::new(
-                    ErrorKind::Unauthorized,
-                    "the session credential is invalid or its session no longer exists",
-                )
-                .into());
-            }
-            Some(parent)
-        } else {
-            None
-        };
         Ok(CreateGuards {
-            _parent: parent,
             _directory: directory,
             _intent: intent,
         })
@@ -6701,7 +6667,7 @@ impl Supervisor {
                 "fresh reconciliation requires a nonempty key of at most 512 bytes and a nonempty request identity of at most 512 KiB",
             ).into());
         }
-        let guards = self.admit_create(Some(&intent_key), None).await?;
+        let guards = self.admit_create(Some(&intent_key)).await?;
         let mut reservation = self.store.reservation(&intent_key).await?;
         if reservation.is_none() && refuse_unknown {
             anyhow::ensure!(
@@ -9740,11 +9706,20 @@ impl Supervisor {
     /// create would validate it, and checked against the session's stored
     /// launch and current durable offer, before this operation stops the
     /// old process.
+    ///
+    /// `expected_launch`, when set, is the stored launch the requester's
+    /// user approved (an agent's restart card; see
+    /// `ControlMsg::RestartSession::expected_launch`). Any other stored
+    /// launch refuses the restart with `Conflict` before anything is
+    /// stopped. It is compared under the lifecycle claim, which every
+    /// Restart with also takes, so none can land between the comparison and
+    /// the relaunch.
     pub(crate) async fn restart_session(
         self: &Arc<Self>,
         session_id: &str,
         stop_if_running: bool,
         restart_with: Option<SessionLaunch>,
+        expected_launch: Option<SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
         if let Some(launch) = &restart_with {
             validate_restart_with(launch)?;
@@ -9845,6 +9820,16 @@ impl Supervisor {
             )
             .into());
         };
+        if let Some(expected) = &expected_launch
+            && *expected != entry.info.launch
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the session's launch changed after this restart was approved, so nothing was \
+                 stopped or restarted; look at the session again and retry",
+            )
+            .into());
+        }
         // Read from the STORE rather than the in-memory mirror: a restart
         // resumes what SURVIVED (`session_snapshot`'s own docs), and the
         // filled resume argv is built there from the durable identity.
@@ -15234,7 +15219,7 @@ pub(crate) mod tests {
             ),
         ] {
             let error = sup
-                .restart_session("missing", true, Some(launch.clone()))
+                .restart_session("missing", true, Some(launch.clone()), None)
                 .await
                 .expect_err("a launch loading would refuse is refused");
             assert_eq!(error_kind(&error), ErrorKind::InvalidRequest, "{error:#}");
@@ -15243,6 +15228,69 @@ pub(crate) mod tests {
                 "{launch:?}: {error:#}"
             );
         }
+    }
+
+    /// Spec: a restart carrying `expected_launch` is refused with
+    /// `Conflict`, and nothing about the session changes, when the stored
+    /// launch is anything else; with the stored launch as the expectation it
+    /// passes that check and goes on to the ordinary restart work.
+    ///
+    /// Why: an agent's restart is approved against the launch its card
+    /// showed (SPEC.md, Agent-spawned sessions: an approval carries out
+    /// exactly what the card showed), and a Restart with from the GUI while
+    /// the card waited would otherwise resume a launch the user never saw on
+    /// it. The second half tells the comparison apart from a refusal that
+    /// would come regardless: the matching restart fails later, at the
+    /// durable snapshot this fixture does not have, with `NotFound`.
+    #[farhelm_testtrace::test]
+    async fn a_restart_expecting_another_launch_is_refused_before_anything_stops() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let entry = entry_with(None, LastOutcome::Launching);
+        let stored = entry.info.launch.clone();
+        let id = entry.info.id.clone();
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+        let other = SessionLaunch::plain_command("something-else");
+        assert_ne!(other, stored, "fixture premise: a different launch");
+
+        let error = sup
+            .restart_session(&id, true, None, Some(other))
+            .await
+            .expect_err("a changed launch is refused");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict, "{error:#}");
+        assert!(
+            format!("{error:#}").contains("changed after this restart was approved"),
+            "{error:#}"
+        );
+        let after = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("the session is still there");
+        assert_eq!(after.info.launch, stored);
+        let outcome = after.run.outcome.lock().unwrap().clone();
+        assert!(
+            matches!(outcome, LastOutcome::Launching),
+            "nothing was stopped or relaunched: {outcome:?}"
+        );
+        assert!(after.terminal.is_none(), "no terminal was started");
+
+        let error = sup
+            .restart_session(&id, true, None, Some(stored))
+            .await
+            .expect_err("this fixture has no durable row to restart from");
+        assert_eq!(
+            error_kind(&error),
+            ErrorKind::NotFound,
+            "the matching expectation passed the comparison: {error:#}"
+        );
     }
 
     /// Which terminal-less rows an unconfirmed delete treats as possibly
@@ -15362,7 +15410,7 @@ pub(crate) mod tests {
             .await
             .insert(id.to_string(), Arc::new(entry));
 
-        sup.restart_session(id, false, None)
+        sup.restart_session(id, false, None, None)
             .await
             .expect("an unknown-status row restarts without stop consent");
         let entry = sup
@@ -15467,7 +15515,7 @@ pub(crate) mod tests {
             .insert(id.to_string(), Arc::new(entry));
 
         let error = sup
-            .restart_session(id, false, None)
+            .restart_session(id, false, None, None)
             .await
             .expect_err("an unconfirmed prior scope must block the relaunch");
         assert!(
@@ -17392,7 +17440,7 @@ pub(crate) mod tests {
             );
 
             let error = sup
-                .restart_session(&created.id, false, None)
+                .restart_session(&created.id, false, None, None)
                 .await
                 .expect_err("a working agent needs stop consent");
             assert_eq!(error_kind(&error), ErrorKind::Conflict);
@@ -17415,7 +17463,7 @@ pub(crate) mod tests {
                 SessionStatus::Running,
                 "fixture premise: the agent no longer reads working"
             );
-            sup.restart_session(&created.id, false, None)
+            sup.restart_session(&created.id, false, None, None)
                 .await
                 .unwrap_or_else(|error| {
                     panic!("an agent reading {quiet:?} restarts without consent: {error:#}")
@@ -17483,7 +17531,7 @@ pub(crate) mod tests {
         let restart = tokio::spawn({
             let sup = Arc::clone(&sup);
             let id = created.id.clone();
-            async move { sup.restart_session(&id, true, None).await }
+            async move { sup.restart_session(&id, true, None, None).await }
         });
         let mut restart = restart;
         // A restart that fails before the window never reaches the gate, so
@@ -17594,7 +17642,7 @@ pub(crate) mod tests {
         );
 
         let restarted = sup
-            .restart_session(&created.id, true, None)
+            .restart_session(&created.id, true, None, None)
             .await
             .expect("restart with a surviving tab");
         assert_eq!(
@@ -17731,7 +17779,7 @@ pub(crate) mod tests {
         };
 
         let restarted = sup
-            .restart_session(&created.id, true, None)
+            .restart_session(&created.id, true, None, None)
             .await
             .expect("restart with a live agent pane");
         assert_eq!(restarted.tabs, vec![TabInfo { id: tab.id.clone() }]);
@@ -17804,7 +17852,7 @@ pub(crate) mod tests {
             .await
             .expect("forge the agent marker on the tab");
 
-        sup.restart_session(&created.id, true, None)
+        sup.restart_session(&created.id, true, None, None)
             .await
             .expect_err("ambiguous old-window identity must be reported");
         let entry = sup
@@ -17917,7 +17965,7 @@ pub(crate) mod tests {
                 "fixture premise: the tab kept the session alive"
             );
 
-            sup.restart_session(&created.id, true, None)
+            sup.restart_session(&created.id, true, None, None)
                 .await
                 .expect_err("the injected replacement stage must fail");
             if stage == ReplacementStage::BeforeCreation {
@@ -25327,7 +25375,7 @@ exit 0
             })
         };
 
-        sup.restart_session(&created.id, true, None)
+        sup.restart_session(&created.id, true, None, None)
             .await
             .expect("restart");
         released.wait().await;
@@ -25606,9 +25654,7 @@ exit 0
                     launch: SessionLaunch::plain_command("agent"),
                 },
                 &Reserved::Retry(Box::new(reservation)),
-                &sup.admit_create(Some("key"), None)
-                    .await
-                    .expect("admission"),
+                &sup.admit_create(Some("key")).await.expect("admission"),
             )
             .await
             .expect("the retry performs the create under the reserved identity");
@@ -30487,7 +30533,7 @@ exit 0
                     .state,
                 incomplete
             );
-            sup.restart_session(&origin.id, true, None)
+            sup.restart_session(&origin.id, true, None, None)
                 .await
                 .expect_err("origin setup must finish first");
             assert_eq!(
@@ -30508,7 +30554,7 @@ exit 0
                 .unwrap()
                 .is_none()
         );
-        sup.restart_session(&borrower.id, true, None)
+        sup.restart_session(&borrower.id, true, None, None)
             .await
             .expect("borrower does not inherit incomplete setup");
         let borrower_row = sup.store.session(&borrower.id).await.unwrap().unwrap();
@@ -30531,7 +30577,7 @@ exit 0
         )
         .unwrap();
         let ready_bytes = std::fs::read(&path).unwrap();
-        sup.restart_session(&origin.id, true, None)
+        sup.restart_session(&origin.id, true, None, None)
             .await
             .expect("Ready permits ordinary restart");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30566,7 +30612,7 @@ exit 0
                 .state,
             PreparationState::Ready,
         );
-        sup.restart_session(&origin.id, true, None)
+        sup.restart_session(&origin.id, true, None, None)
             .await
             .expect("Ready permits restart after supervisor reopen");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30596,7 +30642,7 @@ exit 0
             crate::working_copies::IdentityStatus::DifferentObject
         );
         let refusal = sup
-            .restart_session(&origin.id, true, None)
+            .restart_session(&origin.id, true, None, None)
             .await
             .expect_err("Ready cannot authorize a foreign path");
         assert!(format!("{refusal:#}").contains("identity"));

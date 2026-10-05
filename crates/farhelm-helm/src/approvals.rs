@@ -48,17 +48,6 @@
 //! agent request from that host, listings included, is refused with the slots'
 //! ordinary "too many in flight" message; SPEC_impl.md records that as
 //! accepted.
-//!
-//! The gate that calls [`ask`] arrives in a later change of the same stack as
-//! this table, after the GUI that answers it; until then only the tests
-//! exercise it.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the agent request gate calling `ask` lands later in this stack"
-    )
-)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -447,6 +436,34 @@ async fn asking_session_title(
         .ok()
         .flatten()
         .map(|info| info.title)
+}
+
+/// Describe a TARGET session for a card from what the helm's cache knows:
+/// its title and the host the helm's routing places it on. Best effort: an
+/// unknown session, or a failed read, gives a card with only the id, which is
+/// still the truth the user needs.
+pub(crate) async fn describe_session(state: &AppState, session_id: &str) -> ApprovalSession {
+    let mut described = ApprovalSession {
+        id: session_id.to_string(),
+        title: None,
+        host_name: None,
+    };
+    let Ok(Some(host)) = state.store.host_of_session(session_id).await else {
+        return described;
+    };
+    if let Ok(Some(info)) = state.store.cached_session(host, session_id).await {
+        described.title = Some(info.title);
+    }
+    if let Ok(rows) = state.store.list_hosts().await
+        && let Some(row) = rows.iter().find(|row| row.id == host)
+    {
+        described.host_name = Some(crate::aggregate::host_display_name(
+            row.kind,
+            row.destination.as_deref(),
+            row.alias.as_deref(),
+        ));
+    }
+    described
 }
 
 fn refusal(kind: ErrorKind, message: String) -> anyhow::Error {

@@ -202,7 +202,7 @@ impl Supervisor {
     /// (R1.1), so this function must NEVER
     /// acquire the mutex itself — it would order lifecycle → directory
     /// against every create's intent → directory → lifecycle sequence and
-    /// form a cycle with a restricted create waiting on this very delete.
+    /// form a cycle with a create waiting on this very delete.
     /// The guard is held across the WHOLE teardown, not just the archival
     /// step: the last-reference decision must be made against the same
     /// world the final transaction commits into, and a create admitted in
@@ -3686,7 +3686,7 @@ mod tests {
             rows: 24,
         };
         if create_first {
-            let guards = sup.admit_create(None, None).await.unwrap();
+            let guards = sup.admit_create(None).await.unwrap();
             let admission = Arc::clone(&sup.working_copy_operations).lock_owned();
             tokio::pin!(admission);
             std::future::poll_fn(|cx| {

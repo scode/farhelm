@@ -59,27 +59,6 @@ enum CreateAdmission {
     /// it creates on the asking session's host (protocol 40), which gives
     /// the key a spawn's lifetime rather than an interactive create's.
     Interactive { key_lives_with_session: bool },
-    /// A session-authenticated `farhelm spawn --inherit-agent`.
-    Spawn { asking_session: String },
-}
-
-/// The intent key a spawn is reserved under: the agent's key, scoped to the
-/// session that asked.
-///
-/// Keys are chosen by agents and nothing else in the request records who
-/// asked (`--parent` is optional), so an unscoped key let one session replay
-/// another's spawn: a sibling reusing a key got the first session's child
-/// back as "the new child". Hashing the key gives a fixed length, so the
-/// scoped key stays inside [`INTENT_KEY_CAP`] whatever the agent sent. Keys
-/// reserved before this scoping no longer match; a retry spanning the
-/// upgrade spawns afresh, which bounded session-lifetime keys already allow.
-fn spawn_scoped_intent_key(asking_session: &str, key: &str) -> String {
-    use sha2::Digest as _;
-    let digest: String = sha2::Sha256::digest(key.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    format!("spawn-{asking_session}-{digest}")
 }
 
 impl CreateAdmission {
@@ -91,7 +70,6 @@ impl CreateAdmission {
             CreateAdmission::Interactive {
                 key_lives_with_session: true,
             } => DedupScope::SessionLifetime,
-            CreateAdmission::Spawn { .. } => DedupScope::SessionLifetime,
         }
     }
 }
@@ -134,36 +112,6 @@ use tracing::{debug, warn};
 /// `create_session` has touched storage, tmux, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 
-/// Revalidate a session-authenticated peer's credential against the store,
-/// or say how to refuse the request.
-///
-/// A credential is checked again at each protected step rather than trusted
-/// from the handshake, because the session behind it can be deleted while the
-/// connection stays open. `Unauthorized` means the credential no longer
-/// names a live session; `Internal` means the store could not answer, which
-/// is not evidence either way. The agent-request path makes the same check
-/// inline, interleaved with its own identity check and relay.
-async fn require_session_auth(
-    sup: &Supervisor,
-    auth: &farhelm_proto::SessionAuth,
-) -> Result<(), (ErrorKind, String)> {
-    match sup
-        .store
-        .authenticates_session(&auth.session_id, &auth.token)
-        .await
-    {
-        Ok(true) => Ok(()),
-        Ok(false) => Err((
-            ErrorKind::Unauthorized,
-            "the session credential is invalid or its session no longer exists".to_string(),
-        )),
-        Err(error) => Err((
-            ErrorKind::Internal,
-            format!("could not validate the session credential: {error:#}"),
-        )),
-    }
-}
-
 /// Reply to `req_id` with a refusal of `kind`.
 ///
 /// Every handler refusal goes through here (or [`reply_failure`] /
@@ -201,19 +149,6 @@ fn error_frame(req_id: u64, kind: ErrorKind, message: impl Into<String>) -> Fram
         kind,
         message: message.into(),
     })
-}
-
-/// Count the fields that share create's combined reply-size allowance.
-///
-/// The restricted (spawn) admission and the normal create path both use
-/// this count before durable work.
-fn create_field_bytes(
-    parent: Option<&str>,
-    cwd: &str,
-    checkout_bytes: usize,
-    title: Option<&str>,
-) -> usize {
-    parent.map_or(0, str::len) + cwd.len() + checkout_bytes + title.map_or(0, str::len)
 }
 
 /// Validate the fresh destination before resolution can contact a peer or
@@ -279,89 +214,33 @@ const INTENT_KEY_CAP: usize = 512;
 /// same field; see the definition for what the number is and why.
 use crate::store::RESUME_TEMPLATE_ELEMENT_CAP;
 
-/// Which launch selector a `CreateSession` chose (PLAN_M7.md item 2): its
-/// own resolved launch, or explicit inheritance of the asking session's.
-enum CreateSelector {
-    Launch(SessionLaunch),
-    Inherited,
-}
-
-/// Decide which launch selector a `CreateSession` chose, or say why the
-/// request has no single meaning, before any reservation work begins.
+/// The launch a `CreateSession` runs, or why it has none, before any
+/// reservation work begins.
 ///
-/// The two selectors are mutually exclusive on the wire by CONTRACT rather
-/// than by construction (see `ControlMsg::CreateSession`'s own docs), so this
-/// is where that contract is enforced, once, before anything reads a launch.
-/// A launch is also held to its shape rules here
+/// Every create that reaches this point comes from the helm with a resolved
+/// launch. The inheritance selector on the wire is a session-authenticated
+/// spawn's, and those are now relayed to the helm instead of answered here
+/// (protocol 41; see `handle_restricted_control`), so a create carrying it is
+/// refused. A launch is held to its shape rules here
 /// ([`SessionLaunch::validate_new`]), so a malformed one is refused before a
-/// reservation exists and stays correctable under the same key. Every
-/// refusal is `ErrorKind::InvalidRequest`, and the `Err` is the user-facing
-/// message verbatim (SPEC.md's concrete, actionable errors).
-fn create_selector(
+/// reservation exists and stays correctable under the same key. Every refusal
+/// is `ErrorKind::InvalidRequest`, and the `Err` is the user-facing message
+/// verbatim (SPEC.md's concrete, actionable errors).
+fn create_launch(
     launch: Option<SessionLaunch>,
     inherit_agent: bool,
-) -> Result<CreateSelector, String> {
+) -> Result<SessionLaunch, String> {
     match (launch, inherit_agent) {
         (Some(launch), false) => {
             launch.validate_new()?;
-            Ok(CreateSelector::Launch(launch))
+            Ok(launch)
         }
-        (None, true) => Ok(CreateSelector::Inherited),
+        (_, true) => Err(
+            "a create cannot inherit a launch here; `farhelm spawn --inherit-agent` goes through \
+             the helm"
+                .to_string(),
+        ),
         (None, false) => Err("a create must carry a launch".to_string()),
-        (Some(_), true) => {
-            Err("a create names exactly one launch or the explicit inheritance choice".to_string())
-        }
-    }
-}
-
-/// Resolve the launch a create runs, then hand off to
-/// [`Supervisor::create_session`] (through the caller).
-///
-/// An inherited spawn copies the authenticated asking session's stored
-/// launch exactly (SPEC.md: `spawn --inherit-agent`). A legacy session has
-/// no launch a new session may start from, so inheriting one is refused
-/// with the remedy SPEC.md names.
-async fn resolve_create_selector(
-    sup: &Arc<Supervisor>,
-    admission: &CreateAdmission,
-    selector: CreateSelector,
-) -> Result<SessionLaunch, (ErrorKind, String)> {
-    match selector {
-        CreateSelector::Launch(launch) => Ok(launch),
-        CreateSelector::Inherited => {
-            let CreateAdmission::Spawn { asking_session } = admission else {
-                return Err((
-                    ErrorKind::InvalidRequest,
-                    "a create must carry a launch".to_string(),
-                ));
-            };
-            let parent = sup
-                .store
-                .session(asking_session)
-                .await
-                .map_err(|error| {
-                    (
-                        ErrorKind::Internal,
-                        format!("could not read the asking session's launch: {error:#}"),
-                    )
-                })?
-                .ok_or_else(|| {
-                    (
-                        ErrorKind::Unauthorized,
-                        "the asking session no longer exists".to_string(),
-                    )
-                })?;
-            if let SessionLaunch::Legacy { .. } = parent.launch {
-                return Err((
-                    ErrorKind::InvalidRequest,
-                    "this session was created before launch kinds, so its launch cannot be \
-                     inherited; create the new session with its own launch (`farhelm agent \
-                     create --command`) instead"
-                        .to_string(),
-                ));
-            }
-            Ok(parent.launch)
-        }
     }
 }
 
@@ -375,8 +254,8 @@ async fn resolve_create_selector(
 struct CreateRequest {
     parent: Option<String>,
     cwd: String,
-    /// What the new session runs; `None` exactly when `inherit_agent` asks
-    /// for the asking session's launch instead.
+    /// What the new session runs. `None`, or `inherit_agent`, is refused
+    /// (see [`create_launch`]).
     launch: Option<SessionLaunch>,
     inherit_agent: bool,
     title: Option<String>,
@@ -396,7 +275,6 @@ async fn handle_create_session(
     req_id: u64,
     request: CreateRequest,
     admission: CreateAdmission,
-    restricted_auth: Option<&farhelm_proto::SessionAuth>,
 ) {
     let CreateRequest {
         parent,
@@ -420,8 +298,8 @@ async fn handle_create_session(
             return;
         }
     };
-    let selector = match create_selector(launch, inherit_agent) {
-        Ok(selector) => selector,
+    let mode = match create_launch(launch, inherit_agent) {
+        Ok(mode) => mode,
         Err(message) => {
             reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
             return;
@@ -438,51 +316,17 @@ async fn handle_create_session(
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
-    // A spawn's key belongs to the session that asked (SPEC.md "Agent-spawned
-    // sessions"), before admission locks it, so every use of the key below
-    // (the per-key lock, the reservation) sees the scoped form.
-    let intent_key = match &admission {
-        CreateAdmission::Spawn { asking_session } => {
-            intent_key.map(|key| spawn_scoped_intent_key(asking_session, &key))
-        }
-        CreateAdmission::Interactive { .. } => intent_key,
-    };
-    // Inheritance reads the parent's durable bundle and must wait until its
-    // credential and lifecycle are protected by the same guards that will
-    // cover fingerprint construction and the create itself; a bundle needs
-    // no resolution at all.
-    let mode_before_admission = if matches!(selector, CreateSelector::Inherited) {
-        None
-    } else {
-        Some(resolve_create_selector(sup, &admission, selector).await)
-    };
-    let guards = match sup
-        .admit_create(intent_key.as_deref(), restricted_auth)
-        .await
-    {
+    let guards = match sup.admit_create(intent_key.as_deref()).await {
         Ok(guards) => guards,
         Err(error) => {
             reply_failure(tx, req_id, &error).await;
             return;
         }
     };
-    let mode = match mode_before_admission {
-        Some(mode) => mode,
-        None => resolve_create_selector(sup, &admission, CreateSelector::Inherited).await,
-    };
     // Every refusal from here on releases `guards` before replying:
     // `send_reply` may wait on a full writer queue, and the guards include
-    // the host-wide create mutex and, for a restricted create, the parent
-    // session's lifecycle claim. A client that stops reading must not freeze
-    // stop, delete, or archive of that parent (or every other create).
-    let mode = match mode {
-        Ok(mode) => mode,
-        Err((kind, message)) => {
-            drop(guards);
-            reply_error(tx, req_id, kind, message).await;
-            return;
-        }
-    };
+    // the host-wide create mutex. A client that stops reading must not freeze
+    // every other create.
     // One accounting for every caller-supplied field the supervisor can
     // copy into a durable fingerprint. Interactive rows are permanent, so
     // omitting parent or any part of the launch would leave an
@@ -557,27 +401,6 @@ async fn handle_create_session(
         )
         .await
     {
-        // A session-authenticated create can never newly create the asking
-        // session, so a result naming the asker is an idempotency replay of
-        // the create that made it. Keys are now reserved scoped to the asker
-        // (`spawn_scoped_intent_key`), so a child re-running its parent's
-        // keyed spawn no longer reaches the parent's reservation at all; this
-        // stays as the backstop, because reporting the caller itself as "the
-        // child" would send its later stop or restart at itself. Nothing was
-        // created, so refusing has no effect to undo; `Conflict` says the key
-        // is what must change.
-        Ok(session) if restricted_auth.is_some_and(|auth| auth.session_id == session.id) => {
-            reply_error(
-                tx,
-                req_id,
-                ErrorKind::Conflict,
-                "the idempotency key replayed the create that made the calling session, so no \
-                 new session was created; retry with a key that has not been used on this host, \
-                 or with none at all"
-                    .to_string(),
-            )
-            .await;
-        }
         Ok(session) => {
             send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
         }
@@ -1237,7 +1060,7 @@ async fn handle_delete_session(
         // admission → lifecycle claim (the table on `Supervisor`), matching
         // every create's intent → directory → lifecycle sequence; `teardown_session` itself never
         // acquires the mutex (it would order lifecycle → directory and
-        // cycle against a restricted create). Holding it across the slow
+        // cycle against a create). Holding it across the slow
         // sweep is deliberate: the last-reference archival decision and
         // the final membership-removing transaction must see the same
         // world, and a create admitted in between could bind a membership
@@ -2040,6 +1863,9 @@ struct RestartSessionRequest {
     stop_if_running: bool,
     /// Restart with's replacement launch; `None` is a plain Restart.
     with: Option<SessionLaunch>,
+    /// The stored launch the requester's user approved; see
+    /// `ControlMsg::RestartSession::expected_launch`.
+    expected_launch: Option<SessionLaunch>,
 }
 
 /// Spawned for the same reason `StopSession` is: a restart that
@@ -2091,9 +1917,10 @@ async fn handle_restart_session(
             session_id,
             stop_if_running,
             with,
+            expected_launch,
         } = request;
         match sup
-            .restart_session(&session_id, stop_if_running, with)
+            .restart_session(&session_id, stop_if_running, with, expected_launch)
             .await
         {
             Ok(session) => {
@@ -2585,7 +2412,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 CreateAdmission::Interactive {
                     key_lives_with_session,
                 },
-                None,
             )
             .await
         }
@@ -2788,6 +2614,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             session_id,
             stop_if_running,
             with,
+            expected_launch,
         } => {
             handle_restart_session(
                 sup,
@@ -2798,6 +2625,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                     session_id,
                     stop_if_running,
                     with,
+                    expected_launch,
                 },
             )
             .await
@@ -2907,138 +2735,21 @@ pub(crate) async fn handle_restricted_control(
     auth: &farhelm_proto::SessionAuth,
 ) {
     match msg {
-        ControlMsg::CreateSession {
-            req_id,
-            parent,
-            cwd,
-            launch,
-            inherit_agent,
-            title,
-            cols,
-            rows,
-            intent_key,
-            // Unused: a spawn whose launch the helm resolves is the helm's
-            // own create (protocol 40), checked there before it is sent.
-            confirm_yolo: _,
-            github_checkout,
-            // Restricted creates always get the session-lifetime key a
-            // spawn has, so the helm-only marker changes nothing here.
-            key_lives_with_session: _,
-        } => {
-            // Refused BEFORE the credential check, at the very top of
-            // create handling: a fresh-checkout payload is helm-supplied
-            // from helm-side configuration (checkout root, post-clone hook)
-            // that a spawned session must never see or influence, so no
-            // restricted path can carry it under any credential. The three
-            // new GitHub-checkout requests never reach this arm at all —
-            // they are off the restricted allowlist and fall to the
-            // catch-all below — but a create carrying the payload is ON
-            // the allowlist's message shape and must be cut here.
-            if github_checkout.is_some() {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::Unauthorized,
-                    "fresh GitHub checkouts are not available to \
-                                  session-authenticated creates: the payload is helm-supplied"
-                        .to_string(),
-                )
-                .await;
-                return;
-            }
-            // Reject an invalid credential before any admission work. This
-            // check is intentionally unclaimed: it refuses an
-            // unauthenticated peer cheaply, while the second check below is
-            // still needed to serialize the accepted create with deletion.
-            if let Err((kind, message)) = require_session_auth(sup, auth).await {
-                reply_error(tx, req_id, kind, message).await;
-                return;
-            }
-            if parent
-                .as_deref()
-                .is_some_and(|parent| parent != auth.session_id)
-            {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::Unauthorized,
-                    format!(
-                        "a session-authenticated peer may name only itself ({}) as parent",
-                        truncate_for_error(&auth.session_id)
-                    ),
-                )
-                .await;
-                return;
-            }
-            // The only launch a session-authenticated create may name is
-            // its own, by explicit inheritance; profiles, which it could
-            // also select by name or id, were removed (protocol 38).
-            if launch.is_some() || !inherit_agent {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    "a session-authenticated create requires the explicit inheritance selector \
-                     (farhelm spawn --inherit-agent)"
-                        .to_string(),
-                )
-                .await;
-                return;
-            }
-            let field_len = create_field_bytes(parent.as_deref(), &cwd, 0, title.as_deref());
-            if field_len > CREATE_FIELD_CAP {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    format!(
-                        "parent, cwd, and title together are {field_len} bytes, exceeding the \
-                         {CREATE_FIELD_CAP}-byte limit"
-                    ),
-                )
-                .await;
-                return;
-            }
-            // The shared handler revalidates this credential after intent,
-            // directory and parent-lifecycle admission. No inherited field
-            // or fingerprint is resolved before that protected check.
-            // A structured bundle is compiled by the helm and carries a
-            // selection that the authenticated child did not originate.
-            // Children may inherit their parent's established launch, but
-            // cannot present a new structured bundle as trusted authority.
-            if launch.is_some() {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    "launch is not available to session-authenticated creates".to_string(),
-                )
-                .await;
-                return;
-            }
-            let request = CreateRequest {
-                parent,
-                cwd,
-                launch,
-                inherit_agent,
-                title,
-                cols,
-                rows,
-                intent_key,
-                // Unreachable as `Some` — the arm above refuses a
-                // restricted create that carries the payload before this
-                // call is reached.
-                github_checkout: None,
-            };
-            handle_create_session(
-                sup,
+        // A session-authenticated create is no longer answered here. Every
+        // `farhelm spawn`, `--inherit-agent` included, is relayed to the helm
+        // as an agent `create` (protocol 41), which asks the user before it
+        // creates anything (SPEC.md, Agent-spawned sessions). Answering this
+        // shape locally would be a spawn no one was asked about, so it is
+        // refused whatever it carries, before any credential or admission
+        // work.
+        ControlMsg::CreateSession { req_id, .. } => {
+            reply_error(
                 tx,
                 req_id,
-                request,
-                CreateAdmission::Spawn {
-                    asking_session: auth.session_id.clone(),
-                },
-                Some(auth),
+                ErrorKind::Unauthorized,
+                "a session can no longer create sessions directly; `farhelm spawn` asks the \
+                 attached helm, which asks the user"
+                    .to_string(),
             )
             .await;
         }
@@ -3134,6 +2845,11 @@ pub(crate) async fn handle_restricted_control(
             // been relayed at that point, so `Unavailable` is a safe retry.
             let outcome = 'fenced: {
                 let fence = if request.is_mutating() {
+                    // Deliberately the ordinary budget, not the approval
+                    // wait an earlier request may be sitting in: a second
+                    // change from a session whose first one waits for the
+                    // user is refused quickly rather than queued behind the
+                    // card for minutes.
                     let deadline = tokio::time::Instant::now()
                         + sup.timeouts.agent_deliver
                         + sup.timeouts.agent_upcall;
@@ -3147,8 +2863,9 @@ pub(crate) async fn handle_restricted_control(
                             break 'fenced farhelm_proto::AgentOutcome::Err {
                                 kind: ErrorKind::Unavailable,
                                 message: "an earlier change requested by this session is still \
-                                          in progress; this request was not sent, so it is safe \
-                                          to retry later"
+                                          in progress or waiting for the user's approval in \
+                                          Farhelm; this request was not sent, so it is safe to \
+                                          retry later"
                                     .to_string(),
                             };
                         }
@@ -3172,7 +2889,12 @@ pub(crate) async fn handle_restricted_control(
                     // mutation is really over rather than when this call returns
                     // — see `HelmLink::upcall`.
                     Ok(true) if session_id == auth.session_id => {
-                        sup.relay_agent_request(session_id, request, fence).await
+                        match with_inherited_launch(sup, &session_id, request).await {
+                            Ok(request) => {
+                                sup.relay_agent_request(session_id, request, fence).await
+                            }
+                            Err(refusal) => *refusal,
+                        }
                     }
                     // A credential for one session is not authority to speak AS
                     // another. The check is here rather than at the far end
@@ -3214,13 +2936,78 @@ pub(crate) async fn handle_restricted_control(
                 tx,
                 other.request_req_id().unwrap_or(0),
                 ErrorKind::Unauthorized,
-                "a session-authenticated peer may only create sessions and ask the helm \
-                              about the fleet"
-                    .to_string(),
+                "a session-authenticated peer may only send requests to the helm".to_string(),
             )
             .await;
         }
     }
+}
+
+/// Fill in the launch a `farhelm spawn --inherit-agent` reuses, as the
+/// request is relayed to the helm.
+///
+/// The asking session's stored launch is read from this supervisor's own
+/// store, and whatever the asking CLI sent in its place is discarded: the
+/// session's own launch is the only one inheritance may name (SPEC.md,
+/// Agent-spawned sessions). A spawn that does not inherit must not carry a
+/// launch either, since the helm resolves its launch from templates and
+/// flags; one that does is refused rather than silently stripped, because
+/// only a modified CLI sends it. A legacy session has no launch a new session
+/// may start from, so inheriting one is refused with the remedy SPEC.md
+/// names, before anything is relayed.
+///
+/// Called with the asking session's request fence held, after the credential
+/// check, so the launch read is the authenticated session's own and the
+/// session cannot be deleted under it.
+async fn with_inherited_launch(
+    sup: &Arc<Supervisor>,
+    session_id: &str,
+    mut request: AgentVerb,
+) -> Result<AgentVerb, Box<farhelm_proto::AgentOutcome>> {
+    let AgentVerb::Create {
+        spawn: Some(placement),
+        ..
+    } = &mut request
+    else {
+        return Ok(request);
+    };
+    let invalid = |message: &str| farhelm_proto::AgentOutcome::Err {
+        kind: ErrorKind::InvalidRequest,
+        message: message.to_string(),
+    };
+    if !placement.inherit_agent {
+        if placement.inherited_launch.is_some() {
+            return Err(Box::new(invalid(
+                "a spawn that does not inherit its launch cannot name one; its launch comes from \
+                 templates and flags",
+            )));
+        }
+        return Ok(request);
+    }
+    let stored = match sup.store.session(session_id).await {
+        Ok(Some(row)) => row.launch,
+        Ok(None) => {
+            return Err(Box::new(farhelm_proto::AgentOutcome::Err {
+                kind: ErrorKind::Unauthorized,
+                message: "the asking session no longer exists".to_string(),
+            }));
+        }
+        Err(error) => {
+            return Err(Box::new(farhelm_proto::AgentOutcome::Err {
+                kind: ErrorKind::Internal,
+                message: format!("could not read the asking session's launch: {error:#}"),
+            }));
+        }
+    };
+    if let SessionLaunch::Legacy { .. } = stored {
+        return Err(Box::new(invalid(
+            "this session was created before launch kinds, so its launch cannot be inherited; \
+             create the new session with its own launch (`farhelm agent create --command`) \
+             instead",
+        )));
+    }
+    placement.inherited_launch = Some(Box::new(stored));
+    Ok(request)
 }
 
 /// Bound and sanitize an `AgentRequest`'s TARGET before it is logged or
@@ -3715,6 +3502,7 @@ mod tests {
                 session_id,
                 stop_if_running: false,
                 with: None,
+                expected_launch: None,
             },
         )
         .await;
@@ -3837,15 +3625,22 @@ mod tests {
         authenticated_parent_with(sup, cwd, id, structured_parent_launch()).await
     }
 
-    /// The create selector's shape rules, at the admission boundary before
-    /// any reservation can make a malformed request permanently
-    /// uncorrectable: exactly one of a launch or the inheritance choice, and
-    /// a launch that passes its own rules (a legacy launch never does).
+    /// The create launch's shape rules, at the admission boundary before any
+    /// reservation can make a malformed request permanently uncorrectable: a
+    /// launch is required, the inheritance choice is refused (it is answered
+    /// by the helm now), and a launch must pass its own rules (a legacy
+    /// launch never does).
+    ///
+    /// Why: a session's own `farhelm spawn --inherit-agent` used to be
+    /// answered here with no one asked. It now goes through the helm, which
+    /// asks the user (SPEC.md, Agent-spawned sessions), so a create that still
+    /// carries the inheritance choice must not be carried out locally.
     #[test]
-    fn create_selector_refuses_ambiguous_shapes_and_invalid_launches() {
+    fn create_launch_refuses_inheritance_and_invalid_launches() {
         let valid = SessionLaunch::plain_command("agent");
         for (launch, inherit, expected) in [
-            (Some(valid.clone()), true, "exactly one"),
+            (Some(valid.clone()), true, "cannot inherit"),
+            (None, true, "cannot inherit"),
             (None, false, "must carry a launch"),
             (
                 Some(SessionLaunch::Legacy {
@@ -3862,8 +3657,8 @@ mod tests {
                 "needs a declared agent type",
             ),
         ] {
-            let error = match create_selector(launch, inherit) {
-                Ok(_) => panic!("{expected}: the selector must be refused"),
+            let error = match create_launch(launch, inherit) {
+                Ok(_) => panic!("{expected}: the create must be refused"),
                 Err(error) => error,
             };
             assert!(
@@ -3871,82 +3666,94 @@ mod tests {
                 "expected {expected:?} in {error:?}"
             );
         }
-        assert!(matches!(
-            create_selector(Some(valid.clone()), false),
-            Ok(CreateSelector::Launch(launch)) if launch == valid
-        ));
-        assert!(matches!(
-            create_selector(None, true),
-            Ok(CreateSelector::Inherited)
-        ));
+        assert_eq!(create_launch(Some(valid.clone()), false), Ok(valid));
     }
 
-    /// An explicitly inherited spawn copies the authenticated parent's
-    /// complete stored agent bundle without any helm attachment.
-    ///
-    /// This is the offline scripting contract: the parent, not ambient host
-    /// history, determines invocation, integration, resume, and provenance.
-    #[farhelm_testtrace::test]
-    async fn inherited_spawn_copies_the_asking_sessions_bundle_offline() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let auth = authenticated_parent(&sup, state.path(), "parent").await;
-        handle_restricted_control(
-            &sup,
-            ControlMsg::CreateSession {
-                req_id: 2,
-                parent: Some("parent".to_string()),
-                cwd: state.path().to_string_lossy().into_owned(),
-                launch: None,
+    /// An inheriting spawn's create, as the asking CLI sends it: the
+    /// placement and no launch of its own (or a forged one, in `forged`).
+    fn inheriting_spawn(forged: Option<SessionLaunch>) -> AgentVerb {
+        AgentVerb::Create {
+            host: None,
+            templates: Vec::new(),
+            edits: farhelm_proto::launcher::TemplateFields::default(),
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: Some(farhelm_proto::SpawnPlacement {
+                parent: None,
                 inherit_agent: true,
-                title: Some("child".to_string()),
-                cols: 80,
-                rows: 24,
-                intent_key: Some("spawn-copy".to_string()),
-                confirm_yolo: false,
-                github_checkout: None,
-                key_lives_with_session: false,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
-        let ControlMsg::SessionCreated { session, .. } = reply else {
-            panic!("explicit inherited spawn must succeed: {reply:?}");
-        };
-        let stored = sup
-            .store
-            .session(&session.id)
-            .await
-            .expect("read child")
-            .expect("child exists");
-        assert_eq!(stored.parent.as_deref(), Some("parent"));
-        assert_eq!(stored.launch, parent_launch());
+                inherited_launch: forged.map(Box::new),
+            }),
+        }
     }
 
-    /// Inheriting a legacy parent's launch is refused, naming the remedy,
-    /// and creates nothing.
+    /// Spec: relaying `farhelm spawn --inherit-agent` puts the asking
+    /// session's own stored launch into the request, replacing whatever the
+    /// CLI sent in its place.
     ///
-    /// Why: SPEC.md has `farhelm spawn --inherit-agent` refuse a session
-    /// from before launch kinds; its stored command was never classified,
-    /// so copying it would start a new session nothing has asserted
-    /// anything about.
+    /// Why: the helm shows this launch on the approval card and judges it by
+    /// the YOLO rule, and the only launch inheritance may name is the
+    /// session's own (SPEC.md, Agent-spawned sessions). A CLI-supplied launch
+    /// passed through would let a session spawn anything under the label of
+    /// inheriting.
     #[farhelm_testtrace::test]
-    async fn inherited_spawn_refuses_a_legacy_parent() {
+    async fn an_inheriting_spawn_is_relayed_with_the_sessions_own_launch() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let auth = authenticated_parent_with(
+            .unwrap();
+        let auth = authenticated_structured_parent(&sup, state.path(), "asker").await;
+        let forged = SessionLaunch::plain_command("something-else");
+        let relayed = with_inherited_launch(&sup, &auth.session_id, inheriting_spawn(Some(forged)))
+            .await
+            .unwrap_or_else(|refusal| panic!("relayed, got {refusal:?}"));
+        let AgentVerb::Create {
+            spawn: Some(placement),
+            ..
+        } = relayed
+        else {
+            panic!("still a spawn");
+        };
+        assert_eq!(
+            placement.inherited_launch.as_deref(),
+            Some(&structured_parent_launch())
+        );
+    }
+
+    /// Spec: a spawn that does not inherit but carries a launch is refused
+    /// before it is relayed, and so is inheriting from a session created
+    /// before launch kinds, with the remedy SPEC.md names.
+    ///
+    /// Why: the first can only come from a modified CLI trying to pass its own
+    /// launch off as inherited; the second has no launch a new session may
+    /// start from, and refusing it here keeps the user from being asked about
+    /// a spawn that cannot happen.
+    #[farhelm_testtrace::test]
+    async fn a_forged_or_legacy_inheritance_is_refused_before_relaying() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let auth = authenticated_structured_parent(&sup, state.path(), "asker").await;
+        let mut forged = inheriting_spawn(Some(SessionLaunch::plain_command("x")));
+        if let AgentVerb::Create {
+            spawn: Some(placement),
+            ..
+        } = &mut forged
+        {
+            placement.inherit_agent = false;
+        }
+        let refusal = with_inherited_launch(&sup, &auth.session_id, forged)
+            .await
+            .expect_err("a launch without inheritance is refused");
+        assert!(
+            matches!(&*refusal, farhelm_proto::AgentOutcome::Err { kind: ErrorKind::InvalidRequest, message } if message.contains("cannot name one")),
+            "{refusal:?}"
+        );
+
+        let legacy = authenticated_parent_with(
             &sup,
             state.path(),
-            "parent",
+            "legacy",
             SessionLaunch::Legacy {
                 invocation: "agent".to_string(),
                 agent_kind: AgentKind::Generic,
@@ -3954,135 +3761,12 @@ mod tests {
             },
         )
         .await;
-        handle_restricted_control(
-            &sup,
-            ControlMsg::CreateSession {
-                req_id: 2,
-                parent: Some("parent".to_string()),
-                cwd: state.path().to_string_lossy().into_owned(),
-                launch: None,
-                inherit_agent: true,
-                title: Some("child".to_string()),
-                cols: 80,
-                rows: 24,
-                intent_key: None,
-                confirm_yolo: false,
-                github_checkout: None,
-                key_lives_with_session: false,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
-        let ControlMsg::Error { kind, message, .. } = reply else {
-            panic!("inheriting a legacy launch must be refused: {reply:?}");
-        };
-        assert_eq!(kind, ErrorKind::InvalidRequest);
+        let refusal = with_inherited_launch(&sup, &legacy.session_id, inheriting_spawn(None))
+            .await
+            .expect_err("a legacy launch cannot be inherited");
         assert!(
-            message.contains("before launch kinds") && message.contains("--command"),
-            "{message}"
-        );
-        assert_eq!(sup.store.load_all().await.expect("load").len(), 1);
-    }
-
-    /// A structured parent may spawn without a helm because its resolved
-    /// invocation and requested choices are already in supervisor storage.
-    #[farhelm_testtrace::test]
-    async fn inherited_spawn_keeps_a_structured_parents_launch_snapshot() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let auth = authenticated_structured_parent(&sup, state.path(), "parent").await;
-        handle_restricted_control(
-            &sup,
-            ControlMsg::CreateSession {
-                req_id: 2,
-                parent: Some("parent".to_string()),
-                cwd: state.path().to_string_lossy().into_owned(),
-                launch: None,
-                inherit_agent: true,
-                title: Some("child".to_string()),
-                cols: 80,
-                rows: 24,
-                intent_key: Some("structured-spawn-copy".to_string()),
-                confirm_yolo: false,
-                github_checkout: None,
-                key_lives_with_session: false,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
-        let ControlMsg::SessionCreated { session, .. } = reply else {
-            panic!("explicit inherited structured spawn must succeed: {reply:?}");
-        };
-        let expected = structured_parent_launch();
-        assert!(matches!(expected, SessionLaunch::Agent { .. }));
-        assert_eq!(session.launch, expected);
-        let stored = sup
-            .store
-            .session(&session.id)
-            .await
-            .expect("read child")
-            .expect("child exists");
-        assert_eq!(
-            stored.launch, expected,
-            "a child inherits the parent's composed commands as stored, never recomposed from \
-             its selection through today's catalog"
-        );
-    }
-
-    /// A session-authenticated create that does not inherit is refused, and
-    /// the refusal names the selector that works.
-    ///
-    /// Why: profiles were removed, and with them spawn's `--agent <name>` and
-    /// `--profile-id`; until the agent CLI takes launch flags, inheriting the
-    /// asking session's own launch is the only spawn form. A refusal that did
-    /// not say so would leave an agent with no way forward.
-    #[farhelm_testtrace::test]
-    async fn a_spawn_create_without_inheritance_is_refused_with_the_remedy() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let auth = authenticated_parent(&sup, state.path(), "parent").await;
-        handle_restricted_control(
-            &sup,
-            ControlMsg::CreateSession {
-                req_id: 3,
-                parent: Some("parent".to_string()),
-                cwd: state.path().to_string_lossy().into_owned(),
-                launch: None,
-                inherit_agent: false,
-                title: None,
-                cols: 80,
-                rows: 24,
-                intent_key: None,
-                confirm_yolo: false,
-                github_checkout: None,
-                key_lives_with_session: false,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("refusal").body).expect("decode");
-        let ControlMsg::Error { kind, message, .. } = reply else {
-            panic!("a spawn create without inheritance must fail: {reply:?}");
-        };
-        assert_eq!(kind, ErrorKind::InvalidRequest);
-        assert!(message.contains("--inherit-agent"), "{message}");
-        assert!(
-            sup.store.load_all().await.expect("load").len() == 1,
-            "only the parent exists; nothing was created"
+            matches!(&*refusal, farhelm_proto::AgentOutcome::Err { kind: ErrorKind::InvalidRequest, message } if message.contains("before launch kinds")),
+            "{refusal:?}"
         );
     }
 
@@ -4526,6 +4210,7 @@ mod tests {
                 session_id: session_id.to_string(),
                 stop_if_running: true,
                 with: None,
+                expected_launch: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -5857,19 +5542,18 @@ mod tests {
 
     /// A session-authenticated peer has a SHORT list of operations, and a
     /// message outside it is refused as an authority question rather than
-    /// falling through to a catch-all; creating, which is on the list,
-    /// still cannot forge a sibling or ancestor relationship.
+    /// falling through to a catch-all; a create, which a session used to be
+    /// able to send here, is refused outright and reserves nothing.
     ///
-    /// The list is not "create only" — agent requests are on it too — so
-    /// the two halves here are about different things: the first
-    /// pins that the allowlist is still an ALLOWLIST (an off-list message
-    /// gets `Unauthorized`, not a reply built from the session's own
-    /// credential), and the second pins the one check that has to happen
-    /// inside an allowed operation. Adding an operation must not quietly
-    /// turn the first half into a tautology about whichever message this
-    /// test happens to pick.
+    /// Why: the first half pins that the allowlist is still an ALLOWLIST (an
+    /// off-list message gets `Unauthorized`, not a reply built from the
+    /// session's own credential). The second pins that a session's spawn can
+    /// no longer be carried out by this supervisor alone: every spawn goes
+    /// through the helm, which asks the user (SPEC.md, Agent-spawned
+    /// sessions), so a create answered here would be one nobody was asked
+    /// about.
     #[farhelm_testtrace::test]
-    async fn restricted_dispatch_refuses_an_off_list_message_and_a_forged_parent() {
+    async fn restricted_dispatch_refuses_an_off_list_message_and_any_create() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -5910,18 +5594,18 @@ mod tests {
         )
         .await;
         let forged: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("parent refusal").body).unwrap();
+            serde_json::from_slice(&rx.recv().await.expect("create refusal").body).unwrap();
         let ControlMsg::Error {
             req_id,
             kind,
             message,
         } = forged
         else {
-            panic!("a forged parent must be refused");
+            panic!("a session-authenticated create must be refused");
         };
         assert_eq!(req_id, 42);
         assert_eq!(kind, ErrorKind::Unauthorized);
-        assert!(message.contains("parent-session"));
+        assert!(message.contains("asks the user"), "{message}");
         assert!(sup.sessions.lock().await.is_empty());
         assert_eq!(sup.store.reservation("forged-key").await.unwrap(), None);
     }
@@ -6238,382 +5922,6 @@ mod tests {
             reservation.outcome,
             crate::store::ReservationOutcome::Failed { .. }
         ));
-    }
-
-    /// Deleting a parent revokes every already-open restricted connection.
-    ///
-    /// Hello-time authentication is only admission to the connection; the
-    /// lifecycle-serialized check here is what prevents a cached bearer from
-    /// creating descendants after its authority row is gone.
-    #[farhelm_testtrace::test]
-    async fn restricted_create_revalidates_after_its_parent_is_deleted() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let auth = authenticated_parent(&sup, state.path(), "revoked-parent").await;
-        sup.store
-            .delete_session_settling_reservations(&auth.session_id)
-            .await
-            .expect("delete authenticated parent");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-
-        handle_restricted_control(
-            &sup,
-            ControlMsg::CreateSession {
-                req_id: 43,
-                parent: None,
-                cwd: state.path().to_string_lossy().into_owned(),
-                launch: None,
-                inherit_agent: true,
-                title: None,
-                cols: 80,
-                rows: 24,
-                intent_key: Some("revoked-key".to_string()),
-                confirm_yolo: false,
-                github_checkout: None,
-                key_lives_with_session: false,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("revocation reply").body).unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 43,
-                kind: ErrorKind::Unauthorized,
-                ..
-            }
-        ));
-        assert_eq!(sup.store.reservation("revoked-key").await.unwrap(), None);
-    }
-
-    /// An already authenticated create can lose authority while queued behind
-    /// its parent's lifecycle operation. Observe the actual Pending lock
-    /// acquisition before removing the parent, so an edge-only auth check
-    /// would incorrectly proceed to inherited resolution instead of refusing.
-    #[farhelm_testtrace::test]
-    async fn restricted_create_revalidates_a_parent_revoked_while_waiting() {
-        let state = StateDir::new();
-        let waiting = Arc::new(tokio::sync::Notify::new());
-        let signal = Arc::clone(&waiting);
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                faults: crate::service::FaultHooks {
-                    create_parent_waiting: Some(Arc::new(move |_| signal.notify_one())),
-                    ..crate::service::FaultHooks::default()
-                },
-                ..SupervisorSeams::default()
-            },
-        )
-        .await
-        .expect("supervisor");
-        let auth = authenticated_parent(&sup, state.path(), "waiting-parent").await;
-        assert!(
-            sup.store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-                .unwrap()
-        );
-        let parent_guard = sup.lifecycle_locks.claim(&auth.session_id).await;
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let request = ControlMsg::CreateSession {
-            req_id: 44,
-            parent: None,
-            cwd: state.path().to_string_lossy().into_owned(),
-            launch: None,
-            inherit_agent: true,
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: Some("waiting-revoked-key".into()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        };
-        // Keep the request future owned by this test: a timeout drops it,
-        // rather than detaching a task that might later create a session.
-        let create = handle_restricted_control(&sup, request, &tx, &auth);
-        tokio::pin!(create);
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            tokio::select! {
-                _ = &mut create => panic!("create completed while parent admission was held"),
-                _ = waiting.notified() => {},
-            }
-        })
-        .await
-        .expect("create must reach Pending parent acquisition");
-        assert!(
-            sup.store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-                .unwrap()
-        );
-        sup.store
-            .delete_session_settling_reservations(&auth.session_id)
-            .await
-            .unwrap();
-        assert!(
-            !sup.store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-                .unwrap()
-        );
-        drop(parent_guard);
-        tokio::time::timeout(std::time::Duration::from_secs(5), &mut create)
-            .await
-            .expect("revoked create must finish after release");
-        let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 44,
-                kind: ErrorKind::Unauthorized,
-                ..
-            }
-        ));
-        assert!(
-            sup.store
-                .reservation("waiting-revoked-key")
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(sup.store.load_all().await.unwrap().is_empty());
-        assert!(sup.sessions.lock().await.is_empty());
-    }
-
-    /// Delete wins directory admission before a restricted inherited create.
-    /// The create must wait without holding its parent's lifecycle claim,
-    /// then reject the credential revoked by the completed Delete. This is a
-    /// real handler pair: a reversed lock order deadlocks instead of yielding
-    /// the correlated replies and empty durable state asserted below.
-    #[farhelm_testtrace::test]
-    async fn restricted_inherited_create_waits_for_parent_delete_then_refuses() {
-        restricted_create_after_parent_mutation(false).await;
-    }
-
-    /// Restart must finish its protected metadata update before an inherited
-    /// create resolves the parent bundle. Both operations must complete with
-    /// the credential retained and the child's actual agent metadata matching
-    /// the restarted parent, despite contending for both admission locks.
-    #[farhelm_testtrace::test]
-    async fn restricted_inherited_create_waits_for_parent_restart_then_inherits() {
-        restricted_create_after_parent_mutation(true).await;
-    }
-
-    /// Park a real parent mutation after directory admission but before its
-    /// lifecycle claim, then observe the inherited create's actual Pending
-    /// directory acquisition. The manual guard controls only ordering; the
-    /// production handlers perform every mutation and produce both replies.
-    ///
-    /// The scope manager is disabled, not the default real one. Delete and
-    /// Restart both reach `reap_process_tree`, whose first call to
-    /// `ScopeManager::available` probes the host's systemd user manager with
-    /// a real transient scope under a 15-second budget. That was longer than
-    /// the completion bound below, then 10 seconds, which exists to catch a
-    /// lock cycle between the two handlers, so a slow or failing probe read
-    /// as a deadlock: both tests timed out that way on the hosted release
-    /// runner, which has a user manager (FLAKES.md, 2026-09-29). Nothing here
-    /// is about cgroup scopes, so the fallback sweep keeps the lock-ordering
-    /// contract independent of the host's systemd.
-    ///
-    /// The completion bound is 30 seconds for the same reason from the other
-    /// side: it must sit above everything the two handlers may legitimately
-    /// wait on, or a slow host reads as a deadlock again. The fallback sweep
-    /// alone may spend its 5-second SIGTERM grace plus a 2-second kill
-    /// confirmation, and a Restart then relaunches through tmux. A real lock
-    /// cycle never finishes, so the larger bound only delays that failure,
-    /// and a passing run never waits for it.
-    async fn restricted_create_after_parent_mutation(restart: bool) {
-        let state = StateDir::new();
-        let waiting = Arc::new(tokio::sync::Notify::new());
-        let signal = Arc::clone(&waiting);
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                faults: crate::service::FaultHooks {
-                    create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
-                    ..crate::service::FaultHooks::default()
-                },
-                scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await
-        .unwrap();
-        let auth = reporting_session(&sup, "mutation-parent").await;
-        // The report-only fixture deliberately uses a minimal generic view.
-        // Restart republishes that view, while inheritance reads the durable
-        // row, so this lifecycle fixture must establish their real-world parity.
-        let row = sup.store.session(&auth.session_id).await.unwrap().unwrap();
-        let mut entry = entry_with(None, row.outcome.clone());
-        entry.info.id = row.id.clone();
-        entry.info.cwd = row.cwd.clone();
-        entry.info.canonical_cwd = row.canonical_cwd.clone();
-        entry.info.invocation = row.launch.display_command();
-        entry.info.agent_kind = row.agent_kind();
-        entry.info.launch = row.launch.clone();
-        entry.snapshot = IntegrationSnapshot::of(&row.launch);
-        sup.sessions
-            .lock()
-            .await
-            .insert(row.id.clone(), Arc::new(entry));
-        {
-            let sessions = sup.sessions.lock().await;
-            let entry = sessions.get(&row.id).unwrap();
-            assert_eq!(entry.info.launch, row.launch);
-            assert_eq!(entry.snapshot.kind, row.agent_kind());
-        }
-        assert!(
-            sup.store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-                .unwrap()
-        );
-        if restart {
-            // Restart only resumes, so the parent needs a conversation.
-            sup.record_conversation_for_test(&auth.session_id, "conv-parent")
-                .await;
-        }
-        let parent_guard = sup.lifecycle_locks.claim(&auth.session_id).await;
-        let (mut mutation_tasks, mut mutation_rx) = dispatch_for_test(
-            &sup,
-            if restart {
-                ControlMsg::RestartSession {
-                    req_id: 45,
-                    session_id: auth.session_id.clone(),
-                    stop_if_running: true,
-                    with: None,
-                }
-            } else {
-                ControlMsg::DeleteSession {
-                    req_id: 45,
-                    session_id: auth.session_id.clone(),
-                    only_if_nothing_alive: false,
-                    only_if_agent_ended: false,
-                }
-            },
-        )
-        .await;
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            sup.lifecycle_locks
-                .claims_reached_for_test(&auth.session_id, 2),
-        )
-        .await
-        .expect("parent mutation must reach its lifecycle acquisition");
-        assert!(
-            sup.working_copy_operations.try_lock().is_err(),
-            "parent mutation owns directory admission"
-        );
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let request = ControlMsg::CreateSession {
-            req_id: 46,
-            parent: Some(auth.session_id.clone()),
-            cwd: state.path().to_string_lossy().into_owned(),
-            launch: None,
-            inherit_agent: true,
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: Some("mutation-wins-key".into()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        };
-        let create = handle_restricted_control(&sup, request, &tx, &auth);
-        tokio::pin!(create);
-        tokio::time::timeout(Duration::from_secs(5), async {
-            tokio::select! {
-                _ = &mut create => panic!("create must wait behind the parent mutation"),
-                _ = waiting.notified() => {},
-            }
-        })
-        .await
-        .expect("create must observe Pending directory admission");
-        assert!(sup.store.session(&auth.session_id).await.unwrap().is_some());
-        drop(parent_guard);
-        // Poll the create while joining the real owned parent mutation. Neither
-        // operation may depend on the other's reply being consumed to release
-        // admission; both queues have capacity for their one correlated reply.
-        // The bound is a deadlock watchdog, not a latency budget; see the
-        // doc comment for why it is 30 seconds.
-        tokio::time::timeout(Duration::from_secs(30), async {
-            tokio::join!(&mut create, async {
-                while let Some(result) = mutation_tasks.join_next().await {
-                    result.expect("parent mutation task");
-                }
-            });
-        })
-        .await
-        .expect("parent mutation and restricted create must both finish");
-        let mutation: ControlMsg =
-            serde_json::from_slice(&mutation_rx.recv().await.unwrap().body).unwrap();
-        let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
-        if restart {
-            let ControlMsg::SessionRestarted {
-                req_id: 45,
-                session: parent,
-            } = mutation
-            else {
-                panic!("expected restarted parent, got {mutation:?}");
-            };
-            let ControlMsg::SessionCreated {
-                req_id: 46,
-                session: child,
-            } = reply
-            else {
-                panic!("expected inherited child, got {reply:?}");
-            };
-            assert_eq!(child.parent.as_deref(), Some(auth.session_id.as_str()));
-            assert_eq!(child.invocation, parent.invocation);
-            let child_row = sup.store.session(&child.id).await.unwrap().unwrap();
-            let parent_row = sup.store.session(&parent.id).await.unwrap().unwrap();
-            assert_eq!(child_row.launch, parent_row.launch);
-            assert_eq!(child.launch, parent.launch);
-            assert!(
-                sup.store
-                    .authenticates_session(&auth.session_id, &auth.token)
-                    .await
-                    .unwrap()
-            );
-            assert_eq!(sup.store.load_all().await.unwrap().len(), 2);
-            return;
-        }
-        assert!(
-            matches!(mutation, ControlMsg::SessionDeleted { req_id: 45, .. }),
-            "{mutation:?}"
-        );
-        assert!(
-            matches!(
-                reply,
-                ControlMsg::Error {
-                    req_id: 46,
-                    kind: ErrorKind::Unauthorized,
-                    ..
-                }
-            ),
-            "{reply:?}"
-        );
-        assert!(sup.store.load_all().await.unwrap().is_empty());
-        assert!(
-            sup.store
-                .reservation("mutation-wins-key")
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(sup.sessions.lock().await.is_empty());
     }
 
     /// Seed a session that is able to report its own conversation
@@ -7746,94 +7054,6 @@ mod tests {
         );
     }
 
-    /// A spawn's intent key is reserved scoped to the asking session.
-    ///
-    /// Why it matters: without the asker in the stored key, a sibling reusing
-    /// another session's key and request replayed that session's child to
-    /// itself as "the new child" (SPEC.md "Agent-spawned sessions" scopes keys
-    /// to the asker). Specified: the same key from two askers gives two
-    /// stored keys, the same asker and key the same one, and a key at the
-    /// 512-byte limit still gives a stored key within it.
-    #[farhelm_testtrace::test]
-    fn spawn_intent_keys_are_scoped_to_the_asking_session() {
-        let a = spawn_scoped_intent_key("session-a", "k");
-        assert_ne!(a, spawn_scoped_intent_key("session-b", "k"));
-        assert_eq!(a, spawn_scoped_intent_key("session-a", "k"));
-        let long = spawn_scoped_intent_key(
-            "7c9d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
-            &"x".repeat(INTENT_KEY_CAP),
-        );
-        assert!(long.len() <= INTENT_KEY_CAP, "{}", long.len());
-    }
-
-    /// A child that re-runs its parent's keyed spawn gets a child of its own,
-    /// never its parent's result.
-    ///
-    /// Why it matters: an `--inherit-agent` child carries its parent's exact
-    /// launch bundle, so with a host-wide key its identical spawn replayed
-    /// the create that made the child, and `farhelm spawn` printed the child's
-    /// own id as "the new child"; an agent that then stops or restarts "its
-    /// child" would hit itself. Keys are scoped to the asking session (SPEC.md
-    /// "Agent-spawned sessions"), so the child's key is its own. Spec: the
-    /// child's identical keyed spawn creates a new session that is neither
-    /// the child nor its parent.
-    #[farhelm_testtrace::test]
-    async fn a_childs_identical_keyed_spawn_creates_its_own_child() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let parent = authenticated_parent(&sup, state.path(), "self-replay-parent").await;
-        let spawn = |req_id| ControlMsg::CreateSession {
-            req_id,
-            parent: None,
-            cwd: state.path().to_string_lossy().into_owned(),
-            launch: None,
-            inherit_agent: true,
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: Some("self-replay-key".to_string()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        };
-
-        handle_restricted_control(&sup, spawn(61), &tx, &parent).await;
-        let first: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
-        let ControlMsg::SessionCreated { session: child, .. } = first else {
-            panic!("the parent's keyed spawn must create a child: {first:?}");
-        };
-        let child_auth = farhelm_proto::SessionAuth {
-            session_id: child.id.clone(),
-            token: sup
-                .store
-                .session_token(&child.id)
-                .await
-                .expect("read child credential")
-                .expect("the spawned child has a credential"),
-        };
-
-        handle_restricted_control(&sup, spawn(62), &tx, &child_auth).await;
-        let second: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("second reply").body).expect("decode");
-        let ControlMsg::SessionCreated {
-            session: grandchild,
-            ..
-        } = second
-        else {
-            panic!("the child's own keyed spawn must create a session: {second:?}");
-        };
-        assert_ne!(
-            grandchild.id, child.id,
-            "the child must not be told it created itself"
-        );
-        assert_ne!(grandchild.id, parent.session_id);
-        assert_eq!(sup.store.load_all().await.expect("load sessions").len(), 3);
-    }
-
     /// Spec: a full-authority create carrying the helm's spawn marker
     /// reserves its key for the child's lifetime, and one without it
     /// reserves the key permanently.
@@ -7900,99 +7120,6 @@ mod tests {
         }
     }
 
-    /// An admitted spawn receives bounded idempotency, preserves its direct
-    /// parent, replays an identical key, conflicts if only that parent
-    /// intent changes, and may reuse the key after its child is deleted.
-    #[farhelm_testtrace::test]
-    async fn restricted_create_is_parented_session_lifetime_and_parent_sensitive() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
-        let create = |req_id, parent: Option<&str>| ControlMsg::CreateSession {
-            req_id,
-            parent: parent.map(str::to_string),
-            cwd: state.path().to_string_lossy().into_owned(),
-            launch: None,
-            inherit_agent: true,
-            title: Some("spawned child".to_string()),
-            cols: 80,
-            rows: 24,
-            intent_key: Some("spawn-key".to_string()),
-            confirm_yolo: false,
-            github_checkout: None,
-            key_lives_with_session: false,
-        };
-        let mut send = async |msg| {
-            handle_restricted_control(&sup, msg, &tx, &auth).await;
-            serde_json::from_slice::<ControlMsg>(&rx.recv().await.expect("create reply").body)
-                .expect("decode create reply")
-        };
-
-        let first = send(create(51, Some("parent-session"))).await;
-        let ControlMsg::SessionCreated { session, .. } = first else {
-            panic!("a valid restricted create must succeed: {first:?}");
-        };
-        assert_eq!(session.parent.as_deref(), Some("parent-session"));
-        assert_eq!(
-            sup.store
-                .reservation(&spawn_scoped_intent_key("parent-session", "spawn-key"))
-                .await
-                .unwrap()
-                .expect("key is durable while the child exists")
-                .dedup_scope,
-            DedupScope::SessionLifetime
-        );
-
-        let replay = send(create(52, Some("parent-session"))).await;
-        let ControlMsg::SessionCreated {
-            session: replayed, ..
-        } = replay
-        else {
-            panic!("an identical key must replay: {replay:?}");
-        };
-        assert_eq!(replayed.id, session.id);
-
-        let conflict = send(create(53, None)).await;
-        assert!(matches!(
-            conflict,
-            ControlMsg::Error {
-                req_id: 53,
-                kind: ErrorKind::Conflict,
-                ..
-            }
-        ));
-
-        // Model the completed-delete boundary: the durable transaction has
-        // removed both bounded records, and the published map follows it.
-        sup.store
-            .delete_session_settling_reservations(&session.id)
-            .await
-            .expect("delete the first child and release its key");
-        sup.sessions.lock().await.remove(&session.id);
-
-        let replacement = send(create(54, Some("parent-session"))).await;
-        let ControlMsg::SessionCreated {
-            session: replacement,
-            ..
-        } = replacement
-        else {
-            panic!("a deleted child's key must create a fresh child: {replacement:?}");
-        };
-        assert_ne!(replacement.id, session.id);
-        assert_eq!(
-            sup.store
-                .reservation(&spawn_scoped_intent_key("parent-session", "spawn-key"))
-                .await
-                .unwrap()
-                .expect("the replacement owns the reused key")
-                .session_id,
-            replacement.id
-        );
-    }
-
     /// `RestartSession` carries a `req_id` a caller genuinely blocks on
     /// (unlike `PauseOutput`/`ResumeOutput`'s fire-and-forget precedent),
     /// so every request must produce a correlated reply — including the
@@ -8021,6 +7148,7 @@ mod tests {
                 session_id: "no-such-session".to_string(),
                 stop_if_running: false,
                 with: None,
+                expected_launch: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -9414,6 +8542,7 @@ mod tests {
             session_id: "another-session".to_string(),
             stop_if_running: true,
             with: None,
+            expected_launch: None,
         })
         .await;
         host.type_and_see_echo("typed-after-the-restart").await;

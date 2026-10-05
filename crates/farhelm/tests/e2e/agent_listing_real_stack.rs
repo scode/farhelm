@@ -323,6 +323,40 @@ async fn await_local_host(client: &reqwest::Client, base: &str) {
     }
 }
 
+/// Let the helm's own host run agents' `farhelm` commands, and start YOLO
+/// sessions, without asking, through the same REST routes the host settings
+/// dialog uses.
+///
+/// These tests are about the relay reaching the real helm and acting, not
+/// about the permission prompts: with the settings off, every acting verb
+/// would wait for an approval card no window is open to show (and be refused
+/// at once, with no GUI connected), and the agent YOLO rule would refuse every
+/// command launch. Turning the real settings on, rather than any bypass, keeps
+/// the production path under test (the plan's R4).
+async fn allow_agents_without_asking(client: &reqwest::Client, base: &str) {
+    let hosts = get_json(client, &format!("{base}/api/hosts")).await;
+    let local = hosts["hosts"]
+        .as_array()
+        .expect("hosts is an array")
+        .iter()
+        .find(|row| row["kind"] == "local")
+        .expect("the local host")["id"]
+        .as_i64()
+        .expect("a host id");
+    for (route, field) in [
+        ("commands-without-asking", "commands_without_asking"),
+        ("yolo-without-asking", "yolo_without_asking"),
+    ] {
+        let (status, body) = post(
+            client,
+            &format!("{base}/api/hosts/{local}/{route}"),
+            serde_json::json!({ field: true }),
+        )
+        .await;
+        assert!(status.is_success(), "setting {field}: {body}");
+    }
+}
+
 /// Spec: an agent inside a real session, running the shipped `farhelm agent
 /// hosts` and `farhelm agent sessions`, is answered by the real helm — and
 /// exactly its own host and its own session carry the current-row marker.
@@ -351,6 +385,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
+    allow_agents_without_asking(&client, &helm.base).await;
 
     let work = farhelm_teststate::tempdir().expect("work dir");
     let (status, body) = post(
@@ -475,6 +510,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
+    allow_agents_without_asking(&client, &helm.base).await;
 
     let work = farhelm_teststate::tempdir().expect("work dir");
     let create_session = |title: &'static str| {
@@ -653,6 +689,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
+    allow_agents_without_asking(&client, &helm.base).await;
 
     let invocation = fixture_cmd("fake-agent --script basic");
     let work = farhelm_teststate::tempdir().expect("work dir");
@@ -931,6 +968,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let secret = device_secret(supervisor.state.path(), &helm.base).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
+    allow_agents_without_asking(&client, &helm.base).await;
 
     let work = farhelm_teststate::tempdir().expect("structured clone workdir");
     let selection = LaunchSelection {
@@ -949,9 +987,6 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             "launch": selection,
             "cols": WIDE_COLS,
             "rows": ROWS,
-            // The fixture's only host starts asking before YOLO launches, and this parent is a
-            // YOLO launch; the guard itself is not what this test is about.
-            "confirm_yolo": true,
         }),
     )
     .await;
@@ -978,10 +1013,6 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             &parent.id,
             "--host",
             "this machine",
-            // Cloning a YOLO parent onto a host that asks first needs the
-            // override; passing it here also proves the flag reaches the helm
-            // through the relay.
-            "--confirm-yolo",
         ],
         &parent.id,
         &token,
@@ -1030,7 +1061,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let (status, body) = post(
         &client,
         &format!("{}/api/sessions/{child_id}/replace", helm.base),
-        serde_json::json!({ "confirm_yolo": true }),
+        serde_json::json!({}),
     )
     .await;
     assert!(status.is_success(), "structured replace failed: {body}");

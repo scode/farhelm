@@ -68,9 +68,9 @@ enum Cmd {
     Uninstall(uninstall::Options),
     /// Create a session on the host that runs this one.
     ///
-    /// The child runs this session's own launch (`--inherit-agent`, answered
-    /// by this host's supervisor with no helm), or the launch its launch
-    /// flags and templates describe (resolved by the attached helm).
+    /// The child runs this session's own launch (`--inherit-agent`), or the
+    /// launch its launch flags and templates describe. Either way the request
+    /// goes to the helm attached to this session, which asks the user first.
     Spawn {
         /// Child working directory. Relative paths resolve against this
         /// process's real current directory before crossing the wire;
@@ -105,12 +105,19 @@ enum Cmd {
         /// Retry key, valid only for the child session's lifetime.
         #[arg(long)]
         idempotency_key: Option<String>,
-        /// Start a YOLO session even though this host asks before YOLO
-        /// launches; without it the helm refuses. Only with the user's
-        /// explicit approval for this launch. Without effect with
-        /// `--inherit-agent`, whose launch nothing asks about.
-        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
-        confirm_yolo: bool,
+        /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
+        /// Agent-spawned sessions). Its parser refuses every use, under both
+        /// of its old names, so a caller following older instructions gets
+        /// the reason rather than clap's "unexpected argument".
+        #[arg(
+            long = "confirm-yolo",
+            alias = "allow-yolo-on-sensitive-host",
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_confirm_yolo,
+        )]
+        confirm_yolo: Option<String>,
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
     /// session — `hosts`/`sessions` are read-only questions,
@@ -320,11 +327,19 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
-        /// Start a YOLO session even though the target host asks before YOLO
-        /// launches; without it the helm refuses. Only with the user's
-        /// explicit approval for this launch.
-        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
-        confirm_yolo: bool,
+        /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
+        /// Agent-spawned sessions). Its parser refuses every use, under both
+        /// of its old names, so a caller following older instructions gets
+        /// the reason rather than clap's "unexpected argument".
+        #[arg(
+            long = "confirm-yolo",
+            alias = "allow-yolo-on-sensitive-host",
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_confirm_yolo,
+        )]
+        confirm_yolo: Option<String>,
     },
     /// Copy an explicitly named session onto any host; prints the new id.
     Clone {
@@ -343,11 +358,19 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
-        /// Start a YOLO session even though the target host asks before YOLO
-        /// launches; without it the helm refuses. Only with the user's
-        /// explicit approval for this launch.
-        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
-        confirm_yolo: bool,
+        /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
+        /// Agent-spawned sessions). Its parser refuses every use, under both
+        /// of its old names, so a caller following older instructions gets
+        /// the reason rather than clap's "unexpected argument".
+        #[arg(
+            long = "confirm-yolo",
+            alias = "allow-yolo-on-sensitive-host",
+            hide = true,
+            num_args = 0..=1,
+            default_missing_value = "",
+            value_parser = refuse_confirm_yolo,
+        )]
+        confirm_yolo: Option<String>,
     },
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
@@ -400,14 +423,13 @@ impl AgentCmd {
                 launch,
                 title,
                 idempotency_key,
-                confirm_yolo,
                 ..
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: host.clone(),
                 templates: launch.templates.clone(),
                 edits: launch.edits(cwd.clone(), title.clone()),
                 intent_key: idempotency_key.clone(),
-                confirm_yolo: *confirm_yolo,
+                confirm_yolo: false,
                 spawn: None,
             }),
             AgentCmd::Clone {
@@ -416,14 +438,14 @@ impl AgentCmd {
                 cwd,
                 title,
                 idempotency_key,
-                confirm_yolo,
+                ..
             } => Some(farhelm_proto::AgentVerb::Clone {
                 source_session_id: Some(source_session.clone()),
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
-                confirm_yolo: *confirm_yolo,
+                confirm_yolo: false,
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
@@ -442,6 +464,25 @@ fn refuse_restart_mode(_value: &str) -> Result<String, String> {
         "farhelm agent restart no longer takes --mode: every restart resumes the \
          session's own conversation, so drop --mode. A session whose sessions --json \
          restart_offer is not resume cannot be restarted"
+            .to_string(),
+    )
+}
+
+/// The refusal for `--confirm-yolo` (and its older name
+/// `--allow-yolo-on-sensitive-host`) on `farhelm spawn`, `farhelm agent
+/// create` and `farhelm agent clone`.
+///
+/// The flag let an agent assert the user's YOLO approval itself. With the
+/// helm asking the user before any agent launch, an agent has no override at
+/// all (SPEC.md, Agent-spawned sessions), and the helm ignores the field even
+/// if a modified CLI sends it; this refusal is a courtesy that says why.
+fn refuse_confirm_yolo(_value: &str) -> Result<String, String> {
+    Err(
+        "--confirm-yolo is no longer accepted: an agent cannot confirm a YOLO launch for the \
+         user. Farhelm asks the user before any agent launch, and on a host that asks before \
+         YOLO launches an agent may not start a YOLO or command launch at all; the user can \
+         allow that by turning on \"start YOLO sessions here without asking\" in the host's \
+         settings"
             .to_string(),
     )
 }
@@ -932,7 +973,6 @@ fn main() -> anyhow::Result<()> {
             launch,
             parent,
             idempotency_key,
-            confirm_yolo,
             ..
         } => {
             let child = runtime()?.block_on(spawn_session(
@@ -956,7 +996,6 @@ fn main() -> anyhow::Result<()> {
                     },
                     parent,
                     idempotency_key,
-                    confirm_yolo,
                 },
             ))?;
             println!("{child}");
@@ -1825,81 +1864,53 @@ mod tests {
         assert_eq!(command, "-rm -rf /tmp/x");
     }
 
-    /// `--confirm-yolo` is the YOLO override on every creating verb, and the
-    /// flag's earlier name, `--allow-yolo-on-sensitive-host`, still parses to
-    /// the same override without appearing in help.
+    /// Spec: `--confirm-yolo`, and its older name
+    /// `--allow-yolo-on-sensitive-host`, are refused on every creating verb
+    /// with a message saying an agent cannot confirm a YOLO launch, and
+    /// neither appears in help.
     ///
-    /// Why: the flag shipped under its old name in the stable v0.20.0
-    /// release and in the agent instructions, so scripts and agents may
-    /// still pass it; renaming
-    /// it must not turn those invocations into parse errors. Hiding the old
-    /// name keeps help, and the agent instructions rendered from it, on the
-    /// one wording the product uses now.
+    /// Why: the flag let an agent assert the user's approval itself, which is
+    /// the honour system SPEC.md's permission prompts replace. Scripts and
+    /// agents following older instructions may still pass it; a refusal that
+    /// says why beats clap's "unexpected argument", and the helm ignores the
+    /// field anyway.
     #[farhelm_testtrace::test]
-    fn the_yolo_override_parses_under_its_new_and_old_names() {
+    fn the_yolo_override_is_refused_under_both_names() {
         for flag in ["--confirm-yolo", "--allow-yolo-on-sensitive-host"] {
-            let cli =
-                Cli::try_parse_from(["farhelm", "spawn", "--cwd", "/w", "--inherit-agent", flag])
-                    .unwrap();
-            assert!(
-                matches!(
-                    cli.command,
-                    Cmd::Spawn {
-                        confirm_yolo: true,
-                        ..
-                    }
-                ),
-                "spawn {flag}"
-            );
-            let cli = Cli::try_parse_from([
-                "farhelm",
-                "agent",
-                "create",
-                "--host",
-                "h",
-                "--cwd",
-                "/w",
-                "--command",
-                "p",
-                "--no-yolo",
-                flag,
-            ])
-            .unwrap();
-            assert!(
-                matches!(
-                    cli.command,
-                    Cmd::Agent {
-                        command: AgentCmd::Create {
-                            confirm_yolo: true,
-                            ..
-                        }
-                    }
-                ),
-                "agent create {flag}"
-            );
-            let cli = Cli::try_parse_from([
-                "farhelm",
-                "agent",
-                "clone",
-                "--source-session",
-                "s1",
-                "--host",
-                "h",
-                flag,
-            ])
-            .unwrap();
-            assert!(
-                matches!(
-                    cli.command,
-                    Cmd::Agent {
-                        command: AgentCmd::Clone {
-                            confirm_yolo: true,
-                            ..
-                        }
-                    }
-                ),
-                "agent clone {flag}"
-            );
+            for argv in [
+                &["farhelm", "spawn", "--cwd", "/w", "--inherit-agent", flag][..],
+                &[
+                    "farhelm",
+                    "agent",
+                    "create",
+                    "--host",
+                    "h",
+                    "--cwd",
+                    "/w",
+                    "--command",
+                    "p",
+                    "--no-yolo",
+                    flag,
+                ],
+                &[
+                    "farhelm",
+                    "agent",
+                    "clone",
+                    "--source-session",
+                    "s1",
+                    "--host",
+                    "h",
+                    flag,
+                ],
+            ] {
+                let Err(error) = Cli::try_parse_from(argv) else {
+                    panic!("{argv:?}: the flag must be refused");
+                };
+                assert!(
+                    error.to_string().contains("cannot confirm a YOLO launch"),
+                    "{argv:?}: {error}"
+                );
+            }
         }
         let mut command = <Cli as clap::CommandFactory>::command();
         for verb in [&["spawn"][..], &["agent", "create"], &["agent", "clone"]] {
@@ -1908,11 +1919,8 @@ mod tests {
                 sub = sub.find_subcommand_mut(name).unwrap();
             }
             let help = sub.render_long_help().to_string();
-            assert!(help.contains("--confirm-yolo"), "{verb:?}: {help}");
-            assert!(
-                !help.contains("allow-yolo-on-sensitive-host"),
-                "{verb:?}: {help}"
-            );
+            assert!(!help.contains("confirm-yolo"), "{verb:?}: {help}");
+            assert!(!help.contains("sensitive-host"), "{verb:?}: {help}");
         }
     }
 
