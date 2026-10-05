@@ -71,6 +71,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
   as one choice, and ideally a color as well, so a session's host can be told apart at a glance.
 
+- **Make checkout archiving understandable, or drop it.** Deleting the last session using a fresh GitHub checkout moves
+  the checkout into `farhelm-archived-working-copies` under the working-copy root. The only explanation is one line in
+  Delete's confirmation ("moves it into the working-copy archive"), which does not say where that is or what it is for,
+  and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
+  learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
