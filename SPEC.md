@@ -1097,12 +1097,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   visible from a 650px main pane; narrower panes may clip the trailing actions. Restart and Restart with are greyed out
   when the session cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions
   explain the specific reason, such as an agent type without conversation reporting, a command launch that declared no
-  agent type or did not opt into Resume, or a conversation that was never captured. Directory and command line are muted
-  click-to-copy buttons that take the width their values need and ellipsize only when the row runs out of room; a click
-  confirms locally for about 1.5 seconds. Clipboard writes use the native bridge first and `navigator.clipboard` second,
-  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
-  cancellation. Delete is styled as the danger action and always asks first in the same anchored way, even for a session
-  that has ended, with the same consequence text the row's delete prompt shows.
+  agent type or did not opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a
+  running session's explanation says, naming the agent, when Restart normally becomes available for it (Codex, for
+  instance, once the first prompt is submitted), and an ended session's says its conversation was never captured; both
+  invite the user to send feedback if that is not what happened, since Farhelm cannot tell a report still to come from
+  one that never will. The supervisor's refusal of such a restart and the agent instructions state the same timing,
+  without the invitation. Directory and command line are muted click-to-copy buttons that take the width their values
+  need and ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds. Clipboard
+  writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures.
+  Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and
+  always asks first in the same anchored way, even for a session that has ended, with the same consequence text the
+  row's delete prompt shows.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

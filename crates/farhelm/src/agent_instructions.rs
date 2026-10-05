@@ -111,9 +111,14 @@ fn render(agent: &Command) -> String {
          it cannot: not_captured (no conversation Farhelm can resume was captured),\n\
          no_conversation_reporting (Farhelm has no conversation reporting for that agent), or\n\
          no_resume_command (a command launch created without a resume command), spelled\n\
-         not-captured, no-reporting and no-resume-command in the table. Do not restart such a\n\
-         session; tell the user instead. Restart stops an idle, waiting, or unknown-status\n\
-         target's agent without asking; a working one is refused unless you pass\n\
+         not-captured, no-reporting and no-resume-command in the table. A running session's\n\
+         not_captured normally turns into resume, depending on its agent:\n",
+    );
+    out.push_str(&readiness_lines());
+    out.push_str(
+        "Do not restart such a session; tell the user instead. Restart stops an idle, waiting,\n\
+         or unknown-status target's agent without asking; a working one is refused unless you\n\
+         pass \
          --stop-if-running. Use --stop-if-running only with deliberate permission to stop\n\
          the target. Restart uses its stored configuration; you cannot supply another\n\
          command. Self-restart can lose its acknowledgement.\n\
@@ -183,6 +188,42 @@ fn render(agent: &Command) -> String {
          Results come from the helm attached to this session and cover its fleet. If no helm is\n\
          attached, ask the user to open this session in the Farhelm UI, then retry.\n",
     );
+    out
+}
+
+/// One indented line per agent type that reports conversations, saying when
+/// its `not_captured` offer normally turns into `resume`, generated from the
+/// one source of those facts (`AgentKind::restart_readiness`) so the manual
+/// cannot drift from the app and the supervisor's refusal. Wrapped to the
+/// manual's width, continuation lines indented under the clause. Kinds that
+/// report nothing (generic) get no line: their offer is never not_captured
+/// in practice.
+fn readiness_lines() -> String {
+    const WIDTH: usize = 88;
+    let mut out = String::new();
+    for &kind in farhelm_proto::AgentKind::ALL {
+        let (Some(name), Some(readiness)) = (kind.display_name(), kind.restart_readiness()) else {
+            continue;
+        };
+        let lead = format!("  {name}: ");
+        let indent = " ".repeat(lead.len());
+        let mut line = lead.clone();
+        for word in readiness
+            .clause(farhelm_proto::ReadinessWording::Neutral)
+            .split(' ')
+        {
+            if line.len() > lead.len() && line.len() + 1 + word.len() > WIDTH {
+                out.push_str(line.trim_end());
+                out.push('\n');
+                line = indent.clone();
+            } else if line.len() > lead.len() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
     out
 }
 
@@ -400,6 +441,42 @@ mod tests {
                 !text.contains(&format!("{spelling} ")) && !text.contains(&format!("{spelling}]")),
                 "the instructions advertise the hidden spelling {spelling}:\n{text}"
             );
+        }
+    }
+
+    /// Spec: the restart paragraph lists, for every agent type that reports
+    /// conversations, when its `not_captured` offer normally turns into
+    /// `resume`, worded for a reader who is not the user, in lines no wider
+    /// than the rest of the manual; it still tells the agent not to restart
+    /// such a session.
+    ///
+    /// Why: an agent that sees `not_captured` should know whether it is a
+    /// normal wait (a Codex session nobody has prompted yet) before telling
+    /// the user anything, and these lines are generated from the facts the
+    /// app and the supervisor use, so a kind missing here is missing there.
+    #[farhelm_testtrace::test]
+    fn the_restart_paragraph_says_when_each_agent_captures() {
+        let text = text();
+        let flowing = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for &kind in farhelm_proto::AgentKind::ALL {
+            let (Some(name), Some(readiness)) = (kind.display_name(), kind.restart_readiness())
+            else {
+                continue;
+            };
+            let clause = readiness.clause(farhelm_proto::ReadinessWording::Neutral);
+            assert!(
+                flowing.contains(&format!("{name}: {clause}")),
+                "{kind:?} missing from:\n{text}"
+            );
+        }
+        assert!(
+            flowing.contains("once the user submits the first prompt"),
+            "{text}"
+        );
+        assert!(!flowing.contains("submit your first prompt"), "{text}");
+        assert!(flowing.contains("Do not restart such a session; tell the user instead"));
+        for line in readiness_lines().lines() {
+            assert!(line.len() <= 88, "too wide ({}): {line}", line.len());
         }
     }
 

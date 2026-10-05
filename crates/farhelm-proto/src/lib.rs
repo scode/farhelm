@@ -1223,29 +1223,119 @@ impl RestartOffer {
         matches!(self, RestartOffer::Resume)
     }
 
-    /// Why Restart is unavailable, as one user-facing sentence, or `None`
-    /// when it is available.
+    /// Why Restart is unavailable for a session of `kind`, worded so it also
+    /// reads right to an agent, or `None` when it is available. `ended` says
+    /// the session's agent is gone for good (exited, failed, interrupted by a
+    /// reboot), so it will not report a conversation any more.
     ///
     /// The supervisor's refusals of Restart and Restart with use it, so the
     /// reason a client shows after a refused request is the one the
     /// supervisor decided. The UI words the same reasons in its own tooltips
     /// (lowercase, with its own surrounding sentence), and the agent CLI
     /// prints the variant's spelling.
-    pub fn unavailable_reason(self) -> Option<&'static str> {
-        match self {
-            RestartOffer::Resume => None,
-            RestartOffer::NotCaptured => Some(
-                "Restart needs this session's own conversation, and none that Farhelm can resume \
-                 has been captured; Replace starts the session over",
-            ),
-            RestartOffer::NoConversationReporting => Some(
+    ///
+    /// For [`RestartOffer::NotCaptured`] the reason says, for an agent that
+    /// reports conversations, when Restart normally becomes available
+    /// ([`AgentKind::restart_readiness`]), naming the agent, or for an ended
+    /// session that its conversation was never captured. "Normally" because
+    /// the supervisor answering here does not know whether the report is
+    /// still coming. It carries no invitation to send feedback: agents read
+    /// it through the `farhelm` command, where the app's help menu means
+    /// nothing.
+    pub fn unavailable_reason(self, kind: AgentKind, ended: bool) -> Option<String> {
+        let reason = match self {
+            RestartOffer::Resume => return None,
+            RestartOffer::NotCaptured => {
+                match (kind.display_name(), kind.restart_readiness(), ended) {
+                    (Some(name), Some(readiness), false) => format!(
+                        "Restart needs this session's own conversation, and none that Farhelm \
+                         can resume has been captured; for {name} sessions, Restart normally \
+                         becomes available {}. Until then, Replace starts the session over",
+                        readiness.clause(ReadinessWording::Neutral)
+                    ),
+                    (Some(name), Some(_), true) => format!(
+                        "Restart needs this session's own conversation, and Farhelm never \
+                         captured this {name} session's conversation; Replace starts the \
+                         session over"
+                    ),
+                    _ => "Restart needs this session's own conversation, and none that Farhelm \
+                          can resume has been captured; Replace starts the session over"
+                        .to_string(),
+                }
+            }
+            RestartOffer::NoConversationReporting => {
                 "Restart needs this session's own conversation, and Farhelm has no conversation \
-                 reporting for its agent; Replace starts the session over",
-            ),
-            RestartOffer::NoResumeCommand => Some(
+                 reporting for its agent; Replace starts the session over"
+                    .to_string()
+            }
+            RestartOffer::NoResumeCommand => {
                 "Restart resumes through the launch's resume command, and this command launch \
-                 did not opt into Resume; Replace starts the session over",
-            ),
+                 did not opt into Resume; Replace starts the session over"
+                    .to_string()
+            }
+        };
+        Some(reason)
+    }
+}
+
+/// The moment an agent normally reports a conversation Restart can resume
+/// ([`AgentKind::restart_readiness`]), as a small set of moments rather than
+/// a sentence per kind, so every surface words them from one place
+/// ([`RestartReadiness::clause`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartReadiness {
+    /// A few seconds after the agent starts.
+    ShortlyAfterStart,
+    /// As the agent starts.
+    AtStart,
+    /// When the user submits the first prompt.
+    FirstPrompt,
+    /// After the agent's first reply, once its conversation is saved.
+    FirstReply,
+    /// After the first prompt, and only with Farhelm's hooks installed in
+    /// the agent by the user (Grok's; its documentation page says how).
+    FirstPromptWithHooks,
+}
+
+/// Who a [`RestartReadiness::clause`] is addressed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadinessWording {
+    /// The person using the app, as "you".
+    ToTheUser,
+    /// Anyone: an agent reading the `farhelm` command's output or its
+    /// instructions, or a person reading a refusal the app relays. Names
+    /// the user in the third person.
+    Neutral,
+}
+
+impl RestartReadiness {
+    /// When Restart becomes available, as a clause that completes "Restart
+    /// becomes available …" ("once you submit your first prompt").
+    ///
+    /// No surface may assume more than that shape: none of them can hold a
+    /// link, so Grok's hook setup is named as a documentation page in plain
+    /// text.
+    pub fn clause(self, wording: ReadinessWording) -> &'static str {
+        match (self, wording) {
+            (RestartReadiness::ShortlyAfterStart, _) => "a few seconds after it starts",
+            (RestartReadiness::AtStart, _) => "as soon as it starts",
+            (RestartReadiness::FirstPrompt, ReadinessWording::ToTheUser) => {
+                "once you submit your first prompt"
+            }
+            (RestartReadiness::FirstPrompt, ReadinessWording::Neutral) => {
+                "once the user submits the first prompt"
+            }
+            (RestartReadiness::FirstReply, _) => {
+                "after the agent's first reply, once the conversation is saved"
+            }
+            (RestartReadiness::FirstPromptWithHooks, ReadinessWording::ToTheUser) => {
+                "after your first prompt, and only if Farhelm's Grok hooks are installed (see the \
+                 Grok page in Farhelm's documentation)"
+            }
+            (RestartReadiness::FirstPromptWithHooks, ReadinessWording::Neutral) => {
+                "after the first prompt, and only if Farhelm's Grok hooks are installed on the \
+                 host (see the Grok page in Farhelm's documentation)"
+            }
         }
     }
 }
@@ -1301,6 +1391,56 @@ impl AgentKind {
     /// when it has not decided what a session is.
     pub fn generic() -> Self {
         AgentKind::Generic
+    }
+
+    /// The agent's name as Farhelm shows it to people ("Claude", "Codex",
+    /// "OMP", …), the one the session launcher and the documentation use, or
+    /// `None` for [`AgentKind::Generic`], which names no particular agent.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub fn display_name(self) -> Option<&'static str> {
+        match self {
+            AgentKind::Claude => Some("Claude"),
+            AgentKind::Codex => Some("Codex"),
+            AgentKind::Goose => Some("Goose"),
+            AgentKind::Pi => Some("Pi"),
+            AgentKind::Omp => Some("OMP"),
+            AgentKind::Grok => Some("Grok"),
+            AgentKind::Generic => None,
+        }
+    }
+
+    /// When a session of this kind normally gets a conversation that Restart
+    /// can resume, or `None` for [`AgentKind::Generic`], which reports none.
+    ///
+    /// The single source of these facts for every place that explains a
+    /// `not_captured` restart offer while the agent may still report: the
+    /// app's Restart tooltip and Restart with reason, the supervisor's
+    /// refusal, and the agent instructions (root `AGENTS.md`
+    /// "Harness-specific code"; the map in `farhelm-supervisor`'s
+    /// `agent_kind` module lists this place). It states what normally
+    /// happens, not what will: a report can also be missing because the
+    /// agent was set up not to report or because Farhelm refused it, and
+    /// nothing in a session's listing tells those apart from waiting, which
+    /// is why the app's wording invites feedback when Restart never comes.
+    /// The timings come from each agent's reporter (see `agent_kind`'s
+    /// per-kind modules and its reporter assets).
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub fn restart_readiness(self) -> Option<RestartReadiness> {
+        match self {
+            // Its injected SessionStart hook fires when the process starts.
+            AgentKind::Claude => Some(RestartReadiness::ShortlyAfterStart),
+            // Its MCP reporter extension reports as Goose loads it.
+            AgentKind::Goose => Some(RestartReadiness::AtStart),
+            // Codex fires SessionStart at first prompt submission, not at
+            // process start; a session never prompted never reports.
+            AgentKind::Codex => Some(RestartReadiness::FirstPrompt),
+            // Both save their conversation file only once it holds the
+            // agent's first reply, and report a resumable file only then.
+            AgentKind::Pi | AgentKind::Omp => Some(RestartReadiness::FirstReply),
+            // Grok's hooks are installed by the user, not injected.
+            AgentKind::Grok => Some(RestartReadiness::FirstPromptWithHooks),
+            AgentKind::Generic => None,
+        }
     }
 
     /// The kind's wire word (`claude`, `codex`, …, `generic`), matching its
@@ -4199,6 +4339,76 @@ mod tests {
         );
         let _ = resolved;
     }
+
+    /// Spec: every agent kind that reports conversations has a display name
+    /// and a restart-readiness moment, each moment words a clause for both
+    /// readers, only the user-facing wording says "you", and the generic
+    /// kind has neither; the `not_captured` refusal names the agent and its
+    /// moment for a reporting kind and makes no per-agent claim otherwise.
+    ///
+    /// Why: these are the one source of the "when does Restart become
+    /// available" facts for the app, the supervisor's refusal and the agent
+    /// instructions. A kind added without them would silently fall back to
+    /// the generic wording on every surface, and a second-person clause in
+    /// the neutral wording would tell an agent to submit a prompt itself.
+    #[farhelm_testtrace::test]
+    fn every_reporting_kind_says_when_restart_becomes_available() {
+        for &kind in AgentKind::ALL {
+            let name = kind.display_name();
+            let readiness = kind.restart_readiness();
+            assert_eq!(name.is_some(), readiness.is_some(), "{kind:?}");
+            if kind == AgentKind::Generic {
+                assert_eq!(readiness, None);
+                let reason = RestartOffer::NotCaptured
+                    .unavailable_reason(kind, false)
+                    .unwrap();
+                assert!(!reason.contains("normally becomes available"), "{reason}");
+                continue;
+            }
+            let (name, readiness) = (name.unwrap(), readiness.unwrap());
+            let to_user = readiness.clause(ReadinessWording::ToTheUser);
+            let neutral = readiness.clause(ReadinessWording::Neutral);
+            assert!(!to_user.is_empty() && !neutral.is_empty(), "{kind:?}");
+            assert!(
+                !neutral
+                    .split(' ')
+                    .any(|word| matches!(word, "you" | "your")),
+                "{kind:?}: {neutral}"
+            );
+            let reason = RestartOffer::NotCaptured
+                .unavailable_reason(kind, false)
+                .unwrap();
+            let ended = RestartOffer::NotCaptured
+                .unavailable_reason(kind, true)
+                .unwrap();
+            assert!(
+                ended.contains(&format!(
+                    "Farhelm never captured this {name} session's conversation"
+                )) && !ended.contains("becomes available"),
+                "an ended session will not report again: {ended}"
+            );
+            assert!(
+                reason.contains(&format!(
+                    "for {name} sessions, Restart normally becomes available {neutral}"
+                )),
+                "{reason}"
+            );
+            assert!(
+                reason.contains("Replace starts the session over"),
+                "{reason}"
+            );
+            assert!(!reason.contains("feedback"), "{reason}");
+        }
+        assert_eq!(
+            AgentKind::Codex.restart_readiness(),
+            Some(RestartReadiness::FirstPrompt)
+        );
+        assert_eq!(
+            RestartReadiness::FirstPrompt.clause(ReadinessWording::ToTheUser),
+            "once you submit your first prompt"
+        );
+    }
+
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the version
     /// history linked from the const's own docs for the M2 bump to 3, the
     /// M2.5 bump to 4, the M3 bump to 5, the M4 bump to 6, the M5 bump to 7,
@@ -5602,7 +5812,7 @@ mod tests {
             );
             assert_eq!(
                 offer.can_restart(),
-                offer.unavailable_reason().is_none(),
+                offer.unavailable_reason(AgentKind::Codex, false).is_none(),
                 "{offer:?}: an offer either restarts or says why it cannot"
             );
         }

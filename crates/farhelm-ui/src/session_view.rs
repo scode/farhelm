@@ -97,6 +97,8 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
             "{} sessions can't be resumed",
             crate::launch_composer::harness_word(launch.harness)
         ))
+    } else if session.restart_offer == RestartOffer::NotCaptured {
+        Some(not_captured_with_reason(session))
     } else {
         Some("no captured conversation to resume".to_string())
     }
@@ -130,7 +132,8 @@ fn restart_with_reason(session: &Session) -> Option<String> {
                             crate::launch_composer::harness_word(agent)
                         )
                     }),
-                    RestartOffer::NotCaptured | RestartOffer::NoResumeCommand => {
+                    RestartOffer::NotCaptured => Some(not_captured_with_reason(session)),
+                    RestartOffer::NoResumeCommand => {
                         Some("no captured conversation to resume".to_string())
                     }
                 }
@@ -1837,7 +1840,8 @@ pub(crate) fn SessionView(
     // The restart offer's explanation, now the restart button's tooltip and
     // accessible description rather than a permanent band (see this
     // component's header docs).
-    let offer_explanation = restart_offer_text(&shown.status, shown.restart_offer);
+    let offer_explanation =
+        restart_offer_text(&shown.status, shown.restart_offer, shown.agent_kind);
     // The restart control's full accessible name (`resume conversation` or
     // `restart unavailable`): the button's own VISIBLE glyph is now
     // the compact "restart" every header action uses (so the cluster fits
@@ -2520,7 +2524,7 @@ pub(crate) fn SessionView(
             // (SPEC.md, Durability and resume).
             if interrupted_card_shown() {
                 div { class: "interrupted-card",
-                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with)}" }
+                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer, card_offers_replace_with, shown.agent_kind)}" }
                     if restart_available {
                         button {
                             r#type: "button",
@@ -2956,15 +2960,138 @@ fn activity_destination(
 /// the user needs to know why their terminal is gone before they are asked
 /// to act (SPEC.md: opening an interrupted session offers
 /// restart-with-resume). Everything else states the offer alone.
-fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
-    let offered = offer_clause(offer);
+fn restart_offer_text(
+    status: &SessionStatus,
+    offer: RestartOffer,
+    kind: crate::SessionAgentKind,
+) -> String {
+    let ended = session_ended(status);
+    let offered = offer_clause(offer, kind, ended);
+    let note = feedback_note(offer, ended);
     match status {
         SessionStatus::Interrupted => {
-            format!("interrupted by a host reboot — {offered}.")
+            format!("interrupted by a host reboot — {offered}.{note}")
         }
-        SessionStatus::Error { .. } => format!("the agent never started — {offered}."),
-        _ => format!("{offered}."),
+        SessionStatus::Error { .. } => format!("the agent never started — {offered}.{note}"),
+        _ => format!("{offered}.{note}"),
     }
+}
+
+/// Whether the session's agent is gone for good, so a `not_captured` offer
+/// can no longer turn into Resume by the agent reporting: exited, failed to
+/// start, or interrupted by a host reboot. Running, waiting, idle and
+/// unknown all count as possibly still reporting (unknown hedges toward the
+/// timing sentence, which itself only says what normally happens).
+fn session_ended(status: &SessionStatus) -> bool {
+    match status {
+        SessionStatus::Exited { .. } | SessionStatus::Error { .. } | SessionStatus::Interrupted => {
+            true
+        }
+        SessionStatus::Unknown
+        | SessionStatus::Running
+        | SessionStatus::Waiting
+        | SessionStatus::Idle => false,
+    }
+}
+
+/// The app's invitation to send feedback when a `not_captured` session's
+/// Restart never arrives, appended after the explanation's own period;
+/// empty for every other offer.
+///
+/// The app cannot tell a report that is still coming from one that never
+/// will (a harness set up not to report, a refused report): the listing
+/// carries nothing that separates them, and the maintainer chose wording
+/// over a new wire field. So the text states what normally happens and asks
+/// to hear about it when that is wrong. Only the app says this; the
+/// supervisor's refusal and the agent instructions are read by agents,
+/// for whom the help menu means nothing.
+fn feedback_note(offer: RestartOffer, ended: bool) -> &'static str {
+    match (offer, ended) {
+        (RestartOffer::NotCaptured, false) => {
+            " (If Restart doesn't become available, please send feedback from the help (?) menu.)"
+        }
+        (RestartOffer::NotCaptured, true) => {
+            " (If you expected Restart here, please send feedback from the help (?) menu.)"
+        }
+        (
+            RestartOffer::Resume
+            | RestartOffer::NoConversationReporting
+            | RestartOffer::NoResumeCommand,
+            _,
+        ) => "",
+    }
+}
+
+/// What a `not_captured` offer means for a session of `kind`, as a clause
+/// without its final period.
+///
+/// While the agent may still report, it says, naming the agent, when
+/// Restart normally becomes available (`AgentKind::restart_readiness`, the
+/// one source of those facts); once the session has ended that would be
+/// false, so it says the conversation was never captured instead. An agent
+/// kind this build does not recognize, or a row with none, gets the same
+/// shape with no per-agent claim.
+///
+/// `start_over` is how the session starts over instead: "Replace starts the
+/// session over" everywhere except a legacy session's interrupted card,
+/// which offers Replace with in Replace's place.
+fn not_captured_clause(kind: crate::SessionAgentKind, ended: bool, start_over: &str) -> String {
+    let readiness = kind
+        .proto()
+        .and_then(|kind| Some((kind.display_name()?, kind.restart_readiness()?)));
+    match (readiness, ended) {
+        (Some((name, readiness)), false) => format!(
+            "for {name} sessions, Restart becomes available {}; until then, {start_over}",
+            readiness.clause(farhelm_proto::ReadinessWording::ToTheUser)
+        ),
+        (None, false) => format!(
+            "Restart becomes available once Farhelm captures this session's conversation; until \
+             then, {start_over}"
+        ),
+        (Some((name, _)), true) => format!(
+            "Farhelm never captured this {name} session's conversation, so Restart can't resume \
+             it; {start_over}"
+        ),
+        (None, true) => format!(
+            "Farhelm never captured this session's conversation, so Restart can't resume it; \
+             {start_over}"
+        ),
+    }
+}
+
+/// How a `not_captured` explanation says the session can start over, on
+/// every surface that offers plain Replace.
+const REPLACE_STARTS_OVER: &str = "Replace starts the session over";
+
+/// Restart with's greyed-out reason for a `not_captured` session: the same
+/// per-agent fact as the Restart control's explanation in a short form, since
+/// Restart with waits on the same conversation, and the same feedback
+/// invitation. Short because it sits beside the other Restart with reasons,
+/// which are a phrase each.
+fn not_captured_with_reason(session: &Session) -> String {
+    let ended = session_ended(&session.status);
+    let readiness = session
+        .agent_kind
+        .proto()
+        .and_then(|kind| Some((kind.display_name()?, kind.restart_readiness()?)));
+    let reason = match (readiness, ended) {
+        (Some((name, readiness)), false) => format!(
+            "for {name} sessions, Restart with becomes available {}",
+            readiness.clause(farhelm_proto::ReadinessWording::ToTheUser)
+        ),
+        (None, false) => {
+            "Restart with becomes available once Farhelm captures this session's conversation"
+                .to_string()
+        }
+        (Some((name, _)), true) => {
+            format!("Farhelm never captured this {name} session's conversation")
+        }
+        (None, true) => "Farhelm never captured this session's conversation".to_string(),
+    };
+    format!(
+        "{reason}.{}",
+        feedback_note(RestartOffer::NotCaptured, ended)
+    )
 }
 
 /// Whether a restart can resume this session's conversation, and why not
@@ -2978,23 +3105,22 @@ fn restart_offer_text(status: &SessionStatus, offer: RestartOffer) -> String {
 /// Restart and Restart with are greyed out with the specific reason and
 /// Replace is how the session starts over — so every unavailable clause
 /// names Replace.
-fn offer_clause(offer: RestartOffer) -> &'static str {
+fn offer_clause(offer: RestartOffer, kind: crate::SessionAgentKind, ended: bool) -> String {
     match offer {
-        RestartOffer::Resume => "restarting resumes this session's own conversation",
+        RestartOffer::Resume => "restarting resumes this session's own conversation".to_string(),
         // No "restart is unavailable" here: the control's accessible name
         // (`restart_button_label`) already says so, and the tooltip joins
         // the two.
-        RestartOffer::NotCaptured => {
-            "no conversation Farhelm can resume was captured for this session, so replace starts \
-             it over"
-        }
+        RestartOffer::NotCaptured => not_captured_clause(kind, ended, REPLACE_STARTS_OVER),
         RestartOffer::NoConversationReporting => {
             "Farhelm has no conversation reporting for this session's agent, so replace starts it \
              over"
+                .to_string()
         }
         RestartOffer::NoResumeCommand => {
             "this command launch did not opt into Resume, so it has no resume command and replace \
              starts it over"
+                .to_string()
         }
     }
 }
@@ -3052,15 +3178,34 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
 ///
 /// `replace_with` names Replace with instead of Replace, for a legacy
 /// session, whose card offers it in Replace's place.
-fn interrupted_surface_text(offer: RestartOffer, replace_with: bool) -> String {
+fn interrupted_surface_text(
+    offer: RestartOffer,
+    replace_with: bool,
+    kind: crate::SessionAgentKind,
+) -> String {
+    // An interrupted session's agent is gone, so its clause is always the
+    // ended one (`session_ended`), shared with the Restart tooltip.
+    let clause = offer_clause(offer, kind, true);
+    let note = feedback_note(offer, true);
     // A legacy session's card offers Replace with, never plain Replace, so
     // its text must not promise that "replace starts it over".
     if replace_with {
         return if offer.can_restart() {
             format!(
                 "a host restart paused this session; it needs an intentional restart. Farhelm \
-                 will wait for you to choose Restart or Replace with — {}.",
-                offer_clause(offer)
+                 will wait for you to choose Restart or Replace with — {clause}."
+            )
+        } else if offer == RestartOffer::NotCaptured {
+            // The same ended explanation as the Restart tooltip's, with the
+            // card's own way to start over.
+            format!(
+                "a host restart paused this session. Farhelm will wait for you to choose Replace \
+                 with — {}.{note}",
+                not_captured_clause(
+                    kind,
+                    true,
+                    "Replace with opens the launcher with its command to start it over"
+                )
             )
         } else {
             "a host restart paused this session. Farhelm will wait for you to choose Replace \
@@ -3071,13 +3216,11 @@ fn interrupted_surface_text(offer: RestartOffer, replace_with: bool) -> String {
     }
     if offer.can_restart() {
         format!(
-            "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {}.",
-            offer_clause(offer)
+            "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {clause}."
         )
     } else {
         format!(
-            "a host restart paused this session. Farhelm will wait for you to choose Replace — {}.",
-            offer_clause(offer)
+            "a host restart paused this session. Farhelm will wait for you to choose Replace — {clause}.{note}"
         )
     }
 }
@@ -3219,17 +3362,29 @@ mod tests {
             })
         };
         session.launch = agent(LaunchHarness::Claude);
+        session.agent_kind = crate::SessionAgentKind::Claude;
         assert_eq!(restart_with_reason(&session), None);
-        for offer in [
-            RestartOffer::NotCaptured,
-            RestartOffer::NoConversationReporting,
-        ] {
-            session.restart_offer = offer;
-            assert_eq!(
-                restart_with_reason(&session).as_deref(),
-                Some("no captured conversation to resume")
-            );
-        }
+        // Not yet captured: the same per-agent timing as Restart's own
+        // explanation, while the session runs.
+        session.restart_offer = RestartOffer::NotCaptured;
+        let waiting = restart_with_reason(&session).expect("unavailable");
+        assert!(
+            waiting.contains("for Claude sessions, Restart with becomes available a few seconds")
+                && waiting.contains("send feedback"),
+            "{waiting}"
+        );
+        session.status = SessionStatus::Exited { exit_code: Some(0) };
+        let ended = restart_with_reason(&session).expect("unavailable");
+        assert!(
+            ended.contains("Farhelm never captured this Claude session's conversation"),
+            "{ended}"
+        );
+        session.status = SessionStatus::Running;
+        session.restart_offer = RestartOffer::NoConversationReporting;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("no captured conversation to resume")
+        );
         session.launch = agent(LaunchHarness::Muse);
         assert_eq!(
             restart_with_reason(&session).as_deref(),
@@ -3251,6 +3406,14 @@ mod tests {
         session.restart_offer = RestartOffer::Resume;
         assert_eq!(restart_with_reason(&session), None);
         session.restart_offer = RestartOffer::NotCaptured;
+        assert!(
+            restart_with_reason(&session)
+                .is_some_and(|reason| reason.contains("for Claude sessions, Restart with becomes")),
+            "{:?}",
+            restart_with_reason(&session)
+        );
+        // `no_resume_command` keeps its own reason, apart from not_captured.
+        session.restart_offer = RestartOffer::NoResumeCommand;
         assert_eq!(
             restart_with_reason(&session).as_deref(),
             Some("no captured conversation to resume")
@@ -3442,31 +3605,38 @@ mod tests {
     /// Replace, the one choice it shows.
     #[farhelm_testtrace::test]
     fn the_interrupted_surface_matches_the_restart_offer() {
-        for offer in [
-            RestartOffer::Resume,
-            RestartOffer::NotCaptured,
-            RestartOffer::NoConversationReporting,
-            RestartOffer::NoResumeCommand,
+        for kind in [
+            crate::SessionAgentKind::Codex,
+            crate::SessionAgentKind::Unrecognized,
         ] {
-            let card = interrupted_surface_text(offer, false);
-            let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
-            assert!(
-                card.starts_with("a host restart paused this session"),
-                "{card}"
-            );
-            assert!(
-                card.ends_with(&format!("{}.", offer_clause(offer))),
-                "the card must end with the same clause the tooltip carries: {card}"
-            );
-            assert!(
-                tooltip.ends_with(&format!("{}.", offer_clause(offer))),
-                "{tooltip}"
-            );
-            assert_eq!(
-                card.contains("Restart or Replace"),
-                offer.can_restart(),
-                "only a resumable session's card offers Restart: {card}"
-            );
+            for offer in [
+                RestartOffer::Resume,
+                RestartOffer::NotCaptured,
+                RestartOffer::NoConversationReporting,
+                RestartOffer::NoResumeCommand,
+            ] {
+                let card = interrupted_surface_text(offer, false, kind);
+                let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer, kind);
+                let shared = format!(
+                    "{}.{}",
+                    offer_clause(offer, kind, true),
+                    feedback_note(offer, true)
+                );
+                assert!(
+                    card.starts_with("a host restart paused this session"),
+                    "{card}"
+                );
+                assert!(
+                    card.ends_with(&shared),
+                    "the card must end with the same clause the tooltip carries: {card}"
+                );
+                assert!(tooltip.ends_with(&shared), "{tooltip}");
+                assert_eq!(
+                    card.contains("Restart or Replace"),
+                    offer.can_restart(),
+                    "only a resumable session's card offers Restart: {card}"
+                );
+            }
         }
     }
 
@@ -3481,7 +3651,23 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_legacy_interrupted_card_names_replace_with() {
         for offer in [RestartOffer::Resume, RestartOffer::NotCaptured] {
-            let card = interrupted_surface_text(offer, true);
+            let card = interrupted_surface_text(offer, true, crate::SessionAgentKind::Codex);
+            if offer == RestartOffer::NotCaptured {
+                // The ended explanation the Restart tooltip gives, naming
+                // the agent, with the card's own way to start over.
+                assert!(
+                    card.contains("Farhelm never captured this Codex session's conversation")
+                        && card.contains("Replace with opens the launcher")
+                        && card.contains("If you expected Restart here"),
+                    "{card}"
+                );
+                let generic =
+                    interrupted_surface_text(offer, true, crate::SessionAgentKind::Unrecognized);
+                assert!(
+                    generic.contains("Farhelm never captured this session's conversation"),
+                    "{generic}"
+                );
+            }
             assert!(
                 card.starts_with("a host restart paused this session"),
                 "{card}"
@@ -3649,38 +3835,105 @@ mod tests {
     /// restart-with-resume).
     #[farhelm_testtrace::test]
     fn the_offer_text_states_what_would_happen_to_the_conversation() {
-        let resumable = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::Resume);
+        use crate::SessionAgentKind as Kind;
+        let resumable = restart_offer_text(
+            &SessionStatus::Interrupted,
+            RestartOffer::Resume,
+            Kind::Codex,
+        );
         assert!(
             resumable.contains("reboot") && resumable.contains("resumes"),
             "an interrupted, resumable session must say both: {resumable}"
         );
+        assert!(!resumable.contains("feedback"), "{resumable}");
 
         // SPEC.md: when Farhelm cannot resume, Restart is unavailable with
-        // the specific reason, and Replace is the way to start over.
-        let uncaptured = restart_offer_text(&SessionStatus::Interrupted, RestartOffer::NotCaptured);
+        // the specific reason, and Replace is the way to start over. For an
+        // agent that reports conversations, a running session hears when
+        // Restart normally becomes available for that agent, named, and is
+        // invited to send feedback if it does not.
+        let waiting =
+            restart_offer_text(&SessionStatus::Idle, RestartOffer::NotCaptured, Kind::Codex);
         assert!(
-            uncaptured.contains("no conversation") && uncaptured.contains("replace"),
-            "an uncaptured session must say why Restart is unavailable: {uncaptured}"
+            waiting.contains(
+                "for Codex sessions, Restart becomes available once you submit your \
+                              first prompt"
+            ) && waiting.contains("Replace starts the session over")
+                && waiting.contains("send feedback from the help (?) menu"),
+            "a running Codex session must say when Restart comes: {waiting}"
+        );
+        // Every kind that reports names itself and its own moment; a kind
+        // this build does not know, or a generic one, claims nothing
+        // per-agent.
+        for (kind, says) in [
+            (
+                Kind::Claude,
+                "for Claude sessions, Restart becomes available a few seconds after",
+            ),
+            (
+                Kind::Goose,
+                "for Goose sessions, Restart becomes available as soon as it starts",
+            ),
+            (
+                Kind::Pi,
+                "for Pi sessions, Restart becomes available after the agent's first reply",
+            ),
+            (
+                Kind::Omp,
+                "for OMP sessions, Restart becomes available after the agent's first reply",
+            ),
+            (Kind::Grok, "Farhelm's Grok hooks are installed"),
+            (
+                Kind::Unrecognized,
+                "Restart becomes available once Farhelm captures this session's",
+            ),
+            (
+                Kind::Generic,
+                "Restart becomes available once Farhelm captures this session's",
+            ),
+        ] {
+            let text = restart_offer_text(&SessionStatus::Running, RestartOffer::NotCaptured, kind);
+            assert!(text.contains(says), "{kind:?}: {text}");
+            assert!(text.contains("send feedback"), "{kind:?}: {text}");
+        }
+
+        // Once the session has ended the agent will not report again, so it
+        // says the conversation was never captured instead of when Restart
+        // would come.
+        let uncaptured = restart_offer_text(
+            &SessionStatus::Interrupted,
+            RestartOffer::NotCaptured,
+            Kind::Codex,
+        );
+        assert!(
+            uncaptured.contains("Farhelm never captured this Codex session's conversation")
+                && uncaptured.contains("Replace")
+                && uncaptured.contains("If you expected Restart here")
+                && !uncaptured.contains("becomes available"),
+            "an ended, uncaptured session must say why Restart is unavailable: {uncaptured}"
         );
 
         let unreported = restart_offer_text(
             &SessionStatus::Interrupted,
             RestartOffer::NoConversationReporting,
+            Kind::Generic,
         );
         assert!(
             unreported.contains("no conversation reporting") && unreported.contains("replace"),
             "an agent without reporting must say why Restart is unavailable: {unreported}"
         );
+        assert!(!unreported.contains("feedback"), "{unreported}");
 
         let error = restart_offer_text(
             &SessionStatus::Error {
                 detail: "exec_failed".to_string(),
             },
             RestartOffer::NotCaptured,
+            Kind::Codex,
         );
         assert!(
-            error.contains("never started"),
-            "an errored session's own reason leads instead: {error}"
+            error.contains("never started") && error.contains("never captured"),
+            "an errored session's own reason leads, with the ended wording: {error}"
         );
     }
 
