@@ -6889,7 +6889,11 @@
 - Completion criteria: Cancel followed by either answer in one event burst requests no restart and no host setting
   change; a permanent answer without its bound host is refused; a regression covers the queued order. Remove this
   feedback file and its index entry, or block with findings if the gate trips.
-- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
+- Execution: complete in jj change `ltwxxqom`, bookmark `plan/triage-dialog-cancel-races/04-restart-dialog`, PR
+  https://github.com/scode/farhelm/pull/1661. No change to the dialog's code was needed: `restart-parent-cancel.md`'s
+  fix makes the session view accept an answer only by taking the live question, for the settings it asked about and with
+  its host for "don't ask again", so an answer queued behind the dialog's Cancel requests nothing. This PR adds the
+  browser regression that delivers Cancel followed by each answer in one burst.
 
 ## restart-parent-cancel.md
 
