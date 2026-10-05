@@ -121,14 +121,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it small.
 
 - **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
-  checksums, and CI no longer signs. What remains: swap the maintainer's primary and backup keys into the release key
-  ring (their `.pub` files beside `release_payloads.rs` and `RELEASE_KEY_RING`); switch the README, the website and
-  `docs/install_uninstall.md` to `curl -fsSL https://get.farhelm.io/install.sh | sh` once the first release is on the
-  site; delete the old `MINISIGN_SECRET_KEY` repository secret; a Vercel user that holds only the get.farhelm.io
-  project; disconnect the docs project from Git (its automatic deploys are off only by a setting in agent-writable
-  `website/vercel.json`); tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts;
-  and review the source diff before signing, since the signature proves who published a release, not that its code is
-  sound.
+  checksums, and CI no longer signs. What remains: switch the README, the website and `docs/install_uninstall.md` to
+  `curl -fsSL https://get.farhelm.io/install.sh | sh` once the first release is on the site; delete the old
+  `MINISIGN_SECRET_KEY` repository secret; a Vercel user that holds only the get.farhelm.io project; disconnect the docs
+  project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`); tag
+  rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source diff
+  before signing, since the signature proves who published a release, not that its code is sound.
 
 - **Clear a session's notification once its problem goes away.** A session notification (the bell on the sidebar row) is
   a record of something that happened, not a live state, so it stays until the user clears it even after the problem it

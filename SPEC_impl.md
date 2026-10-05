@@ -3340,19 +3340,21 @@ as the `MINISIGN_SECRET_KEY` repository secret, which nothing references any mor
 until then a workflow change could still read it. The public keys are committed twice — `RELEASE_KEY_RING` and one
 `.pub` file per key beside `release_payloads.rs` — with a test that the two agree in both directions.
 
-The ring holds two keys, a primary and a backup (today, until the maintainer swaps them in, only the key previous
-releases were signed with). Releases are signed with the primary; the backup is compiled in but kept offline. Rotation
-follows from two facts: the helm verifies its own release with its own ring, so a release's signing key must be in that
-release's own ring, or the release cannot provision hosts; and an app updates by verifying the next release with the
-ring it already has, so the signing key must also be in the ring of the release before it. A rotation therefore replaces
-at most one key per release: to retire the primary A of ring {A, B}, the next release carries {B, C} and is signed with
-B, and B becomes the primary. A compromised key is retired the same way, promptly. An app more than one rotation behind
-cannot verify the latest release and must be reinstalled with `curl -fsSL https://get.farhelm.io/install.sh | sh`, which
-trusts get.farhelm.io over TLS and needs no key; that is also the recovery if both keys are lost. Consecutive rotations
-are therefore spaced so that daily automatic updates have time to carry apps across each one. Note also what the keys do
-not protect: `install.sh` run by hand on a fresh machine has nothing to pin a key in, so it trusts get.farhelm.io over
-TLS and the `SHA256SUMS` it serves; the signature guards what a running helm provisions onto other hosts and what an
-installed app updates to, not the first download of Farhelm itself.
+The ring holds two keys, a primary and a backup, generated on the maintainer's trusted host; `RELEASE_KEY_RING` lists
+the primary first. The key CI held is in no ring: releases built from then on do not trust it, while helms of earlier
+releases keep trusting it for their own version's payloads. Releases are signed with the primary; the backup is compiled
+in but kept offline. Rotation follows from two facts: the helm verifies its own release with its own ring, so a
+release's signing key must be in that release's own ring, or the release cannot provision hosts; and an app updates by
+verifying the next release with the ring it already has, so the signing key must also be in the ring of the release
+before it. A rotation therefore replaces at most one key per release: to retire the primary A of ring {A, B}, the next
+release carries {B, C} and is signed with B, and B becomes the primary. A compromised key is retired the same way,
+promptly. An app more than one rotation behind cannot verify the latest release and must be reinstalled with
+`curl -fsSL https://get.farhelm.io/install.sh | sh`, which trusts get.farhelm.io over TLS and needs no key; that is also
+the recovery if both keys are lost. Consecutive rotations are therefore spaced so that daily automatic updates have time
+to carry apps across each one. Note also what the keys do not protect: `install.sh` run by hand on a fresh machine has
+nothing to pin a key in, so it trusts get.farhelm.io over TLS and the `SHA256SUMS` it serves; the signature guards what
+a running helm provisions onto other hosts and what an installed app updates to, not the first download of Farhelm
+itself.
 
 A release also carries cargo-dist's own metadata on GitHub, none of which is signed and none of which Farhelm reads:
 `dist-manifest.json`, a `<archive>.tar.gz.sha256` beside each of the four archives, and a lowercase `sha256.sum` over
