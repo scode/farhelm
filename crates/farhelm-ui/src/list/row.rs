@@ -18,6 +18,7 @@ use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 use crate::{LaunchHarness, Session, SessionStatus};
 
+use super::bell::{BellSlot, NotificationBell};
 use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
@@ -856,6 +857,16 @@ pub(super) fn SessionRow(
     on_mark_seen: EventHandler<(String, Option<i64>)>,
     on_rename_start: EventHandler<(String, String)>,
     on_menu_toggle: EventHandler<String>,
+    /// The notification bell's click (SPEC.md, Status): the session id, its
+    /// current read mark, which `ListView` keeps as the open list's "new
+    /// since last time" boundary, and the newest entry the list will show,
+    /// which closing it marks read.
+    on_bell_toggle: EventHandler<(String, u64, u64)>,
+    /// Escape inside the bell's list: close it.
+    on_bell_close: EventHandler<String>,
+    /// The list's clear button: the session id and the newest sequence
+    /// number the list showed.
+    on_bell_clear: EventHandler<(String, u64)>,
 ) -> Element {
     let RowState {
         error,
@@ -870,6 +881,7 @@ pub(super) fn SessionRow(
         locality,
         activity,
         deleting,
+        bell_open,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -949,6 +961,16 @@ pub(super) fn SessionRow(
         .as_deref()
         .map(|name| gui_host_name(name, locality == HostLocality::Local));
     let open_session = session.clone();
+    // A row shows its bell while any notification is left uncleared; the
+    // helm has already dropped the cleared ones.
+    let has_bell = !session.notifications.is_empty();
+    let bell_toggle_target = (
+        session.id.clone(),
+        session.notifications_read_through,
+        session.newest_notification_seq().unwrap_or(0),
+    );
+    let bell_close_id = session.id.clone();
+    let bell_clear_id = session.id.clone();
     let stop_id = session.id.clone();
     let delete_target = DeleteTarget::for_session(&session);
     let clone_target = session.clone();
@@ -1590,6 +1612,12 @@ pub(super) fn SessionRow(
                         // instead of inheriting a status color that would
                         // make "2m" look like a verdict.
                         span { class: "session-activity-column",
+                        // The bell's reserved space, which the overlay
+                        // after this button draws the bell over (see
+                        // `bell`'s module doc for why it is not here).
+                        if has_bell {
+                            BellSlot {}
+                        }
                         if let Some(activity) = &activity {
                             span {
                                 class: "status-time",
@@ -1654,6 +1682,22 @@ pub(super) fn SessionRow(
                     // the accessibility tree at all.
                     if compact {
                         span { class: "visually-hidden", "{display_peer(&session.cwd)}" }
+                    }
+                }
+                // The notification bell, a sibling of the open button laid
+                // over it rather than nested inside it: see `bell`'s module
+                // doc. Only on rows whose session has notifications left.
+                if has_bell {
+                    NotificationBell {
+                        session_id: session.id.clone(),
+                        title: session.title.clone(),
+                        notifications: session.notifications.clone(),
+                        unread: session.unread_notifications(),
+                        activity_age: activity.as_ref().map(|activity| activity.age.clone()),
+                        open: bell_open,
+                        on_toggle: move |_| on_bell_toggle.call(bell_toggle_target.clone()),
+                        on_close: move |_| on_bell_close.call(bell_close_id.clone()),
+                        on_clear: move |through| on_bell_clear.call((bell_clear_id.clone(), through)),
                     }
                 }
                 // The actions menu: one small toggle beside the open
@@ -2410,6 +2454,8 @@ pub(super) fn row_specimen(id: &str) -> Session {
         // must keep seeing no toggle and the pre-plan colours unless a test
         // overrides it via `..row_specimen(id)`.
         seen_activity_at: None,
+        notifications: Vec::new(),
+        notifications_read_through: 0,
     }
 }
 
@@ -2516,6 +2562,9 @@ mod tests {
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
+            let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
+            let on_bell_close = use_callback(|_: String| {});
+            let on_bell_clear = use_callback(|_: (String, u64)| {});
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
             let session = Session {
                 title: SPOOF.to_string(),
@@ -2539,6 +2588,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         activity: None,
                         deleting: false,
+                        bell_open: None,
                     },
                     on_open,
                     on_clone,
@@ -2553,6 +2603,9 @@ mod tests {
                     on_cancel_delete,
                     on_rename_start,
                     on_menu_toggle,
+                    on_bell_toggle,
+                    on_bell_close,
+                    on_bell_clear,
                 }
             }
         }
@@ -2659,6 +2712,9 @@ mod tests {
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
+            let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
+            let on_bell_close = use_callback(|_: String| {});
+            let on_bell_clear = use_callback(|_: (String, u64)| {});
             let session = row_specimen("session-1");
             rsx! {
                 SessionRow {
@@ -2677,6 +2733,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         activity: None,
                         deleting: false,
+                        bell_open: None,
                     },
                     on_open,
                     on_clone,
@@ -2691,6 +2748,9 @@ mod tests {
                     on_cancel_delete,
                     on_rename_start,
                     on_menu_toggle,
+                    on_bell_toggle,
+                    on_bell_close,
+                    on_bell_clear,
                 }
             }
         }
@@ -2745,6 +2805,9 @@ mod tests {
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
+            let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
+            let on_bell_close = use_callback(|_: String| {});
+            let on_bell_clear = use_callback(|_: (String, u64)| {});
             let selected = SELECTED.with(|selected| selected.get());
             rsx! {
                 for id in ["session-1", "session-2", "session-3"] {
@@ -2765,6 +2828,7 @@ mod tests {
                             locality: HostLocality::Unknown,
                             activity: None,
                             deleting: false,
+                            bell_open: None,
                         },
                         on_open,
                         on_clone,
@@ -2779,6 +2843,9 @@ mod tests {
                         on_cancel_delete,
                         on_rename_start,
                         on_menu_toggle,
+                        on_bell_toggle,
+                        on_bell_close,
+                        on_bell_clear,
                     }
                 }
             }
@@ -2803,6 +2870,211 @@ mod tests {
                  selected rows and nothing else"
             );
         });
+    }
+
+    /// Render one row whose session carries `notifications` with read mark
+    /// `read_through`, its list open (with that read mark as the opening
+    /// boundary) when `open` is set, and return the DOM edits.
+    fn bell_row_edits(
+        notifications: Vec<crate::SessionNotification>,
+        read_through: u64,
+        open: bool,
+    ) -> Vec<dioxus::core::Mutation> {
+        std::thread_local! {
+            static CASE: std::cell::RefCell<Option<(Vec<crate::SessionNotification>, u64, bool)>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        CASE.with(|case| *case.borrow_mut() = Some((notifications, read_through, open)));
+        fn app() -> Element {
+            let (notifications, read_through, open) =
+                CASE.with(|case| case.borrow().clone()).expect("case set");
+            let session = Session {
+                notifications,
+                notifications_read_through: read_through,
+                ..row_specimen("belled")
+            };
+            rsx! {
+                SessionRow {
+                    session,
+                    compact: false,
+                    state: RowState {
+                        error: None,
+                        busy: false,
+                        confirming: false,
+                        confirming_replace: false,
+                        renaming: false,
+                        nav_disabled: false,
+                        menu_open: false,
+                        composer_transfer_open: false,
+                        selected: false,
+                        locality: HostLocality::Unknown,
+                        activity: None,
+                        deleting: false,
+                        bell_open: open.then_some(read_through),
+                    },
+                    on_open: |_: Session| {},
+                    on_clone: |_: Session| {},
+                    on_replace_with: |_: Session| {},
+                    on_mark_seen: |_: (String, Option<i64>)| {},
+                    on_replace: |_: Session| {},
+                    on_confirm_replace: |_: Session| {},
+                    on_cancel_replace: |_: String| {},
+                    on_stop: |_: String| {},
+                    on_delete: |_: DeleteTarget| {},
+                    on_confirm_delete: |_: (String, crate::DeleteGuard)| {},
+                    on_cancel_delete: |_: String| {},
+                    on_rename_start: |_: (String, String)| {},
+                    on_menu_toggle: |_: String| {},
+                    on_bell_toggle: |_: (String, u64, u64)| {},
+                    on_bell_close: |_: String| {},
+                    on_bell_clear: |_: (String, u64)| {},
+                }
+            }
+        }
+        VirtualDom::new(app).rebuild_to_vec().edits
+    }
+
+    /// Every text-valued attribute the edits set under `name`.
+    fn attribute_values(edits: &[dioxus::core::Mutation], name: &str) -> Vec<String> {
+        edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::SetAttribute {
+                    name: attr,
+                    value: dioxus::core::AttributeValue::Text(value),
+                    ..
+                } if *attr == name => Some(value.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every text node the edits create or set.
+    fn text_values(edits: &[dioxus::core::Mutation]) -> Vec<String> {
+        edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::CreateTextNode { value, .. }
+                | dioxus::core::Mutation::SetText { value, .. } => Some(value.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn notification(seq: u64, text: &str) -> crate::SessionNotification {
+        crate::SessionNotification {
+            seq,
+            at: 1_700_000_000,
+            text: text.to_string(),
+        }
+    }
+
+    /// The bell's three states (SPEC.md, Status): absent, taking no space,
+    /// on a row with no notifications; quiet when every notification is
+    /// read; loud, filled, when any is unread. The accessible name carries
+    /// the unread count in every state that has a bell, because the loud
+    /// colour says nothing to a screen reader.
+    #[farhelm_testtrace::test]
+    fn the_bell_is_absent_quiet_or_loud_with_the_unread_count_in_its_name() {
+        // Static classes never appear as attribute edits, so presence is
+        // read from the bell's dynamic attributes; the reserved slot's
+        // geometry is the browser suite's to check.
+        let none = bell_row_edits(Vec::new(), 0, false);
+        let classes = attribute_values(&none, "class");
+        assert!(
+            !classes
+                .iter()
+                .any(|class| class.contains("session-row-bell")),
+            "a row without notifications has no bell: {classes:?}"
+        );
+        assert!(
+            !attribute_values(&none, "aria-label")
+                .iter()
+                .any(|label| label.starts_with("notifications")),
+        );
+
+        let read = bell_row_edits(vec![notification(2, "b"), notification(1, "a")], 2, false);
+        let classes = attribute_values(&read, "class");
+        assert!(classes.iter().any(|class| class == "btn session-row-bell"));
+        assert!(
+            attribute_values(&read, "data-glyph").contains(&"bell".to_string()),
+            "a read bell is drawn outlined"
+        );
+        assert!(
+            attribute_values(&read, "aria-label")
+                .contains(&"notifications for stable: none unread".to_string())
+        );
+
+        let unread = bell_row_edits(vec![notification(3, "c"), notification(2, "b")], 1, false);
+        assert!(
+            attribute_values(&unread, "class")
+                .iter()
+                .any(|class| class == "btn session-row-bell loud")
+        );
+        assert!(attribute_values(&unread, "data-glyph").contains(&"bell-unread".to_string()));
+        assert!(
+            attribute_values(&unread, "aria-label")
+                .contains(&"notifications for stable: 2 unread".to_string())
+        );
+        assert!(
+            attribute_values(&unread, "data-tooltip")
+                .iter()
+                .any(|tooltip| tooltip.starts_with("notifications: 2 unread")),
+            "the bell has hover help naming the count"
+        );
+        assert!(
+            attribute_values(&unread, "data-row-menu-key").is_empty(),
+            "a closed bell renders no list"
+        );
+    }
+
+    /// The open list shows every notification newest first, marks the ones
+    /// above the read mark as of opening as new, and renders the
+    /// supervisor's text as escaped, isolated peer text, since a supervisor
+    /// is not trusted to write markup or direction controls into the
+    /// sidebar. (The visible "new" word is static template text, which
+    /// these edits do not carry; the browser suite checks it.)
+    #[farhelm_testtrace::test]
+    fn the_open_list_marks_new_entries_and_escapes_supervisor_text() {
+        const SPOOF: &str = "hook \u{202E}kcatta";
+        let edits = bell_row_edits(
+            vec![
+                notification(3, SPOOF),
+                notification(2, "older"),
+                notification(1, "oldest"),
+            ],
+            2,
+            true,
+        );
+        assert_eq!(
+            attribute_values(&edits, "data-row-menu-key"),
+            vec!["bell:belled"],
+            "the open list carries the key its outside-click relay answers to"
+        );
+        let classes = attribute_values(&edits, "class");
+        let entry_classes: Vec<&String> = classes
+            .iter()
+            .filter(|class| class.starts_with("session-bell-entry") && !class.contains("meta"))
+            .collect();
+        assert_eq!(
+            entry_classes,
+            vec![
+                "session-bell-entry new",
+                "session-bell-entry",
+                "session-bell-entry"
+            ],
+            "newest first, and only the entry above the read mark is new"
+        );
+        assert_eq!(
+            attribute_values(&edits, "data-notification-seq"),
+            vec!["3", "2", "1"]
+        );
+        let texts = text_values(&edits);
+        assert!(texts.iter().any(|text| *text == display_peer(SPOOF)));
+        assert!(
+            texts.iter().all(|text| !text.contains('\u{202E}')),
+            "a raw direction control reached a text node: {texts:?}"
+        );
     }
 
     /// `stale`, `selected` and `menu-open` are independent row states and

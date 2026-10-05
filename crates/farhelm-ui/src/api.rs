@@ -2223,6 +2223,32 @@ pub(crate) async fn mark_seen(
     Ok(())
 }
 
+/// `PUT /api/sessions/{id}/notifications/read` (or `/cleared` when `clear`
+/// is set): mark the session's notifications read, or cleared, through
+/// sequence number `through` (SPEC.md, Status).
+///
+/// No write queue, unlike [`mark_seen`]: the helm never moves either mark
+/// backwards, so two of these racing each other end in the higher mark
+/// whichever lands last, which is the intent of both.
+pub(crate) async fn mark_notifications(
+    base: &str,
+    id: &str,
+    through: u64,
+    clear: bool,
+) -> Result<(), String> {
+    let url = format!(
+        "{base}/api/sessions/{}/notifications/{}",
+        encode_path_segment(id),
+        if clear { "cleared" } else { "read" }
+    );
+    let body = serde_json::json!({ "through": through });
+    let resp = send(client().put(&url).json(&body)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// One session's slice of the seen-state write queue: the newest locally
 /// chosen value, whether a writer currently owns it, and what to do with
 /// that writer's eventual result.

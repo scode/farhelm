@@ -38,6 +38,7 @@
 //! only delays the helm's order, and `rows::held_display_order` is the whole
 //! rule for what a held list shows.
 
+mod bell;
 mod create_form;
 mod row;
 mod shared;

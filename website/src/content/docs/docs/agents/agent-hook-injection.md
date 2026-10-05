@@ -271,7 +271,9 @@ reporter first.
   `invocation already passes --settings`, `invocation already configures codex hooks`, or
   `invocation contains a bare --`. A session with no declared agent logs nothing — no integration means there was never
   a hook to skip. Every one of these launches still runs. Sessions keep running without gaining a new conversation to
-  resume from that launch.
+  resume from that launch. Apart from `disabled by FARHELM_AGENT_HOOKS`, which was your own choice, the session's row
+  also shows the skip as a notification (see
+  [Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell)).
 - `recorded the conversation identity this session's agent reported` — an accepted report, with the conversation and the
   vendor's `source` word. When it displaced a claim naming a DIFFERENT id, a second line says so:
   `this session's agent reported a conversation identity that replaces the one previously claimed for it`.
@@ -282,8 +284,10 @@ reporter first.
   records, the session's terminal, or the saved file, and kept the report for its next pass.
   `discarded a conversation report that could not be read` means the saved file itself was damaged.
 - `this session was launched with a conversation hook but holds no conversation identity` — the tripwire, once per
-  launch, 65 seconds after the first input if no conversation is saved. A resumed session with a saved conversation does
-  not warn.
+  launch, 65 seconds after you first press Enter in the agent's terminal if no conversation is saved. A resumed session
+  with a saved conversation does not warn. The same problem shows as a notification on the session's row, so you do not
+  have to read this log to find out, except for Pi and OMP: they report only after their first reply, which can take as
+  long as the first turn, so their line here is a hint rather than proof.
 
 **3. Confirm the reporter is active.** Use `ps -o args= -p <agent pid>` for injected reporters. Claude's flags are
 `--settings` followed by a JSON blob naming the farhelm binary; Codex's are `--dangerously-bypass-hook-trust` plus two

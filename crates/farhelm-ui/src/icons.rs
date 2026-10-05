@@ -388,6 +388,32 @@ pub(crate) fn RemoteHostIcon() -> Element {
     }
 }
 
+/// The session row's notification bell (SPEC.md, Status), drawn in the
+/// sidebar's 12-unit glyph box beside the agent and permission marks.
+///
+/// `loud` fills the bell: together with the error colour app.css gives a
+/// loud bell, a filled shape is what keeps an unread notification obvious
+/// to a reader who cannot tell the colour apart from the quiet grey one.
+/// The button around it supplies the accessible name.
+#[component]
+pub(crate) fn BellIcon(loud: bool) -> Element {
+    rsx! {
+        svg {
+            class: "sidebar-glyph bell-glyph",
+            "data-glyph": if loud { "bell-unread" } else { "bell" },
+            view_box: "0 0 12 12",
+            fill: if loud { "currentColor" } else { "none" },
+            stroke: "currentColor",
+            stroke_width: "1.2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            path { d: "M3 8.6V5.4a3 3 0 0 1 6 0v3.2l1 1H2z" }
+            path { d: "M5 10.6a1 1 0 0 0 2 0", fill: "none" }
+        }
+    }
+}
+
 /// The sidebar bar's help menu toggle: a question mark in a circle, drawn
 /// with the same 16px box, stroke weight and `currentColor` as the settings
 /// gear beside it so the two read as one pair of controls.

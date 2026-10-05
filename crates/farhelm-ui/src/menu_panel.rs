@@ -826,19 +826,23 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
 pub(crate) const ROW_MENU_OUTSIDE_RELAY: &str = "row-menu-outside-relay";
 
 /// The `data-row-menu` value naming one row's menu: `session:<id>` or
-/// `host:<id>`, or one of the sidebar bar's menus, `bar:<name>`
-/// (`bar:help`, `bar:update`). The dismissal listener derives the same
-/// string from the open panel's row (`data-session-id` / `data-host-id`) or
-/// the bar menu's `data-bar-menu` marker, which is how a
+/// `host:<id>`, one of the sidebar bar's menus, `bar:<name>` (`bar:help`,
+/// `bar:update`), or a session row's open notification list, `bell:<id>`.
+/// The dismissal listener derives the same string from the open panel's row
+/// (`data-session-id` / `data-host-id`) or the bar menu's `data-bar-menu`
+/// marker; a surface that a row's own id would misname (the notification
+/// list sits inside its session row but is not that row's menu) states its
+/// key outright in a `data-row-menu-key` attribute, which wins. That is how a
 /// deferred dismissal names the menu it saw open instead of whichever menu
 /// happens to be open when the relay is handled.
 pub(crate) fn row_menu_relay_key(kind: &str, id: &str) -> String {
     format!("{kind}:{id}")
 }
 
-/// Close the open session or host row menu, or one of the sidebar bar's
-/// menus (`app_bar::BarMenuToggle`, which reuses this machinery and renders
-/// its own relay), when a pointer goes down anywhere outside it, the way Escape
+/// Close the open session or host row menu, one of the sidebar bar's menus
+/// (`app_bar::BarMenuToggle`, which reuses this machinery and renders its own
+/// relay), or a session row's notification list (`list::bell`), when a
+/// pointer goes down anywhere outside it, the way Escape
 /// does, so a menu no longer stays open until its own `⋯` is clicked again. Idempotent: the listener is
 /// installed once per page, however many times this runs.
 ///
@@ -888,15 +892,17 @@ pub(crate) fn install_row_menu_outside_dismiss() {
             window.__farhelmRowMenuOutsideDismiss = true;
             document.addEventListener('pointerdown', (event) => {{
                 if (!event.isTrusted) return;
-                const open = document.querySelector('.session-row-menu-flyout, .host-row-menu-panel, .bar-menu-panel');
+                const open = document.querySelector('.session-row-menu-flyout, .host-row-menu-panel, .bar-menu-panel, .session-bell-flyout');
                 const target = event.target;
                 if (!open || !(target instanceof Element)) return;
                 if (open.contains(target)) return;
-                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"], .bar-menu-toggle[aria-expanded="true"]')) return;
+                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"], .bar-menu-toggle[aria-expanded="true"], .session-row-bell[aria-expanded="true"]')) return;
+                const keyed = open.closest('[data-row-menu-key]');
                 const sessionRow = open.closest('[data-session-id]');
                 const hostRow = open.closest('[data-host-id]');
                 const barMenu = open.closest('[data-bar-menu]');
-                const key = sessionRow
+                const key = keyed ? keyed.getAttribute('data-row-menu-key')
+                    : sessionRow
                     ? 'session:' + sessionRow.getAttribute('data-session-id')
                     : hostRow ? 'host:' + hostRow.getAttribute('data-host-id')
                     : barMenu ? 'bar:' + barMenu.getAttribute('data-bar-menu') : null;

@@ -3484,6 +3484,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         }
     }
 
@@ -3971,6 +3973,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
+                notifications: Vec::new(),
+                notifications_read_through: 0,
             }
         }
         // The view shows B (learned from its own read); the parent's
@@ -4022,6 +4026,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
+                notifications: Vec::new(),
+                notifications_read_through: 0,
             }
         }
 
@@ -4113,6 +4119,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         };
         assert_eq!(
             status_badge_destination(&unknown),
@@ -4180,6 +4188,8 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: Some(None),
+                notifications: Vec::new(),
+                notifications_read_through: 0,
             }
         }
         assert!(
@@ -4203,6 +4213,8 @@ mod tests {
         assert!(
             !seen_effect_eligible(&Session {
                 seen_activity_at: None,
+                notifications: Vec::new(),
+                notifications_read_through: 0,
                 ..base()
             }),
             "a helm that predates the field offers nothing to mark"
@@ -4238,6 +4250,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: Some(Some(1_700_000_000)),
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         };
         assert!(seen_effect_eligible(&already_seen));
         assert_eq!(
