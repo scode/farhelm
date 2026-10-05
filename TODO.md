@@ -688,6 +688,30 @@ are large mostly because of their tests.
   them, keep working with the app closed. Deferred 2026-10-04 while planning `plans/queue/hook-report-files.md`, which
   keeps conversation tracking working without a supervisor and states this gap in the spec as expected for now.
 
+- **Keep a nested Grok from erasing the session's conversation switch.** A `grok` started inside a Grok session can make
+  Restart resume the wrong conversation. Here's the sequence. You are in conversation A in a Grok session and run
+  `/new`, which starts conversation B, and Grok's hook saves a report saying "this session is now in B". Before Farhelm
+  reads that report, the session's Grok starts another `grok` (through its shell tool, say). That second `grok` runs
+  your configured Farhelm hooks too, because Grok's hooks live in its configuration rather than on the launch's command
+  line, and its hook saves a report for the same session that replaces the first one. Farhelm then reads the second
+  report, sees that it comes from a `grok` nested below the session's own, and refuses it, which is correct, but B's
+  report is already gone. The session stays on A, and Restart resumes A although you were in B. In a brand-new session
+  whose first report was the one replaced, nothing is recorded, and Restart stays unavailable. Farhelm never records the
+  nested `grok`'s conversation; the failure is a stale or missing conversation, never a wrong one.
+
+  The window is short while the supervisor runs, since it reads reports every two seconds, but covers the whole outage
+  while it does not (on the Mac, while the app is closed). It exists because each session keeps only its newest unread
+  report (Grok keeps two: the one naming the conversation and the newest per-prompt one), and the check that refuses a
+  nested report runs when Farhelm reads the file, not when the hook writes it. Reporting over the supervisor's socket,
+  before #1594, checked each report as it arrived, so a refused report could never displace a good one. Claude, Codex,
+  Pi and OMP are not affected: Farhelm adds their reporter to the one launch it builds, so a copy of them started inside
+  a session reports nothing. Unverified: whether B's later per-prompt reports correct the session on their own; they
+  only add detail to a conversation already named, so the session may stay on A until the next `/new` or a restart.
+  Possible fixes: keep every report as its own file and apply them in order, so a refused report never replaces another
+  (the plan ruled out only a capped queue, which would evict reports during a long outage); keep a slot per reporting
+  process; or have the hook check its own process chain before writing. The accepted gap is recorded in SPEC_impl.md's
+  "Report files". Found 2026-10-05 reviewing the `hook-report-files` plan's report.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
