@@ -3348,10 +3348,10 @@ machines. The release workflow builds and validates a release and publishes its 
 which keeps its name but only validates); the maintainer then signs its `SHA256SUMS` and publishes the release on
 get.farhelm.io from a trusted host, with tooling that deliberately lives outside this repository so that agents cannot
 author it. That tooling refuses to sign a release unless every ring key string appears verbatim in every archive, which
-is why each key stays one verbatim string literal in the source. The key previous releases were signed with still exists
-as the `MINISIGN_SECRET_KEY` repository secret, which nothing references any more; deleting it is the maintainer's, and
-until then a workflow change could still read it. The public keys are committed twice — `RELEASE_KEY_RING` and one
-`.pub` file per key beside `release_payloads.rs` — with a test that the two agree in both directions.
+is why each key stays one verbatim string literal in the source. The key previous releases were signed with was held as
+the `MINISIGN_SECRET_KEY` repository secret; that secret has been deleted, so no workflow can read it. The public keys
+are committed twice — `RELEASE_KEY_RING` and one `.pub` file per key beside `release_payloads.rs` — with a test that the
+two agree in both directions.
 
 The ring holds two keys, a primary and a backup, generated on the maintainer's trusted host; `RELEASE_KEY_RING` lists
 the primary first. The key CI held is in no ring: releases built from then on do not trust it, while helms of earlier

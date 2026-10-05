@@ -50,7 +50,7 @@ default-members = [
 # (releasing/AGENTS.md). Everything else carries this sentinel, so no build
 # that is not a tagged release can claim to be one. That matters beyond
 # labeling: a release-shaped helm downloads its provisioning payloads from
-# the GitHub release named by this number (`payloads.rs`), so an untagged
+# get.farhelm.io for the release named by this number (`payloads.rs`), so an untagged
 # build carrying a real release's number would push that release's binaries
 # to remote hosts. With the sentinel it refuses its default download, naming
 # --payload-dir and payloads built from the same commit.
