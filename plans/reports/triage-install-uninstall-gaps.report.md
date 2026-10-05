@@ -80,3 +80,43 @@ Two fresh reviewers per PR, Claude Opus 5.5 at high effort and gpt-6-astra at hi
   overwritten program behind a link would have gone unnoticed. Now it compares contents on both sides of the link.
   gpt-6-astra also found the plain-file case above, now refused. Opus's smaller points (a misleading test helper, an
   unreachable branch, the changelog wording) were fixed.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as three squash commits on main, in order: #1654 (the remote host's linger error is escaped
+before it is logged), #1655 (uninstall refuses when a host with no recorded identity reports one) and #1656 (the Mac
+installer refuses to update Farhelm.app through symlinked or non-folder paths). Nothing else reached main while they
+merged.
+
+#### What else was on main, and what lands with it
+
+Nothing that could interact: between the commit the stack was built on and the landing, main gained only the planning
+queue's own bookkeeping. The triage-template-gaps plan (template saves while the list loads, and a template's host
+reaching another installation) is landing next, in the same round. A separate reviewer that had not worked on either
+plan read both against each other before anything merged: they share no code and neither edits SPEC.md or SPEC_impl.md.
+Their triage ledger entries merge cleanly. Their lines in the review-feedback queue's index sit next to each other, so
+triage-template-gaps, landing second, meets a conflict there, resolved by removing every line either plan removes.
+
+#### Review before merging
+
+The same reviewer found nothing outside the three PRs that the changes break. It confirmed:
+
+- Every test that uninstalls a connected host uses a host whose recorded and reported identities are the same, so none
+  meets the new refusal; the uninstall route is the check's only caller outside tests; and SPEC_impl.md already required
+  the exact match, a missing identity included.
+- The installer never creates a linked folder itself (its only symlink is the Terminal link), and neither does the
+  uninstall acceptance test; the refusal happens after the installer takes its lock, and its existing exit cleanup
+  releases it; and the install documentation describes nothing the change makes untrue.
+- The new check runs before the installer chooses between updating in place and rebuilding, for every app that carries
+  the current installation record. As the report says, an old-layout app is rebuilt without it, and that path only moves
+  the old app aside. (The review first claimed the check also covered old-layout apps; reading the installer confirmed
+  the report.)
+- One line of this plan's changelog fragment is longer than the others; the release-time rewrite reflows it.
+
+#### Checks
+
+- Reused: the report's checks. The code on main after the last merge is identical to the final stack they ran on, and
+  the only other commits since the stack was based are the planning queue's bookkeeping.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above became untrue during the landing.
