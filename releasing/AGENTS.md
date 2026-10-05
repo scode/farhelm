@@ -5,8 +5,16 @@ keeps only the one rule every PR has to follow (leave a changelog fragment). `di
 release machinery itself and why it is shaped the way it is; this file is the procedure that drives it.
 
 Three kinds of release exist. A stable release `X.Y.Z` is cut from main, gets curated release notes, and is what
-`install.sh` and `releases/latest` serve. An RC `X.Y.Z-rc.N` and a dev release `X.Y.Z-dev.N` are prereleases for trying
-a build on a real machine; they carry no curated notes. The tag, not any merge, triggers the release workflow.
+`https://get.farhelm.io/latest` names and the installer installs by default. An RC `X.Y.Z-rc.N` and a dev release
+`X.Y.Z-dev.N` are prereleases for trying a build on a real machine; they carry no curated notes. The tag, not any merge,
+triggers the release workflow.
+
+The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
+never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads
+plus its `install.sh`) and published it on get.farhelm.io, from a trusted host with tooling that deliberately lives
+outside this repository; agents do not author, run, or replace that step. Until then nothing installs it: the installer
+and the helm read get.farhelm.io only. `dist-workspace.toml`'s header and SPEC_impl.md's "Verification chain (D3)" say
+why.
 
 Main's version is always `0.0.0-unreleased`, in both the root `Cargo.toml` and `packaging/farhelm-desktop/dist.toml`.
 Every kind of release sets its real version in a release commit that lives only under its tag: a stable one on its
@@ -220,10 +228,12 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop archive silently
    vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that dist's announcement
    matches.
-7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the release: every asset
-   present including `SHA256SUMS` and `SHA256SUMS.minisig`, the release NOT marked prerelease, `releases/latest`
-   pointing at it, and the release page showing the changelog section above the download tables with the heading text as
-   its name.
+7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the GitHub release: every
+   asset the release contract names present and NO `SHA256SUMS` or `SHA256SUMS.minisig` (those belong on get.farhelm.io;
+   the workflow refuses them), the release NOT marked prerelease, and the release page showing the changelog section
+   above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish.
+   Once they have, check get.farhelm.io (read-only): `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and
+   `install.sh` answer, and `https://get.farhelm.io/latest` names `vX.Y.Z`.
 8. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 9. `cargo clean` again (see "Build outputs" below).
 
@@ -288,24 +298,25 @@ With both settled, the process is:
   gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding
   the tmux e2e suite (see "Finishing work" in the root `AGENTS.md`); that gate is the release's validation, so local
   slow-battery reruns are not a prerequisite for tagging.
-- Watch the workflow run to completion rather than fire-and-forgetting it, then verify the published release: every
-  asset present including `SHA256SUMS` and `SHA256SUMS.minisig`, and the release marked prerelease (cargo-dist does that
-  for `-rc.N` versions on its own — `releases/latest` must still point at the last stable, so ordinary installs are
-  unaffected).
+- Watch the workflow run to completion rather than fire-and-forgetting it, then verify the GitHub release: every asset
+  the release contract names present, no `SHA256SUMS` or `SHA256SUMS.minisig`, and the release marked prerelease
+  (cargo-dist does that for `-rc.N` versions on its own). Tell the maintainer it is ready to sign and publish. Once they
+  have, check that `https://get.farhelm.io/vX.Y.Z-rc.N/SHA256SUMS`, its `.minisig` and `install.sh` answer, and that
+  `https://get.farhelm.io/latest` still names the last stable release, so ordinary installs are unaffected.
 - After the workflow succeeds and the published release passes those checks, close the version-bump PR without merging
   it. The tag preserves the release commit; the PR does not need to stay open for the RC to remain available. Keep the
   tag and published release intact.
-- Finish by handing the maintainer the exact copy-paste command, with the installer fetched FROM THE TAG — when the rc
-  comes from a stack, main does not have the rc's installer — and the version pinned on the far side of the pipe:
+- Finish by handing the maintainer the exact copy-paste command, with the installer get.farhelm.io serves FOR THAT TAG
+  (the one signed with the release) and the version pinned on the far side of the pipe:
 
   ```
-  curl -fsSL https://raw.githubusercontent.com/scode/farhelm/vX.Y.Z-rc.N/scripts/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
+  curl -fsSL https://get.farhelm.io/vX.Y.Z-rc.N/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
   ```
 
   Remind the maintainer to quit the desktop app before updating and relaunch after.
 - Then `cargo clean` again (see "Build outputs" below).
 - A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
-  the unsigned-release recovery below is the one exception's procedure, and even it keeps the tag).
+  the incomplete-release recovery below deletes only a GitHub release, and keeps the tag).
 - Close the version-bump PR without merging when its release attempt is permanently abandoned, including when a fix
   requires another RC and a new version-bump PR will supersede it. A temporary pause or a recoverable workflow rerun is
   not permanent abandonment; keep the PR open while that same release attempt remains active.
@@ -319,7 +330,7 @@ With both settled, the process is:
 A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure above with
 `dev` in place of `rc` everywhere — the bump commit is `chore: release X.Y.Z-dev.N`, N increments per attempt and a tag
 name is never reused, the workflow runs from the tag and marks the release a prerelease (any semver prerelease suffix
-does; `releases/latest` still points at the last stable), and `scripts/install.sh` accepts
+does; get.farhelm.io's `latest` still names the last stable), and `scripts/install.sh` accepts
 `FARHELM_VERSION=vX.Y.Z-dev.N` the same way it accepts an `-rc.N`. Settle the same two choices first, base and version,
 and ask when the request does not state them; the RC version default above does not apply to dev releases. The `-dev.N`
 and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both exist. The name is the whole
@@ -439,6 +450,7 @@ you expect), `dist generate --check` (the generated workflow is current), the re
 (`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`, `scripts/check-desktop-assets.sh`,
 `releasing/check-changelog.py`), and `shellcheck` over the scripts the workflow calls.
 
-When a tag produces a public release that never got its `SHA256SUMS`, the recovery procedure is in
-`dist-workspace.toml`'s header ("RECOVERY: a release that exists but was never signed"). It is maintainer-run: delete
-the release, never the tag, then re-run the workflow.
+When a tag produces a GitHub release that is incomplete or failed validation, the recovery procedure is in
+`dist-workspace.toml`'s header ("RECOVERY: a GitHub release that is incomplete or failed validation"). It is
+maintainer-run, before anything for that version is signed or published on get.farhelm.io: delete the release, never the
+tag, then re-run the workflow.

@@ -6,8 +6,8 @@
 #
 # Two places need exactly this verdict and must not drift: the tmux producer
 # (`scripts/build-tmux-assets.sh`, checking what it just built) and the release
-# signing gate (`.github/workflows/sign-sums.yml`, checking what was actually
-# published). A payload that fails here reaches a host we do not control, where
+# validation gate (`.github/workflows/sign-sums.yml`, checking what was
+# actually published). A payload that fails here reaches a host we do not control, where
 # a missing loader or a wrong machine is a first-exec failure with nothing
 # nearby to explain it.
 #

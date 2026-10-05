@@ -7,8 +7,8 @@
 //! [`DirectoryPayloads`](super::payloads::DirectoryPayloads) and the
 //! verified download source
 //! [`ReleasePayloadSource`](super::release_payloads::ReleasePayloadSource).
-//! `install.sh`'s asset table and the `SHA256SUMS`-writing release workflow
-//! are NOT Rust and cannot import `RELEASE_ARCHIVES` or `sums_members()` —
+//! `install.sh`'s asset table and the release workflow that validates the
+//! payloads `SHA256SUMS` lists are NOT Rust and cannot import `RELEASE_ARCHIVES` or `sums_members()` —
 //! they keep their own representations (a delimited shell table, a YAML
 //! block) — so this module's test module reads each of those files back and
 //! compares. The `sign-sums.yml` parity test is here already; `install.sh`'s
@@ -97,12 +97,15 @@ pub fn farhelm_archive_for(arch: PayloadArch) -> &'static ReleaseArchive {
         .expect("RELEASE_ARCHIVES carries a farhelm archive for every PayloadArch target")
 }
 
-/// The exact six names `SHA256SUMS` lists, sorted — every [`RELEASE_ARCHIVES`]
-/// entry plus both tmux builds. The `sign-sums` release job hashes exactly
-/// this list, in this order, out of its own hardcoded copy; the parity test
-/// below reads that copy back out of the workflow and compares, which is what
-/// keeps the checksum file and the helm's download expectations from drifting
-/// apart.
+/// The six payload names `SHA256SUMS` lists, sorted — every
+/// [`RELEASE_ARCHIVES`] entry plus both tmux builds. The signed file on
+/// get.farhelm.io also lists the release's `install.sh`; that seventh entry
+/// is the updater's, not a payload, which is why it is not here. The
+/// `sign-sums` release job validates exactly this list, in this order, out of
+/// its own hardcoded copy, and prints their digests (with the installer's)
+/// in the form of the signed file; the parity test below reads that copy
+/// back out of the workflow and compares, which is what keeps the validated
+/// set and the helm's download expectations from drifting apart.
 ///
 /// Still called from nowhere but tests, and deliberately so: the download
 /// source looks each asset up by name in whatever `SHA256SUMS` it fetched
@@ -190,13 +193,12 @@ mod tests {
     /// Spec: the asset list hardcoded in the `sign-sums` release job equals
     /// [`sums_members`], name for name and in the same order.
     ///
-    /// Why this matters more than it looks: that job is what turns a set of
-    /// uploaded files into the signed `SHA256SUMS` every helm verifies
-    /// against. If the workflow's list falls behind this module — a target
-    /// added here, a name changed — CI still produces a perfectly valid
-    /// signature over a SHORTER list, and the failure surfaces as a helm
-    /// refusing to provision because an asset it wants is "not in
-    /// SHA256SUMS". YAML cannot import Rust, so the two lists are separate by
+    /// Why this matters more than it looks: that job is the last check of a
+    /// release's payloads before the maintainer signs their `SHA256SUMS`. If
+    /// the workflow's list falls behind this module — a target added here, a
+    /// name changed — the job fails a good release on an asset it does not
+    /// recognize, or validates a list that no longer matches what the helm
+    /// downloads. YAML cannot import Rust, so the two lists are separate by
     /// necessity; this test is what makes the duplication safe.
     #[farhelm_testtrace::test]
     fn sign_sums_workflow_lists_exactly_sums_members() {

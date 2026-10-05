@@ -28,10 +28,12 @@
 //!
 //! ONE tag convention, everywhere: a release tag is `vX.Y.Z` — it already
 //! carries the leading `v` — and the trusted comment is `farhelm ` followed
-//! by that tag. **The Step 5 `sign-sums` job MUST therefore sign with
-//! `minisign -S -t "farhelm $TAG" -s key -m SHA256SUMS`**, with no second
+//! by that tag. **Signing MUST therefore pass `-t "farhelm $TAG"`**
+//! (`minisign -S -t "farhelm $TAG" -s key -m SHA256SUMS`), with no second
 //! `v` of its own; `farhelm v$TAG` would render `farhelm vv1.2.3` and
-//! produce a release every shipped helm refuses.
+//! produce a release every shipped helm refuses. Signing happens on the
+//! maintainer's trusted host, outside this repository (SPEC_impl.md,
+//! "Release signing key"), so this is the contract that tooling follows.
 //! [`required_trusted_comment`] is the consumer half of that contract and
 //! `signing_and_verification_agree_on_the_tag_convention` pins the two
 //! together.
@@ -133,7 +135,7 @@ const ASSET_MAX_BYTES: usize = 1024 * 1024 * 1024;
 /// previous release's signature IN PRODUCTION, without also demanding the
 /// test fixtures be re-signed — see [`VERSION`]'s docstring for the
 /// incident that made this a parameter. The producing half of this contract
-/// is `sign-sums`' `-t "farhelm $TAG"`; see the module header, and the
+/// is the signer's `-t "farhelm $TAG"`; see the module header, and the
 /// parity test that pins them together.
 fn required_trusted_comment(version: &str) -> String {
     format!("farhelm {}", release_tag(version))
@@ -3285,7 +3287,7 @@ mod tests {
     /// agree on ONE tag convention.
     ///
     /// This is the whole of F1 (review round 2) in one assertion. A release
-    /// tag is `vX.Y.Z`, so `sign-sums` renders `farhelm $TAG`; documentation
+    /// tag is `vX.Y.Z`, so signing renders `farhelm $TAG`; documentation
     /// that said `farhelm v$TAG` would have produced `farhelm vv0.0.3` and a
     /// release every shipped helm refuses — with nothing in the suite to
     /// notice, because both halves were only ever described in prose. Here
@@ -3294,7 +3296,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn signing_and_verification_agree_on_the_tag_convention() {
         // Deliberately the real production constant, not `FIXTURE_VERSION`:
-        // this test pins the tag convention CI's `sign-sums` job and this
+        // this test pins the tag convention the release signer and this
         // module's own verification actually agree on, which is a fact
         // about `VERSION`, not about whatever the fixtures are signed for.
         let tag = release_tag(VERSION);
