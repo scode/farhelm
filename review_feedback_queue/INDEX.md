@@ -6,7 +6,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
 - `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
-- `yolo-launcher-cancel.md` — Launcher YOLO answer can restore cancelled consent.
 - `yolo-restart-cancel.md` — Restart with accepts a cancelled YOLO answer.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 - `feedback-queued-close.md` — A queued close can discard feedback while sending starts.

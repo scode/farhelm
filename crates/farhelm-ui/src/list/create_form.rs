@@ -12,7 +12,7 @@ use crate::github_checkout::{
     PreviewState, RepositoryAuthority, repository_choices,
 };
 use crate::launch_controls::LaunchControls;
-use crate::ops::OpLock;
+use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
@@ -737,6 +737,61 @@ fn select_existing_directory(
 /// accepted request is still resolving.
 fn draft_transition_allowed(ops: OpLock) -> bool {
     !ops.busy_now()
+}
+
+/// Submit the launcher's form, as its Launch button would.
+///
+/// For a control that decides in its own handler whether a submit should
+/// happen at all (the YOLO question's answers), where a native submit
+/// button would submit regardless. `requestSubmit` runs the same validation
+/// and `onsubmit` a Launch click does.
+fn resubmit_composer() {
+    document::eval(
+        "document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()",
+    );
+}
+
+/// One opening of the launcher's YOLO question: the key its
+/// [`ConfirmSlot`] is open for.
+///
+/// The question belongs to the launch the helm refused, named by that
+/// request's intent key (`refused_key`), and `opening` counts openings, so an
+/// answer drawn for an earlier question can never take a later one. An answer
+/// records consent only by taking the question its handler was drawn for:
+/// Cancel followed by either answer in one event burst (all three drawn
+/// before the render that removes them) finds the slot empty and records
+/// nothing. `ask` is what the question shows; the slot holds nothing else.
+#[derive(Clone, PartialEq)]
+struct LauncherYoloQuestion {
+    opening: u64,
+    refused_key: String,
+    ask: crate::yolo_confirm::YoloAsk,
+}
+
+/// Answer the launcher's YOLO question `question` (the opening this answer's
+/// handler was drawn for). When it is still open: take it, record consent
+/// for its refused request in `confirmed_key`, and for "don't ask again"
+/// (`stop_asking`) also in `stop_asking_for`, and return `true`, after which
+/// the caller resubmits the form. Otherwise change nothing and return
+/// `false`: a stale answer leaves the form unauthorized and must not submit.
+///
+/// The one-off answer also clears `stop_asking_for`, so it can never mark the
+/// host. Consent stays recorded under the refused key after the submit, which
+/// is what lets a retry of the same request (a confirmed create whose reply
+/// was lost) keep it; see `yolo_confirmed_key`.
+fn answer_launcher_yolo(
+    slot: &mut ConfirmSlot<LauncherYoloQuestion>,
+    question: &LauncherYoloQuestion,
+    stop_asking: bool,
+    confirmed_key: &mut Option<String>,
+    stop_asking_for: &mut Option<LauncherYoloQuestion>,
+) -> bool {
+    if slot.take(question).is_none() {
+        return false;
+    }
+    *confirmed_key = Some(question.refused_key.clone());
+    *stop_asking_for = stop_asking.then(|| question.clone());
+    true
 }
 
 /// Everything one intended create IS — the exact thing an idempotency key
@@ -2016,16 +2071,35 @@ pub(super) fn CreateSessionForm(
     // was lost must replay under its key with the override, or the helm would refuse the
     // replay and a second confirmation would mint a new key and a second session.
     //
+    // The question itself is a `ConfirmSlot` (`LauncherYoloQuestion`): an
+    // answer records consent only by taking the question it was drawn for,
+    // then resubmits the form, so an answer queued behind Cancel records
+    // nothing and submits nothing (`answer_launcher_yolo`).
+    //
     // "Start, and don't ask again on this host" adds a request to mark the
-    // host safe first, held the same way: under the refused key, set by that
-    // button's click just before the form submits, and taken by that one
-    // submit, so it can never ride along with a later Launch or "start
-    // anyway". `yolo_error` is that first step's failure, shown inside the
-    // confirmation, which stays up.
-    let mut yolo_refusal = use_signal(|| None::<(String, crate::yolo_confirm::YoloAsk)>);
+    // host safe first, held the same way: the question it answered (and so
+    // its refused key), set by that button's click just before the form
+    // resubmits, and taken by that one submit, so it can never ride along
+    // with a later Launch or "start anyway". `yolo_error` is that first
+    // step's failure; the question comes back up with it.
+    let mut yolo_refusal = use_confirm_slot::<LauncherYoloQuestion, ()>();
+    let mut yolo_openings = use_signal(|| 0u64);
     let mut yolo_confirmed_key = use_signal(|| None::<String>);
-    let mut yolo_stop_asking_key = use_signal(|| None::<String>);
+    let mut yolo_stop_asking = use_signal(|| None::<LauncherYoloQuestion>);
     let mut yolo_error = use_signal(|| None::<String>);
+    // Open the question for `refused_key` as a new opening.
+    let mut open_yolo_question = move |refused_key: String, ask: crate::yolo_confirm::YoloAsk| {
+        let opening = *yolo_openings.peek() + 1;
+        yolo_openings.set(opening);
+        yolo_refusal.open(
+            LauncherYoloQuestion {
+                opening,
+                refused_key,
+                ask,
+            },
+            (),
+        );
+    };
     // Whether an explicit choice has been overtaken by reality. Derived per
     // render rather than written back into `chosen_host`, so it cannot
     // outlive the condition that produced it — and so a host that comes back
@@ -3409,19 +3483,16 @@ pub(super) fn CreateSessionForm(
                 // Taken before anything can refuse this submit, so a request
                 // to stop asking lives exactly as long as the one submit its
                 // button started.
-                let stop_asking_for = yolo_stop_asking_key.write().take();
+                let stop_asking_for = yolo_stop_asking.write().take();
                 let Some(op_guard) = ops.claim_guard() else {
                     return;
                 };
                 // The confirmation, if any, is matched against the key this
                 // submit ends up using, below; the question itself is
-                // answered either way. Except when this submit first has to
-                // mark the host safe: the confirmation stays up through that
-                // step, so a failure has somewhere to show and the user can
-                // still pick another answer.
-                if stop_asking_for.is_none() {
-                    yolo_refusal.set(None);
-                }
+                // answered either way. An answer already took it; a Launch
+                // pressed while it is open supersedes it, which is
+                // reconciliation rather than an answer, hence `clear`.
+                yolo_refusal.clear();
                 yolo_error.set(None);
                 // Frozen HERE, from the live signals, and not touched again:
                 // the minting await below can span further edits, and
@@ -3828,16 +3899,18 @@ pub(super) fn CreateSessionForm(
                     // is sent, and send nothing if that fails. The override
                     // is withdrawn on failure too, so a later plain Launch
                     // asks again rather than riding on this confirmation.
-                    if allow_yolo && stop_asking_for.as_deref() == Some(key.as_str()) {
-                        match crate::yolo_confirm::stop_asking(&base, bound.host, &yolo_host_name).await {
-                            Ok(()) => yolo_refusal.set(None),
-                            Err(reason) => {
-                                yolo_confirmed_key.set(None);
-                                yolo_error.set(Some(reason));
-                                ops.release();
-                                return;
-                            }
-                        }
+                    if let Some(answered) = stop_asking_for.filter(|answered| answered.refused_key == key)
+                        && allow_yolo
+                        && let Err(reason) = crate::yolo_confirm::stop_asking(&base, bound.host, &yolo_host_name).await
+                    {
+                        // The answer took the question down; it comes back,
+                        // as a new opening, with the reason, so the user can
+                        // pick another answer.
+                        yolo_confirmed_key.set(None);
+                        yolo_error.set(Some(reason));
+                        open_yolo_question(answered.refused_key, answered.ask);
+                        ops.release();
+                        return;
                     }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(command) => CreateAgent::Command(command),
@@ -3972,7 +4045,7 @@ pub(super) fn CreateSessionForm(
                                     // reconcile with it rather than start a
                                     // second session. The loud confirmation
                                     // replaces the ordinary error line.
-                                    yolo_refusal.set(Some((
+                                    open_yolo_question(
                                         key.clone(),
                                         crate::yolo_confirm::YoloAsk {
                                             host: Some(bound.host),
@@ -3984,7 +4057,7 @@ pub(super) fn CreateSessionForm(
                                                 },
                                             ),
                                         },
-                                    )));
+                                    );
                                     ops.release();
                                     return;
                                 }
@@ -4152,33 +4225,56 @@ pub(super) fn CreateSessionForm(
             // Shown only while the draft still holds the refused request's
             // key: an edit that changes what would launch retires the key,
             // and with it a question that no longer describes the draft.
-            if let Some((refused_key, ask)) = yolo_refusal.read().clone()
-                && intent_key.read().as_ref().is_some_and(|(key, _)| *key == refused_key)
+            if let Some(question) = yolo_refusal.current_key()
+                && intent_key.read().as_ref().is_some_and(|(key, _)| *key == question.refused_key)
             {
                 crate::yolo_confirm::YoloConfirmation {
-                    ask,
+                    ask: question.ask.clone(),
                     busy,
                     error: yolo_error(),
-                    confirm_submits: true,
-                    // The one-off also disarms "don't ask again". Every
-                    // submit takes that request before anything can refuse
-                    // it, so this is defence in depth, for a click whose
-                    // submit never fired: the one-off must never mark the
-                    // host.
+                    // Both answers resubmit the form themselves, and only
+                    // once they have taken this opening of the question
+                    // (`answer_launcher_yolo`). As native submit buttons they
+                    // would submit it whether or not the question was still
+                    // open, sending a cancelled draft again.
+                    confirm_submits: false,
+                    // The one-off also disarms any "don't ask again"
+                    // request (`answer_launcher_yolo`): it must never mark
+                    // the host.
                     on_confirm: {
-                        let refused_key = refused_key.clone();
+                        let question = question.clone();
                         move |_| {
-                            yolo_stop_asking_key.set(None);
-                            yolo_confirmed_key.set(Some(refused_key.clone()));
+                            if answer_launcher_yolo(
+                                &mut yolo_refusal,
+                                &question,
+                                false,
+                                &mut yolo_confirmed_key.write(),
+                                &mut yolo_stop_asking.write(),
+                            ) {
+                                resubmit_composer();
+                            }
                         }
                     },
-                    on_confirm_and_stop_asking: move |_| {
-                        yolo_confirmed_key.set(Some(refused_key.clone()));
-                        yolo_stop_asking_key.set(Some(refused_key.clone()));
+                    on_confirm_and_stop_asking: {
+                        let question = question.clone();
+                        move |_| {
+                            if answer_launcher_yolo(
+                                &mut yolo_refusal,
+                                &question,
+                                true,
+                                &mut yolo_confirmed_key.write(),
+                                &mut yolo_stop_asking.write(),
+                            ) {
+                                resubmit_composer();
+                            }
+                        }
                     },
                     on_cancel: move |_| {
-                        yolo_refusal.set(None);
-                        yolo_error.set(None);
+                        // Only this opening: a cancel drawn for an earlier
+                        // question leaves a later one (and its error) alone.
+                        if yolo_refusal.take(&question).is_some() {
+                            yolo_error.set(None);
+                        }
                     },
                 }
             }
@@ -4664,7 +4760,7 @@ pub(super) fn CreateSessionForm(
                                             if !apply_recent.call(entry.clone()) {
                                                 return;
                                             }
-                                            document::eval("document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()");
+                                            resubmit_composer();
                                         }
                                     },
                                     // The row is a grid so that harness, folder,
@@ -6517,5 +6613,123 @@ mod tests {
             muse.contains("no trust flag"),
             "Muse false only adds no flag: {muse:?}"
         );
+    }
+
+    /// Spec (`LauncherYoloQuestion`): an answer to the launcher's YOLO
+    /// question records consent, and asks for a resubmit, only by taking the
+    /// opening it was drawn for. Cancel followed by either answer in one
+    /// event burst records no consent, no "don't ask again" request, and no
+    /// resubmit; an answer drawn for an earlier opening takes nothing from a
+    /// later one; a genuine answer records consent for the refused request's
+    /// key, and only "don't ask again" also asks to mark the host.
+    ///
+    /// Why: the recorded consent is what lets the form's next submit of
+    /// that request launch with no approval prompts (and, from Replace
+    /// with, delete the source session). The launcher used to record it
+    /// from the answer's own copy of the question, so an answer queued
+    /// behind Cancel restored the consent the user had just withdrawn and
+    /// submitted the draft. Consent kept under the key after a genuine
+    /// answer is what lets a retry of the same request keep it.
+    #[farhelm_testtrace::test]
+    fn a_cancelled_launcher_yolo_question_records_no_consent() {
+        use dioxus::prelude::*;
+        use std::cell::Cell;
+
+        use super::{LauncherYoloQuestion, answer_launcher_yolo};
+        use crate::ops::{ConfirmSlot, use_confirm_slot};
+
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<LauncherYoloQuestion>>> =
+                const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<LauncherYoloQuestion, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let question = |opening: u64| LauncherYoloQuestion {
+            opening,
+            refused_key: "intent-1".to_string(),
+            ask: crate::yolo_confirm::YoloAsk {
+                host: Some(7),
+                host_name: "build box".to_string(),
+                reason: crate::yolo_confirm::YoloReason::Asserted,
+            },
+        };
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let mut slot = SLOT.with(Cell::get).expect("the slot mounted");
+
+        dom.in_runtime(|| {
+            for stop_asking in [false, true] {
+                let open = question(1);
+                slot.open(open.clone(), ());
+                // An armed request the stale answer must leave alone, so a
+                // helper that wrote it regardless would show.
+                let (mut confirmed, mut stop_for) = (None, Some(question(9)));
+                assert!(slot.take(&open).is_some(), "premise: Cancel closes it");
+                assert!(
+                    !answer_launcher_yolo(
+                        &mut slot,
+                        &open,
+                        stop_asking,
+                        &mut confirmed,
+                        &mut stop_for
+                    ),
+                    "an answer queued behind Cancel (stop asking: {stop_asking}) does not resubmit"
+                );
+                assert_eq!(confirmed, None, "and records no consent");
+                assert!(
+                    stop_for.is_some_and(|armed| armed.opening == 9),
+                    "and changes no request to mark the host"
+                );
+            }
+
+            // An answer drawn for an earlier opening.
+            slot.open(question(2), ());
+            let (mut confirmed, mut stop_for) = (None, None);
+            assert!(!answer_launcher_yolo(
+                &mut slot,
+                &question(1),
+                true,
+                &mut confirmed,
+                &mut stop_for
+            ));
+            assert_eq!(confirmed, None);
+            assert!(
+                stop_for.is_none(),
+                "an answer for an earlier opening marks no host"
+            );
+            assert!(slot.is_open(), "the later question is left alone");
+
+            // Positive controls. The one-off records consent and disarms a
+            // stray "don't ask again" request.
+            let mut stop_for = Some(question(2));
+            assert!(answer_launcher_yolo(
+                &mut slot,
+                &question(2),
+                false,
+                &mut confirmed,
+                &mut stop_for
+            ));
+            assert_eq!(confirmed.as_deref(), Some("intent-1"));
+            assert!(stop_for.is_none(), "the one-off never marks the host");
+            assert!(!slot.is_open());
+
+            slot.open(question(3), ());
+            let (mut confirmed, mut stop_for) = (None, None);
+            assert!(answer_launcher_yolo(
+                &mut slot,
+                &question(3),
+                true,
+                &mut confirmed,
+                &mut stop_for
+            ));
+            assert_eq!(confirmed.as_deref(), Some("intent-1"));
+            assert!(stop_for.is_some_and(|answered| answered == question(3)));
+        });
     }
 }

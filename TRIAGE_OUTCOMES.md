@@ -6873,7 +6873,10 @@
 - Completion criteria: a stale answer leaves the form unauthorized and changes no host setting; a genuine confirmation
   still lets the same request be retried; a regression covers the queued order. Remove this feedback file and its index
   entry, or block with findings if the gate trips.
-- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
+- Execution: complete in jj change `qkpposmn`, bookmark `plan/triage-dialog-cancel-races/02-launcher-yolo`, PR
+  https://github.com/scode/farhelm/pull/1659. The launcher's question is on `ConfirmSlot`, keyed by its opening and the
+  refused request's key; an answer records consent only by taking it, and only then resubmits the form, so its buttons
+  are no longer submit buttons.
 
 ## yolo-restart-cancel.md
 
