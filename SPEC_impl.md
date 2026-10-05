@@ -422,15 +422,16 @@ an ordinary restart. That path reattaches the terminal even when the restart is 
 beneath a modal whose keystrokes must never reach the agent.
 
 The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
-`body` is `inert`, including siblings rendered after it opened, so no other code can focus anything behind it and Tab
-from `body` can only reach the dialog. Only elements that were not already inert are marked, and exactly those are
-restored when it closes, before focus returns to the header action. A capture-phase keydown handler covers focus that
-still ends up outside the dialog (a click on the scrim leaves it on `body`): it swallows that key and puts focus back on
-the dialog, and Escape still cancels unless a request is in flight. The earlier per-mechanism guards stay as a second
-layer for engines without `inert`: a terminal whose output becomes visible, or that becomes the selected terminal (as
-when the selected tab exits and the view falls back to the agent), does not take focus while the dialog is mounted, and
-during a request the primary action stays focusable (unavailable through `aria-disabled`) while the other controls are
-disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
+`body` is `inert`, including siblings rendered after it opened, except the agent approval cards (`data-modal-exempt`),
+which stay live so that an agent waiting on a card does not also wait on the dialog, so no other code can focus anything
+behind it and Tab from `body` can only reach the dialog. Only elements that were not already inert are marked, and
+exactly those are restored when it closes, before focus returns to the header action. A capture-phase keydown handler
+covers focus that still ends up outside the dialog (a click on the scrim leaves it on `body`): it swallows that key and
+puts focus back on the dialog, and Escape still cancels unless a request is in flight. The earlier per-mechanism guards
+stay as a second layer for engines without `inert`: a terminal whose output becomes visible, or that becomes the
+selected terminal (as when the selected tab exits and the view falls back to the agent), does not take focus while the
+dialog is mounted, and during a request the primary action stays focusable (unavailable through `aria-disabled`) while
+the other controls are disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
 
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
@@ -1176,9 +1177,10 @@ that affect only its own host: which of its sessions sent an upcall, that one of
 show. A lie about those damages only that host, where the supervisor already has full authority. Anything whose effect
 reaches beyond its own host (another host's sessions, another supervisor, the helm's machine, or the helm's own state
 such as settings and credentials) is allowed only where the spec grants it, and a request's arrival on a supervisor
-connection adds nothing to that grant. The grants are the agent verbs any agent may use (cross-host stop, rename, and
-restart, plus the temporary create and clone exception in SPEC.md's "Local authority and trust between hosts"). A
-supervisor cannot, for example, ask the helm to change a host's settings.
+connection adds nothing to that grant. The grants are the agent verbs any agent may use, each carried out only once the
+user has approved it or the requesting host's "run farhelm commands from this host without asking" setting is on
+(SPEC.md, Agent-spawned sessions; see "Permission prompts for agent actions"). A supervisor cannot, for example, ask the
+helm to change a host's settings.
 
 ### Errors crossing levels of abstraction
 
@@ -1256,7 +1258,8 @@ connection's writer, with the answer budget starting at the receipt and a write 
 attachment site in the supervisor and a receipt changes that type at all of them. Both kinds are emitted by the relay
 and by the helm; the earlier rule that only the supervisor emits them was too narrow, because the helm has its own
 transient states and a bare `Internal` would tell a caller nothing about retrying. The DELIVERY leg gets its own short
-budget (5 seconds) separate from the helm's answer budget (30 seconds) precisely to keep this distinction honest: a
+budget (5 seconds) separate from the helm's answer budget (30 seconds, plus the nine-minute approval wait for a verb
+that may wait for the user; see "Permission prompts for agent actions") precisely to keep this distinction honest: a
 request that spent its whole budget waiting for room on a full writer queue was never sent, and reporting that as
 `Timeout` would invert the one thing the two kinds exist to say. Both budgets live on the supervisor because it is the
 only party that can tell them apart; the asking CLI blocks with no deadline of its own so that the specific answer
@@ -1264,29 +1267,30 @@ reaches it.
 
 A MUTATING verb is fenced against its own asker being deleted mid-flight, and its failures speak a different vocabulary
 from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/restart stays in
-flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke that very
-credential underneath it. So the supervisor claims a per-asking-session fence (`Supervisor::agent_request_locks`) BEFORE
-it checks the credential — checking first and claiming after leaves a gap a whole delete fits inside — and
-`handle_delete_session` waits on the same key before tearing anything down. The fence is released when the MUTATION
-ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the helm is still working, so
-the guard is held until the helm answers or the connection dies. That is bounded by the LINK's life rather than by a
-clock, which is only a bound if the link can be counted on to end — and it cannot, because a response naming no pending
-entry is dropped, which is right for an ordinary late answer and indistinguishable from a helm answering under an id it
-has already used. So the retention has a last resort of its own (ten minutes), and its expiry RETIRES THE LINK rather
-than dropping the guard: dropping it would be the same budget-shaped release on a longer clock, still guessing that the
-mutation ended, whereas ending the connection makes every pending upcall on it resolve as the delivered-outcome-unknown
-ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED is retired the same way and
-immediately, on both legs of the relay: it cannot be a late answer, so the only readings are a broken peer and a hostile
-one, and on a connection that stays healthy the waiter it strands has nothing else to end it. Correspondingly, a
-connection lost after the request was queued is reported to a mutating caller as `Timeout` ("delivered, outcome
-unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to look at the session
-before retrying — the change may already have taken effect, and the retry-safe kind would be an invitation to apply it
-twice. A listing keeps `Unavailable`, having nothing to double-apply. The fence's "until the connection dies" is
-accepted as a gap: the helm owns a mutation it has started (see "Who owns an accepted action") and may still be carrying
-it out after the link that asked is gone, so a delete of the asking session can proceed while, for example, a create it
-asked for still lands. Nothing is lost when it does: the new session appears in the list like any other. Which verbs are
-mutating is `AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm
-read, so a verb added later cannot be fenced on one side and not the other.
+flight to the helm and back for as long as the user takes to answer its card, up to nine and a half minutes, which is
+ample room for a `DeleteSession` to revoke that very credential underneath it. So the supervisor claims a
+per-asking-session fence (`Supervisor::agent_request_locks`) BEFORE it checks the credential — checking first and
+claiming after leaves a gap a whole delete fits inside — and `handle_delete_session` waits on the same key before
+tearing anything down. The fence is released when the MUTATION ends, not when the CLI's answer budget does: a budget
+expiring says nothing about whether the helm is still working, so the guard is held until the helm answers or the
+connection dies. That is bounded by the LINK's life rather than by a clock, which is only a bound if the link can be
+counted on to end — and it cannot, because a response naming no pending entry is dropped, which is right for an ordinary
+late answer and indistinguishable from a helm answering under an id it has already used. So the retention has a last
+resort of its own (ten minutes), and its expiry RETIRES THE LINK rather than dropping the guard: dropping it would be
+the same budget-shaped release on a longer clock, still guessing that the mutation ended, whereas ending the connection
+makes every pending upcall on it resolve as the delivered-outcome-unknown ending the relay already speaks. A response
+correlated to a `req_id` that was NEVER ISSUED is retired the same way and immediately, on both legs of the relay: it
+cannot be a late answer, so the only readings are a broken peer and a hostile one, and on a connection that stays
+healthy the waiter it strands has nothing else to end it. Correspondingly, a connection lost after the request was
+queued is reported to a mutating caller as `Timeout` ("delivered, outcome unknown") rather than `Unavailable` ("never
+delivered, retry freely"), with a remedy that says to look at the session before retrying — the change may already have
+taken effect, and the retry-safe kind would be an invitation to apply it twice. A listing keeps `Unavailable`, having
+nothing to double-apply. The fence's "until the connection dies" is accepted as a gap: the helm owns a mutation it has
+started (see "Who owns an accepted action") and may still be carrying it out after the link that asked is gone, so a
+delete of the asking session can proceed while, for example, a create it asked for still lands. Nothing is lost when it
+does: the new session appears in the list like any other. Which verbs are mutating is `AgentVerb::is_mutating`, one
+exhaustive match in the protocol crate that both the supervisor and the helm read, so a verb added later cannot be
+fenced on one side and not the other.
 
 That vocabulary is a rule about a PHASE, not a list of failures, and every hop applies it the same way: once a mutation
 has been handed to the next hop, the only endings that may speak plainly are the expected success reply and a refusal
@@ -1321,34 +1325,35 @@ refuses a peer asking as a session it is not; from there the helm accepts the fo
 the connection it arrived on belongs to that session's host, without re-verification — it never sees the credential, so
 there is nothing on its side to check against. The host already controls its own sessions, so their credentials do not
 provide containment from that host. Accepting a forwarded session claim does not make the supervisor's messages trusted
-or authorize effects outside the named fleet operations and temporary execution exceptions in SPEC.md's
-maintainer-confirmed decisions. Provisioning a supervisor does not establish trust in its responses. What the helm does
-check is that the connection is still the CURRENT one for that host row, since registry rows outlive the machines behind
-them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carried helm-resolved
-launch bundles and upward profile resolution, which protocol 38 removed with profiles. The historical paragraph below
-describes why 13 was current at the time; later released additions took the wire to 26. Version 16 introduced the
-durable optional structured launch snapshot carried with a create and `SessionInfo`. The snapshot is declarative
-provenance beside the resolved invocation, never a browser-owned compiler input; old sessions remain absent rather than
-being reconstructed from a command. Version 17 adds `BrowseDirectory` and `DirectoryListing`: the helm routes one
-authenticated, connection-incarnation-guarded request to the chosen supervisor, which expands `~` from its own recorded
-home, canonicalizes the requested directory, and returns only a sorted bounded immediate child-directory listing plus
-parent and truncation state. Neither the helm nor the client reads the target filesystem. Version 18 adds
-accepted-create `canonical_cwd`, the identity fact that binds folder history to the destination the target supervisor
-actually accepted. Version 19 adds OpenCode to the structured-harness enum. Version 26 retires session archival and its
-wire fields and messages. A supervisor must retain that snapshot alongside the resolved invocation, so an older peer
-that cannot decode the new enum value refuses the connection rather than silently losing the selection. The following 13
-paragraph is historical context, not the current protocol version; the frozen changelog stops at 11. Version 13 also
-carries `AgentVerb::Rename`/`Stop` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by
-`AgentReply::Created`), all added additively within the version rather than as version bumps of their own — which was
-possible ONLY because 13 itself had not yet shipped when they landed, still being developed on this branch with no
-released build speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to
-keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own,
-same as any other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host`
-became `Option<String>`, so a reply carrying a row the helm just mutated or created can say "there is a session here but
-no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a real value. A decoder
-built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not
-stretch to cover it under any reading — so it is allowed here only because nothing released speaks 13 yet. It must not
-be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own.
+or authorize effects outside the named fleet operations, which act across hosts only with the user's approval or the
+requesting host's setting (see "Permission prompts for agent actions"). Provisioning a supervisor does not establish
+trust in its responses. What the helm does check is that the connection is still the CURRENT one for that host row,
+since registry rows outlive the machines behind them. Version 14 replaced session-list pagination with a bounded
+whole-list reply, and version 15 carried helm-resolved launch bundles and upward profile resolution, which protocol 38
+removed with profiles. The historical paragraph below describes why 13 was current at the time; later released additions
+took the wire to 26. Version 16 introduced the durable optional structured launch snapshot carried with a create and
+`SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a browser-owned compiler
+input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds `BrowseDirectory` and
+`DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to the chosen supervisor,
+which expands `~` from its own recorded home, canonicalizes the requested directory, and returns only a sorted bounded
+immediate child-directory listing plus parent and truncation state. Neither the helm nor the client reads the target
+filesystem. Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder history to the
+destination the target supervisor actually accepted. Version 19 adds OpenCode to the structured-harness enum. Version 26
+retires session archival and its wire fields and messages. A supervisor must retain that snapshot alongside the resolved
+invocation, so an older peer that cannot decode the new enum value refuses the connection rather than silently losing
+the selection. The following 13 paragraph is historical context, not the current protocol version; the frozen changelog
+stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop` and the two creating verbs `AgentVerb::Create`/`Clone`
+(answered by `AgentReply::Created`), all added additively within the version rather than as version bumps of their own —
+which was possible ONLY because 13 itself had not yet shipped when they landed, still being developed on this branch
+with no released build speaking it yet. That is a one-time allowance for a version still in flight, not a standing
+license to keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape addition needs a version
+of its own, same as any other. The same allowance covers the one thing in 13 that is not an addition at all:
+`AgentSession::host` became `Option<String>`, so a reply carrying a row the helm just mutated or created can say "there
+is a session here but no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a
+real value. A decoder built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running
+additive rule does not stretch to cover it under any reading — so it is allowed here only because nothing released
+speaks 13 yet. It must not be carried forward the same way once 13 ships: the identical edit made afterwards needs a
+version of its own.
 
 Version 25 adds `AgentVerb::Restart`, `AgentReply::Restarted`, and the non-secret `AgentSession::restart_offer`
 discovery field. The new tagged request and reply require an exact-version handshake refusal for older peers. Each verb
@@ -1359,13 +1364,14 @@ unknown session, a disconnected host, a title the owning supervisor rejects — 
 have shown, and a session an agent creates is seeded into the helm's cache and published exactly as one the create
 dialog made.
 
-The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
-its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
-attacker-chosen target, title, directory and host name onto two byte-unbounded queues before anything downstream can
-look at them; its refusals are relay-specific by construction. And the agent CLI escapes and caps a refusal before
-printing it, because the destination is a terminal rather than a browser — so the WORDING is the UI's, while the bytes
-may be escaped and the tail cut. Both divergences are one-directional: they can refuse something the UI would have
-allowed through to the same shared code, never the reverse.
+The equivalence covers that shared path and stops there, deliberately, in two places, besides the user's approval, which
+every acting agent verb passes first, and the stricter YOLO rule create, clone and spawn also pass (see "Permission
+prompts for agent actions"). The relay adds a doorway check of its own (`validate_agent_verb`) that the REST surface has
+no counterpart for, since only the relay puts an attacker-chosen target, title, directory and host name onto two
+byte-unbounded queues before anything downstream can look at them; its refusals are relay-specific by construction. And
+the agent CLI escapes and caps a refusal before printing it, because the destination is a terminal rather than a browser
+— so the WORDING is the UI's, while the bytes may be escaped and the tail cut. Both divergences are one-directional:
+they can refuse something the UI would have allowed through to the same shared code, never the reverse.
 
 `Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
@@ -1414,20 +1420,22 @@ machine consumer: it is printed on the CLI's stdout as the answer, and an id car
 whatever captured it. A reply that fails the check is refused rather than sanitized, because a scrubbed id is not the
 session's id and everything done with it afterwards would address something that does not exist.
 
-One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets
-`CreateAdmission::Spawn`'s session-lifetime reservation scope, because the create arrives on the asking session's own
-credential. An agent's `create`/`clone` reaches the target supervisor over the HELM's full-authority connection, so the
-key currently gets the same permanent, interactive scope any other helm-mediated create gets. Permanent retention is not
-a security requirement for these agent-originated requests: SPEC.md's temporary creation/cloning exception also covers
-their existing retry exposure. The current implementation remains described here until a separate retention change is
-made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
-never have heard of the asking session. Both kinds of key are stored scoped to the asking session (spawn's by the
-supervisor, as `spawn-<asking session>-<SHA-256 of the key>`; create's and clone's by the helm relay), so a key only
-ever replays for the session that used it. A spawn with `--inherit-agent` copies the asking session's exact stored
-launch bundle on its own supervisor and therefore works offline; the supervisor refuses a session-authenticated create
-without it, naming the flag. A spawn with launch flags is not a supervisor create at all: the CLI relays it as an agent
-`create` placed on the asking session's own host, which the helm marks so its key still gets a spawn's session-lifetime
-scope (see "Agent launches from the CLI").
+One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets a
+session-lifetime reservation scope, because the child lives on the asking session's own host, whose supervisor knows the
+asking session (the helm marks the spawn's create with `key_lives_with_session`, see "Agent launches from the CLI"). An
+agent's `create`/`clone` may land on a supervisor that has never heard of the asking session, so the key currently gets
+the same permanent, interactive scope any other helm-mediated create gets. Permanent retention is not a security
+requirement for these agent-originated requests: a retry is a new request that the user approves like any other
+(SPEC.md, Agent-spawned sessions), so how long a key is kept is not what authorizes it. The current implementation
+remains described here until a separate retention change is made. Session-lifetime scoping is not merely unimplemented
+here — it is not expressible, since the target supervisor may never have heard of the asking session. Every kind of key
+is stored scoped to the asking session by the helm relay, so a key only ever replays for the session that used it. Every
+spawn is an agent `create` placed on the asking session's own host and goes through the helm, so the user can be asked
+first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With `--inherit-agent` the asking session's
+supervisor fills in that session's exact stored launch (`SpawnPlacement::inherited_launch`, overwriting whatever the CLI
+sent) before relaying it, and the helm launches that launch rather than resolving templates and flags. A
+session-authenticated `CreateSession` sent straight to the supervisor is refused outright (protocol 41), so the relay is
+the only way a session creates one.
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -2789,12 +2797,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   terminal" path.
 - `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`
   — the in-session spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting
-  (see "What running sessions hold across versions"), as are the `farhelm agent` verbs below. `--inherit-agent` is
-  answered by the session's own supervisor and needs `--cwd`; the launch flags are the ones `farhelm agent create`
-  takes, and go through the helm (see "Agent launches from the CLI"). clap refuses `--inherit-agent` beside any launch
-  flag, and a spawn with neither is refused before anything is dialed. `--agent` took a profile name before profiles
-  were removed and is now the agent type flag; `--profile-id <id>` is still parsed, hidden, only so it can be refused
-  with a message naming the launch flags and `--template`.
+  (see "What running sessions hold across versions"), as are the `farhelm agent` verbs below. Every spawn goes through
+  the helm and waits for the user's approval (see "Permission prompts for agent actions"). `--inherit-agent` takes the
+  asking session's own stored launch, filled in by its supervisor, and needs `--cwd`; the launch flags are the ones
+  `farhelm agent create` takes (see "Agent launches from the CLI"). clap refuses `--inherit-agent` beside any launch
+  flag, and a spawn with neither is refused before anything is dialed. `--confirm-yolo` is still parsed, hidden, only so
+  it can be refused with a message saying an agent cannot confirm a YOLO launch for the user. `--agent` took a profile
+  name before profiles were removed and is now the agent type flag; `--profile-id <id>` is still parsed, hidden, only so
+  it can be refused with a message naming the launch flags and `--template`.
 - `farhelm agent hosts|sessions|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
@@ -2856,6 +2866,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   from a closed set, and an unknown one is refused listing them all), because every one of these values is judged
   downstream — by the registry, by the target filesystem — and every one of them may legally begin with `-`; refusing
   such a value locally would be this CLI declining to carry a name the far end would have explained.
+- `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--host <name>] <launch flags>`,
+  `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
+  template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
+  parsed, hidden, only so it can be refused, since a template written from other templates would copy command text the
+  agent never saw. `--host` names a host by the name `farhelm agent hosts` prints and is resolved to that host's install
+  when the template is written. An edit sends only the fields given. Each write is relayed to the helm and waits for the
+  user's approval (see "Permission prompts for agent actions"); stdout gets one confirmation line naming the template,
+  as the lifecycle verbs confirm on stdout.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer
@@ -3370,7 +3388,13 @@ refused naming `--command` or `command` and its fields; `farhelm agent sessions`
 create-idempotency key from before launch kinds is refused rather than replayed (see "Launch-kinds reservations"), and
 OMP admission accepts only the current binary's reporter asset. The last one keeps biting: any change to the OMP asset's
 bytes or name makes every OMP session started before it lose conversation tracking until relaunched, so such a change is
-exactly the kind of retirement this section asks to be surfaced.
+exactly the kind of retirement this section asks to be surfaced. Asking the user before agent actions (protocol 41)
+retired three more. `--confirm-yolo`, and its alias `--allow-yolo-on-sensitive-host`, on `farhelm agent create`, `clone`
+and `farhelm spawn` are refused with a message saying why (SPEC.md, Agent-spawned sessions, has the agent YOLO rule that
+replaced them). `farhelm spawn --inherit-agent` no longer works without the helm, because every spawn now waits for the
+user. And a keyed `--inherit-agent` spawn retried across the update is not replayed: its key used to be reserved by the
+session's own supervisor and is now reserved through the helm like every other agent create, so the retry is a new
+request, shown on a card, which creates a second child if allowed.
 
 ### Restart only resumes
 
@@ -3496,11 +3520,13 @@ grow. A field a template leaves out is absent from the JSON; for the agent-launc
 effort, permissions, workspace trust) and for the resume command, an explicit `null` means "reset to the default", which
 is how a template can clear a choice rather than only set one. The agent type, host, destination and session name have
 no reset: a template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields
-are refused on decode, so a misspelled field is an error rather than a silently ignored edit. Writes go through
-`PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
-`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only a template's shape on
-write (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields within the 64
-KiB a create is held to); whether its fields apply is decided only when it is applied. No agent verb writes a template.
+are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The GUI's writes go
+through `PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
+`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only the shape of a template
+the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields
+within the 64 KiB a create is held to); whether its fields apply is decided only when it is applied. An agent's template
+writes share the same store path but carry a precondition and a few refusals of their own (see "Permission prompts for
+agent actions").
 
 Application is one pure function, `farhelm_proto::launcher::apply_template`, compiled into both the UI and the helm: a
 launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
@@ -3529,7 +3555,7 @@ and again whenever the Templates dialog closes.
 
 ### Agent launches from the CLI
 
-`farhelm agent create` and `farhelm spawn` (other than `--inherit-agent`) send the helm launcher edits, not a launch:
+`farhelm agent create` and `farhelm spawn` without `--inherit-agent` send the helm launcher edits, not a launch:
 `AgentVerb::Create` (protocol 40) carries the template names in order, the flags as one more
 `farhelm_proto::launcher::TemplateFields` (`--cwd` as the destination folder, `--title` as the name), an optional host
 NAME, and for a spawn a placement naming the parent. The helm's `agent_launch::resolve` applies the templates and then
@@ -3550,25 +3576,111 @@ The host is the asking session's own for a spawn (which also makes a template th
 launcher's host-fixed rule); otherwise an explicit `--host` name, then the install a template named, matched among host
 rows not in the identity-mismatch phase. With an explicit `--host` the templates' host fields are dropped before they
 are applied, so the flag wins even over a template whose host was since reinstalled or removed, which the launcher's
-`tl:` would refuse. A spawn's parent must be the asking session, as the supervisor requires of `--inherit-agent`; the
-relay holds the asking session's delete fence for the whole request, which is what the restricted create's parent
-lifecycle claim gives the inherited path. The helm sends the spawn's create with `key_lives_with_session` (protocol 40),
-which the supervisor honors only on the helm's full-authority connection, so the key gets a spawn's session-lifetime
-reservation rather than an interactive create's permanent one.
+`tl:` would refuse. A spawn's parent must be the asking session; the relay holds the asking session's delete fence for
+the whole request, which keeps the parent from being deleted under the create. An inheriting spawn is placed the same
+way, with the launch its supervisor filled in, and a host row that has gone missing during the request refuses it rather
+than letting it fall back to another host. The helm sends the spawn's create with `key_lives_with_session` (protocol
+40), which the supervisor honors only on the helm's full-authority connection, so the key gets a spawn's
+session-lifetime reservation rather than an interactive create's permanent one.
 
 A keyed create is bound to its first accepted resolution in `helm.db` (schema 39, table `agent_create_bindings`): the
 asker-scoped key the supervisor also reserves, the asking session, a SHA-256 digest of the request as sent (host name,
-templates, flags, spawn placement; not `--confirm-yolo`, so a retry that adds the confirmation the helm asked for is the
-same request), and the resolved host, folder, launch and title. A retry with the same digest reuses the resolution
-instead of reading the templates again, so the supervisor's fingerprint matches and it replays the session (or the
-refusal it recorded) after a template edit. Two attempts racing on one key both dispatch the resolution stored first. A
-different request under the same key is resolved afresh and meets the supervisor's ordinary key conflict unless it
-resolves identically. The binding is written before dispatch, because a lost reply is exactly when a retry comes. It is
-removed again, if this attempt wrote it, only when no supervisor holds the key's outcome: the helm refused before
-sending (the YOLO confirmation, an unconnected host), or a supervisor refused a spawn, whose session-lifetime key it
-does not keep for a refusal. A supervisor's refusal of an ordinary keyed create is recorded against the key, so the
-binding stays and the retry gets that refusal back. The table only spares retries from template edits, while the
-supervisor's reservation is what ties a key to its session, so every write prunes rows older than 30 days and all but
-the asking session's newest 256; a retry past that is resolved afresh. A spawn's binding also outlives its child: a
-keyed spawn re-run after the child was deleted creates a new child from the stored resolution, not from the templates as
-they are now.
+templates, flags, spawn placement; not the `confirm_yolo` field an older CLI may still send, which the helm ignores),
+and the resolved host, folder, launch and title. A retry with the same digest reuses the resolution instead of reading
+the templates again, so the supervisor's fingerprint matches and it replays the session (or the refusal it recorded)
+after a template edit. Two attempts racing on one key both dispatch the resolution stored first. A different request
+under the same key is resolved afresh and meets the supervisor's ordinary key conflict unless it resolves identically.
+The binding is written before dispatch, because a lost reply is exactly when a retry comes. It is removed again, if this
+attempt wrote it, only when no supervisor holds the key's outcome: the helm refused before sending (the agent YOLO rule,
+the user's answer, an unconnected host), or a supervisor refused a spawn, whose session-lifetime key it does not keep
+for a refusal. A supervisor's refusal of an ordinary keyed create is recorded against the key, so the binding stays and
+the retry gets that refusal back. The table only spares retries from template edits, while the supervisor's reservation
+is what ties a key to its session, so every write prunes rows older than 30 days and all but the asking session's newest
+256; a retry past that is resolved afresh. A spawn's binding also outlives its child: a keyed spawn re-run after the
+child was deleted creates a new child from the stored resolution, not from the templates as they are now.
+
+### Permission prompts for agent actions
+
+SPEC.md (Agent-spawned sessions) has the helm ask the user before it carries out any acting `farhelm` command from
+inside a session. The decision lives in the helm because the requesting host and its supervisor are untrusted: the
+per-host setting, the check that a GUI is there to ask, and the wait for the answer are all keyed by the host connection
+the request arrived on (`agent_requests::AgentOrigin`), never by anything the request claims. Each acting verb handler
+first resolves exactly what it would do (the launch, the target session, the whole template), then asks
+(`approvals::ask`), then rechecks that the request's connection is still the one serving its host before acting, so an
+approval never carries over to whatever replaced that connection during the wait.
+
+Pending approvals are an in-memory table in the helm (`approvals::Approvals`). Nothing is persisted: a helm restart
+drops the table and the parked requests with it, and the asking CLI gets the relay's ordinary "helm went away" ending.
+The GUI reads the table through `GET /api/approvals` and learns of changes from the fleet invalidation feed, which every
+insert and removal bumps; it answers with `POST /api/approvals/{id}`, which returns 410 once the request no longer
+waits. An entry leaves the table exactly once: the user's answer, the asking session being deleted, the requesting
+connection going away (checked on every feed change and at least every 5 seconds), or the wait expiring after 9 minutes
+(`farhelm_proto::approvals::APPROVAL_WAIT`). Every ending passes through one drop guard that removes the entry if it is
+still there and bumps the feed, so no card outlives the request it describes. Card ids are random, not sequential.
+
+"A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
+whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes
+(dioxus-desktop's default, which Farhelm keeps), so a closed app holds no subscription. A browser whose feed socket
+failed and fell back to polling does not count, and its requests are refused as having no window to ask in; that is the
+accepted cost of not adding a second presence signal.
+
+Waiting needs time budgets that outlast the wait. `AgentVerb::may_wait_for_user` names the verbs that can wait (every
+acting verb, no listing); the supervisor's relay gives those an answer budget of its ordinary agent upcall timeout plus
+`APPROVAL_WAIT`, and the CLI, which has no deadline of its own, prints a line saying it is waiting for the user once a
+request has waited two seconds. The relay's extra 30 seconds is an allowance for the work the helm does before and after
+the wait, not a guaranteed ordering: the approval wait starts only once the helm has resolved the request, so a request
+whose resolution is slow (a clone reading its source from a busy supervisor, say) can still time out at the relay, and
+the CLI then reports the outcome as unknown rather than as unanswered. The supervisor still serializes a session's
+acting requests behind its delete fence, so a second change from one session while the first waits is refused once that
+fence's ordinary wait runs out.
+
+The helm admits at most four agent answer tasks per host connection (`client::AGENT_ANSWER_SLOTS`), and a waiting
+request holds one. A host therefore has at most four cards up at once, and while it does, every other agent request from
+that host, listings included, is refused with the slots' ordinary "too many in flight" message. That is accepted: four
+waiting requests from one host is already more than a user answers at once, and a separate cap would only move the
+refusal.
+
+The "run farhelm commands from this host without asking" setting is `hosts.commands_without_asking` in `helm.db` (schema
+40), off by default, and reset to off whenever the row adopts a different install, exactly as the YOLO setting is.
+"Always allow" on a card stores it only if the card's connection is still live, and stores it only while the host row
+still records the install identity it had when the request arrived (`allow_commands_for_identity`, under the host write
+lock), so a card raised by a replaced installation cannot grant its successor the setting. The setting and the request
+can race: when the request expires between the setting being stored and the request being taken, the answer gets 410 and
+the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
+host's setting may still have been turned on.
+
+Deleting a session refuses its waiting requests first and keeps refusing new ones until the delete finishes
+(`Approvals::deny_session`, held for the delete and for a replacement's teardown), so a card for a session that is going
+away cannot be allowed into acting for it.
+
+What a card shows is what an approval does. Launches are resolved fully before the card, and the dispatched launch is
+the one shown. The agent YOLO rule (`yolo_guard::check_agent`) runs before the card, after it, and again at dispatch: on
+a host that asks before YOLO launches it refuses every agent launch except one it can vouch for, a structured agent
+launch whose effective permission is not YOLO and whose start and resume argv equal what `launches::compile` makes of
+its selection. That last condition is what keeps a clone honest: a clone copies the source session's launch from the
+source supervisor, which is untrusted, and without it a source could pair non-YOLO choices with a YOLO command line. A
+command launch can never be vouched for, since Farhelm does not read commands, and `confirm_yolo` in a request is
+ignored. A launch is also refused if the target host's connection changed while the card waited, since the approval was
+for the machine the card named. A lifecycle verb routes its target before asking, so a session no host knows is refused
+without a card. A plain restart re-runs the session's stored launch; the card shows the helm's cached copy of it (a
+restart whose copy the helm cannot read is refused before any card, since there would be nothing to show or to hold it
+to), and the restart carries that copy to the supervisor as `RestartSession::expected_launch` (protocol 41). The
+supervisor refuses, before stopping anything, unless the stored launch is still exactly that, comparing under the
+session's lifecycle claim, which every Restart with also takes, so a Restart with from the GUI while the card waited
+cannot make the approval resume a launch the card did not show. The helm also refuses up front when its cache already
+shows the change, which only gives a clearer message.
+
+Template writes (`TemplateCreate`, `TemplateEdit`, `TemplateDelete`, protocol 42) go through the same card. An edit is
+merged with the stored template before the card, so the card shows the whole result, command text the listing withholds
+included. The write then lands only on the template the card was built from: the conditional store operations
+(`put_launch_template_if`, `delete_launch_template_if`) compare and write in one immediate transaction, and a mismatch
+is refused as "changed while this request waited". This is the agent path's exception to SPEC.md's last-write-wins; the
+GUI's own writes still carry no precondition. The helm also refuses, before any card, an edit with nothing to change, a
+`--command` without a YOLO assertion, and a write whose result would hold both agent-launch and command-launch choices,
+which `launcher::apply_template` could never apply; a create from agent-launch flags stores the agent launch kind
+explicitly, so the template means what the flags meant.
+
+The prompts are a check on agents that act through the `farhelm` CLI, not a sandbox. Any process running as the
+session's user, an agent included, can open the supervisor's socket with full authority and act on that host without
+asking, and a compromised supervisor can act on its own host; SPEC.md (Local authority and trust between hosts) leaves
+same-account isolation out of scope. Reaching another host, or the helm's own state, still goes through the helm.

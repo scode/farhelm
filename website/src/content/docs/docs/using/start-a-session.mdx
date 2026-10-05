@@ -70,8 +70,10 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
 />
 
 It is not only the **yolo** choice that asks. Farhelm offers Pi only in YOLO mode, so every Pi launch asks, and so does
-a custom command you say runs without approval prompts. Farhelm goes by that answer alone and never reads the command
-to check it.
+a custom command you say runs without approval prompts. Farhelm goes by that answer alone and never reads the command to
+check it. An agent cannot give that answer or confirm a YOLO launch: on a host that asks, it cannot start a YOLO session
+or a custom command at all ([Approve what agents
+do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 To change your mind about a host later, use its settings. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
 them.
