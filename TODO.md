@@ -107,6 +107,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
+- **Ask for feedback when the installer finishes.** The installer's closing message should directly encourage the user
+  to send feedback through the `?` menu's Send feedback, say that it goes privately to the maintainer, and say that even
+  a low-effort, throwaway comment is useful. The installer tests check its exact closing messages, so they change with
+  it.
+
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
   the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a
