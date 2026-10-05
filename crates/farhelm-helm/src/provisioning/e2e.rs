@@ -354,11 +354,12 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         self.action(target, "restart-supervisor").await
     }
 
-    /// Every removable file is reported present and at its own canonical
-    /// path, and the unit running under provisioning's kill policy, so an
-    /// injected UNINSTALL plans its full step list. The steps themselves are
-    /// simulated like every other action, which is what keeps a browser
-    /// spec's real remote supervisor running while the panel uninstalls it.
+    /// Every removable file is reported present, not a symlink, and at its
+    /// own canonical path, and the unit running under provisioning's kill
+    /// policy, so an injected UNINSTALL plans its full step list. The steps
+    /// themselves are simulated like every other action, which is what keeps
+    /// a browser spec's real remote supervisor running while the panel
+    /// uninstalls it.
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
@@ -371,6 +372,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
             canonical: Some(path.clone()),
             path,
             exists: true,
+            symlink: false,
         };
         Ok(UninstallInspection {
             paths: paths

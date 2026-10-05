@@ -3065,7 +3065,13 @@ positive evidence that no supervisor answers and its unit file already gone; whe
 registered binary is no longer checked, since there is nothing left to protect and the check would strand the retry. The
 binary the probe dialed must lie inside the lib directory and the host's state directory must not, compared as canonical
 paths the host resolves (`readlink -f`), since the lib directory is removed with `rm -rf` and a state directory
-symlinked into it would otherwise go with it; a path the host cannot resolve refuses. A row with no recorded state
+symlinked into it would otherwise go with it; a path the host cannot resolve refuses. Those comparisons cannot see a lib
+directory that is itself a symlink, since the binary resolves inside the link's target, while `rm -rf` of the link
+removes only the link; so the inspection also reports, per path, whether the path itself is a symlink (`[ -L ]`, which
+sees a dangling link too), and planning refuses a symlinked lib directory before any other check of the inspection, the
+resolution check included, so that a dangling link gets the refusal that points to Remove rather than "cannot tell where
+it leads". The removal command repeats the `-L` test in the same shell as the `rm`, as the unit removal does for setup's
+marker, and refuses a lib directory that became a link after confirmation as a failed step. A row with no recorded state
 directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
 started between the confirmation check and the stop is not locked out: it survives, unmanaged, which matches
 `farhelm uninstall`'s stance of neither forcibly terminating nor proving that everything stopped.

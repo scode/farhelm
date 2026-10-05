@@ -190,6 +190,12 @@ pub(super) struct HostPath {
     pub(super) path: PathBuf,
     /// Whether anything is at the path (a dangling symlink counts).
     pub(super) exists: bool,
+    /// Whether the path itself is a symlink (`[ -L ]`), dangling or not.
+    /// Only the last component counts: a path under a symlinked parent is
+    /// not one, because removing it reaches the real directory. Uninstall
+    /// refuses a lib directory that is one, since `rm -rf` of the link
+    /// would remove only the link and leave the installation behind.
+    pub(super) symlink: bool,
     /// Where the path really leads, or `None` when the host could not
     /// resolve it (a missing parent, a symlink loop).
     pub(super) canonical: Option<PathBuf>,
@@ -305,10 +311,10 @@ pub(super) trait ProvisioningBackend: Send + Sync {
     ) -> Result<ActionOutcome, BackendFailure>;
 
     /// Read, without changing anything, what UNINSTALL needs to know about
-    /// the installation on the target: which of `paths` exist and where
-    /// they really lead, the state directory a supervisor started without
-    /// `--state-dir` would use there, and the supervisor unit's run state
-    /// and loaded kill policy. See [`UninstallInspection`].
+    /// the installation on the target: which of `paths` exist, whether each
+    /// is itself a symlink, and where they really lead, the state directory
+    /// a supervisor started without `--state-dir` would use there, and the
+    /// supervisor unit's run state and loaded kill policy. See [`UninstallInspection`].
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
@@ -336,7 +342,9 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure>;
-    /// Delete one directory tree; an absent one is a skip.
+    /// Delete one directory tree; an absent one is a skip, and one that is
+    /// itself a symlink is refused rather than unlinked, because removing
+    /// the link would leave the tree it points to behind.
     async fn remove_directory(
         &self,
         target: &ProvisioningTarget,
@@ -2349,13 +2357,15 @@ impl ProvisioningBackend for SystemBackend {
     /// Read-only, so it runs on either transport, though only UNINSTALL
     /// planning asks and that refuses the local row before it gets here.
     ///
-    /// The output is NUL-separated: an existence flag and a canonical path
-    /// (empty when unresolvable) per asked path, then the default state
-    /// directory and its canonical form, then the unit's `ActiveState`,
-    /// `KillMode` and `FragmentPath`, and the fragment's existence and
-    /// canonical form. A failing `systemctl show` fails the whole command
-    /// rather than reading as empty values. `readlink -f` rather than
-    /// `realpath`: both GNU and BusyBox provide it.
+    /// The output is NUL-separated: an existence flag, a symlink flag and a
+    /// canonical path (empty when unresolvable) per asked path, then the
+    /// default state directory and its three fields, then the unit's
+    /// `ActiveState`, `KillMode` and `FragmentPath`, and the fragment's
+    /// three fields (no fragment prints two `0` flags and an empty path,
+    /// through `%s` because a literal `\00` would read the second flag's
+    /// digit as part of an octal escape). A failing `systemctl show` fails
+    /// the whole command rather than reading as empty values. `readlink -f`
+    /// rather than `realpath`: both GNU and BusyBox provide it.
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
@@ -2364,7 +2374,8 @@ impl ProvisioningBackend for SystemBackend {
     ) -> Result<UninstallInspection, BackendFailure> {
         let mut script = String::from(
             "resolve() { if [ -e \"$1\" ] || [ -L \"$1\" ]; then printf 1; else printf 0; fi; \
-             printf '\\0'; readlink -f -- \"$1\" 2>/dev/null | tr -d '\\n'; printf '\\0'; }; ",
+             printf '\\0'; if [ -L \"$1\" ]; then printf 1; else printf 0; fi; printf '\\0'; \
+             readlink -f -- \"$1\" 2>/dev/null | tr -d '\\n'; printf '\\0'; }; ",
         );
         for path in paths {
             script.push_str(&format!("resolve {}; ", shell_path(path)?));
@@ -2377,7 +2388,7 @@ impl ProvisioningBackend for SystemBackend {
              mode=$(systemctl --user show -p KillMode --value -- {unit}) || exit 1; \
              fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
              printf '%s\\0%s\\0%s\\0' \"$active\" \"$mode\" \"$fragment\"; \
-             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '0\\0\\0'; fi",
+             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0' 0 0; fi",
             unit = crate::ssh::shell_quote(unit),
         ));
         let output = self
@@ -2487,6 +2498,12 @@ impl ProvisioningBackend for SystemBackend {
         })
     }
 
+    /// Planning refuses a lib directory that is itself a symlink, and
+    /// confirmation plans again, so a link made before the user confirmed
+    /// is caught there. The test is repeated here, in the same shell as the
+    /// `rm`, for a link made after that re-check, while the earlier steps
+    /// (disable, unit removal, stop, reload) ran. A dangling link refuses
+    /// too: `-L` sees it where `-e` does not.
     async fn remove_directory(
         &self,
         target: &ProvisioningTarget,
@@ -2496,6 +2513,10 @@ impl ProvisioningBackend for SystemBackend {
         let script = format!(
             "d={dir}; \
              if [ ! -e \"$d\" ] && [ ! -L \"$d\" ]; then printf absent; exit 0; fi; \
+             if [ -L \"$d\" ]; then \
+               printf '%s\\n' \"refusing to remove $d: it has become a symbolic link since uninstall \
+             last checked it, and removing it would leave the installation it points to in place; \
+             nothing was removed\" >&2; exit 81; fi; \
              rm -rf -- \"$d\"",
             dir = shell_path(path)?,
         );
@@ -2563,15 +2584,20 @@ pub(super) fn parse_uninstall_inspection(
         fields: &mut impl Iterator<Item = &'a [u8]>,
         path: PathBuf,
     ) -> Option<HostPath> {
-        let exists = match fields.next()? {
-            b"1" => true,
-            b"0" => false,
-            _ => return None,
-        };
+        fn flag<'a>(fields: &mut impl Iterator<Item = &'a [u8]>) -> Option<bool> {
+            match fields.next()? {
+                b"1" => Some(true),
+                b"0" => Some(false),
+                _ => None,
+            }
+        }
+        let exists = flag(fields)?;
+        let symlink = flag(fields)?;
         let canonical = fields.next()?;
         Some(HostPath {
             path,
             exists,
+            symlink,
             canonical: (!canonical.is_empty())
                 .then(|| bytes_path(canonical).ok())
                 .flatten(),

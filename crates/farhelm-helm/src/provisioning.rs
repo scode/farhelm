@@ -340,6 +340,11 @@ mod tests {
         /// Canonical paths an UNINSTALL inspection reports for named paths
         /// (a symlink's target); any path not listed resolves to itself.
         canonical: Mutex<HashMap<PathBuf, PathBuf>>,
+        /// Paths an UNINSTALL inspection reports as symlinks themselves,
+        /// each with the target the host resolves it to, or `None` for a
+        /// dangling link the host cannot resolve. Takes precedence over
+        /// `canonical` for the paths it names.
+        symlinks: Mutex<HashMap<PathBuf, Option<PathBuf>>>,
         /// The supervisor's default state directory the inspection reports.
         default_state_dir: Mutex<PathBuf>,
         /// The unit's `ActiveState` and loaded `KillMode`, as an inspection
@@ -390,6 +395,7 @@ mod tests {
                 present: Mutex::new(None),
                 repeat_probe: Mutex::new(None),
                 canonical: Mutex::new(HashMap::new()),
+                symlinks: Mutex::new(HashMap::new()),
                 default_state_dir: Mutex::new(PathBuf::from("/home/test/.local/state/farhelm")),
                 unit_state: Mutex::new(("active".to_string(), "process".to_string())),
                 unit_fragment: Mutex::new(None),
@@ -635,19 +641,27 @@ mod tests {
                 .unwrap()
                 .push("inspect-uninstall".to_string());
             let present = self.present.lock().unwrap().clone();
-            let host_path = |path: &Path| HostPath {
-                path: path.to_path_buf(),
-                exists: present
-                    .as_ref()
-                    .is_none_or(|present| present.iter().any(|kept| kept == path)),
-                canonical: Some(
-                    self.canonical
-                        .lock()
-                        .unwrap()
-                        .get(path)
-                        .cloned()
-                        .unwrap_or_else(|| path.to_path_buf()),
-                ),
+            let symlinks = self.symlinks.lock().unwrap().clone();
+            let host_path = |path: &Path| {
+                let link = symlinks.get(path);
+                HostPath {
+                    path: path.to_path_buf(),
+                    exists: present
+                        .as_ref()
+                        .is_none_or(|present| present.iter().any(|kept| kept == path)),
+                    symlink: link.is_some(),
+                    canonical: match link {
+                        Some(target) => target.clone(),
+                        None => Some(
+                            self.canonical
+                                .lock()
+                                .unwrap()
+                                .get(path)
+                                .cloned()
+                                .unwrap_or_else(|| path.to_path_buf()),
+                        ),
+                    },
+                }
             };
             let (unit_active_state, unit_kill_mode) = self.unit_state.lock().unwrap().clone();
             let fragment = self.unit_fragment.lock().unwrap().clone();
@@ -3796,6 +3810,107 @@ mod tests {
         );
     }
 
+    /// Why this matters: with Farhelm's lib directory replaced by a
+    /// symlink, every canonical check passes (the binary resolves inside the
+    /// link's target), and `rm -rf` of the link removes only the link:
+    /// uninstall used to report success and forget the host while the
+    /// installation stayed on it. The refusal also has to tell the user that
+    /// removing the host from the list remains open to them.
+    ///
+    /// Spec: a lib directory that is itself a symlink refuses planning with a
+    /// 409 that names the lib directory and the target the host resolves it
+    /// to, says uninstall does not run on this layout, and points to
+    /// removing the host from the list. A dangling link gets the same
+    /// refusal, saying the target cannot be resolved, rather than the
+    /// generic "cannot tell where it leads". A link that appears between
+    /// planning and confirmation fails the run at confirmation with no host
+    /// action, and the host stays listed.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_a_lib_directory_that_is_a_symlink() {
+        let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
+        let lib = root.path().join("lib");
+        let target = root.path().join("elsewhere/farhelm");
+        backend
+            .symlinks
+            .lock()
+            .unwrap()
+            .insert(lib.clone(), Some(target.clone()));
+        // The running binary resolves into the link's target, as it would
+        // on such a host, so the binary-inside-lib check alone passes.
+        backend
+            .canonical
+            .lock()
+            .unwrap()
+            .insert(lib.join("farhelm"), target.join("farhelm"));
+
+        let linked = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(linked.contains(&lib.display().to_string()), "{linked}");
+        assert!(linked.contains(&target.display().to_string()), "{linked}");
+        assert!(linked.contains("does not run on this layout"), "{linked}");
+        assert!(linked.contains("remove it from the list"), "{linked}");
+
+        backend.symlinks.lock().unwrap().insert(lib.clone(), None);
+        let dangling = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(dangling.contains("cannot resolve"), "{dangling}");
+        assert!(!dangling.contains("cannot tell where"), "{dangling}");
+        assert!(dangling.contains("remove it from the list"), "{dangling}");
+
+        backend.symlinks.lock().unwrap().clear();
+        backend.canonical.lock().unwrap().clear();
+        let preview = service.plan_uninstall(host).await.unwrap();
+        // The realistic layout again, binary inside the link's target, so
+        // only the symlink check can stop the run at confirmation.
+        backend
+            .symlinks
+            .lock()
+            .unwrap()
+            .insert(lib.clone(), Some(target.clone()));
+        backend
+            .canonical
+            .lock()
+            .unwrap()
+            .insert(lib.join("farhelm"), target.join("farhelm"));
+        backend.operations.lock().unwrap().clear();
+        service
+            .start_uninstall(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let view = wait_finished(&service, host).await;
+
+        assert_eq!(view.status, RunStatus::Failed, "{view:?}");
+        assert!(
+            view.message
+                .as_deref()
+                .is_some_and(|message| message.contains("symbolic link")),
+            "{view:?}"
+        );
+        assert_eq!(
+            backend
+                .operations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|operation| *operation != "inspect-uninstall")
+                .count(),
+            0,
+            "a refused uninstall acted on the host"
+        );
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        );
+    }
+
     /// Why this matters: a host whose supervisor answers but cannot be used
     /// has something running that uninstall cannot check, and an identity
     /// problem means the destination may now reach a different machine;
@@ -5086,6 +5201,108 @@ mod tests {
         }
     }
 
+    /// Why this matters: every uninstall guard reads its facts from this
+    /// parser, and a field read out of step would hand one path's flags to
+    /// the next: a symlinked lib directory could pass as a plain one, and
+    /// `rm -rf` would remove only the link.
+    ///
+    /// Spec: per asked path, then for the default state directory and the
+    /// unit's fragment, the output carries an existence flag, a symlink
+    /// flag and a canonical path (empty when the host could not resolve
+    /// it), NUL-terminated. A dangling link parses as existing, a symlink,
+    /// and unresolved; an empty fragment parses as no fragment. A flag
+    /// other than `0` or `1`, a missing field, or a field left over is
+    /// malformed, which is how output in the older two-field shape is
+    /// rejected rather than misread.
+    #[test]
+    fn uninstall_inspection_parses_symlink_flags_per_path() {
+        let unit = Path::new("/h/.config/systemd/user/farhelm-supervisor.service");
+        let lib = Path::new("/h/.local/lib/farhelm");
+        let encode = |fields: &[&str]| {
+            fields
+                .iter()
+                .map(|field| format!("{field}\0"))
+                .collect::<String>()
+        };
+        let mut fields = vec![
+            // The unit file: present, not a link, resolved to itself.
+            "1",
+            "0",
+            "/h/.config/systemd/user/farhelm-supervisor.service",
+            // The lib directory: a dangling link the host cannot resolve.
+            "1",
+            "1",
+            "",
+            // The default state directory's name, then its three fields.
+            "/h/.local/state/farhelm",
+            "1",
+            "0",
+            "/h/.local/state/farhelm",
+            // The unit's state, kill mode and (empty) fragment path, then
+            // the placeholder fields for no fragment.
+            "active",
+            "process",
+            "",
+            "0",
+            "0",
+            "",
+        ];
+        let output = encode(&fields);
+
+        let inspection = parse_uninstall_inspection(output.as_bytes(), &[unit, lib])
+            .expect("well-formed output");
+        assert_eq!(
+            inspection.paths[0],
+            HostPath {
+                path: unit.to_path_buf(),
+                exists: true,
+                symlink: false,
+                canonical: Some(unit.to_path_buf()),
+            }
+        );
+        assert_eq!(
+            inspection.paths[1],
+            HostPath {
+                path: lib.to_path_buf(),
+                exists: true,
+                symlink: true,
+                canonical: None,
+            }
+        );
+        assert!(!inspection.default_state_dir.symlink);
+        assert_eq!(inspection.unit_fragment, None);
+
+        // The lib directory's symlink flag.
+        fields[4] = "2";
+        assert_eq!(
+            parse_uninstall_inspection(encode(&fields).as_bytes(), &[unit, lib]),
+            None
+        );
+        let two_fields = encode(&[
+            "1",
+            "/h/.config/systemd/user/farhelm-supervisor.service",
+            "1",
+            "",
+            "/h/.local/state/farhelm",
+            "1",
+            "/h/.local/state/farhelm",
+            "active",
+            "process",
+            "",
+            "0",
+            "",
+        ]);
+        assert_eq!(
+            parse_uninstall_inspection(two_fields.as_bytes(), &[unit, lib]),
+            None
+        );
+        let trailing = format!("{output}extra\0");
+        assert_eq!(
+            parse_uninstall_inspection(trailing.as_bytes(), &[unit, lib]),
+            None
+        );
+    }
+
     /// Why this matters: UNINSTALL's host commands delete files and stop a
     /// service on someone's machine, and a retry reruns them over whatever
     /// an earlier run left. They must refuse setup's unit at the moment of
@@ -5093,18 +5310,22 @@ mod tests {
     /// and never run on the helm's own machine.
     ///
     /// Spec, for the real shell scripts run against fixture paths with a
-    /// fake `systemctl`: `inspect_uninstall` reports each path's existence
-    /// and canonical location in order (a symlink resolved to its target),
-    /// the default state directory under the host's HOME, and the unit's
-    /// run state and kill policy;
-    /// `remove_unit` refuses a unit whose first line is setup's marker
-    /// (with or without a trailing newline) and keeps it, removes an
-    /// unmarked one, and skips an absent one; `stop` refuses a running unit
-    /// whose loaded `KillMode` is not `process`, stops one whose is, and
-    /// skips one that is inactive without calling `stop`; `disable`
-    /// never reloads the user manager itself (`--no-reload`) and passes
-    /// `--runtime` exactly when the backend links units for this boot only; `remove_directory` removes a tree and then skips it; every
-    /// mutator refuses the local transport.
+    /// fake `systemctl`: `inspect_uninstall` reports each path's existence,
+    /// whether the path itself is a symlink (dangling included; a path under
+    /// a symlinked parent is not), and its canonical location in order (a
+    /// symlink resolved to its target, none for one the host cannot
+    /// resolve), the default state directory under the host's HOME, and the
+    /// unit's run state and kill policy; `remove_unit` refuses a unit whose
+    /// first line is setup's marker (with or without a trailing newline) and
+    /// keeps it, removes an unmarked one, and skips an absent one; `stop`
+    /// refuses a running unit whose loaded `KillMode` is not `process`,
+    /// stops one whose is, and skips one that is inactive without calling
+    /// `stop`; `disable` never reloads the user manager itself
+    /// (`--no-reload`) and passes `--runtime` exactly when the backend links
+    /// units for this boot only; `remove_directory` refuses a path that is
+    /// itself a symlink and leaves both the link and its target, removes the
+    /// real tree under a symlinked parent, and removes a tree and then skips
+    /// it; every mutator refuses the local transport.
     #[farhelm_testtrace::test]
     async fn uninstall_host_commands_refuse_setup_units_and_skip_finished_work() {
         let root = tempfile::tempdir().unwrap();
@@ -5195,6 +5416,65 @@ mod tests {
         // The fake systemctl reports no fragment, which is systemd's answer
         // for a unit it knows no file for.
         assert_eq!(inspection.unit_fragment, None);
+        // Only a path that is itself a link counts as a symlink: the state
+        // link does, the lib directory it leads into does not.
+        assert_eq!(
+            inspection
+                .paths
+                .iter()
+                .map(|host_path| host_path.symlink)
+                .collect::<Vec<_>>(),
+            [false, false, false, true]
+        );
+
+        // A lib directory that is itself a symlink is reported as one with
+        // the target the host resolves, and a dangling one as a symlink the
+        // host cannot resolve. A lib directory under a symlinked parent (a
+        // linked `~/.local`, say) is not one, because removing it reaches
+        // the real directory; this is the only level at which that rule is
+        // tested against a real shell.
+        let real_lib = root.path().join("real-lib");
+        tokio::fs::create_dir_all(&real_lib).await.unwrap();
+        tokio::fs::write(real_lib.join("farhelm"), b"binary")
+            .await
+            .unwrap();
+        let linked_lib = root.path().join("linked-lib");
+        tokio::fs::symlink(&real_lib, &linked_lib).await.unwrap();
+        let dangling_lib = root.path().join("dangling-lib");
+        tokio::fs::symlink(root.path().join("gone/lib"), &dangling_lib)
+            .await
+            .unwrap();
+        let real_local = root.path().join("real-local");
+        tokio::fs::create_dir_all(real_local.join("lib/farhelm"))
+            .await
+            .unwrap();
+        let linked_local = root.path().join("linked-local");
+        tokio::fs::symlink(&real_local, &linked_local)
+            .await
+            .unwrap();
+        let under_linked_parent = linked_local.join("lib/farhelm");
+        let inspection = system
+            .inspect_uninstall(
+                &target,
+                "farhelm-supervisor.service",
+                &[&linked_lib, &dangling_lib, &under_linked_parent],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            inspection
+                .paths
+                .iter()
+                .map(|host_path| (host_path.exists, host_path.symlink))
+                .collect::<Vec<_>>(),
+            [(true, true), (true, true), (true, false)]
+        );
+        assert_eq!(inspection.paths[0].canonical, Some(canonical(&real_lib)));
+        assert_eq!(inspection.paths[1].canonical, None);
+        assert_eq!(
+            inspection.paths[2].canonical,
+            Some(canonical(&real_local).join("lib/farhelm"))
+        );
         tokio::fs::remove_file(&linked_state).await.unwrap();
         tokio::fs::remove_dir(lib.join("data")).await.unwrap();
         tokio::fs::write(&log, "").await.unwrap();
@@ -5280,6 +5560,46 @@ mod tests {
                 "--user disable --no-reload -- farhelm-supervisor.service",
                 "--user --runtime disable --no-reload -- farhelm-supervisor.service",
             ]
+        );
+
+        // A lib directory that became a symlink after planning is refused by
+        // the removal command itself, dangling or not, and neither the link
+        // nor its target is touched. Under a symlinked parent, the real
+        // directory goes and the parent's link stays.
+        for link in [&linked_lib, &dangling_lib] {
+            let refusal = system
+                .remove_directory(&target, link)
+                .await
+                .expect_err("a lib directory that is a symlink must not be removed");
+            assert!(
+                refusal.rendered().contains("has become a symbolic link"),
+                "{}",
+                refusal.rendered()
+            );
+            assert!(
+                tokio::fs::symlink_metadata(link)
+                    .await
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+        }
+        assert!(real_lib.join("farhelm").exists());
+        assert!(matches!(
+            system
+                .remove_directory(&target, &under_linked_parent)
+                .await
+                .unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert!(!real_local.join("lib/farhelm").exists());
+        assert!(real_local.join("lib").exists());
+        assert!(
+            tokio::fs::symlink_metadata(&linked_local)
+                .await
+                .unwrap()
+                .file_type()
+                .is_symlink()
         );
 
         assert!(matches!(
