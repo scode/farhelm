@@ -77,7 +77,7 @@ The installer currently installs the desktop app on Apple silicon Macs only. Lin
 session hosts; this temporary limitation applies only to the installer.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
+curl -fsSL https://get.farhelm.io/install.sh | sh
 ```
 
 See [installation and uninstall](docs/install_uninstall.md) for more detail about what installation does and how to

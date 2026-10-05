@@ -18,6 +18,7 @@ What Farhelm exposes and trusts: SSH as the only network path between machines, 
 no relay or account, and nothing that needs root. Also how much the helm is trusted with on each host, since it can run
 commands there. The SSH prerequisite for adding a host is in [Add a remote host](/docs/get-started/add-a-remote-host/).
 It will also cover the connections that leave your machines: setting up or updating a host downloads Farhelm's release
-files, feedback you choose to send goes over HTTPS to a feedback service the project runs
-([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks GitHub for new releases and
-downloads them, by itself unless you turn that off ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).
+files from get.farhelm.io, feedback you choose to send goes over HTTPS to a feedback service the project runs
+([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks get.farhelm.io for new releases
+and downloads them, checking each one's signature, by itself unless you turn that off
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).

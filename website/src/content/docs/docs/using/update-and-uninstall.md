@@ -8,9 +8,9 @@ sidebar:
 ## Farhelm updates itself
 
 The Farhelm app on your Mac keeps itself up to date. Shortly after you open it, and about once a day after that, it
-checks GitHub for a new release. When there is one, it installs it in the background, with the same installer you used
-to [install Farhelm](/docs/get-started/install/). Nothing changes on screen while that happens, and your sessions keep
-running.
+checks get.farhelm.io for a new release. When there is one, it installs it in the background, with the same installer
+you used to [install Farhelm](/docs/get-started/install/). Nothing changes on screen while that happens, and your
+sessions keep running.
 
 Only stable releases are installed this way, never a prerelease. This applies to the app installed in `~/Applications`;
 a copy of Farhelm you built yourself never updates itself.
@@ -46,8 +46,11 @@ installed, however it got there.
 
 ## How updates are checked
 
-The update check and the download both go to GitHub over HTTPS, the same way the installer does when you run it
-yourself. Farhelm does not check a release's signature before installing it; it trusts what GitHub serves. See the
+The update check and the download both go to get.farhelm.io over HTTPS. Before installing an update, Farhelm checks that
+the release is signed with one of the project's keys, and installs nothing otherwise. The signature shows that a release
+comes from the project; it says nothing about whether its code was reviewed. Installing Farhelm by hand is different:
+nothing can check a signature before Farhelm is on your Mac, so the install command trusts get.farhelm.io over HTTPS. If
+Farhelm ever cannot verify an update, the version number shows a warning with the command to reinstall it. See the
 [security model](/docs/how-it-works/security-model/) for the rest of what leaves your Mac.
 
 ## Update remote hosts, or uninstall

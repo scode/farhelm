@@ -15,7 +15,7 @@ Farhelm itself on Linux is coming.
 Run this shell command in a terminal:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
+curl -fsSL https://get.farhelm.io/install.sh | sh
 ```
 
 It needs no administrator password. It puts the Farhelm app in `~/Applications` and the `farhelm` command in

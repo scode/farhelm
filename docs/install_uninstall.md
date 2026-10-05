@@ -17,38 +17,41 @@ installation itself.
 Run the installer as your normal user:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
+curl -fsSL https://get.farhelm.io/install.sh | sh
 ```
 
-The installer checks the release archives' checksums and installs `~/Applications/Farhelm.app`. The app is the whole
-installation and the way to start Farhelm: open it from Spotlight, Launchpad or `~/Applications`. For the Terminal, the
-installer also makes `~/.local/bin/farhelm` a link into the app, so `farhelm` works in a shell whose `PATH` includes
-`~/.local/bin`. Those locations are fixed. Keep both directories writable only by you: the update safeguards assume
-another account cannot create or replace files there.
+The installer downloads the release and its checksums from get.farhelm.io over HTTPS, checks the archives against those
+checksums, and installs `~/Applications/Farhelm.app`. Run by hand, it cannot check the release's signature, since
+nothing on a fresh machine has a key to check it with; it trusts get.farhelm.io. The app is the whole installation and
+the way to start Farhelm: open it from Spotlight, Launchpad or `~/Applications`. For the Terminal, the installer also
+makes `~/.local/bin/farhelm` a link into the app, so `farhelm` works in a shell whose `PATH` includes `~/.local/bin`.
+Those locations are fixed. Keep both directories writable only by you: the update safeguards assume another account
+cannot create or replace files there.
 
-Re-run the installer to update. It defaults to the latest stable release; `FARHELM_VERSION` selects a specific version,
-including a prerelease. Set it on the `sh` side of the pipe:
+Re-run the installer to update. It defaults to the latest stable release on get.farhelm.io; `FARHELM_VERSION` selects a
+specific version published there, including a prerelease. Set it on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_VERSION=0.2.1 sh
+curl -fsSL https://get.farhelm.io/install.sh | FARHELM_VERSION=0.23.0 sh
 ```
 
 Updates preserve user data.
 
-Farhelm also keeps itself up to date. Shortly after it starts, and about once a day after that, the app checks GitHub
-for the latest stable release (never a prerelease). When that release is newer than the installed version, the app runs
-this same installer in the background, pinned to that release; nothing on screen changes while it works. When a newer
-version is installed, whether the app installed it or you ran the installer yourself, the version number at the top of
-the sidebar turns red with an up-arrow in front of it, and its hover says which version is installed. Select it and
-choose **restart to update** to quit Farhelm and open it again on the new version (your sessions keep running), or
-**what's new** to see the releases on GitHub; quitting and reopening Farhelm any other way finishes the update too. To
-check right away, choose **check for updates** in the `?` menu, or **update** in the menu of the **local (this
-machine)** host; the version number's hover then says how the check went. A failed automatic check is only logged, in
-the app's log, and tried again the next day. To stop the automatic checks and installs, untick **install updates
-automatically** in the settings dialog (the gear at the top of the sidebar); checking on demand and running the
-installer yourself keep working. With automatic updates on, a version you pinned with `FARHELM_VERSION` that is older
-than the latest stable release is replaced by it at the next automatic check, which includes the one at startup. This
-applies only to the app installed at `~/Applications/Farhelm.app`; a build from main never updates itself.
+Farhelm also keeps itself up to date. Shortly after it starts, and about once a day after that, the app checks
+get.farhelm.io for the latest stable release (never a prerelease). When that release is newer than the installed
+version, the app checks that the release is signed with one of the keys built into it, then runs this same installer in
+the background, pinned to that release; nothing on screen changes while it works. When a newer version is installed,
+whether the app installed it or you ran the installer yourself, the version number at the top of the sidebar turns red
+with an up-arrow in front of it, and its hover says which version is installed. Select it and choose **restart to
+update** to quit Farhelm and open it again on the new version (your sessions keep running), or **what's new** to see the
+releases on GitHub; quitting and reopening Farhelm any other way finishes the update too. To check right away, choose
+**check for updates** in the `?` menu, or **update** in the menu of the **local (this machine)** host; the version
+number's hover then says how the check went. A failed automatic check is only logged, in the app's log, and tried again
+the next day. To stop the automatic checks and installs, untick **install updates automatically** in the settings dialog
+(the gear at the top of the sidebar); checking on demand and running the installer yourself keep working. With automatic
+updates on, a version you pinned with `FARHELM_VERSION` that is older than the latest stable release is replaced by it
+at the next automatic check, which includes the one at startup. This applies only to the app installed at
+`~/Applications/Farhelm.app`; a build from main never updates itself.
 
 You can update while Farhelm is open. The running Farhelm keeps working as it was, on the version it started with:
 sessions keep running, new sessions start, and agents' `farhelm` commands and conversation tracking keep working. Quit
