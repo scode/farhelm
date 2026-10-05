@@ -148,3 +148,56 @@ second round on its fixes.
 
 Every finding was fixed except one, declined as out of scope: the two website pages raised above. The second round's
 findings on PR 4 were small (test coverage and wording) and are all fixed.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as four squash commits on main, in stack order: #1628 (verification against a ring of keys),
+#1629 (installer and helm downloads from get.farhelm.io), #1630 (CI stops signing) and #1631 (the Mac app verifies an
+update before installing it). Nothing else reached main while they merged. Since #1629 is on main, running main's
+`install.sh` (the README's install command) fails with "no release is published on get.farhelm.io yet" until you publish
+a release there, as the report says and as you accepted in planning.
+
+#### What else was on main
+
+Nothing that could interact. The stack was built on main right after the previous plan landed (the one that matches an
+agent's retried create by its request), and between then and the landing main gained only the planning queue's own
+bookkeeping. No other plan landed alongside it. One merge waited about two minutes because GitHub took that long to work
+out whether #1630 could merge; nothing changed in between.
+
+A separate reviewer that had not seen the work checked the stack before anything merged. It found nothing broken, and
+confirmed:
+
+- Every caller of the changed verification code and of the helm's default download location is updated inside the PRs.
+- Every check of a signature goes through the ring, and a signature still has to name the exact version in its signed
+  comment, whichever key made it. No code checks against a single key any more.
+- None of the test and capture scripts outside the PRs (CentOS provisioning, the desktop smoke, the browser tests, the
+  README image, the demo video, the docs screenshots) uses the default download location, GitHub release URLs or a
+  checksum file on the GitHub release.
+- The setting the installer tests use to point the installer at a stand-in site now takes the whole site rather than one
+  release's folder; only the two installer test scripts use it, and both are updated.
+- The release workflow stays consistent with the configuration it is generated from: the only generated change is the
+  signing job's permission dropping to read-only, and no other workflow refers to signing or its secret.
+
+#### Out-of-date text the review found
+
+Beyond the two website pages the report already raises ("Update and uninstall" and "Security model"), the review found
+more text that still describes GitHub as where Farhelm comes from. None of it was changed during the landing, and
+nothing tracks it apart from this note. It would fit the same docs change that switches the install command:
+
+- The website's "Add a remote host" page says the Mac downloads Farhelm for a host from GitHub and needs to reach it.
+- `docs/install_uninstall.md` says the app checks GitHub for updates, and shows installing version 0.2.1 with
+  `FARHELM_VERSION`, which main's installer now refuses because old releases are not on get.farhelm.io.
+- The helm's `--payload-dir` help text, which users see in `--help`, says it is for tests that would rather not reach
+  GitHub.
+- A comment in the workspace's `Cargo.toml` says a release build downloads its payloads from the GitHub release.
+- A few comments touched by the stack are mis-indented or left over-long (in `scripts/install.sh`,
+  `.github/dist-build-setup.yml`, `dist-workspace.toml`, `scripts/check-static-elf.sh` and the helm's provisioning
+  assets). The formatters pass on them; they do not check comment layout.
+
+#### Checks
+
+- Reused: the report's checks, which ran on the final stack. The code on main after the last merge is identical to that
+  final stack, and the only other commits since the stack was based are the planning queue's bookkeeping.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
