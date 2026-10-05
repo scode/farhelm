@@ -142,3 +142,67 @@ writes bound to their card), fixed: cards that could outlive a replaced host con
 reinstalled host; the template messages reusing a protocol version; keyboard focus on a card being taken by a terminal;
 a late answer claiming nothing was approved; and stale SPEC_impl.md text in several sections. Declined: the three review
 suggestions under open questions.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as six squash commits on main, in stack order: #1605 (the spec), #1606 (the helm's table of
+waiting requests and the per-host setting), #1607 (the cards), #1608 (asking before every acting `farhelm` command),
+#1609 (template writes from agents) and #1610 (the implementation notes, the website and the TODO entry's removal).
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, main gained only TODO.md edits and the planning queue's own
+files: one TODO entry removed ("Confirm the help menu fix on the Mac") and plan pointers added to two others. None of it
+touches code, SPEC.md or SPEC_impl.md, and the TODO edits sit apart from the stack's, so the rebase applied without
+conflict. Nothing else reached main while the six PRs merged. No other plan landed in the same round.
+
+One earlier change matters more, and the report's list of rebase interactions leaves it out. Just before delivering, the
+executor rebased the stack onto the fix that shows the whole help menu in the Mac app, which moved where that menu opens
+in the sidebar. The executor's last full Rust run (dc83523d) and its browser run (a500d994) came before that rebase, on
+a stack that already included the rule that every control has hover text and the change that saves conversation reports
+as files. Between that full run and the delivery the stack also gained one small fix: an agent's restart is refused,
+before any card, when the helm cannot read the session's stored launch details. Targeted runs covered that fix (62fb478e
+and 6abacbb6, listed in the report's Checks). No Rust or browser test ran on the stack combined with the help-menu fix.
+
+An independent review by a fresh-context sub-agent, done before anything merged, read that combination instead. It found
+no interaction: the menu still sits below the cards, and the cards below hover text; the cards are never inside the
+sidebar where the menu now opens; the menu's keyboard focus and the cards' share no code; and the test that requires
+hover text on every control is satisfied by the cards' buttons and the new host setting.
+
+#### What the review found for later
+
+The review found nothing outside the six PRs that breaks: by its search, no test, script or page still uses
+`--confirm-yolo` in a way that fails, and nothing else calls what the stack changed. It did find text that is now out of
+date. None of it was changed during the landing, and nothing tracks it apart from this note:
+
+- **The queued plan "agent-retry-by-request" contradicts what landed.** Its Decision 5 says
+  `farhelm spawn
+  --inherit-agent` is answered by the session's own supervisor and never the helm; it still treats
+  `--confirm-yolo` as part of what a retried request is compared on; and it assumes protocol version 40, where main is
+  now at 42. The report says to check that plan against SPEC.md when it runs. Given these three points, it needs
+  revising before it runs: an executor picking it up as it stands would build against a design that no longer exists.
+- **A pending changelog fragment from an earlier change** (`agent-cli-launch-flags.md`) says `--inherit-agent` runs with
+  no helm involved and that agents cannot create or change templates. Both are now untrue, and release curation has to
+  reconcile it with this stack's fragments.
+- **The website's "Your first session" page** says the host's supervisor answers an agent's `farhelm spawn` and
+  `farhelm agent` commands. Those now go through the helm and need a Farhelm window open, so the sentence is incomplete.
+- **Four browser tests** (for Restart with and for restarting from the terminal) fake a helm refusal whose text still
+  mentions `--confirm-yolo`. They only check that the UI does not show that text, so they still pass.
+- **The TODO entry "Let the Mac's supervisor outlive the desktop app"** argued that a supervisor outliving the app would
+  keep `farhelm spawn` working. Spawn now needs the helm and an open window, so that part of its case no longer holds.
+
+#### Checks
+
+- Run now, on the final stack after rebasing onto the latest main: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check`, and `python -B scripts/check-test-sleeps.py` (no
+  unannotated delays). All clean.
+- Reused: the test runs in the report's Checks section. They predate two code changes: the restart fix, which the
+  targeted runs above cover, and the help-menu rebase, which only the review above covers. The rebase onto the latest
+  main brought only TODO.md and queue changes, and the landing changed no code.
+- Skipped: running Rust or browser tests again. Nothing in the code changed during the landing; the remaining gap is the
+  help-menu interaction, which the review read and found none.
+
+The landing itself made nothing in the report above untrue. These notes add to it in two places: the help-menu rebase,
+which the report does not mention, and a firmer conclusion about the queued plan "agent-retry-by-request" than the
+report's "check it when it runs".
