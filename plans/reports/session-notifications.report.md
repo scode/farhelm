@@ -145,3 +145,54 @@ Two fresh reviewers per PR, Claude Opus 5.5 at high effort and gpt-6-astra at hi
   used the session title without the escaping the visible title gets. And the list stayed open, floating in the wrong
   place, after a compact toggle or a keyboard-opened host menu moved its row. I declined two findings, both listed as
   follow-ups above: the docs screenshot and the top-bar menus' keyboard gap.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as four squash commits on main, in stack order: #1619 (the spec), #1620 (the supervisor
+records notifications), #1621 (the helm keeps read and cleared marks) and #1622 (the bell, its list, the docs and the
+TODO entry's removal). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, main gained documentation only: the docs website's written
+pages were updated to match the app (#1623, which also adjusted three docs screenshot scripts and the list of published
+screenshots), the README screenshot was refreshed (#1626), TODO.md gained one entry and a plan pointer on another, and a
+new plan joined the queue. No product code, SPEC.md or SPEC_impl.md, and no browser test changed. The rebase applied
+without conflict.
+
+The website update rewrote the two pages this stack also edits, so a separate reviewer that had not seen the work read
+the combined pages before anything merged. On "Read the session list", the new "When a row shows a bell" section follows
+the rewritten text coherently, names the menu item as the app now labels it ("replace with"), and its links resolve; the
+four screenshots the page shows are all still published. On "Agent hook injection", the two changes edit different
+paragraphs and the page reads consistently. The docs website build (which checks every internal link and anchor) passed
+on the combined result.
+
+The same reviewer checked what the bell's new row layout could break outside the stack's own tests, including the README
+screenshot, the docs screenshots and the demo video, which no ordinary test run exercises. None depends on the old
+layout. The reviewer checked one way a bell could appear in them, the most likely one: a hooked session that has not
+reported its conversation a minute after an Enter. Those scripts either press no Enter or end a few seconds after the
+one they press. It did not check the other triggers (a launch Farhelm could not hook, a Codex or Grok record found
+inconsistent, an outdated OMP reporter) against the staged sessions those scripts use; if one of them fired, the next
+screenshot or video refresh would show a bell, which whoever runs it looks at anyway. It also confirmed that the helm
+database version this stack takes (41) is not claimed by any other open change, and that the plan still in progress that
+changes how retried agent requests are matched ("agent-retry-by-request") will need its own rebase onto the new main,
+which should apply cleanly.
+
+#### A fix made while landing
+
+One small one, found by that reviewer. In the sidebar list's code, a new type for the open notification list had been
+inserted between an existing function and the comment describing that function, so the comment described the wrong
+thing. The landing moved the type above the comment; no behavior changed. It went into #1622 before anything merged.
+
+#### Checks
+
+- Run now, on the final stack after rebasing onto the latest main: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check`, `python -B scripts/check-test-sleeps.py` (no
+  unannotated delays), `python3 releasing/check-changelog.py format`, and the docs website build. All clean. After the
+  comment fix, `cargo fmt --all -- --check` and `cargo check -p farhelm-ui` again, clean.
+- Reused: the test runs in the report's Checks section. What main gained since is documentation and a screenshot, and
+  the landing's only change moved a comment.
+- Skipped: running Rust or browser tests again, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
