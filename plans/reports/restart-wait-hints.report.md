@@ -79,3 +79,31 @@ Restart with's reason was the full tooltip rather than a short form; the "? menu
 running for other kinds of unavailable Restart (a Codex command launch without a resume command got the identity message
 instead of "no resume command"); and a few small documentation and test gaps. Nothing declined. The second round found
 nothing.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as #1618 (the per-agent Restart explanations), one squash commit on main.
+
+#### What else was on main
+
+Nothing that could interact. The change was built on main right after the v0.22.0 release notes landed, and between then
+and the landing main gained only the planning queue's own bookkeeping, which touches no code, spec or test. No other
+plan landed while it merged. A separate reviewer that had not seen the work checked this independently before the merge
+and reached the same conclusion. It also found nothing outside the PR that the new wording breaks: no test, screenshot
+or video script, or website page checks or quotes the old hover text, the old refusal or the old agent instructions; the
+Codex restart tests elsewhere only check that such a restart is refused, which it still is; and the test that requires
+hover text on every control is satisfied, since Restart and Restart with still have hover text in every state.
+
+The same reviewer looked at the plan still in progress that changes how retried agent requests are matched
+("agent-retry-by-request", whose PR is open). It edits two of the same files, in separate parts, and should rebase onto
+this change without trouble.
+
+#### Checks
+
+- Reused: the report's checks, as the report describes them; its Rust run (28cc8a0f) was after its last rebase onto
+  main, and its browser run (1622ac91) on the commit before it. I did not compare the exact commit those runs recorded
+  with the one that landed. What the landing adds is that nothing outside the queue's own files reached main after the
+  change was built, so no code that could interact with it was added.
+- Skipped: running anything again during the landing, since nothing that could interact landed in between.
+
+Nothing in the report above was made untrue by the landing.
