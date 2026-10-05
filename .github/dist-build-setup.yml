@@ -72,12 +72,12 @@
   # one. `release_payloads.rs` requires the signed trusted comment to read
   # `farhelm v{CARGO_PKG_VERSION}` and builds its default release URL with the
   # same leading `v`, so a bare `0.0.3` tag would sail through dist and
-  # produce a correctly signed release that no shipped helm can install.
+    # produce a release that, once the maintainer signed it, no shipped helm
+  # could install.
   #
   # Refusing here means the mistake costs a deleted tag instead of a
-  # published, signed, unusable release. `sign-sums.yml` asserts the same
-  # thing again before it touches the key, since these are separate jobs and
-  # only one of them holds the secret.
+  # published, unusable release. `sign-sums.yml` asserts the same thing again
+  # after publishing, since these are separate jobs.
   run: |
     set -euo pipefail
     # `[workspace.package].version` is the only bare `version = "…"` at the

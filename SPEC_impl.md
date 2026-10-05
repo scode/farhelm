@@ -3284,47 +3284,62 @@ download keeps the size cost where it belongs (paid once, by the host actually b
 "provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
 the provisioning helm's own version.
 
-Verification chain (D3): CI writes one `SHA256SUMS` covering the six release binaries/archives and signs it with an
-unencrypted minisign secret key held as a repository secret, passing `-t "farhelm $TAG"` so the release version lands in
-the signature's trusted comment; the `farhelm` binary embeds the matching public key and refuses any download whose
-`SHA256SUMS.minisig` does not verify, whose trusted comment names a version other than the helm's own, or whose per-file
-SHA-256 does not match. The trusted comment is not decoration: the signature otherwise authenticates only the CONTENTS
-of `SHA256SUMS`, which name no version, so whoever serves the release URL could replay an older release's valid manifest
-and assets at a newer version's URL and downgrade every host that helm provisions. A release tag is `vX.Y.Z` and already
-carries the `v`, so the comment is `farhelm` plus the tag verbatim: signing without `-t`, or with a second `v`
-(`farhelm v$TAG` → `farhelm vv1.2.3`), produces a release no helm can install. `--payload-dir` is the one path that
-skips all of this — nothing there is downloaded, so nothing there is checked. SPEC.md's "no public relay, no third-party
-rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects, are download sources the helm's
-own machine reaches directly, never a relay or rendezvous point sessions or connections pass through.
+Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
+permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before
+any release is published); `/<tag>/SHA256SUMS` lists, in `sha256sum` format sorted by name, the six payloads and that
+release's `install.sh`; `/<tag>/SHA256SUMS.minisig` is the minisign signature over it, with trusted comment exactly
+`farhelm <tag>`; `/<tag>/install.sh` is the installer signed with the release; and `/<tag>/<payload>` for each payload
+is a temporary redirect to wherever the archive is hosted (today the GitHub release). `<tag>` is `v` plus the version,
+prereleases included. Installed software trusts a ring of public keys compiled into both shipped binaries
+(`RELEASE_KEY_RING` in `release_payloads.rs`): a `SHA256SUMS` is accepted when its signature verifies under ANY key in
+the ring and its trusted comment is exactly `farhelm v{version}` for the version being installed, and then each payload
+must match its listed SHA-256. The helm checks its own version's release this way before provisioning a host;
+`farhelm_helm::verify_signed_sums` is the one entry point for these rules outside the helm's own downloads. The trusted
+comment is not decoration: the signature otherwise authenticates only the CONTENTS of `SHA256SUMS`, which name no
+version, so whoever serves the release URL could replay an older release's valid manifest and assets at a newer
+version's URL and downgrade every host that helm provisions. A release tag is `vX.Y.Z` and already carries the `v`, so
+the comment is `farhelm` plus the tag verbatim. `--payload-dir` is the one path that skips all of this — nothing there
+is downloaded, so nothing there is checked. Integrity never depends on where a payload redirect points, so hosting can
+move without touching clients. Releases from before get.farhelm.io are not published there (their checksums were signed
+by a key CI could read), and nothing falls back to GitHub for a release the site does not have. SPEC.md's "no public
+relay, no third-party rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects, are
+download sources the helm's own machine reaches directly, never a relay or rendezvous point sessions or connections pass
+through.
 
-Release signing key. The key pair behind that chain is the project's one long-lived secret, and its handling is
-deliberately minimal. The public half is committed twice — `RELEASE_KEY_RING` in `release_payloads.rs` and
-`crates/farhelm-helm/src/provisioning/farhelm-release.pub`, with a test that they agree. The secret half exists only as
-the `MINISIGN_SECRET_KEY` repository secret: it was generated locally, stored with `gh secret set`, and the file
-destroyed; it is never committed, never printed, and never present on a developer machine. Only the `sign` job of
-`sign-sums.yml` receives it, after a secretless `validate` job has already checked the assets, so the generated dist
-workflow and the build jobs never see it. Neither minisign keys nor repository secrets expire; rotation happens when the
-maintainer chooses. Rotating is one PR: `minisign -G` a fresh pair, `gh secret set MINISIGN_SECRET_KEY` from the new
-secret file, shred it, replace both committed copies of the public key, and cut the next release. Nothing in the field
-notices, because under D2 a helm only downloads the release built from the same commit as itself, which is signed by the
-key that commit compiled in; old helms keep verifying their old releases with the old key. The one future feature that
-changes this is a cross-version download that verifies signatures, such as an auto-updater that checks them: it would
-verify the next release with the key it already carries, so a rotation would then need a transition release signed by
-the old key but carrying the new one. Sequencing rotation before shipping such a feature, never in the same release, is
-the whole rule. The desktop app's updater (The desktop app's updater) does not verify signatures, so it does not trigger
-this rule; the rule stays for the day one does. Note also what the key does not protect: `install.sh` runs on a machine
-with nothing to pin a key in, so installing by hand trusts get.farhelm.io over TLS and the `SHA256SUMS` it serves; the
-signature guards what a running helm provisions onto other hosts, not the first download of the helm itself.
+Release signing key. CI never signs and no workflow step reads a signing key: agents working on this repository can push
+to main and run workflows, so any key CI could read would be a path from an agent's push to code running on users'
+machines. The release workflow builds and validates a release and publishes its archives on GitHub (`sign-sums.yml`,
+which keeps its name but only validates); the maintainer then signs its `SHA256SUMS` and publishes the release on
+get.farhelm.io from a trusted host, with tooling that deliberately lives outside this repository so that agents cannot
+author it. That tooling refuses to sign a release unless every ring key string appears verbatim in every archive, which
+is why each key stays one verbatim string literal in the source. The key previous releases were signed with still exists
+as the `MINISIGN_SECRET_KEY` repository secret, which nothing references any more; deleting it is the maintainer's, and
+until then a workflow change could still read it. The public keys are committed twice — `RELEASE_KEY_RING` and one
+`.pub` file per key beside `release_payloads.rs` — with a test that the two agree in both directions.
 
-A release also carries cargo-dist's own metadata, none of which is signed and none of which Farhelm reads:
+The ring holds two keys, a primary and a backup (today, until the maintainer swaps them in, only the key previous
+releases were signed with). Releases are signed with the primary; the backup is compiled in but kept offline. Rotation
+follows from two facts: the helm verifies its own release with its own ring, so a release's signing key must be in that
+release's own ring, or the release cannot provision hosts; and an app updates by verifying the next release with the
+ring it already has, so the signing key must also be in the ring of the release before it. A rotation therefore replaces
+at most one key per release: to retire the primary A of ring {A, B}, the next release carries {B, C} and is signed with
+B, and B becomes the primary. A compromised key is retired the same way, promptly. An app more than one rotation behind
+cannot verify the latest release and must be reinstalled with `curl -fsSL https://get.farhelm.io/install.sh | sh`, which
+trusts get.farhelm.io over TLS and needs no key; that is also the recovery if both keys are lost. Consecutive rotations
+are therefore spaced so that daily automatic updates have time to carry apps across each one. Note also what the keys do
+not protect: `install.sh` run by hand on a fresh machine has nothing to pin a key in, so it trusts get.farhelm.io over
+TLS and the `SHA256SUMS` it serves; the signature guards what a running helm provisions onto other hosts and what an
+installed app updates to, not the first download of Farhelm itself.
+
+A release also carries cargo-dist's own metadata on GitHub, none of which is signed and none of which Farhelm reads:
 `dist-manifest.json`, a `<archive>.tar.gz.sha256` beside each of the four archives, and a lowercase `sha256.sum` over
 what dist built. That last one is worth naming explicitly because it looks like the file that matters and is not it:
-`SHA256SUMS` — uppercase, six entries, the one `SHA256SUMS.minisig` authenticates — is what the helm and `install.sh`
-verify against. The metadata is nonetheless part of the release contract rather than incidental: the signing job
-REQUIRES the manifest and the four per-archive checksums to be present as stable, machine-readable metadata for
-downstream tooling, and treats `sha256.sum` as optional. Homebrew distribution remains deferred, with no publishing
-model selected. Anything else appearing on a release fails it, so no published asset can sit outside both the signed set
-and that list.
+`SHA256SUMS` — uppercase, on get.farhelm.io, the one `SHA256SUMS.minisig` authenticates — is what the helm, the updater
+and `install.sh` verify against. The metadata is nonetheless part of the release contract rather than incidental: the
+validation job REQUIRES the manifest and the four per-archive checksums to be present as stable, machine-readable
+metadata for downstream tooling, and treats `sha256.sum` as optional. Homebrew distribution remains deferred, with no
+publishing model selected. Anything else appearing on the GitHub release, a `SHA256SUMS` or its signature included,
+fails it.
 
 ## Cross-compilation and targets
 

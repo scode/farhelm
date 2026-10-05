@@ -23,8 +23,8 @@ authenticated: the version in the URL and in the cache directory name is attacke
 valid older `SHA256SUMS` could be replayed at a newer version's URL and downgrade every host a helm provisions.
 
 The comment is `farhelm` followed by the release TAG, and a tag is `vX.Y.Z` — it already carries the `v`, so the signing
-flag is `-t "farhelm $TAG"` and never `-t "farhelm v$TAG"`, which would render `farhelm vv0.0.3`. The Step 5 `sign-sums`
-job follows the same rule; a release signed without `-t`, or with the doubled `v`, is refused by every helm.
+flag is `-t "farhelm $TAG"` and never `-t "farhelm v$TAG"`, which would render `farhelm vv0.0.3`. The maintainer's
+release signing follows the same rule; a release signed without `-t`, or with the doubled `v`, is refused by every helm.
 
 **Fixtures signed for the current version are pinned to workspace version `0.0.3`, permanently.** They are never
 re-signed when the workspace version bumps, and that is the point: the first real release tag bumped the workspace
@@ -36,7 +36,7 @@ here pass `FIXTURE_VERSION` (`"0.0.3"`, defined beside this fixture's other help
 hold the two ends of that contract together: `production_wiring_binds_the_cache_to_the_crate_version` (in
 `provisioning.rs`) is the oracle that production still passes the real crate version, and
 `signing_and_verification_agree_on_the_tag_convention` (in `release_payloads.rs`) is the oracle that the trusted-comment
-convention itself — `farhelm v$TAG`, never `farhelm vv$TAG` — still matches what `sign-sums` produces.
+convention itself — `farhelm v$TAG`, never `farhelm vv$TAG` — still matches what release signing produces.
 
 **`variants/other-version/` is the exception and must stay signed for a different version** (`farhelm v0.0.2`). It is a
 correctly signed manifest for the wrong release — the replay condition itself — so re-signing it for the current version
@@ -146,8 +146,8 @@ grep -rl "$(id -un)" "$FIXTURES"                                 # must find not
 `the_committed_archives_record_no_account_identity` asserts step 6's first check on every committed archive, so a
 regeneration that forgets the ownership flags fails the suite rather than shipping a name.
 
-`-W` writes the secret key unencrypted, matching D3: the minisign CLI has no non-interactive password path, so CI's own
-signing key is unencrypted too and these fixtures reproduce that shape.
+`-W` writes the secret key unencrypted, because the minisign CLI has no non-interactive password path and these steps
+are meant to run unattended.
 
 `minisign -S` prehashes by default, which is what `minisign_verify`'s `verify(.., allow_legacy = false)` requires. The
 `legacy-signature` variant is what proves that refusal is real rather than assumed.

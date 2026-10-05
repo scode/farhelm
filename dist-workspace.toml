@@ -15,12 +15,13 @@
 #
 # Almost every value departs from the `scode-dist-rust-setup` skill's defaults,
 # because that skill describes a Homebrew-first CLI while this project ships a
-# curl-installable pair of binaries plus a signed checksum file. Each departure
+# curl-installable pair of binaries whose checksums the maintainer signs and
+# publishes on get.farhelm.io. Each departure
 # and the decision behind it (D-numbers are from the distribution plan):
 #
 # - `installers = []` (skill: `["homebrew"]`) — D7. The install path is
-#   `scripts/install.sh`, curled from `main`, reading the same asset names the
-#   helm does; dist's own shell/powershell installers would be a second,
+#   `scripts/install.sh`, served by get.farhelm.io with each release and
+#   signed with it, reading the same asset names the helm does; dist's own shell/powershell installers would be a second,
 #   divergent description of the release. Homebrew distribution is deferred;
 #   no publishing model or tap contract has been selected.
 # - `install-updater = false` (skill: true) — there is no self-update command
@@ -30,14 +31,15 @@
 #   doubles as the payload provisioning pushes to a host. No Intel Mac (D4),
 #   no Windows (D11).
 # - `checksum = "sha256"` — these per-archive `.sha256` files are dist's, not
-#   ours. What consumers verify against is `SHA256SUMS`, written and signed by
-#   the `sign-sums` job (D3); dist's ride along for anyone reading the release
-#   page by hand.
+#   ours. What consumers verify against is the `SHA256SUMS` the maintainer
+#   signs and publishes on get.farhelm.io (D3); dist's ride along for anyone
+#   reading the release page by hand.
 # - `unix-archive = ".tar.gz"` — D14. The helm unpacks downloaded archives
 #   itself, and gzip means its extractor needs only `flate2` + `tar`.
-# - `source-tarball = false` — `SHA256SUMS` lists exactly the six
-#   binaries/archives the plan's asset table names. A source tarball would be
-#   a seventh asset no consumer knows about.
+# - `source-tarball = false` — the release's payloads are exactly the six
+#   binaries/archives the plan's asset table names, which the signed
+#   `SHA256SUMS` lists beside the release's `install.sh`. A source tarball
+#   would be one more asset no consumer knows about.
 # - `auto-includes = false` + `include = ["LICENSE"]` (dist default:
 #   auto-includes on) — the default sweeps in whatever README/LICENSE sits
 #   beside each package, which here would ship
@@ -66,22 +68,22 @@
 #   dist is exercised on a PR, which is why AGENTS.md's finishing battery has
 #   nothing to run for it.
 # - `publish-jobs = ["./sign-sums"]` (skill: `["homebrew"]`) — our own reusable
-#   workflow: it writes the one `SHA256SUMS` covering the six payloads, signs
-#   it with minisign, and refuses to overwrite one that already exists (D3).
-#   It is the only custom publish job. The static-linkage, architecture, and
-#   archive-shape checks the retired hand-written release workflow did live
-#   inside it, because that job is the point where the COMPLETE release
-#   inventory is known (it lists every published asset name and rejects one it
-#   does not recognize) and the payload bytes it signs are in hand. It does
-#   not download or hash cargo-dist's metadata; that metadata is required to
-#   exist but is not part of the signed set.
+#   workflow, which despite its name signs nothing: CI never sees a signing
+#   key (D3). It validates the published payloads (static linkage,
+#   architecture, archive shape, a release-shaped `farhelm`) and the
+#   release's complete asset inventory, rejecting any name it does not
+#   recognize, including a `SHA256SUMS` or signature, which belong on
+#   get.farhelm.io only. It is the only custom publish job, and the point
+#   where the complete inventory and the payload bytes are both in hand. The
+#   maintainer then signs and publishes the release on get.farhelm.io from a
+#   trusted host, with tooling kept outside this repository so agents cannot
+#   author it; `releasing/AGENTS.md` has the steps.
 # - `publish-prereleases = true` — NOT in the plan, and load-bearing. dist
 #   skips every publish job on a prerelease tag by default, which would
-#   produce a `vX.Y.Z-rc.N` release with no `SHA256SUMS` — and a release with
-#   no `SHA256SUMS` is one no helm and no `install.sh` will install from,
-#   since verification is not optional (D3). Prereleases are a supported way
-#   to reach a build (D15 lets `FARHELM_VERSION` name one), so they must be
-#   signed like any other release.
+#   publish a `vX.Y.Z-rc.N` release whose payloads nothing validated.
+#   Prereleases are a supported way to reach a build (D15 lets
+#   `FARHELM_VERSION` name one), so they are validated, and signed on
+#   get.farhelm.io, like any other release.
 # - NO `plan-jobs` (the skill's Phase G hook). The release test gate is real,
 #   but it lives in `.github/dist-build-setup.yml` instead, because dist 0.32's
 #   generated graph makes a plan job FAIL OPEN. `host` accepts a
@@ -104,15 +106,13 @@
 #
 # One thing dist 0.32 does NOT offer: holding the GitHub Release as a draft
 # until the publish jobs finish. `dist host --steps=release` creates the
-# release and uploads the archives before `sign-sums` runs, so for the couple
-# of minutes that job takes, a release exists with no `SHA256SUMS` beside it.
-# The only draft flow dist has (`create = false`) expects a human to have
-# drafted the release first, which a tag-push release has no place for. D17
-# covers the window instead: both the helm and `install.sh` answer a missing
-# `SHA256SUMS` with one message that does not try to distinguish "still
-# publishing" from "no such release".
+# release and uploads the archives before `sign-sums` runs. That no longer
+# matters to installed software: nothing installs from a GitHub release
+# until the maintainer has published it on get.farhelm.io, and both the helm
+# and `install.sh` answer a release get.farhelm.io does not have with one
+# message (D17).
 #
-# ## RECOVERY: a release that exists but was never signed
+# ## RECOVERY: a GitHub release that is incomplete or failed validation
 #
 # Two ways to land there, and one procedure for both. dist's `host` job creates
 # the release and uploads every asset in a single `gh release create … *`,
@@ -121,24 +121,20 @@
 # re-running the job fails immediately on the release that already exists.
 # Separately, `sign-sums` can fail on its own after the release is public.
 #
-# Recovery, for the maintainer, from a machine with `gh`:
+# Recovery, for the maintainer, from a machine with `gh`, BEFORE anything is
+# signed or published on get.farhelm.io for that version:
 #
-#   1. Confirm the release is unsigned: `gh release view vX.Y.Z --json assets`
-#      must show NEITHER `SHA256SUMS` nor `SHA256SUMS.minisig`. If both are
-#      there, the release is complete and nothing below applies. If exactly one
-#      is there, do NOT delete anything — re-run the workflow, which reconciles
-#      that half by byte-comparison.
-#   2. Delete the RELEASE, never the tag: `gh release delete vX.Y.Z`. The tag
-#      is what names the version and what the signature will cover; deleting it
-#      would make the next attempt build from a re-created tag that may not
-#      point where the first one did.
-#   3. Re-run the `Release` workflow for that tag from the Actions UI.
+#   1. Delete the RELEASE, never the tag: `gh release delete vX.Y.Z`. The tag
+#      is what names the version; deleting it would make the next attempt build
+#      from a re-created tag that may not point where the first one did.
+#   2. Re-run the `Release` workflow for that tag from the Actions UI.
 #
-# This is safe by construction rather than by care: `sign-sums` refuses to run
-# at all when a release already carries both signed files, so the procedure
-# cannot clobber a good release even if step 1 is skipped. It is deliberately a
-# documented human procedure and not a workflow — an automated release-deleting
-# job is a bigger weapon than the failure mode warrants.
+# Once a version is published on get.farhelm.io, treat its files there as
+# final: a release that went wrong after publishing is fixed with a new
+# version, not by redoing this one, since installed apps may already have
+# verified and installed the first. It is deliberately a documented human
+# procedure and not a workflow — an automated release-deleting job is a bigger
+# weapon than the failure mode warrants.
 #
 # ## Residuals in the GENERATED workflow
 #
@@ -168,7 +164,7 @@
 # - `permissions: contents: write` is emitted at WORKFLOW scope, so the plan
 #   and build jobs inherit release-write authority they never use.
 #   `github-custom-job-permissions` reaches custom jobs only (that is how
-#   `sign-sums` gets its `contents: write` below); the generated jobs'
+#   `sign-sums` gets its read-only `contents` below); the generated jobs'
 #   permissions are hardcoded in the template. What bounds it: those jobs run
 #   this repository's own scripts, its committed lockfile, and the pinned dx —
 #   nothing a contributor cannot already influence through `ci.yml`.
@@ -193,13 +189,13 @@
 #   (`actions/checkout@v6` and friends), not a commit SHA.
 #
 # A compromise of any of those upstreams could tamper with the build, and the
-# later signing job would then sign the result; signing proves the published
-# bytes are the ones the gate validated, not that the build machine was clean.
+# maintainer's later signature would then cover the result; signing proves
+# who published a release, not that the build machine was clean.
 # The three are the same class of trust (a distribution's or GitHub's own
 # publishing chain), so pinning only one of them would not change the trust
 # the release rests on. Pinning all of them is a possible future hardening
 # project, not a requirement today. What IS pinned by checksum stays pinned:
-# tmux and its libraries, the zig wheel, nextest, and minisign.
+# tmux and its libraries, the zig wheel, and nextest.
 
 [workspace]
 # A HYBRID workspace: the cargo workspace, plus one generic (non-cargo)
@@ -255,11 +251,11 @@ publish-prereleases = true
 # meant to read.
 github-build-setup = "../dist-build-setup.yml"
 
-# `sign-sums` uploads to the release, which the default read-only token cannot
-# do. dist gives custom publish jobs no permissions unless they are named
-# here.
+# `sign-sums` only reads the release (it uploads nothing since signing moved
+# off CI). dist gives custom publish jobs no permissions unless they are
+# named here, and reading the release's assets needs this one.
 [dist.github-custom-job-permissions.sign-sums]
-contents = "write"
+contents = "read"
 
 # DEVIATION from dist's defaults, which build both Linux targets on x86_64 and
 # would need a cross-compiler for the aarch64 one. Each target is built on its

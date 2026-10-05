@@ -485,8 +485,8 @@ PLIST_EOF
   #   (`--` first, so the name can never be misread as another option), must
   #   yield exactly one record, and that record must be a regular file.
   #
-  # This is the same shape the helm's own extractor and the release's
-  # sign-sums job require of these archives.
+    # This is the same shape the helm's own extractor and the release's
+  # validation job (sign-sums.yml) require of these archives.
   extract_sole_member() {
     esm_archive=$1
     esm_label=$2
@@ -1018,8 +1018,8 @@ PLIST_EOF
         curl_get -fsSL --retry 3 -o "$archive_path" "$BASE_URL/$row_archive"
       fi
 
-      # Exactly one SHA256SUMS line must name this archive (D3's
-      # "sign-sums" job asserts the same on the publishing side) — awk's
+      # Exactly one SHA256SUMS line must name this archive (the release's
+      # signing asserts the same on the publishing side) — awk's
       # exact field comparison, not a substring grep, so one archive's
       # name being a prefix of another's can never cross-match.
       sums_hits=$(awk -v f="$row_archive" '$2==f{c++} END{print c+0}' "$STAGING_DIR/SHA256SUMS")
