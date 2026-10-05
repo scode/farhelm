@@ -147,6 +147,15 @@ mod feed;
 /// renders a host chip from.
 mod hosts;
 
+/// The one SemVer release order Farhelm uses to call a build newer, and the
+/// test for a development build that has no place in it.
+///
+/// Public for the desktop app's updater (`farhelm-ui`'s `desktop/updater.rs`),
+/// which decides whether an installed or released version is newer than the
+/// running one by the same rule the host list uses for a host's build, rather
+/// than keeping a second comparison that could drift from this one.
+pub use hosts::{build_is_newer, is_development_build};
+
 /// Release-owned structured launch catalog and argv compiler.
 mod launches;
 

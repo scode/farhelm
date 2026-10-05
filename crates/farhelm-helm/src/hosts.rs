@@ -362,8 +362,10 @@ fn release_order(peer: &str, ours: &str) -> Option<std::cmp::Ordering> {
 /// Shared with provisioning, which refuses to Update a host whose build is
 /// newer than this helm's: an Update installs this helm's own build, so on
 /// such a host it would be a downgrade, and an older supervisor refuses a
-/// newer database schema and leaves the host unreachable.
-pub(crate) fn build_is_newer(peer: &str, ours: &str) -> bool {
+/// newer database schema and leaves the host unreachable. Also exported for
+/// the desktop app's updater, which asks whether a released or installed
+/// version is newer than the one running.
+pub fn build_is_newer(peer: &str, ours: &str) -> bool {
     !is_development_build(ours) && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
 }
 
@@ -376,7 +378,7 @@ pub(crate) fn build_is_newer(peer: &str, ours: &str) -> bool {
 /// release: it has no place in the release order ([`build_is_newer`]) and
 /// no published release carries its payloads
 /// (`provisioning::payloads::production_payloads_with_key`).
-pub(crate) fn is_development_build(version: &str) -> bool {
+pub fn is_development_build(version: &str) -> bool {
     semver::Version::parse(version)
         .is_ok_and(|v| v.major == 0 && v.minor == 0 && v.patch == 0 && !v.pre.is_empty())
 }

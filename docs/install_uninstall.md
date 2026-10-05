@@ -33,7 +33,17 @@ including a prerelease. Set it on the `sh` side of the pipe:
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_VERSION=0.2.1 sh
 ```
 
-There is no automatic updater yet. Updates preserve user data.
+Updates preserve user data.
+
+Farhelm also keeps itself up to date. Shortly after it starts, and about once a day after that, the app checks GitHub
+for the latest stable release (never a prerelease). When that release is newer than the installed version, the app runs
+this same installer in the background, pinned to that release; nothing on screen changes while it works. When a newer
+version is installed, whether the app installed it or you ran the installer yourself, the version number at the top of
+the sidebar turns red with an up-arrow in front of it, and its hover says which version is installed. Quit and reopen
+Farhelm to finish the update. To check right away, choose **check for updates** in the `?` menu, or **update** in the
+menu of the **local (this machine)** host; the version number's hover then says how the check went. A failed automatic
+check is only logged, in the app's log, and tried again the next day. This applies only to the app installed at
+`~/Applications/Farhelm.app`; a build from main never updates itself.
 
 You can update while Farhelm is open. The running Farhelm keeps working as it was, on the version it started with:
 sessions keep running, new sessions start, and agents' `farhelm` commands and conversation tracking keep working. Quit

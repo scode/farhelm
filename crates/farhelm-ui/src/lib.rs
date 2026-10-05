@@ -130,6 +130,7 @@ use serde::Deserialize;
 mod activity;
 mod api;
 mod app_bar;
+mod app_updater;
 /// The cards that ask the user to approve an agent's `farhelm` command.
 mod approvals;
 mod attachments;
