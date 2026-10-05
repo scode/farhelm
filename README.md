@@ -84,8 +84,8 @@ See [installation and uninstall](docs/install_uninstall.md) for more detail abou
 uninstall.
 
 Installs `~/Applications/Farhelm.app`, which is the whole installation, and a `~/.local/bin/farhelm` link into it for
-the terminal. Does NOT auto-upgrade (yet) — re-run the same command to update; that is safe while Farhelm is open, and
-quitting and reopening it finishes the update.
+the terminal. The app keeps itself up to date, installing new stable releases in the background and offering a restart
+when one is ready; re-running the same command also updates it, and that is safe while Farhelm is open.
 
 To uninstall, stop local sessions and their additional terminals, quit the desktop app, and stop manually started
 Farhelm processes. Run `farhelm uninstall` and confirm once, or use `farhelm uninstall --dry-run` to preview removal.

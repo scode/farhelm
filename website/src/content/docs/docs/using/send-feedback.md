@@ -27,4 +27,6 @@ feedback.
 
 If sending fails, the dialog says so and keeps your text, so you can try again or copy it.
 
-The same menu's **documentation** item opens these docs in your browser.
+The same menu's **documentation** item opens these docs in your browser, and in the Farhelm app on your Mac its **check
+for updates** item looks for a new release and installs it
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).
