@@ -6652,7 +6652,9 @@
 - Completion criteria: raw frames go to a private directory allocated for the run (for example with `mkdtemp`), and only
   that directory is removed; nothing derived from the output path is deleted. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
+- Execution: complete — change `vtqmymyzxozztzsltqmxtuzsvpvrztzy`, bookmark
+  `plan/triage-tooling-output-ownership/01-recorder-frames`, PR
+  [#1649](https://github.com/scode/farhelm/pull/1649/changes).
 
 ## recorder-stills-owner.md
 
