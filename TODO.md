@@ -151,12 +151,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it small.
 
 - **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
-  checksums, and CI no longer signs. What remains: switch the README, the website and `docs/install_uninstall.md` to
-  `curl -fsSL https://get.farhelm.io/install.sh | sh` once the first release is on the site; delete the old
-  `MINISIGN_SECRET_KEY` repository secret; a Vercel user that holds only the get.farhelm.io project; disconnect the docs
-  project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`); tag
-  rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source diff
-  before signing, since the signature proves who published a release, not that its code is sound.
+  checksums, and CI no longer signs. What remains: a Vercel user that holds only the get.farhelm.io project; disconnect
+  the docs project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`);
+  tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source
+  diff before signing, since the signature proves who published a release, not that its code is sound.
 
 - **Clear a session's notification once its problem goes away.** A session notification (the bell on the sidebar row) is
   a record of something that happened, not a live state, so it stays until the user clears it even after the problem it
@@ -179,18 +177,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and every update. A user who starts a session, quits Farhelm before typing, reopens it and then types gets no bell if
   the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
   for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report.
-
-- **Update the docs that still say Farhelm comes from GitHub.** Since the get.farhelm.io cutover, installs, the helm's
-  payload downloads and the Mac app's updates come from get.farhelm.io and are checked against signed checksums, but
-  several pages and texts still describe GitHub. Known gaps: the website's "Update and uninstall" and "Security model"
-  pages (they say updates come from GitHub and that no release signature is checked); the website's "Add a remote host"
-  page (it says the Mac downloads Farhelm for a host from GitHub and needs to reach GitHub); `docs/install_uninstall.md`
-  (it says the app checks GitHub for updates, and its `FARHELM_VERSION=0.2.1` example names a release the installer now
-  refuses, because old releases are not on get.farhelm.io); the helm's `--payload-dir` help text, which users see in
-  `--help` and which says the option is for tests that would rather not reach GitHub; and a comment in the workspace's
-  `Cargo.toml` saying a release build downloads its payloads from the GitHub release. Switching the install command
-  itself waits for the first release on the site and is part of "Lock down the release and update trust chain" above;
-  the rest is true now and need not wait. Found in the `get-site-cutover` plan's report and its landing review.
 
 ## Doc todo
 
