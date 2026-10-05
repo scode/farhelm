@@ -154,3 +154,43 @@ these, each a recorded decision:
   landing in those few seconds is still kept apart by the installer's own lock. The app does re-check after asking
   GitHub which release is latest, because that request is the slow step.
 - The two update-menu keyboard gaps above.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as four squash commits on main, in stack order: #1599 (the spec), #1600 (the updater and the
+red version marker), #1604 (restart to update, the shared sidebar menu and the settings checkbox) and #1613 (the
+website, the README's install section and the TODO entry's removal).
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, one change reached main besides the planning queue's own
+files: the fix that makes remote uninstall refuse a host whose program directory is a symbolic link (#1614). It edits
+SPEC.md, SPEC_impl.md and TODO.md, and the helm's remote uninstall code. A separate reviewer that had not seen the work
+read both changes against each other before anything merged and found no interaction. They edit different paragraphs of
+SPEC.md (remote uninstall there; installation and updates, and the non-goals, here) and different sections of
+SPEC_impl.md; each removes a different TODO entry, and neither refers to the other's; and the two version helpers this
+stack makes public in the helm are ones the uninstall fix does not touch. The rebase applied without conflict. #1614 was
+another plan's landing and finished before this one began; nothing else reached main while these four merged.
+
+The same reviewer also searched the rest of the repository for anything the stack's renaming of the help menu's CSS
+classes and data attributes (from `help-menu` to `bar-menu`) would break, including the docs screenshot, README image
+and demo video harnesses, and found nothing: every use was updated inside #1604, and the help button's own class, which
+other tests and code use, was kept. It confirmed the stack adds no files to the desktop app's bundled assets, and that
+it leaves the docs Overview page and the README's introduction alone.
+
+#### Checks
+
+- Run now, on the final stack after rebasing onto the latest main: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-ui --features desktop --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features web --target wasm32-unknown-unknown`, `dprint check`,
+  `python -B scripts/check-test-sleeps.py` (no unannotated delays) and `python3 releasing/check-changelog.py format`.
+  All clean.
+- Reused: the test runs in the report's "Checks run, reused and skipped" section, which ran on the earlier base
+  (`a01d53a2`). The only code that reached main since then is the uninstall fix in the helm's provisioning code, which
+  this stack does not use, and the rebase onto it changed none of the stack's code.
+- Skipped: running Rust or browser tests again, for the same reason; and every check on a real Mac, which still needs a
+  Mac (the report's "Checks owed on a real Mac" stand as written).
+
+Apart from the stack's base, which moved past `a01d53a2` to include #1614, nothing in the report above was made untrue
+by the landing.
