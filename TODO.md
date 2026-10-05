@@ -103,6 +103,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without an app release. Decide what the release gate should cover, including whether it sends to the live endpoint
   (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
 
+- **Private dry-run release flow before signing.**
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
