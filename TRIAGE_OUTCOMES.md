@@ -6637,3 +6637,267 @@
   entry.
 - Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
   [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## recorder-frames-owner.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`. The README demo-video recorder derives `<output>.frames` from the
+  MP4 path it is given and recursively deletes it before recording (`e2e/readme-video/recorder.ts:156`), without
+  establishing that it created that directory. The default output (`target/readme-video/readme-video.mp4`) does not
+  collide with anything; a collision needs `--output` pointed next to an existing directory of that name. Maintainer
+  tooling only, so no user-facing work is at stake despite the original highest-bucket filing.
+- Decision: the user (2026-10-05) chose `fix code`: this is straightforward hardening of maintainer tooling that needs
+  no product judgement. Schedule it through `plans/` together with `recorder-stills-owner.md` and
+  `publisher-main-pin.md` as one plan, since all three are small and related.
+- Completion criteria: raw frames go to a private directory allocated for the run (for example with `mkdtemp`), and only
+  that directory is removed; nothing derived from the output path is deleted. Remove this feedback file and its index
+  entry.
+- Execution: pending.
+
+## recorder-stills-owner.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`. After encoding, the recorder derives `<base>-stills/` from the
+  output path, recursively deletes it, and writes the review stills there (`e2e/readme-video/recorder.ts:337–340`),
+  without checking that an existing directory came from an earlier recording. `docs/readme-video/SPEC.md` describes the
+  stills directory as an output but does not settle removal of foreign contents. Maintainer tooling only.
+- Decision: as recorded under `recorder-frames-owner.md` (same date, same plan).
+- Completion criteria: the stills stay at their documented location, but the recorder replaces an existing stills
+  directory only when it can show it made that directory (for example a marker file it writes there), and otherwise
+  refuses with a message naming the directory. A fresh directory and one from an earlier recording keep working as
+  today. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## publisher-main-pin.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`. The docs-screenshot publisher decides which snapshot to retain
+  beyond the six-week window from the manifest in the local checkout (`scripts/publish-docs-shots.sh:217`, `:287`), not
+  from main's. Main's pinned snapshot can drop out of the keeper only after an unlikely sequence (a publish whose
+  manifest change never lands, then another publish more than six weeks later from a checkout whose manifest differs
+  from main's), after which GitHub may collect the images and the live docs show broken images until a fresh capture and
+  publish. Images are regenerable; maintainer tooling only.
+- Decision: as recorded under `recorder-frames-owner.md` (same date, same plan).
+- Completion criteria: the publisher also retains the snapshot pinned by `origin/main`'s manifest, read from the remote
+  rather than the checkout, and refuses to prune when it cannot read it. `--self-test` gains a case where the local
+  manifest differs from main's and main's aged snapshot survives. Run the self-test and `shellcheck` on the script.
+  Remove this feedback file and its index entry.
+- Execution: pending.
+
+## installer-prune.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. At the end of an in-place update the macOS installer recursively
+  removes every real, version-named folder under `Farhelm.app/Contents/Versions` other than the new, previously
+  installed, and running versions (`scripts/install.sh:1355–1367`), without checking what is inside, so a file a user
+  put inside an old version folder is removed with it. The installer only reaches this for an app it recognized as its
+  own through its installation record.
+- Decision: the user (2026-10-05) decided that once the installer recognizes `Farhelm.app` as one it built, it owns
+  everything inside the bundle, and the installer's reserved temporary names (`.farhelm-new.*` inside the app,
+  `.farhelm-link.<pid>` in the Terminal link's directory) are Farhelm's too. Contents a user places there are not
+  protected. This is a clarification of SPEC.md's existing rule that the installer changes `Farhelm.app` only when it
+  can show it built it; it does not change how a bundle is recognized, and it does not change how anything outside the
+  bundle and those reserved names is treated.
+- Completion criteria: SPEC.md's installation section states the principle above, next to the "Installation follows the
+  same ownership rule as removal" paragraph, so it reads as what "built it" covers rather than an exception to the
+  name-matching rule. Remove this feedback file and its index entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-incomplete.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. When the new version's folder exists without a usable `farhelm`,
+  the update moves it into its private work directory and replaces it, and cleanup later deletes the work directory with
+  the displaced folder in it; a failed restore is ignored the same way (`scripts/install.sh:1219–1232`). Only contents a
+  user put inside that version folder are at stake.
+- Decision: as recorded under `installer-prune.md` (same date: the installer owns everything inside a recognized
+  bundle).
+- Completion criteria: covered by the spec change under `installer-prune.md`. Remove this feedback file and its index
+  entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-staging-glob.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. Before an in-place update, the installer removes every regular file
+  named `.farhelm-new.*` in the app's `Contents`, `MacOS`, `Resources`, and `Versions` folders
+  (`scripts/install.sh:1206–1211`), including one a user created with that name.
+- Decision: as recorded under `installer-prune.md`.
+- Completion criteria: covered by the spec change under `installer-prune.md`. Remove this feedback file and its index
+  entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-link-staging.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. To publish the Terminal link, the installer removes
+  `~/.local/bin/.farhelm-link.<installer pid>` before creating its staging symlink there
+  (`scripts/install.sh:1321–1325`), so a user file at exactly that name would be lost.
+- Decision: as recorded under `installer-prune.md` (the name is one of the installer's reserved temporary names).
+- Completion criteria: covered by the spec change under `installer-prune.md`. Remove this feedback file and its index
+  entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-malformed-record.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. The fallback that recognizes an installation whose Terminal link
+  moved converts NUL bytes to newlines and checks only the first two lines (`scripts/install.sh:404–415`), so a
+  newline-separated lookalike of the record, or one with extra fields, would pass and authorize rebuilding that app.
+  Such a file does not arise by accident: the installer writes the exact NUL-terminated form, and a foreign app would
+  have to carry a hand-made imitation of it.
+- Decision: the user (2026-10-05) decided that filesystem states which only exist because someone under the user's own
+  account deliberately crafted them are deliberate same-account interference, outside Farhelm's threat model under
+  SPEC.md's "Local authority and trust between hosts". Farhelm's guards against accidental interference do not need to
+  cover them. Examples from this triage: a hand-made lookalike of an installation record, a symlink whose target path
+  contains a newline, a symlink planted at a path Farhelm reserves for its own marker files, and every name the
+  installer would use to keep a user's file already being taken.
+- Completion criteria: SPEC.md's "Local authority and trust between hosts" states the principle above, with examples of
+  the kind listed, as a refinement of its existing line between deliberate interference and accidental interference.
+  Remove this feedback file and its index entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## uninstall-newline.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. Remote uninstall canonicalizes paths with `readlink -f` piped
+  through `tr -d '\n'` (`crates/farhelm-helm/src/provisioning/backend.rs:2378`), which removes newlines inside the path
+  as well as the trailing one, so two distinct paths can compare equal. Reaching it needs a symlink whose target path
+  contains a newline among the files uninstall inspects; a bypass of the containment checks and any actual file or
+  process loss were not established.
+- Decision: as recorded under `installer-malformed-record.md` (same date: deliberately crafted states are outside the
+  threat model).
+- Completion criteria: covered by the spec change under `installer-malformed-record.md`. Remove this feedback file and
+  its index entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## setup-marker-preflight.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. `farhelm helm setup` records a pending restart for each changed,
+  active unit before writing any unit (`crates/farhelm/src/setup.rs:739–750`), and the marker write uses
+  `std::fs::write` (`setup.rs:1067–1071`), which follows a symlink at the marker path and truncates its target. If the
+  helm's marker were a symlink to an unrelated file and writing the supervisor's unit then failed, that file would
+  already be emptied. A symlink at that reserved path does not arise by accident.
+- Decision: as recorded under `installer-malformed-record.md`.
+- Completion criteria: covered by the spec change under `installer-malformed-record.md`. Remove this feedback file and
+  its index entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-backup.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `8319077a`. When `~/.local/bin/farhelm` is a file of the user's own, the
+  installer renames it to `farhelm.replaced-<UTC timestamp>`, or that name plus `-<pid>` when the first is taken, and
+  then runs `mv` without checking the second name (`scripts/install.sh:1312–1316`): an existing file there would be
+  overwritten, and an existing directory would receive the command inside it. Both names being taken needs two runs in
+  the same second with the same process number, or someone creating them on purpose.
+- Decision: as recorded under `installer-malformed-record.md`.
+- Completion criteria: covered by the spec change under `installer-malformed-record.md`. Remove this feedback file and
+  its index entry.
+- Execution: complete — change `nwutumqwyllkmtrqlyszwsunlrswomku`, bookmark `pr/triage-installer-ownership`, PR
+  [#1638](https://github.com/scode/farhelm/pull/1638/changes).
+
+## installer-symlink.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`. An in-place update checks that `Contents/Versions` is a real folder
+  (`scripts/install.sh:1171`), but not the app root, `Contents`, `MacOS`, or `Resources`; `mkdir -p` accepts folder
+  symlinks, and the replacement helper writes beside the destination and renames over it, so a symlinked `Resources` or
+  `MacOS` would redirect the icon or program replacement into another directory. Like the items under
+  `installer-malformed-record.md`, the trigger needs a deliberately made symlink.
+- Decision: the user (2026-10-05) chose to fix it anyway: SPEC.md already requires that symlinks must not redirect
+  uninstall's removal into unrelated files or directories, and the installer writing through them is inconsistent with
+  that, while the fix is cheap.
+- Completion criteria: before an in-place update writes anything, the installer verifies that the app and every folder
+  it writes through (`Contents`, `MacOS`, `Resources`, `Versions`, and the version folder) are real folders, not
+  symlinks, and refuses with a clear message otherwise, changing nothing. `scripts/test-install-sh.sh` gains a fixture
+  per linked folder with a sentinel file behind the link that survives the refused update. Run `sh -n`, `shellcheck`,
+  and the installer test script. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## yolo-sidebar-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`, no browser reproduction. The sidebar's Replace-with-YOLO question
+  (`crates/farhelm-ui/src/list/view.rs`, `yolo_replace` and `do_replace`) does not use the shared `ConfirmSlot` helper
+  in `crates/farhelm-ui/src/ops.rs` that `header-replace-confirm-ignores-cancel.md` introduced. An affirmative answer
+  queued behind Cancel still dispatches the replacement, which launches the successor without approval prompts and
+  deletes the source session, and the permanent answer can also turn off future YOLO questions on that host. Queued
+  Cancel-then-confirm events are an established case per that earlier decision. YOLO consent is a trust-boundary
+  consequence, so the sub-second race filter does not apply.
+- Decision: the user (2026-10-05) chose `fix code` with a complexity gate. The expected fix is to move this prompt onto
+  the existing `ConfirmSlot` helper, so a confirm, including the "don't ask again on this host" answer, acts only while
+  its question is still open. If using the helper does not solve the problem for this prompt, or the fix turns complex,
+  stop and bounce it back to the user rather than designing something larger. Schedule it through `plans/` as one plan
+  with `yolo-launcher-cancel.md`, `yolo-restart-cancel.md`, `restart-parent-cancel.md`, and `feedback-queued-close.md`,
+  including a sweep for other prompts that still guard by hand (bringing them onto the helper is in scope under the same
+  gate).
+- Completion criteria: Cancel followed by either affirmative answer in one event burst dispatches neither the
+  replacement nor the host preference change; a genuine confirmation still works; a regression covers the queued order.
+  Remove this feedback file and its index entry. If the gate trips, the plan blocks on this item with what was found
+  instead.
+- Execution: pending.
+
+## yolo-launcher-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`, no browser reproduction. The launcher's YOLO question
+  (`crates/farhelm-ui/src/list/create_form.rs`) records an affirmative answer against the refused launch's request
+  identity without checking that the question is still open, so an answer queued behind Cancel restores the cancelled
+  consent and submits the unchanged draft; for Replace with launcher that also deletes the source session, and the
+  permanent answer can change the host's setting.
+- Decision: as recorded under `yolo-sidebar-cancel.md` (same date, same plan, same complexity gate).
+- Completion criteria: a stale answer leaves the form unauthorized and changes no host setting; a genuine confirmation
+  still lets the same request be retried; a regression covers the queued order. Remove this feedback file and its index
+  entry, or block with findings if the gate trips.
+- Execution: pending.
+
+## yolo-restart-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`, no browser reproduction. In Restart with
+  (`crates/farhelm-ui/src/restart_with.rs`), affirmative handlers rendered before Cancel can still request an
+  unrestricted restart, which can also stop a working agent first when the dialog's action allowed it. Fixed together
+  with `restart-parent-cancel.md`, the parent side of the same flow.
+- Decision: as recorded under `yolo-sidebar-cancel.md` (same date, same plan, same complexity gate).
+- Completion criteria: Cancel followed by either answer in one event burst requests no restart and no host setting
+  change; a permanent answer without its bound host is refused; a regression covers the queued order. Remove this
+  feedback file and its index entry, or block with findings if the gate trips.
+- Execution: pending.
+
+## restart-parent-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`, no browser reproduction. The session view's handler for Restart
+  with (`crates/farhelm-ui/src/session_view.rs`) accepts `allow_yolo` from the dialog without establishing that its YOLO
+  question is still open, and forwards it as explicit approval to the helm; a missing question turns the permanent
+  answer into a one-off approved restart instead of refusing it.
+- Decision: as recorded under `yolo-sidebar-cancel.md` (same date, same plan, same complexity gate).
+- Completion criteria: the parent dispatches an approval-bearing restart only by consuming a live question bound to the
+  current dialog opening and the settings being approved, and refuses a permanent answer without its host; a regression
+  delivers a stale approval after cancellation and shows nothing is dispatched. Remove this feedback file and its index
+  entry, or block with findings if the gate trips.
+- Execution: pending.
+
+## feedback-queued-close.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8319077a`, no browser reproduction. The feedback dialog
+  (`crates/farhelm-ui/src/feedback.rs`) guards Escape with the sending flag from the last render, and Cancel closes
+  unconditionally, so a close queued right behind Send can unmount the dialog after sending started, dropping the send
+  and the typed text without knowing whether it was delivered. SPEC.md requires a failed send to keep the text.
+- Decision: as recorded under `yolo-sidebar-cancel.md` (same date, same plan, same complexity gate). This one may not
+  map onto the confirmation helper itself; the expected fix is that every close path reads the live sending state, and
+  anything more complex is bounced back to the user.
+- Completion criteria: Send followed by Cancel or Escape in one event burst does not close the dialog while the send is
+  unresolved; closing before Send still works; a regression covers both close paths. Remove this feedback file and its
+  index entry, or block with findings if the gate trips.
+- Execution: pending.
