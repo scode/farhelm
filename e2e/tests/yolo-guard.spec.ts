@@ -146,6 +146,109 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
 });
 
 /**
+ * Cancel and an answer to the launcher's YOLO question delivered in one
+ * burst, before the render that removes the question, start nothing. Why:
+ * both answers launch an agent with no approval prompts (and "don't ask
+ * again" also turns the host's question off), and the answers used to be
+ * the form's submit buttons recording consent from their own copy of the
+ * question, so an answer queued behind Cancel restored the consent and
+ * resubmitted the cancelled draft. Specifies, for each answer: after the
+ * burst no create carries the override, the host is not marked, nothing
+ * starts, and a following plain Launch is asked about again; a genuine
+ * answer afterwards still retries the same request with the override.
+ */
+test("cancel and an answer to the launcher's YOLO question in one burst start nothing", async ({ page, request }) => {
+  const cwd = stackScratchDir("yolo-burst-");
+  const created: string[] = [];
+  try {
+    await setLocalYoloWithoutAsking(request, false);
+    const local = await localHostId(request);
+    const createPosts: string[] = [];
+    page.on("request", (candidate) => {
+      if (candidate.method() === "POST" && candidate.url().endsWith("/api/sessions")) {
+        createPosts.push(candidate.postData() ?? "");
+      }
+    });
+    const markPosts: unknown[] = [];
+    page.on("request", (candidate) => {
+      if (candidate.method() === "POST" && candidate.url().endsWith(`/api/hosts/${local}/yolo-without-asking`)) {
+        markPosts.push(candidate.postData());
+      }
+    });
+    const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
+      candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions");
+
+    await page.goto("/");
+    const form = await openYoloLaunch(page, cwd);
+    const confirmation = form.locator(".yolo-confirmation");
+    const [refused] = await Promise.all([page.waitForResponse(isCreate), form.locator(".create-session-submit").click()]);
+    expect(refused.status()).toBe(409);
+    await expect(confirmation).toBeVisible();
+
+    for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking"]) {
+      // Both buttons are captured before either is clicked, then clicked in
+      // one synchronous block: Cancel first, the answer second, before any
+      // render can remove the answer (the technique the session list's
+      // cancel-and-confirm test uses). The answer must still be connected
+      // and enabled when clicked, or the click would reach no handler and
+      // prove nothing.
+      const answerWasLive = await confirmation.evaluate((node, selector) => {
+        const cancel = node.querySelector<HTMLButtonElement>(".yolo-cancel")!;
+        const start = node.querySelector<HTMLButtonElement>(selector)!;
+        cancel.click();
+        const live = start.isConnected && !start.disabled;
+        start.click();
+        return live;
+      }, answer);
+      expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
+      await expect(confirmation).toHaveCount(0);
+      await expect(form, `cancel keeps the launcher open (${answer})`).toBeVisible();
+
+      // A plain Launch is the observation point: its reply proves the page
+      // has handled everything the burst could have started, and it must be
+      // asked about again rather than ride on restored consent.
+      const [again] = await Promise.all([
+        page.waitForResponse(isCreate),
+        form.locator(".create-session-submit").click(),
+      ]);
+      expect(again.status(), `after cancel then ${answer}, Launch is not confirmed`).toBe(409);
+      await expect(confirmation).toBeVisible();
+    }
+    const bodies = createPosts.map((body) => JSON.parse(body));
+    expect(
+      bodies.map((body) => body.confirm_yolo ?? false),
+      "no create after a burst carries the override",
+    ).toEqual([false, false, false]);
+    expect(markPosts, "the host is never marked").toHaveLength(0);
+    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
+    expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);
+
+    // Positive control: a genuine answer retries the same request with the
+    // override and launches.
+    const [confirmed] = await Promise.all([
+      page.waitForResponse(isCreate),
+      confirmation.locator(".yolo-confirm").click(),
+    ]);
+    expect(confirmed.ok(), `the confirmed launch must be admitted: ${await confirmed.text()}`).toBe(true);
+    created.push((await confirmed.json()).id);
+    const last = JSON.parse(createPosts[createPosts.length - 1]);
+    expect(last.confirm_yolo).toBe(true);
+    expect(last.intent_key, "the confirmation retries the refused request").toBe(
+      JSON.parse(createPosts[createPosts.length - 2]).intent_key,
+    );
+  } finally {
+    await setLocalYoloWithoutAsking(request, false);
+    await patchPreferences(request, { remembered_permissions: null });
+    for (const id of created) await cleanupSession(request, id);
+    // A regression would start sessions this test never recorded; leave
+    // none of them on the shared helm.
+    for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
+      await cleanupSession(request, row.id);
+    }
+  }
+});
+
+/**
  * "Start, and don't ask again on this host" lets the host start YOLO
  * launches and then starts the launch, and when marking fails it starts
  * nothing. Why: the button turns a safety question off for good, so the
@@ -195,15 +298,16 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     expect(refused.status()).toBe(409);
     await expect(confirmation).toBeVisible();
 
-    // A refused mark: its reason in the confirmation, which stays up, and no create.
+    // A refused mark: the question, which the answer took down, comes back
+    // with its reason, and no create is sent.
     await confirmation.locator(".yolo-confirm-stop-asking").click();
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("could not stop asking for");
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
     expect(markPosts).toEqual([{ yolo_without_asking: true }]);
     expect(createPosts, "a failed mark sends no create").toHaveLength(1);
     expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
-    // The pressed button was disabled while the mark ran; focus comes back
-    // to the question's safe answer rather than staying lost.
+    // The question returns as a fresh one, so focus lands on its safe answer
+    // rather than staying lost with the button that was pressed.
     await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
 
     // The override went with the failure: a plain Launch asks again.
