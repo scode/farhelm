@@ -44,7 +44,7 @@ would silently delete the test rather than update it.
 
 ## The signing key
 
-`test-key.pub` is a throwaway key generated for these fixtures and has nothing to do with `MINISIGN_PUBKEY`, the key
+`test-key.pub` is a throwaway key generated for these fixtures and has nothing to do with `RELEASE_KEY_RING`, the keys
 compiled into shipped binaries. The matching secret key is deliberately not committed: running the tests needs only the
 public key, and a signing key has no business living in a public repository even when it signs nothing real.
 

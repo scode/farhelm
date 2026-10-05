@@ -3297,7 +3297,7 @@ rendezvous service" line still holds: GitHub is a download source the helm's own
 or rendezvous point sessions or connections pass through.
 
 Release signing key. The key pair behind that chain is the project's one long-lived secret, and its handling is
-deliberately minimal. The public half is committed twice — `MINISIGN_PUBKEY` in `release_payloads.rs` and
+deliberately minimal. The public half is committed twice — `RELEASE_KEY_RING` in `release_payloads.rs` and
 `crates/farhelm-helm/src/provisioning/farhelm-release.pub`, with a test that they agree. The secret half exists only as
 the `MINISIGN_SECRET_KEY` repository secret: it was generated locally, stored with `gh secret set`, and the file
 destroyed; it is never committed, never printed, and never present on a developer machine. Only the `sign` job of

@@ -29,6 +29,7 @@ pub(crate) use http::{
     probe_host, provision_host, provisioning_state, uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
+pub use release_payloads::{RELEASE_KEY_RING, verify_signed_sums};
 pub(crate) use service::{ProvisioningService, RunTask};
 
 #[cfg(test)]
@@ -9841,7 +9842,7 @@ mod tests {
                 true,
                 state_dir.path(),
                 version,
-                super::release_payloads::test_support::test_pubkey(),
+                super::release_payloads::test_support::test_ring(),
                 super::release_payloads::test_support::test_client(),
             )
             .unwrap();
@@ -10043,7 +10044,7 @@ mod tests {
             false,
             state_dir.path(),
             super::release_payloads::test_support::FIXTURE_VERSION,
-            super::release_payloads::test_support::test_pubkey(),
+            super::release_payloads::test_support::test_ring(),
             // Production settings plus `no_proxy()`: without it an ambient
             // proxy variable would route this loopback fixture request off
             // the machine, which no test here may do.

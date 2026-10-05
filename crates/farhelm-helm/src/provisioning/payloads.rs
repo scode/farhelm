@@ -13,7 +13,7 @@
 
 use super::assets;
 use super::plan::{PayloadArch, PayloadKind};
-use super::release_payloads::{self, MINISIGN_PUBKEY, ReleasePayloadSource};
+use super::release_payloads::{self, RELEASE_KEY_RING, ReleasePayloadSource};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -1128,7 +1128,7 @@ pub(super) fn production_payloads(
         // a constant of its own, so this is the only line a future refactor
         // could get wrong and stop shipping `CARGO_PKG_VERSION`.
         release_payloads::VERSION,
-        MINISIGN_PUBKEY,
+        RELEASE_KEY_RING,
         release_client()?,
     )
 }
@@ -1141,10 +1141,10 @@ pub(super) fn production_payloads(
 /// loopback release signed with a throwaway key. Two things have to be
 /// injected for that to be honest:
 ///
-/// - `pubkey`, because the production secret key lives only as a repository
-///   secret, so no test can produce a signature [`MINISIGN_PUBKEY`] accepts.
-///   That the shipped binary passes the real constant is covered separately,
-///   by the key's own oracle test.
+/// - `ring`, because no production secret key is available to tests, so no
+///   test can produce a signature [`RELEASE_KEY_RING`] accepts. That the
+///   shipped binary passes the real ring is covered separately, by the
+///   ring's own oracle test.
 /// - `client`, because reqwest honours the ambient proxy variables: a
 ///   loopback fixture URL alone does not guarantee the socket stays on this
 ///   machine, and no test in this repository may mutate the environment to
@@ -1156,7 +1156,7 @@ pub(super) fn production_payloads(
 /// threaded through unchanged.
 ///
 /// `version` is likewise named explicitly rather than read from
-/// [`release_payloads::VERSION`] internally, for the same reason `pubkey`
+/// [`release_payloads::VERSION`] internally, for the same reason `ring`
 /// and `client` are: the end-to-end provisioning test drives real fixtures
 /// signed for `release_payloads::test_support::FIXTURE_VERSION`, a
 /// deliberately different value from whatever the workspace version
@@ -1169,7 +1169,7 @@ pub(super) fn production_payloads_with_key(
     release_build: bool,
     cwd: &Path,
     version: impl Into<String>,
-    pubkey: &'static str,
+    ring: &'static [&'static str],
     client: reqwest::Client,
 ) -> anyhow::Result<Arc<dyn PayloadSource>> {
     let version = version.into();
@@ -1221,7 +1221,7 @@ pub(super) fn production_payloads_with_key(
         base_url,
         helm_state_dir.join("payloads"),
         version,
-        pubkey,
+        ring,
         client,
     )))
 }

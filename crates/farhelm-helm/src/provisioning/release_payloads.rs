@@ -7,8 +7,9 @@
 //! that decides whether a downloaded byte is allowed to become a host binary
 //! is here. The chain is:
 //!
-//! 1. a `SHA256SUMS` signed with the key CI holds, verified against
-//!    [`MINISIGN_PUBKEY`] compiled into this binary;
+//! 1. a `SHA256SUMS` signed with a release key, verified against the
+//!    [`RELEASE_KEY_RING`] compiled into this binary (a signature by any key
+//!    in the ring counts);
 //! 2. the signature's TRUSTED COMMENT, which must read exactly
 //!    `farhelm v{version}` for this build's own version;
 //! 3. a per-asset SHA-256 computed over the bytes as they arrive off the
@@ -63,35 +64,30 @@ use tokio::sync::{Mutex, OnceCell};
 use tracing::info;
 use url::Url;
 
-/// The public half of the minisign key CI signs every release's
-/// `SHA256SUMS` with; pairs with the `MINISIGN_SECRET_KEY` repository
-/// secret (D3).
+/// The release keys a signed `SHA256SUMS` may be signed with: the public
+/// half of each, as the verbatim base64 key line of its minisign `.pub` file
+/// (D3).
 ///
-/// Published `SHA256SUMS` files are never re-signed or replaced — that is
-/// repository policy, enforced by the `sign-sums` job refusing to overwrite
-/// an existing one — so a helm carrying this key keeps verifying every
-/// release that was ever signed with it, including releases cut long after
-/// that helm was built.
+/// A signature verifies when ANY key in the ring verifies it AND its trusted
+/// comment names this exact version ([`verify_sums`]); nothing else about
+/// verification depends on how many keys there are. The ring exists so a
+/// lost or compromised primary key can be retired without first shipping a
+/// transition release that every installed client would have to catch: the
+/// next release carries the backup plus a new key and is signed with the
+/// backup. SPEC_impl.md's "Release signing key" has the rotation rules.
 ///
-/// Rotation is cheap TODAY because of D2: a helm only ever downloads the
-/// release matching its own version, and that release is signed by whatever
-/// key the same commit compiled in here. So a rotation is one PR that swaps
-/// this constant and `farhelm-release.pub` together with the repository
-/// secret, and the next release simply uses the new key; nothing already in
-/// the field looks at it. The ordering problem only appears with a
-/// cross-version download — an auto-updater verifying the NEXT release with
-/// the CURRENT key — which nothing does yet. Whoever adds one must first
-/// ship a release carrying the new key (signed with the old), and only then
-/// sign with the new; see SPEC_impl.md's "Release signing key" for the
-/// recipe and that constraint.
+/// Each entry stays one verbatim string literal, never decoded bytes or a
+/// string assembled at run time: the maintainer's publishing tooling refuses
+/// to sign a release unless it finds every key string verbatim in every
+/// archive, which is how a release built with the wrong ring is caught before
+/// it is signed. The `.pub` files beside this module are the committed
+/// oracle; `the_built_in_key_ring_matches_the_committed_key_files` holds the
+/// two in exact agreement in both directions, so adding a key is a new
+/// `.pub` file and a new entry here, and nothing else.
 ///
-/// The key is only half the contract. Signing must ALSO pass
-/// `-t "farhelm $TAG"` — the tag already begins with `v`, so there is no
-/// second one — putting the version in the signed trusted comment. See this
-/// module's header for why a signature without it is replayable across
-/// versions. `farhelm-release.pub` sits beside this file as the committed
-/// oracle for this constant.
-pub const MINISIGN_PUBKEY: &str = "RWSNQaVU+WXJm29s7DRqwrHGbzMgOJck6kLPfVU4Gvk1uCnwgdlzp/U/";
+/// Published `SHA256SUMS` files are never re-signed or replaced, so a build
+/// carrying a key keeps verifying every release ever signed with it.
+pub const RELEASE_KEY_RING: &[&str] = &["RWSNQaVU+WXJm29s7DRqwrHGbzMgOJck6kLPfVU4Gvk1uCnwgdlzp/U/"];
 
 /// The release THIS build asks for. A helm downloads the payloads matching
 /// its OWN version and no other, which is what keeps a provisioned host
@@ -263,11 +259,11 @@ pub(super) struct ReleasePayloadSource {
     /// are permanently signed for. See [`VERSION`]'s docstring for why that
     /// split exists.
     version: String,
-    /// The minisign public key `SHA256SUMS.minisig` must verify against.
-    /// Injected rather than read from [`MINISIGN_PUBKEY`] directly so tests
+    /// The keys `SHA256SUMS.minisig` must verify against (one is enough).
+    /// Injected rather than read from [`RELEASE_KEY_RING`] directly so tests
     /// can drive the real verification path with a throwaway test key
-    /// instead of needing the production secret key to exist.
-    pubkey: &'static str,
+    /// instead of needing a production secret key to exist.
+    ring: &'static [&'static str],
     /// The per-asset download ceiling; production uses [`ASSET_MAX_BYTES`],
     /// while tests lower it to exercise the same streaming boundary without
     /// constructing a gigabyte-sized fixture.
@@ -345,14 +341,14 @@ impl ReleasePayloadSource {
         base_url: Url,
         cache_root: PathBuf,
         version: impl Into<String>,
-        pubkey: &'static str,
+        ring: &'static [&'static str],
         client: reqwest::Client,
     ) -> Self {
         Self::with_transport(
             base_url,
             cache_root,
             version,
-            pubkey,
+            ring,
             Arc::new(HttpTransport::new(client)),
         )
     }
@@ -363,7 +359,7 @@ impl ReleasePayloadSource {
         base_url: Url,
         cache_root: PathBuf,
         version: impl Into<String>,
-        pubkey: &'static str,
+        ring: &'static [&'static str],
         transport: Arc<dyn Transport>,
     ) -> Self {
         let version = version.into();
@@ -377,7 +373,7 @@ impl ReleasePayloadSource {
             cache_root,
             cache_dir,
             version,
-            pubkey,
+            ring,
             asset_max_bytes: ASSET_MAX_BYTES,
             transport,
             sums: OnceCell::new(),
@@ -454,12 +450,16 @@ impl ReleasePayloadSource {
     async fn fetch_sums(&self) -> anyhow::Result<ReleaseSums> {
         let sums_bytes = self.fetch_capped("SHA256SUMS").await?;
         let signature_bytes = self.fetch_capped("SHA256SUMS.minisig").await?;
-        verify_sums(self.pubkey, &self.version, &sums_bytes, &signature_bytes)?;
-
-        let text = std::str::from_utf8(&sums_bytes)
-            .map_err(|_| malformed_sums_refusal(&self.version, &self.base_url))?;
-        let entries = parse_sums(text)
-            .ok_or_else(|| malformed_sums_refusal(&self.version, &self.base_url))?;
+        // The same composition the updater gets from `verify_signed_sums`,
+        // with this source's own wording for a body that is not sha256sum
+        // output (it can name the URL it came from).
+        let entries = verified_entries(
+            self.ring,
+            &self.version,
+            &sums_bytes,
+            &signature_bytes,
+            || malformed_sums_refusal(&self.version, &self.base_url),
+        )?;
 
         // Published only after verification, so the cache can never hold a
         // checksum file that was not signed for this version. Both writes
@@ -652,10 +652,10 @@ impl ReleasePayloadSource {
     /// renders the precise refusal there.
     async fn cached_controls_verified(&self) -> anyhow::Result<bool> {
         let cache_dir = self.cache_dir.clone();
-        let pubkey = self.pubkey;
+        let ring = self.ring;
         let version = self.version.clone();
         let verified =
-            tokio::task::spawn_blocking(move || cached_sums_verify(&cache_dir, pubkey, &version))
+            tokio::task::spawn_blocking(move || cached_sums_verify(&cache_dir, ring, &version))
                 .await
                 .context("the cached checksum verification task panicked")?;
         if verified {
@@ -884,30 +884,42 @@ const ASSET_SUFFIXES: [&str; 6] = [
 /// it in order to find that out.
 const MARKER_MAX_BYTES: u64 = 128;
 
-/// Verify a `SHA256SUMS` against `pubkey`: the signature, then the version
-/// bound into its trusted comment.
+/// Verify a `SHA256SUMS` against `ring`: a signature by any key in it, then
+/// the version bound into its trusted comment.
 ///
 /// One function because the download path and the cached-copy re-check must
 /// apply IDENTICAL rules — a cache that accepted a signature the network
 /// path would refuse would be a way to keep using a downgraded manifest
-/// across restarts.
+/// across restarts. The desktop app's updater reaches the same rules through
+/// [`verify_signed_sums`].
 ///
 /// Every way authenticity can fail — not UTF-8, not a minisign signature, a
-/// legacy (non-prehashed) signature, a good signature from the wrong key —
-/// collapses into one refusal on purpose. Telling them apart would only tell
-/// an attacker which guess was closer. The VERSION mismatch is separate,
-/// because that one is an operator-actionable fact about a real, correctly
-/// signed release.
-fn verify_sums(pubkey: &str, version: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()> {
-    let key = minisign_verify::PublicKey::from_base64(pubkey).map_err(|error| {
-        anyhow!("farhelm's built-in minisign public key is not decodable: {error}")
-    })?;
+/// legacy (non-prehashed) signature, a good signature from a key outside the
+/// ring — collapses into one refusal on purpose. Telling them apart would
+/// only tell an attacker which guess was closer. The VERSION mismatch is
+/// separate, because that one is an operator-actionable fact about a real,
+/// correctly signed release. A ring entry that does not decode is a broken
+/// build rather than a bad release, so it is reported as such, whichever
+/// key signed.
+fn verify_sums(ring: &[&str], version: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+    let keys = ring
+        .iter()
+        .map(|key| {
+            minisign_verify::PublicKey::from_base64(key).map_err(|error| {
+                anyhow!("farhelm's built-in minisign public key is not decodable: {error}")
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let signature = std::str::from_utf8(signature)
         .ok()
         .and_then(|text| minisign_verify::Signature::decode(text).ok())
         .ok_or_else(|| signature_refusal(version))?;
-    key.verify(sums, &signature, false)
-        .map_err(|_| signature_refusal(version))?;
+    if !keys
+        .iter()
+        .any(|key| key.verify(sums, &signature, false).is_ok())
+    {
+        return Err(signature_refusal(version));
+    }
 
     let comment = signature.trusted_comment();
     if comment != required_trusted_comment(version) {
@@ -919,9 +931,52 @@ fn verify_sums(pubkey: &str, version: &str, sums: &[u8], signature: &[u8]) -> an
     Ok(())
 }
 
-/// The refusal for a `SHA256SUMS` that does not verify against the key this
-/// binary carries. See [`verify_sums`] for why the three distinguishable
-/// causes deliberately produce one message.
+/// Verify a release's signed `SHA256SUMS` and return its entries, file name
+/// to lowercase hex SHA-256: the one entry point outside this module, used by
+/// the desktop app's updater before it runs a release's installer.
+///
+/// `version` is the release's version without the tag's `v` (`0.22.0`); the
+/// signature's trusted comment must be exactly `farhelm v{version}`. `ring`
+/// is [`RELEASE_KEY_RING`] in production and a throwaway key in tests, as for
+/// the helm's own downloads. The rules are [`verify_sums`]'s, unchanged, then
+/// the body must be `sha256sum` output; any failure is an error and nothing
+/// is returned, so a caller cannot use entries from a file that did not
+/// verify.
+pub fn verify_signed_sums(
+    ring: &[&str],
+    version: &str,
+    sums: &[u8],
+    signature: &[u8],
+) -> anyhow::Result<BTreeMap<String, String>> {
+    verified_entries(ring, version, sums, signature, || {
+        anyhow!("refusing v{version}: its signed SHA256SUMS is not in sha256sum format")
+    })
+}
+
+/// [`verify_sums`], then the body parsed as `sha256sum` output, or
+/// `malformed()` when it is not: the one composition behind both the helm's
+/// own downloads ([`ReleasePayloadSource::fetch_sums`]) and
+/// [`verify_signed_sums`], so the two cannot come to apply different rules.
+/// Only the wording of the malformed-body refusal is the caller's.
+fn verified_entries(
+    ring: &[&str],
+    version: &str,
+    sums: &[u8],
+    signature: &[u8],
+    malformed: impl FnOnce() -> anyhow::Error,
+) -> anyhow::Result<BTreeMap<String, String>> {
+    verify_sums(ring, version, sums, signature)?;
+    std::str::from_utf8(sums)
+        .ok()
+        .and_then(parse_sums)
+        .ok_or_else(malformed)
+}
+
+/// The refusal for a `SHA256SUMS` that does not verify against any key this
+/// binary carries. Its wording predates the ring and is kept as it was:
+/// "the built-in key" reads as the ring's collective trust anchor. See
+/// [`verify_sums`] for why the distinguishable causes deliberately produce
+/// one message.
 fn signature_refusal(version: &str) -> anyhow::Error {
     anyhow!(
         "refusing v{version} assets: SHA256SUMS.minisig does not verify with farhelm's built-in \
@@ -1278,7 +1333,7 @@ fn publish_controls(cache_dir: &Path, sums: &[u8], signature: &[u8]) -> anyhow::
 /// Both files are read through [`read_capped`], so a restored or corrupted
 /// cache cannot make this allocate more than the network path would have
 /// accepted in the first place. Synchronous; callers use `spawn_blocking`.
-fn cached_sums_verify(cache_dir: &Path, pubkey: &str, version: &str) -> bool {
+fn cached_sums_verify(cache_dir: &Path, ring: &[&str], version: &str) -> bool {
     let limit = u64::try_from(SUMS_MAX_BYTES).expect("64 KiB fits in u64");
     let Some(sums) = read_capped(&cache_dir.join("SHA256SUMS"), limit) else {
         return false;
@@ -1286,7 +1341,7 @@ fn cached_sums_verify(cache_dir: &Path, pubkey: &str, version: &str) -> bool {
     let Some(signature) = read_capped(&cache_dir.join("SHA256SUMS.minisig"), limit) else {
         return false;
     };
-    verify_sums(pubkey, version, &sums, &signature).is_ok()
+    verify_sums(ring, version, &sums, &signature).is_ok()
 }
 
 /// Whether `<asset>.bin` in `cache_dir` is a regular file whose SHA-256
@@ -1385,10 +1440,10 @@ pub(super) mod test_support {
     /// committed `.pub` file rather than pasted here, so regenerating the
     /// fixture key pair needs no code change.
     ///
-    /// This is emphatically NOT [`MINISIGN_PUBKEY`]: the production key's
-    /// secret half exists only as a repository secret, so a test that used
-    /// it could not sign anything and would have to stub out the one check
-    /// this whole module exists to perform.
+    /// This is emphatically NOT a [`RELEASE_KEY_RING`] key: a production
+    /// key's secret half is held outside this repository, so a test that
+    /// used it could not sign anything and would have to stub out the one
+    /// check this whole module exists to perform.
     pub(in crate::provisioning) fn test_pubkey() -> &'static str {
         const KEY_FILE: &str = include_str!("../../tests/fixtures/release/test-key.pub");
         KEY_FILE
@@ -1396,6 +1451,14 @@ pub(super) mod test_support {
             .nth(1)
             .expect("a minisign public key file is a comment line then the key line")
             .trim()
+    }
+
+    /// A ring of just the fixture key, the ring every test source verifies
+    /// with. Built once per process into a static because a source holds its
+    /// ring for `'static`, as production holds [`RELEASE_KEY_RING`].
+    pub(in crate::provisioning) fn test_ring() -> &'static [&'static str] {
+        static RING: std::sync::OnceLock<[&'static str; 1]> = std::sync::OnceLock::new();
+        RING.get_or_init(|| [test_pubkey()])
     }
 
     pub(in crate::provisioning) fn fixture_bytes(relative: &str) -> Vec<u8> {
@@ -1534,7 +1597,7 @@ pub(super) mod test_support {
                 self.base_url.clone(),
                 cache_root.to_path_buf(),
                 FIXTURE_VERSION,
-                test_pubkey(),
+                test_ring(),
                 test_client(),
             )
         }
@@ -1757,7 +1820,7 @@ mod tests {
             Url::parse("http://127.0.0.1:9/").unwrap(),
             cache_root.to_path_buf(),
             FIXTURE_VERSION,
-            test_pubkey(),
+            test_ring(),
             transport,
         );
         (source, attempts)
@@ -1824,7 +1887,7 @@ mod tests {
     fn the_committed_fixture_release_is_internally_consistent() {
         let sums_bytes = fixture_bytes("SHA256SUMS");
         verify_sums(
-            test_pubkey(),
+            test_ring(),
             FIXTURE_VERSION,
             &sums_bytes,
             &fixture_bytes("SHA256SUMS.minisig"),
@@ -2133,7 +2196,7 @@ mod tests {
             base_url.clone(),
             cache.path().to_path_buf(),
             FIXTURE_VERSION,
-            test_pubkey(),
+            test_ring(),
             test_client(),
         );
 
@@ -3112,30 +3175,108 @@ mod tests {
         }
     }
 
-    /// Spec: the key compiled into shipped binaries equals the committed
-    /// production public key file.
+    /// Spec: the key ring compiled into shipped binaries holds exactly the
+    /// keys of the committed `.pub` files beside this module, no more and no
+    /// fewer, each as that file's verbatim key line, and every entry decodes
+    /// as a minisign key.
     ///
-    /// The real oracle for `MINISIGN_PUBKEY`. A decodability check alone is
+    /// The real oracle for `RELEASE_KEY_RING`. A decodability check alone is
     /// nearly worthless here — most single-character substitutions still
     /// parse as a valid minisign key — and every behavioural test in this
-    /// file injects the fixture key instead, so a mistyped constant would
+    /// file injects the fixture key instead, so a mistyped entry would
     /// otherwise surface only on a real "add host" against a real release.
-    /// The maintainer cross-checks the same line against the key held as
-    /// `MINISIGN_SECRET_KEY`.
+    /// Both directions matter: a key file with no ring entry is a key the
+    /// maintainer believes clients trust and they do not, and a ring entry
+    /// with no file is a key nobody can cross-check. The files are found by
+    /// listing the directory, not named here, so a new key's file cannot be
+    /// forgotten by this test.
     #[farhelm_testtrace::test]
-    fn the_built_in_public_key_matches_the_committed_release_key_file() {
-        const KEY_FILE: &str = include_str!("farhelm-release.pub");
+    fn the_built_in_key_ring_matches_the_committed_key_files() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provisioning");
+        let mut from_files: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "pub"))
+            .map(|path| {
+                std::fs::read_to_string(&path)
+                    .unwrap()
+                    .lines()
+                    .nth(1)
+                    .unwrap_or_else(|| {
+                        panic!("{}: a comment line then the key line", path.display())
+                    })
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        from_files.sort();
+        let mut ring: Vec<String> = RELEASE_KEY_RING.iter().map(|key| key.to_string()).collect();
+        ring.sort();
+        assert!(!ring.is_empty(), "a ring with no key verifies nothing");
         assert_eq!(
-            KEY_FILE
-                .lines()
-                .nth(1)
-                .expect("a minisign public key file is a comment line then the key line")
-                .trim(),
-            MINISIGN_PUBKEY
+            ring, from_files,
+            "the ring and the committed .pub files must agree"
+        );
+        for key in RELEASE_KEY_RING {
+            assert!(
+                minisign_verify::PublicKey::from_base64(key).is_ok(),
+                "{key} must decode as a minisign key"
+            );
+        }
+    }
+
+    /// Spec: a ring of several keys accepts a signature by any one of them
+    /// and refuses one by a key outside it, and the trusted-comment version
+    /// rule still holds whichever key signed: the fixture release verifies
+    /// under the production ring plus the fixture key, with the fixture key
+    /// second, and is refused by the production ring alone; the
+    /// other-version fixture, signed by the fixture key, is refused for its
+    /// version under the same two-key ring. The public entry point applies
+    /// the same rules and returns the manifest's entries.
+    ///
+    /// Why: the ring is what lets a lost or compromised key be retired
+    /// without stranding installed clients, and it must not loosen anything
+    /// else. A ring that checked only its first key would make the backup
+    /// key useless exactly when it is needed; one that skipped the version
+    /// check for a non-first key would reopen the downgrade replay the
+    /// trusted comment closes.
+    #[farhelm_testtrace::test]
+    fn a_multi_key_ring_accepts_any_member_and_nothing_else() {
+        let ring = [RELEASE_KEY_RING[0], test_pubkey()];
+        let sums = fixture_bytes("SHA256SUMS");
+        let signature = fixture_bytes("SHA256SUMS.minisig");
+        verify_sums(&ring, FIXTURE_VERSION, &sums, &signature)
+            .expect("a signature by the ring's second key verifies");
+        // And by its first: neither position is special.
+        verify_sums(
+            &[test_pubkey(), RELEASE_KEY_RING[0]],
+            FIXTURE_VERSION,
+            &sums,
+            &signature,
+        )
+        .expect("a signature by the ring's first key verifies");
+        let error = verify_sums(RELEASE_KEY_RING, FIXTURE_VERSION, &sums, &signature)
+            .expect_err("a key outside the ring is refused");
+        assert!(
+            format!("{error:#}").contains("does not verify with farhelm's built-in key"),
+            "{error:#}"
+        );
+
+        let other = fixture_bytes("variants/other-version/SHA256SUMS");
+        let other_signature = fixture_bytes("variants/other-version/SHA256SUMS.minisig");
+        let error = verify_sums(&ring, FIXTURE_VERSION, &other, &other_signature)
+            .expect_err("the version rule holds for every key in the ring");
+        assert!(format!("{error:#}").contains("was signed for"), "{error:#}");
+
+        let entries = verify_signed_sums(&ring, FIXTURE_VERSION, &sums, &signature)
+            .expect("the public entry point verifies the same release");
+        assert_eq!(
+            entries,
+            parse_sums(std::str::from_utf8(&sums).unwrap()).unwrap()
         );
         assert!(
-            minisign_verify::PublicKey::from_base64(MINISIGN_PUBKEY).is_ok(),
-            "the constant must also decode as a minisign key"
+            verify_signed_sums(RELEASE_KEY_RING, FIXTURE_VERSION, &sums, &signature).is_err(),
+            "the public entry point refuses what verify_sums refuses"
         );
     }
 
