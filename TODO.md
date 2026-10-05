@@ -65,7 +65,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Restart and Restart with are greyed out, and their hover text says no conversation was captured, so replace starts it
   over. That reads as final and in Farhelm's own terms. Say instead what the user is waiting for with this agent, per
   harness (for example, if Codex reports its conversation only after its first turn, say so), and that Restart will
-  resume once that happens; keep the final wording for the cases where it never will.
+  resume once that happens; keep the final wording for the cases where it never will. Plan:
+  `plans/queue/restart-wait-hints.md`.
 
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
@@ -87,7 +88,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Refuse symlinked program directories during remote uninstall.** If a remote host's `~/.local/lib/farhelm` is a
   symlink, uninstall currently removes the link, reports success and forgets the host, while the target directory and
   Farhelm binary remain. Refuse that layout before changing the host, with a message naming the symlink target; keep the
-  host listed and its data untouched. Follow-up to the remote uninstall change in PRs #1565 and #1568.
+  host listed and its data untouched. Follow-up to the remote uninstall change in PRs #1565 and #1568. Plan:
+  `plans/queue/uninstall-symlinked-lib.md`.
 
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
