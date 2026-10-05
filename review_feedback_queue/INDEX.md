@@ -15,7 +15,6 @@ One line per open item. This file must always match the feedback files in this d
 - `yolo-restart-cancel.md` — Restart with accepts a cancelled YOLO answer.
 - `installer-symlink.md` — App updates can overwrite files outside a symlinked bundle directory.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
-- `recorder-frames-owner.md` — Starting video recording can erase an unrelated sibling directory.
 - `recorder-stills-owner.md` — Finishing a video can erase unrelated files in its stills directory.
 - `publisher-main-pin.md` — Publishing from an older checkout may stop retaining main’s pinned images.
 - `feedback-queued-close.md` — A queued close can discard feedback while sending starts.

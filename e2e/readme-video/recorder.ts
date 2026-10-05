@@ -36,11 +36,15 @@
  */
 import type { Page } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export interface RecorderOptions {
-  /** The MP4 to write. Its directory also receives `<name>.marks.json` and `<name>-stills/`. */
+  /**
+   * The MP4 to write. Its directory also receives `<name>.marks.json` and
+   * `<name>-stills/`, and, while recording, a hidden scratch directory of
+   * the recorder's own making (see `Recorder`'s `frameDir`).
+   */
   output: string;
   /** Output frame rate. Frames arriving faster than this collapse into the latest one per slot. */
   fps?: number;
@@ -115,6 +119,17 @@ function jpegSize(data: Buffer): { width: number; height: number } | null {
  * picture from inside it, or start the resumed stretch on one from before.
  */
 export class Recorder {
+  /**
+   * Scratch for the raw frames, made fresh for this recording by `start`;
+   * of the directories beside the output, the only one the recorder removes
+   * without checking what is in it. Its name is chosen by `mkdtemp` rather
+   * than derived from the output path, because a derived name could be a
+   * directory the maintainer already had there, and removing it would delete
+   * their files. It sits beside the output rather than under the system
+   * temporary directory, which may be a small memory-backed filesystem, and
+   * a long recording's frames are large. Its name is not hidden, so one left
+   * by a run killed outright is easy to spot.
+   */
   private readonly frameDir: string;
   private readonly entries: Entry[] = [];
   private readonly marks: Array<{ label: string; at: number }> = [];
@@ -133,8 +148,12 @@ export class Recorder {
   private written = 0;
   private stopped = false;
 
-  private constructor(private readonly page: Page, private readonly options: Required<RecorderOptions>) {
-    this.frameDir = `${options.output}.frames`;
+  private constructor(
+    private readonly page: Page,
+    private readonly options: Required<RecorderOptions>,
+    frameDir: string,
+  ) {
+    this.frameDir = frameDir;
     this.slot = 1 / options.fps;
   }
 
@@ -152,45 +171,47 @@ export class Recorder {
     if (typeof (page as any).screencast?.start !== "function") {
       throw new Error("page.screencast is missing: the recorder needs Playwright 1.59 or newer (e2e/package-lock.json pins it)");
     }
-    const recorder = new Recorder(page, { fps: 30, quality: 92, crf: 18, ...options });
-    rmSync(recorder.frameDir, { recursive: true, force: true });
-    mkdirSync(recorder.frameDir, { recursive: true });
+    const settings = { fps: 30, quality: 92, crf: 18, ...options };
+    const outputDir = path.dirname(settings.output);
+    mkdirSync(outputDir, { recursive: true });
+    const frameDir = mkdtempSync(path.join(outputDir, `${path.basename(settings.output)}.frames-`));
+    const recorder = new Recorder(page, settings, frameDir);
     let first: () => void = () => {};
     const firstFrame = new Promise<void>((resolve) => (first = resolve));
     const viewport = page.viewportSize();
     recorder.expected = viewport;
-    await page.screencast.start({
-      quality: recorder.options.quality,
-      ...(viewport ? { size: viewport } : {}),
-      onFrame: ({ data, timestamp }) => {
-        if (recorder.origin === 0) {
-          recorder.origin = timestamp;
-          first();
-        }
-        recorder.frame(data, timestamp);
-      },
-    });
-    // A page that is completely still may not repaint on its own; a no-op
-    // style flip on the root forces the one paint the screencast needs.
-    await page.evaluate(() => {
-      document.documentElement.style.outline = "0 solid transparent";
-      requestAnimationFrame(() => document.documentElement.style.removeProperty("outline"));
-    });
     let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`the screencast delivered no frame within ${FIRST_FRAME_TIMEOUT_MS} ms`)),
-        FIRST_FRAME_TIMEOUT_MS,
-      );
-    });
     try {
+      await page.screencast.start({
+        quality: recorder.options.quality,
+        ...(viewport ? { size: viewport } : {}),
+        onFrame: ({ data, timestamp }) => {
+          if (recorder.origin === 0) {
+            recorder.origin = timestamp;
+            first();
+          }
+          recorder.frame(data, timestamp);
+        },
+      });
+      // A page that is completely still may not repaint on its own; a no-op
+      // style flip on the root forces the one paint the screencast needs.
+      await page.evaluate(() => {
+        document.documentElement.style.outline = "0 solid transparent";
+        requestAnimationFrame(() => document.documentElement.style.removeProperty("outline"));
+      });
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`the screencast delivered no frame within ${FIRST_FRAME_TIMEOUT_MS} ms`)),
+          FIRST_FRAME_TIMEOUT_MS,
+        );
+      });
       await Promise.race([firstFrame, timeout]);
       if (recorder.failure) throw new Error(recorder.failure);
     } catch (error) {
-      // Leave nothing running or on disk behind a recording that never started.
-      recorder.stopped = true;
-      await page.screencast.stop().catch(() => {});
-      rmSync(recorder.frameDir, { recursive: true, force: true });
+      // Leave nothing running or on disk behind a recording that never
+      // started. Every failure after the scratch directory exists lands
+      // here: each run makes a new one, so a leaked one would pile up.
+      await recorder.discard();
       throw error;
     } finally {
       clearTimeout(timer);
@@ -298,11 +319,51 @@ export class Recorder {
 
   /**
    * Stop the screencast, encode the MP4, extract a still per mark, and
-   * remove the scratch frames. Returns the marks with their still paths.
+   * remove the scratch frames, whether or not the rest succeeded: a failed
+   * recording cannot be encoded again, and each run makes a new scratch
+   * directory, so one left behind would only pile up. Returns the marks
+   * with their still paths.
    */
   async finish(): Promise<Mark[]> {
     const end = this.outputTime(this.pausedAt ?? Date.now());
     this.stopped = true;
+    try {
+      return await this.encode(end);
+    } finally {
+      this.removeScratch();
+    }
+  }
+
+  /**
+   * Abandon the recording: stop the screencast and remove the frame scratch,
+   * encoding nothing. Safe to call more than once and after {@link finish},
+   * which is what lets a caller run it unconditionally from teardown: a beat
+   * that fails between `start` and `finish` would otherwise leave the
+   * scratch behind, and since every run makes a new directory, nothing
+   * would ever remove it.
+   */
+  async discard(): Promise<void> {
+    if (!this.stopped) {
+      this.stopped = true;
+      await this.page.screencast.stop().catch(() => {});
+    }
+    this.removeScratch();
+  }
+
+  /**
+   * Remove the frame scratch, warning rather than throwing if that fails,
+   * so a cleanup problem never replaces the error a caller is reporting.
+   */
+  private removeScratch(): void {
+    try {
+      rmSync(this.frameDir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`could not remove the recorder's frame scratch ${this.frameDir}: ${error}`);
+    }
+  }
+
+  /** {@link finish}'s work once the timeline has ended at `end` seconds. */
+  private async encode(end: number): Promise<Mark[]> {
     await this.page.screencast.stop();
     if (this.failure) throw new Error(this.failure);
     if (this.entries.length === 0) throw new Error("the recording captured no frames");
@@ -351,7 +412,6 @@ export class Recorder {
       marks.push({ label: mark.label, at: Number(mark.at.toFixed(3)), still: path.relative(path.dirname(output), still) });
     }
     writeFileSync(`${base}.marks.json`, `${JSON.stringify({ duration: Number(end.toFixed(3)), marks }, null, 2)}\n`);
-    rmSync(this.frameDir, { recursive: true, force: true });
     return marks;
   }
 }

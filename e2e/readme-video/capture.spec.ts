@@ -53,6 +53,14 @@ async function expectTerminalFocused(page: Page) {
   ).toBe(true);
 }
 
+// The running recording, so teardown can discard it when a beat fails before
+// `finish`; see `Recorder.discard`.
+let recorder: Recorder | undefined;
+test.afterEach(async () => {
+  await recorder?.discard();
+  recorder = undefined;
+});
+
 test("record the README demo video", async ({ page, request }) => {
   const scenario = loadScenario(VIDEO_DIR);
   const info = readStackInfo(VIDEO_STACK_INFO_PATH);
@@ -71,7 +79,7 @@ test("record the README demo video", async ({ page, request }) => {
   // The title card goes up before recording starts, so the first frame of
   // the video is the card rather than a flash of the bare app.
   const title = await director.card("farhelm", "Every coding agent, on every machine, in one place.");
-  const recorder = await Recorder.start(page, { output });
+  recorder = await Recorder.start(page, { output });
 
   // Beat 1: title card.
   await director.hold(1_500);
