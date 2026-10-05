@@ -799,9 +799,14 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
             const active = document.activeElement;
             if (active && active !== document.body &&
                 !active.closest('.session-row-menu-flyout, .host-row-menu-panel, .help-menu-panel')) return;
+            // Several elements can carry the same marker (the help menu's
+            // toggle wrapper and its flyout, which is the bar's sibling), so
+            // keep looking until one actually holds the toggle.
             for (const row of document.querySelectorAll(`[${{attrName}}]`)) {{
-                if (row.getAttribute(attrName) === wanted) {{
-                    row.querySelector(toggleSelector)?.focus({{ preventScroll: true }});
+                if (row.getAttribute(attrName) !== wanted) continue;
+                const toggle = row.querySelector(toggleSelector);
+                if (toggle) {{
+                    toggle.focus({{ preventScroll: true }});
                     return;
                 }}
             }}
@@ -814,7 +819,7 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
 /// Class of the hidden buttons [`install_row_menu_outside_dismiss`] clicks to
 /// close a row menu. `ListView` renders one per row menu identity it may have
 /// to dismiss and owns what each does, since `ListView` owns both row menus'
-/// open state; `app_bar::HelpMenu` renders its own for the help menu, whose
+/// open state; `app_bar::BarWithHelpMenu` renders its own for the help menu, whose
 /// open state is local. See [`row_menu_relay_key`] for the identity each one
 /// carries.
 pub(crate) const ROW_MENU_OUTSIDE_RELAY: &str = "row-menu-outside-relay";
@@ -831,7 +836,7 @@ pub(crate) fn row_menu_relay_key(kind: &str, id: &str) -> String {
 }
 
 /// Close the open session or host row menu, or the sidebar bar's help menu
-/// (`app_bar::HelpMenu`, which reuses this machinery and renders its own
+/// (`app_bar::BarWithHelpMenu`, which reuses this machinery and renders its own
 /// relay), when a pointer goes down anywhere outside it, the way Escape
 /// does, so a menu no longer stays open until its own `⋯` is clicked again. Idempotent: the listener is
 /// installed once per page, however many times this runs.

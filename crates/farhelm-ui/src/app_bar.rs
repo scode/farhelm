@@ -123,9 +123,23 @@ fn open_documentation() {
     ));
 }
 
-/// The sidebar bar's help menu: a `?` toggle to the right of the settings
-/// gear, opening a small menu with Send feedback and Documentation
-/// (SPEC.md "Feedback").
+/// The sticky sidebar bar itself, ending in the help menu: a `?` toggle to
+/// the right of the settings gear, opening a small menu with Send feedback
+/// and Documentation (SPEC.md "Feedback"). `children` are the bar's other
+/// contents, rendered before the toggle.
+///
+/// This component renders the bar, rather than sitting inside it, because
+/// the menu's flyout must NOT be inside the bar. The bar is sticky, so it
+/// is a stacking context, and it lives inside `.app-sidebar`, the scroll
+/// container. WebKit clips a fixed-position element to an overflow ancestor
+/// whenever the element's stacking context sits inside that ancestor (WebKit
+/// bug 160953), so a flyout inside the bar was painted only up to the
+/// sidebar's right edge: in the macOS app the menu showed as its pointer and
+/// a few pixels, while layout, visibility and hit testing all stayed correct.
+/// The flyout is therefore the bar's next sibling, where, like the row
+/// menus' flyouts, no ancestor below the root forms a stacking context.
+/// Keeping the toggle and the flyout in one component keeps their open
+/// state local.
 ///
 /// It reuses the row menus' machinery (`menu_panel`) so it behaves like
 /// them: arrow keys, Home/End, Escape and Tab inside the menu, focus back on
@@ -133,13 +147,20 @@ fn open_documentation() {
 /// shared outside-pointer dismissal, which reaches this menu through its own
 /// relay button keyed `help:bar`. Its elements carry the host row menu's
 /// panel and item classes for the shared look, plus `help-menu-*` classes of
-/// their own, which is what the dismissal and focus helpers look for.
+/// their own, which is what the dismissal and focus helpers look for. Both
+/// the toggle's wrapper and the flyout carry `data-help-menu="bar"`: the
+/// dismissal derives the relay key from whichever encloses the open panel,
+/// and the focus helper finds the toggle under the one that holds it.
 ///
 /// Its open state is local: unlike the row menus, nothing else on the page
 /// needs to know or close it, beyond what the outside-pointer dismissal
 /// already does.
 #[component]
-fn HelpMenu(layout_epoch: ReadSignal<u64>, on_send_feedback: EventHandler<()>) -> Element {
+fn BarWithHelpMenu(
+    layout_epoch: ReadSignal<u64>,
+    on_send_feedback: EventHandler<()>,
+    children: Element,
+) -> Element {
     let mut open = use_signal(|| false);
     // The layout epoch the open menu was measured under. Its coordinates
     // are a snapshot, so a later resize or scroll closes the menu, as it
@@ -235,86 +256,90 @@ fn HelpMenu(layout_epoch: ReadSignal<u64>, on_send_feedback: EventHandler<()>) -
     };
 
     rsx! {
-        span { class: "app-help-menu", "data-help-menu": "bar",
-            button {
-                r#type: "button",
-                class: "btn btn-neutral app-help-toggle",
-                aria_label: "help",
-                "data-tooltip": "help: send feedback or open the documentation",
-                aria_haspopup: "menu",
-                aria_expanded: open(),
-                onkeydown: move |evt| {
-                    if !open() {
-                        let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+        div { class: "app-bar",
+            {children}
+            span { class: "app-help-menu", "data-help-menu": "bar",
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral app-help-toggle",
+                    aria_label: "help",
+                    "data-tooltip": "help: send feedback or open the documentation",
+                    aria_haspopup: "menu",
+                    aria_expanded: open(),
+                    onkeydown: move |evt| {
+                        if !open() {
+                            let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+                                return;
+                            };
+                            evt.prevent_default();
+                            begin_open(intent);
                             return;
-                        };
-                        evt.prevent_default();
-                        begin_open(intent);
-                        return;
-                    }
-                    handle_menu_key(&evt, None, wiring, &());
-                },
-                onfocusin: move |_| forget_menu_focus(wiring),
-                onmounted: move |element| {
-                    toggle_handle.set(Some(element.data()));
-                    if should_measure_on_mount(open(), *placement.peek()) {
-                        spawn_measurement();
-                    }
-                },
-                onclick: move |_| {
-                    if open() {
-                        open.set(false);
-                    } else {
-                        begin_open(MenuOpenIntent::First);
-                    }
-                },
-                crate::icons::HelpIcon {}
+                        }
+                        handle_menu_key(&evt, None, wiring, &());
+                    },
+                    onfocusin: move |_| forget_menu_focus(wiring),
+                    onmounted: move |element| {
+                        toggle_handle.set(Some(element.data()));
+                        if should_measure_on_mount(open(), *placement.peek()) {
+                            spawn_measurement();
+                        }
+                    },
+                    onclick: move |_| {
+                        if open() {
+                            open.set(false);
+                        } else {
+                            begin_open(MenuOpenIntent::First);
+                        }
+                    },
+                    crate::icons::HelpIcon {}
+                }
+                button {
+                    r#type: "button",
+                    class: ROW_MENU_OUTSIDE_RELAY,
+                    "data-row-menu": row_menu_relay_key("help", "bar"),
+                    hidden: true,
+                    tabindex: "-1",
+                    onclick: move |_| open.set(false),
+                }
             }
-            if open() {
-                div {
-                    class: "host-row-menu-flyout help-menu-flyout",
-                    style: session_menu_placement_style(placement()),
-                    if let Some(pointer_style) = session_menu_pointer_style(placement()) {
-                        span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
-                    }
-                    div { class: "host-row-menu-panel help-menu-panel",
-                        div {
-                            class: "host-row-menu-items session-row-menu-items",
-                            role: "menu",
-                            aria_label: "help",
-                            // Rendered from the same list keyboard order is
-                            // built from, so the two cannot drift apart.
-                            for action in HELP_ACTIONS {
-                                button {
-                                    key: "{action.label()}",
-                                    r#type: "button",
-                                    class: "btn session-row-menu-item host-row-menu-item help-menu-item",
-                                    "data-help-action": action.label(),
-                                    "data-tooltip": action.tooltip(),
-                                    role: "menuitem",
-                                    tabindex: if tab_stop == Some(action) { "0" } else { "-1" },
-                                    onmounted: move |element| remember_menu_item(wiring, action, element.data()),
-                                    onfocusin: move |_| menu_focus.set(order.position(action)),
-                                    onfocusout: move |_| menu_focus.set(None),
-                                    onkeydown: move |evt| handle_menu_key(&evt, order.position(action), wiring, &()),
-                                    onclick: move |_| choose(action),
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "{action.label()}" }
-                                        span { class: "session-row-menu-description", "{action.description()}" }
-                                    }
+        }
+        if open() {
+            div {
+                class: "host-row-menu-flyout help-menu-flyout",
+                "data-help-menu": "bar",
+                style: session_menu_placement_style(placement()),
+                if let Some(pointer_style) = session_menu_pointer_style(placement()) {
+                    span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
+                }
+                div { class: "host-row-menu-panel help-menu-panel",
+                    div {
+                        class: "host-row-menu-items session-row-menu-items",
+                        role: "menu",
+                        aria_label: "help",
+                        // Rendered from the same list keyboard order is
+                        // built from, so the two cannot drift apart.
+                        for action in HELP_ACTIONS {
+                            button {
+                                key: "{action.label()}",
+                                r#type: "button",
+                                class: "btn session-row-menu-item host-row-menu-item help-menu-item",
+                                "data-help-action": action.label(),
+                                "data-tooltip": action.tooltip(),
+                                role: "menuitem",
+                                tabindex: if tab_stop == Some(action) { "0" } else { "-1" },
+                                onmounted: move |element| remember_menu_item(wiring, action, element.data()),
+                                onfocusin: move |_| menu_focus.set(order.position(action)),
+                                onfocusout: move |_| menu_focus.set(None),
+                                onkeydown: move |evt| handle_menu_key(&evt, order.position(action), wiring, &()),
+                                onclick: move |_| choose(action),
+                                span { class: "session-row-menu-copy",
+                                    span { class: "session-row-menu-label", "{action.label()}" }
+                                    span { class: "session-row-menu-description", "{action.description()}" }
                                 }
                             }
                         }
                     }
                 }
-            }
-            button {
-                r#type: "button",
-                class: ROW_MENU_OUTSIDE_RELAY,
-                "data-row-menu": row_menu_relay_key("help", "bar"),
-                hidden: true,
-                tabindex: "-1",
-                onclick: move |_| open.set(false),
             }
         }
     }
@@ -374,8 +399,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let sent_version = displayed_version(skew.as_ref()).to_string();
 
     rsx! {
-        div {
-            class: "app-bar",
+        BarWithHelpMenu {
+            layout_epoch,
+            on_send_feedback: move |_| {
+                feedback_notice.set(String::new());
+                feedback_open.set(true);
+            },
             // Trusted, compile-time markup from the repository's own brand
             // file, never peer data, which is what makes inner HTML safe here.
             span { class: "app-wordmark", dangerous_inner_html: WORDMARK_SVG }
@@ -394,13 +423,6 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                 aria_haspopup: "dialog",
                 onclick: move |_| settings_open.set(true),
                 crate::icons::SettingsIcon {}
-            }
-            HelpMenu {
-                layout_epoch,
-                on_send_feedback: move |_| {
-                    feedback_notice.set(String::new());
-                    feedback_open.set(true);
-                },
             }
         }
         if settings_open() {
