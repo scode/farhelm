@@ -456,6 +456,151 @@ test("a permanent setup answer is reversible through settings after the next add
   await expect(page.locator(".add-host-form")).toHaveCount(0);
 });
 
+/**
+ * Record every setup-preference write the page sends. The page saves
+ * preferences from a background writer that nothing on screen waits for, so
+ * a single read of the helm's preferences can come before an unwanted write
+ * lands; watching the writes themselves cannot.
+ */
+function recordSetupPreferenceWrites(page: Page): unknown[] {
+  const writes: unknown[] = [];
+  page.on("request", (candidate) => {
+    if (candidate.method() !== "PUT" || new URL(candidate.url()).pathname !== "/api/preferences") return;
+    const body = candidate.postDataJSON() as Record<string, unknown>;
+    if ("skip_host_setup_confirmation" in body) writes.push(body);
+  });
+  return writes;
+}
+
+/** The settings dialog's "set up new hosts without asking" checkbox, which
+ * reflects this client's own preference at once. */
+async function expectSetupStillAsks(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "settings", exact: true });
+  await expect(
+    settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),
+    "the setup question is still asked",
+  ).not.toBeChecked();
+  await settings.getByRole("button", { name: "close", exact: true }).click();
+}
+
+/**
+ * Cancel and an answer to the add dialog's setup question delivered in one
+ * burst, before the render that removes the question, set nothing up. Why:
+ * either answer installs Farhelm on the remote machine, and "yes, and don't
+ * ask in the future" also turns the setup question off for every later
+ * host. Cancel only told the hosts panel to close the dialog, so the offer
+ * stayed live until the next render and an answer queued behind Cancel still
+ * submitted it; the permanent answer also saved its preference before
+ * anything checked the offer. Specifies, for each answer: no provisioning
+ * request, no host registered, and the preference untouched.
+ */
+test("cancel and a setup answer in one burst add nothing and change no preference", async ({
+  page,
+  request,
+}, testInfo) => {
+  const remote = destination(testInfo, "add-burst");
+  await configureBackend({ targets: { [target(remote)]: {} } });
+  await patchPreferences(request, { skip_host_setup_confirmation: null });
+  const preferenceWrites = recordSetupPreferenceWrites(page);
+  const provisions: string[] = [];
+  page.on("request", (candidate) => {
+    if (candidate.method() === "POST" && new URL(candidate.url()).pathname.endsWith("/provision")) {
+      provisions.push(candidate.url());
+    }
+  });
+  await page.goto("/");
+
+  for (const answer of ["yes", "yes, and don't ask in the future"]) {
+    await probeRemote(page, remote);
+    const form = page.locator(".add-host-form");
+    await expect(form.locator(".provisioning-plan")).toBeVisible();
+    const answerWasLive = await form.evaluate((node, label) => {
+      const buttons = [...node.querySelectorAll<HTMLButtonElement>("button")];
+      const cancel = buttons.find((button) => button.textContent?.trim() === "cancel")!;
+      const yes = buttons.find((button) => button.textContent?.trim() === label)!;
+      cancel.click();
+      const live = yes.isConnected && !yes.disabled;
+      yes.click();
+      return live;
+    }, answer);
+    expect(answerWasLive, `premise: "${answer}" was still live when clicked`).toBe(true);
+    await expect(page.locator(".add-host-form"), "cancel closes the dialog").toHaveCount(0);
+    // The panel's add button is usable again only once nothing holds the
+    // page; an admitted setup would hold it while it posts.
+    await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  }
+  expect(provisions, "no setup request after a cancelled question").toHaveLength(0);
+  expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
+  await expectSetupStillAsks(page);
+  expect(preferenceWrites, "no setup preference was written").toHaveLength(0);
+});
+
+/**
+ * The same burst on a host row's own setup question (a failed setup run
+ * again) leaves the setup preference alone. Why: the row's confirmation
+ * already refused a plan that Cancel had withdrawn, but its permanent answer
+ * saved "set up new hosts without asking" first, turning the question off for
+ * every later host on an answer the user had just cancelled. Specifies: after
+ * Cancel then the permanent answer in one burst, no setup request is sent and
+ * the preference is unchanged; a genuine answer afterwards still runs setup.
+ */
+test("cancel and a permanent answer on a host row's setup question change no preference", async ({
+  page,
+  request,
+}, testInfo) => {
+  const remote = destination(testInfo, "rerun-burst");
+  await configureBackend({
+    targets: {
+      [target(remote)]: {
+        fail_action: "attach-supervisor",
+        message: "supervisor started but attachment failed",
+      },
+    },
+  });
+  await patchPreferences(request, { skip_host_setup_confirmation: null });
+  const preferenceWrites = recordSetupPreferenceWrites(page);
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "failed");
+  // The rerun probes again and, finding nothing, asks before setting up.
+  await configureBackend({ targets: { [target(remote)]: {} } });
+  const provisions: string[] = [];
+  page.on("request", (candidate) => {
+    if (candidate.method() === "POST" && new URL(candidate.url()).pathname.endsWith("/provision")) {
+      provisions.push(candidate.url());
+    }
+  });
+  await page.goto("/");
+  await openHostsPanel(page);
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
+  await row.locator(".provisioning-rerun").click();
+  const question = page.getByRole("dialog", { name: "host setup", exact: true });
+  await expect(question).toBeVisible();
+
+  const answerWasLive = await question.evaluate((node) => {
+    const buttons = [...node.querySelectorAll<HTMLButtonElement>("button")];
+    const cancel = buttons.find((button) => button.textContent?.trim() === "cancel")!;
+    const forever = buttons.find((button) => button.textContent?.trim() === "yes, and don't ask in the future")!;
+    cancel.click();
+    const live = forever.isConnected && !forever.disabled;
+    forever.click();
+    return live;
+  });
+  expect(answerWasLive, "premise: the permanent answer was still live when clicked").toBe(true);
+  await expect(question).toHaveCount(0);
+  expect(provisions, "no setup request after a cancelled question").toHaveLength(0);
+  await expectSetupStillAsks(page);
+  expect(preferenceWrites, "no setup preference was written").toHaveLength(0);
+
+  // Positive control: answering the question for real runs setup.
+  await openHostMenu(row);
+  await row.locator(".provisioning-rerun").click();
+  await expect(question).toBeVisible();
+  await question.getByRole("button", { name: "yes", exact: true }).click();
+  await expect.poll(() => provisions.length).toBe(1);
+});
+
 test("manual discovery preserves the concrete peer-safe reason and never provisions", async ({
   page,
 }, testInfo) => {

@@ -6859,7 +6859,13 @@
   prompts, host removal, the update and uninstall confirmations and the rename dialog all check their question when they
   run. Two prompts have the same bug, both already queued and not yet triaged: `addhost-cancel.md` (a queued answer
   behind Add host's cancel still sets up the host) and `setup-inline-cancel.md` (the permanent setup answer queued
-  behind cancel still turns off future setup questions).
+  behind cancel still turns off future setup questions). Both are fixed at the top of this plan's stack, in jj change
+  `ouloqpns`, bookmark `plan/triage-dialog-cancel-races/06-setup-cancel`, PR https://github.com/scode/farhelm/pull/1663,
+  which removes their queue items; they were never triaged, so they have no entries here. Add host's offer moved onto
+  `ConfirmSlot`. The host row's setup question was not moved: its confirmation already takes the plan it shows, and only
+  the permanent answer's preference write came before that, so the fix moves the write after it. The row's plan state is
+  shared with its update and uninstall confirmations, and putting it on the helper would restructure that panel, which
+  the complexity gate rules out.
 
 ## yolo-launcher-cancel.md
 

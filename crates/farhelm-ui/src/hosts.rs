@@ -70,7 +70,7 @@ use crate::menu_panel::{
     measurement_outcome, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::ops::{OpGuard, OpLock};
+use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, ProvisioningMenuState, ProvisioningPanel,
@@ -3596,6 +3596,59 @@ struct AddBinding {
     destination: String,
 }
 
+/// What confirming the add dialog's setup question may do; see
+/// [`take_add_offer`].
+#[derive(Debug, PartialEq)]
+enum AddConfirm<G> {
+    /// The destination was edited since discovery: the offer is withdrawn
+    /// and the user must probe again.
+    BindingChanged,
+    /// Another operation holds the page: nothing happens. An offer that is
+    /// still open stays up to answer again; this is checked before the
+    /// offer, so an answer queued behind Cancel while the page is busy gets
+    /// this rather than [`AddConfirm::Stale`], to the same effect.
+    Refused,
+    /// The offer this answer was drawn for is gone (cancelled, already
+    /// confirmed, or replaced): nothing may happen, the "don't ask in the
+    /// future" preference included.
+    Stale,
+    /// The offer is taken and the page lock claimed: submit it.
+    Accepted(G),
+}
+
+/// Confirm `planned`, the offer the add dialog's answer was drawn for,
+/// against the destination field as it is now (`current`).
+///
+/// The offer is taken only after the page lock is claimed (`claim`), so a
+/// confirmation refused for a busy page leaves an open question up; a claim
+/// whose offer then turns out to be gone is dropped with this call. Cancel
+/// and Escape empty the offer before telling the panel to close, so an
+/// answer queued behind them in the same event burst gets
+/// [`AddConfirm::Stale`] (or [`AddConfirm::Refused`] while the page is
+/// busy). The caller acts, preference write included, only on
+/// [`AddConfirm::Accepted`].
+fn take_add_offer<G>(
+    slot: &mut ConfirmSlot<AddOffer>,
+    planned: &AddOffer,
+    current: &AddBinding,
+    claim: impl FnOnce() -> Option<G>,
+) -> AddConfirm<G> {
+    if planned.binding != *current {
+        return if slot.take(planned).is_some() {
+            AddConfirm::BindingChanged
+        } else {
+            AddConfirm::Stale
+        };
+    }
+    let Some(claim) = claim() else {
+        return AddConfirm::Refused;
+    };
+    if slot.take(planned).is_none() {
+        return AddConfirm::Stale;
+    }
+    AddConfirm::Accepted(claim)
+}
+
 /// One-use ADD authority paired with the inputs the helm inspected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AddOffer {
@@ -3681,32 +3734,56 @@ fn AddHostForm(
     let mut ssh = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut probing = use_signal(|| false);
-    let mut offer = use_signal(|| None::<AddOffer>);
+    // The setup question for the plan discovery returned: a `ConfirmSlot`
+    // keyed by the offer itself, so a confirmation acts only by taking the
+    // offer its handler was drawn for. Every way of closing the dialog
+    // retires it (and the remembered answer's automatic submit) before
+    // telling the panel, because the panel closing the dialog unmounts this
+    // form only at the next render, and an answer queued behind the close in
+    // the same event burst still runs before that.
+    let mut offer = use_confirm_slot::<AddOffer, ()>();
     let mut auto_submit = use_signal(|| false);
     let page_busy = ops.busy();
     let busy = page_busy || *probing.read();
 
+    // Close the dialog: Cancel (in the form or the setup question) and
+    // Escape. Closing is reconciliation for whatever offer is open, hence
+    // `clear`, not an answer.
+    let mut close = move || {
+        offer.clear();
+        auto_submit.set(false);
+        on_cancel.call(());
+    };
+
     let preference_base = base.clone();
-    let confirm = use_callback(move |_| {
-        let Some(planned) = offer.peek().clone() else {
-            return;
-        };
+    // Confirm `planned`, the offer the answer was drawn for. `skip_future`
+    // is the permanent answer, remembered only once this confirmation has
+    // taken the offer: an answer that finds it gone (cancelled, or already
+    // confirmed) changes no preference.
+    let confirm = use_callback(move |(planned, skip_future): (AddOffer, bool)| {
         let current = AddBinding {
             destination: ssh.peek().clone(),
         };
-        if planned.binding != current {
-            offer.set(None);
-            error.set(Some(
-                "the ssh destination changed after discovery; probe again".to_string(),
-            ));
-            return;
-        }
-        let Some(claim) = ops.claim_guard() else {
-            return;
+        // Taking the offer also means the helm may consume this id before
+        // any later refusal or transport ambiguity reaches the browser, so
+        // it is never presented for a second use.
+        let claim = match take_add_offer(&mut offer, &planned, &current, || ops.claim_guard()) {
+            AddConfirm::Accepted(claim) => claim,
+            AddConfirm::BindingChanged => {
+                error.set(Some(
+                    "the ssh destination changed after discovery; probe again".to_string(),
+                ));
+                return;
+            }
+            AddConfirm::Refused | AddConfirm::Stale => return,
         };
-        // The helm may consume this id before any later refusal or transport
-        // ambiguity reaches the browser. Never present it for a second use.
-        offer.set(None);
+        if skip_future {
+            preferences.0.write().skip_host_setup_confirmation = Some(true);
+            store_preference(
+                &preference_base,
+                PreferenceValue::HostSetupConfirmation(true),
+            );
+        }
         error.set(None);
         on_submit.call(AddSubmission {
             probe_id: planned.probe_id,
@@ -3718,13 +3795,15 @@ fn AddHostForm(
     // produces the one-use authority, and the same binding check protects
     // against the destination changing while that authority is in flight.
     use_effect(move || {
-        if auto_submit() && offer.peek().is_some() {
+        if auto_submit()
+            && let Some(planned) = offer.current_key()
+        {
             auto_submit.set(false);
-            confirm.call(());
+            confirm.call((planned, false));
         }
     });
     use_effect(move || {
-        if offer.read().is_some() && !*auto_submit.peek() {
+        if offer.is_open() && !*auto_submit.peek() {
             settings_dialog::focus_add_cancel();
         }
     });
@@ -3740,7 +3819,7 @@ fn AddHostForm(
                 onmounted: move |_| settings_dialog::install_add_dialog(),
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape && !evt.is_composing() {
-                        on_cancel.call(());
+                        close();
                     }
                 },
         form {
@@ -3751,7 +3830,7 @@ fn AddHostForm(
                 // still stays outside the page lock. This synchronous guard
                 // prevents a second Enter in the same browser task from
                 // retaining two competing one-use plans.
-                if *probing.peek() || offer.peek().is_some() || ops.busy_now() {
+                if *probing.peek() || offer.is_open() || ops.busy_now() {
                     return;
                 }
                 error.set(None);
@@ -3768,7 +3847,7 @@ fn AddHostForm(
                             probe_id,
                             confirmation,
                         }) => {
-                            offer.set(Some(AddOffer { probe_id, confirmation, binding }));
+                            offer.open(AddOffer { probe_id, confirmation, binding }, ());
                             auto_submit.set(
                                 preferences.0.peek().skip_host_setup_confirmation == Some(true),
                             );
@@ -3788,21 +3867,12 @@ fn AddHostForm(
                     probing.set(false);
                 });
             },
-            if let Some(planned) = offer.read().clone() {
+            if let Some(planned) = offer.current_key() {
                 SetupPlanConfirmation {
-                    confirmation: planned.confirmation,
+                    confirmation: planned.confirmation.clone(),
                     busy: page_busy,
-                    on_confirm: move |skip_future| {
-                        if skip_future {
-                            preferences.0.write().skip_host_setup_confirmation = Some(true);
-                            store_preference(
-                                &preference_base,
-                                PreferenceValue::HostSetupConfirmation(true),
-                            );
-                        }
-                        confirm.call(());
-                    },
-                    on_cancel: move |_| on_cancel.call(()),
+                    on_confirm: move |skip_future| confirm.call((planned.clone(), skip_future)),
+                    on_cancel: move |_| close(),
                 }
             } else {
                 label {
@@ -3839,13 +3909,13 @@ fn AddHostForm(
                 }
             }
         }
-                if offer.read().is_none() {
+                if !offer.is_open() {
                     // Never disabled: see this component's doc.
                     button {
                         r#type: "button",
                         class: "btn btn-neutral add-host-cancel",
                         "data-tooltip": "cancel: close without adding a host",
-                        onclick: move |_| on_cancel.call(()),
+                        onclick: move |_| close(),
                         "cancel"
                     }
                 }
@@ -5447,5 +5517,101 @@ mod tests {
         assert_eq!(format_elapsed(3_599), "59:59");
         assert_eq!(format_elapsed(3_600), "1:00:00");
         assert_eq!(format_elapsed(93_784), "26:03:04");
+    }
+
+    /// Spec (`take_add_offer`): confirming the add dialog's setup question
+    /// takes the offer the answer was drawn for, after claiming the page
+    /// lock. Once the offer is gone (as Cancel leaves it) an answer is stale
+    /// and keeps no claim; an answer for a replaced offer is stale; a busy
+    /// page refuses and leaves the question up; an edited destination
+    /// withdraws the offer; a genuine answer is accepted with its claim.
+    ///
+    /// Why: an accepted answer installs Farhelm on the remote machine, and
+    /// its permanent form turns the setup question off for every later
+    /// host. This pins the decision the dialog's confirm makes. That every
+    /// close path empties the offer first, and that the permanent answer is
+    /// saved only after acceptance, live in the dialog's handlers and are
+    /// covered by the provisioning browser spec's burst test.
+    #[farhelm_testtrace::test]
+    fn a_cancelled_add_offer_sets_nothing_up() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<AddOffer>>> = const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<AddOffer, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let binding = AddBinding {
+            destination: "builder@example".to_string(),
+        };
+        let offer = |probe_id: &str| AddOffer {
+            probe_id: probe_id.to_string(),
+            confirmation: "install farhelm".to_string(),
+            binding: binding.clone(),
+        };
+        // A claim that counts how many are still held.
+        let held = Rc::new(Cell::new(0));
+        #[derive(Debug, PartialEq)]
+        struct Claim(Rc<Cell<i32>>);
+        impl Drop for Claim {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() - 1);
+            }
+        }
+        let claim = || {
+            held.set(held.get() + 1);
+            Some(Claim(held.clone()))
+        };
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let mut slot = SLOT.with(Cell::get).expect("the slot mounted");
+
+        dom.in_runtime(|| {
+            // Cancel (which clears the offer), then an answer.
+            slot.open(offer("p1"), ());
+            slot.clear();
+            assert_eq!(
+                take_add_offer(&mut slot, &offer("p1"), &binding, claim),
+                AddConfirm::Stale
+            );
+            assert_eq!(held.get(), 0, "a stale answer keeps no claim");
+
+            // An answer drawn for an offer since replaced.
+            slot.open(offer("p2"), ());
+            assert_eq!(
+                take_add_offer(&mut slot, &offer("p1"), &binding, claim),
+                AddConfirm::Stale
+            );
+            assert!(slot.is_open(), "the newer offer is left alone");
+
+            // A busy page refuses and keeps the question.
+            assert_eq!(
+                take_add_offer(&mut slot, &offer("p2"), &binding, || None::<Claim>),
+                AddConfirm::Refused
+            );
+            assert!(slot.is_open());
+
+            // An edited destination withdraws the offer.
+            let edited = AddBinding {
+                destination: "builder@elsewhere".to_string(),
+            };
+            assert_eq!(
+                take_add_offer(&mut slot, &offer("p2"), &edited, claim),
+                AddConfirm::BindingChanged
+            );
+            assert!(!slot.is_open());
+
+            // A genuine answer.
+            slot.open(offer("p3"), ());
+            let accepted = take_add_offer(&mut slot, &offer("p3"), &binding, claim);
+            assert!(matches!(accepted, AddConfirm::Accepted(_)));
+            assert_eq!(held.get(), 1, "the accepted answer holds its claim");
+            assert!(!slot.is_open());
+        });
     }
 }
