@@ -11,7 +11,8 @@
  * post to the internet; the helm's own forwarding is covered by its Rust
  * tests against a stand-in server instead.
  */
-import { Page, Route } from "@playwright/test";
+import { Locator, Page, Route } from "@playwright/test";
+import { openHostMenu, openRowMenu } from "./helpers/fleet";
 import { expect, test } from "./helpers/evidence";
 
 const DOCS_URL = "https://farhelm.io/docs/";
@@ -103,6 +104,103 @@ test("the help menu sits right of the gear and follows the menu conventions", as
   await page.setViewportSize({ width: size.width, height: size.height - 60 });
   await expect(menu).toHaveCount(0);
   await page.setViewportSize(size);
+});
+
+/**
+ * Why the stacking-context check: the sidebar's menus open beside it, over
+ * the session pane, as fixed-position flyouts that live inside the sidebar's
+ * scroll container. Fixed positioning lets a flyout escape that container's
+ * clip in every engine as long as no ancestor between the flyout and the
+ * root forms a stacking context inside the container. Once one does, WebKit
+ * clips the fixed flyout to the container anyway (WebKit bug 160953). That
+ * is the bug 0.22.0-rc.5's macOS app shipped: the help menu's flyout sat
+ * inside the sticky (hence stacking-context) sidebar bar, and only its
+ * pointer and a few pixels of the panel showed. Layout, visibility and hit
+ * testing stayed correct, and the WebKit Playwright runs on Linux painted it
+ * fine, so neither the menu tests above nor a screenshot caught it. This
+ * check asserts the structure the fix depends on instead, for every sidebar
+ * menu flyout: no ancestor that forms a stacking context either clips
+ * itself (the literal shape of WebKit's bug report, an `overflow` element
+ * with a `z-index`) or sits inside an ancestor that does. Each offender is
+ * reported as the stacking context and the clipping element it found.
+ */
+async function stackingContextsInsideScrollers(flyout: Locator): Promise<string[]> {
+  return flyout.evaluate((el) => {
+    const createsStackingContext = (node: Element): boolean => {
+      const style = getComputedStyle(node);
+      const parentDisplay = node.parentElement ? getComputedStyle(node.parentElement).display : "";
+      const flexOrGridItem = /flex|grid/.test(parentDisplay);
+      return (
+        style.position === "fixed" ||
+        style.position === "sticky" ||
+        (style.zIndex !== "auto" && (style.position !== "static" || flexOrGridItem)) ||
+        parseFloat(style.opacity) < 1 ||
+        style.transform !== "none" ||
+        style.filter !== "none" ||
+        style.isolation === "isolate" ||
+        style.mixBlendMode !== "normal" ||
+        /paint|layout|strict|content/.test(style.contain) ||
+        /transform|opacity|filter/.test(style.willChange)
+      );
+    };
+    const clips = (node: Element) => getComputedStyle(node).overflow !== "visible";
+    const describe = (node: Element) => node.tagName.toLowerCase() + (node.className ? "." + [...node.classList].join(".") : "");
+    const offenders: string[] = [];
+    for (let node = el.parentElement; node && node !== document.documentElement; node = node.parentElement) {
+      if (!createsStackingContext(node)) continue;
+      // Starts at the stacking context itself: one that also clips is the
+      // bug's own shape, not just one nested in a clipping ancestor.
+      for (let above: Element | null = node; above && above !== document.documentElement; above = above.parentElement) {
+        if (clips(above)) {
+          offenders.push(above === node ? `${describe(node)} clips itself` : `${describe(node)} inside ${describe(above)}`);
+          break;
+        }
+      }
+    }
+    return offenders;
+  });
+}
+
+/**
+ * Every sidebar menu flyout (help, session row, host row) keeps the
+ * structure that lets WebKit paint it beside the sidebar: no stacking
+ * context between it and the root clips or sits inside a clipping
+ * container. See `stackingContextsInsideScrollers` for the bug this guards.
+ *
+ * The help menu is checked twice: in the default layout, where the sidebar
+ * bar is sticky, and in the macOS app's narrow-window layout, where the bar
+ * becomes fixed (`.macos-window` at 661px and below; forced here the way
+ * window-chrome.spec.ts forces it). Each menu is closed, and seen closed,
+ * before the next opens: the help flyout shares the host flyout's class, so
+ * a help menu left open would otherwise be the one the host check reads.
+ */
+test("sidebar menu flyouts sit under no stacking context inside the sidebar", async ({ page }) => {
+  await page.goto("/");
+  const helpFlyout = page.locator(".help-menu-flyout");
+  await openHelpMenu(page);
+  expect(await stackingContextsInsideScrollers(helpFlyout)).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(helpFlyout).toHaveCount(0);
+
+  const sessionRow = page.locator(".session-row").first();
+  await openRowMenu(sessionRow);
+  const sessionFlyout = sessionRow.locator(".session-row-menu-flyout");
+  expect(await stackingContextsInsideScrollers(sessionFlyout)).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(sessionFlyout).toHaveCount(0);
+
+  const hostRow = page.locator(".host-row").first();
+  await openHostMenu(hostRow);
+  const hostFlyout = hostRow.locator(".host-row-menu-flyout");
+  expect(await stackingContextsInsideScrollers(hostFlyout)).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(hostFlyout).toHaveCount(0);
+
+  await page.setViewportSize({ width: 600, height: 700 });
+  await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+  await expect(page.locator(".app-bar")).toHaveCSS("position", "fixed");
+  await openHelpMenu(page);
+  expect(await stackingContextsInsideScrollers(helpFlyout)).toEqual([]);
 });
 
 /**

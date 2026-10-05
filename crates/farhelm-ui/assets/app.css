@@ -734,10 +734,12 @@ samp {
   margin-left: 6px;
   padding: 2px;
 }
-/* The help menu's wrapper holds its toggle, its fixed-position flyout and a
-   hidden relay button. As an inline box it would add a text line's height
-   around the toggle and grow the bar, so it is a flex item sized by the
-   toggle alone. */
+/* The help menu's wrapper holds its toggle and a hidden relay button; its
+   flyout is the bar's next sibling, never inside the bar (see
+   `BarWithHelpMenu` in app_bar.rs: WebKit clips a fixed element whose
+   stacking context, here the sticky bar, sits inside the sidebar's scroller).
+   As an inline box the wrapper would add a text line's height around the
+   toggle and grow the bar, so it is a flex item sized by the toggle alone. */
 .app-bar .app-help-menu {
   display: inline-flex;
   align-items: center;
