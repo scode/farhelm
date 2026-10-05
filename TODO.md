@@ -105,12 +105,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Private dry-run release flow before signing.**
 
-- **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
-  until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
-  inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
-  deployment assumptions, then deploy the website. Test end to end from the macOS app through the helm and live endpoint
-  to a private inbox issue, checking the message, contact and metadata, plus success and failure behavior. Follow-up to
-  PRs #1566, #1567, #1569 and #1570.
+- **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
+  the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
+  the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a
+  new token, set it as `FEEDBACK_GITHUB_TOKEN` in Vercel, and deploy again (`docs/feedback-endpoint.md`). The endpoint
+  allows five requests per IP per 10 minutes, so space test sends out.
 
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
