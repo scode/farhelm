@@ -2573,6 +2573,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         }
     }
 

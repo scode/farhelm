@@ -476,20 +476,26 @@ where
                         // lets the failure arm below still mutate
                         // `attachments` (`.remove`) under the SAME lock
                         // hold — no gap where a takeover could interleave.
-                        // Read confirmed delivery under the same lock as the
-                        // send. Empty frames do not start the diagnostic clock;
-                        // a partial send counts if some bytes reached the pane.
-                        let (send_result, delivered) = match attachments.get_mut(&route.key) {
+                        let send_result = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
-                                let result = a.input.send(&frame.body).await;
-                                (Some(result), a.input.delivered_any_bytes())
+                                Some(a.input.send(&frame.body).await)
                             }
-                            _ => (None, false),
+                            _ => None,
                         };
-                        // Only input delivered to the agent starts its hook
-                        // warning timer. A tab's keystrokes say nothing about
-                        // whether the agent had a prompt it could report.
-                        if delivered && route.key.terminal == TerminalId::Agent {
+                        // Only a submitted line delivered to the agent starts
+                        // its hook warning timer: input containing a carriage
+                        // return. A tab's keystrokes say nothing about whether
+                        // the agent had a prompt it could report, and neither
+                        // do the terminal's automatic replies to the agent
+                        // TUI's own queries, which never carry one (see
+                        // `capture::note_first_input`). The whole frame must
+                        // have been confirmed: the any-bytes latch is already
+                        // true once those replies land, so it cannot say
+                        // whether THIS frame's Enter arrived.
+                        if route.key.terminal == TerminalId::Agent
+                            && matches!(send_result, Some(Ok(())))
+                            && super::capture::submits_a_line(&frame.body)
+                        {
                             note_first_input(entry);
                         }
                         match send_result {
@@ -2128,6 +2134,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             }],
             truncated: false,
         };
@@ -2193,6 +2200,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -2228,6 +2236,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));

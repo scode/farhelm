@@ -219,8 +219,22 @@ impl GrokLocator {
     /// conservative answer: keep the selected UUID, but withdraw Resume.
     /// No error from vendor-owned files is allowed to redirect the locator or
     /// trigger a history search.
-    pub(crate) async fn verify(&mut self) {
-        self.resumable = self.verify_exact_files().await.unwrap_or(false);
+    /// Re-check the exact record pair and set `resumable` from it, returning
+    /// whether the verdict was definitive: `false` when the evidence could not
+    /// be read cleanly (a read error, or a file caught mid-write), which still
+    /// refuses the offer but is not proof the record is gone. The supervisor
+    /// tells the user about a withdrawal only on a definitive verdict.
+    pub(crate) async fn verify(&mut self) -> bool {
+        match self.verify_exact_files().await {
+            Ok(resumable) => {
+                self.resumable = resumable;
+                true
+            }
+            Err(_) => {
+                self.resumable = false;
+                false
+            }
+        }
     }
 
     /// Require the reported update file and its sibling summary to name the

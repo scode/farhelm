@@ -34,14 +34,14 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
         return HookInjection::skipped(
             argv,
             if policy.exe.is_none() {
-                "farhelm executable path is not utf-8"
+                super::EXE_NOT_UTF8_REASON
             } else {
-                "disabled by FARHELM_AGENT_HOOKS"
+                super::HOOKS_DISABLED_REASON
             },
         );
     }
     let Some(exe) = policy.exe else {
-        return HookInjection::skipped(argv, "farhelm executable path is not utf-8");
+        return HookInjection::skipped(argv, super::EXE_NOT_UTF8_REASON);
     };
     if shape.needs_session_subcommand {
         let program = effective_program_index(&argv)
@@ -93,12 +93,12 @@ pub(crate) fn farhelm_args(
     policy: &HookPolicy<'_>,
 ) -> super::FarhelmArgs {
     let Some(exe) = policy.exe else {
-        return super::FarhelmArgs::skipped("farhelm executable path is not utf-8");
+        return super::FarhelmArgs::skipped(super::EXE_NOT_UTF8_REASON);
     };
     let enabled = policy.hooks.allows(farhelm_proto::AgentKind::Goose);
     let resuming = phase == super::LaunchPhase::Resume;
     if !enabled && !resuming {
-        return super::FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+        return super::FarhelmArgs::skipped(super::HOOKS_DISABLED_REASON);
     }
     let args = if enabled && !resuming {
         vec![

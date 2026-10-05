@@ -30,10 +30,11 @@ impl Supervisor {
             return Ok(true);
         };
         let was_resumable = locator.resumable;
-        locator.verify().await;
+        let definitive = locator.verify().await;
         if was_resumable == locator.resumable {
             return Ok(true);
         }
+        let tell_user = was_resumable && !locator.resumable && definitive;
         if was_resumable && !locator.resumable {
             warn!(target: LOG_TARGET,
                 session = %row.id,
@@ -60,6 +61,16 @@ impl Supervisor {
             return Ok(false);
         }
         row.captured_conversation = Some(replacement);
+        if tell_user {
+            // Told to the user once the withdrawal is durable, as Codex's is.
+            self.notify_session(
+                &row.id,
+                row.generation,
+                crate::service::notifications::NotificationKind::ResumeWithdrawn,
+                &crate::service::notifications::resume_withdrawn_text("Grok"),
+            )
+            .await;
+        }
         Ok(true)
     }
 
@@ -77,12 +88,13 @@ impl Supervisor {
         })?;
         let mut locator = crate::agent_kind::grok::GrokLocator::parse(stored)
             .context("decoding the Grok resume locator")?;
-        locator.verify().await;
+        let definitive = locator.verify().await;
         if locator.resume_id().is_some() {
             return Ok(());
         }
         let replacement = locator.encode()?;
-        self.store
+        let withdrawn = self
+            .store
             .replace_reported_conversation_if_current(
                 session_id,
                 snapshot.generation,
@@ -91,6 +103,18 @@ impl Supervisor {
             )
             .await
             .context("invalidating a stale Grok resume locator")?;
+        // The final check before a Restart is a withdrawal like the
+        // background one, and later refreshes see the offer already gone, so
+        // this is the only place the user can be told about it.
+        if withdrawn && definitive {
+            self.notify_session(
+                session_id,
+                snapshot.generation,
+                crate::service::notifications::NotificationKind::ResumeWithdrawn,
+                &crate::service::notifications::resume_withdrawn_text("Grok"),
+            )
+            .await;
+        }
         Err(RequestError::new(
             ErrorKind::Conflict,
             "this session's restart offer changed while the restart was being prepared; its \

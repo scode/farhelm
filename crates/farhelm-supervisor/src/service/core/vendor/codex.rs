@@ -49,9 +49,13 @@ impl Supervisor {
         let was_resumable = locator.resumable;
         let had_thread = locator.thread_id.is_some();
         let verified = locator.verify().await;
-        if was_resumable && !locator.resumable {
+        let withdrawn = was_resumable && !locator.resumable;
+        if withdrawn {
             warn!(target: LOG_TARGET, session = %row.id, "the exact Codex record is unavailable or inconsistent; withdrawing its resume offer");
         }
+        // A read error is not proof the record is gone (it may pass by the
+        // next pass), so only a clean verdict is told to the user.
+        let tell_user = withdrawn && verified.is_ok();
         // Failure leaves the exact path and any established thread binding
         // intact, but verify has already withdrawn readiness.
         drop(verified);
@@ -80,6 +84,19 @@ impl Supervisor {
             return Ok(false);
         }
         row.captured_conversation = Some(replacement);
+        if tell_user {
+            // Told to the user on the session (SPEC.md, Status) only once the
+            // withdrawal is durable: a compare-and-swap lost to a newer report
+            // withdrew nothing. Fenced on this row's generation, so a relaunch
+            // that raced this refresh records nothing.
+            self.notify_session(
+                &row.id,
+                row.generation,
+                crate::service::notifications::NotificationKind::ResumeWithdrawn,
+                &crate::service::notifications::resume_withdrawn_text("Codex"),
+            )
+            .await;
+        }
         Ok(true)
     }
 

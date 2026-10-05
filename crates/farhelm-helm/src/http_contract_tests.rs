@@ -75,6 +75,7 @@ fn session_list_body() -> SessionListBody {
             canonical_path: "/home/user/src/widgets".to_string(),
             origin_session_id: "fh-0123abcd".to_string(),
         }),
+        notifications: Vec::new(),
     };
     SessionListBody {
         sessions: vec![SessionRow {

@@ -108,17 +108,75 @@ impl Supervisor {
             self.sessions.lock().await.values().cloned().collect();
         self.apply_report_files(&entries, wait_for_drain).await;
         refresh_report_only_captures(self, &entries).await;
-        report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, Instant::now());
+        let silent = report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, Instant::now());
+        for entry in silent {
+            self.notify_hook_silent(&entry).await;
+        }
+    }
+
+    /// Turn one tripwire firing into the session's notification (SPEC.md,
+    /// Status). The store records it only while that launch's row still holds
+    /// no captured conversation, checked in the same statement as the insert:
+    /// a report committed between this pass's mirror refresh and the tripwire
+    /// is not in the capture state yet, and a notification, unlike the log
+    /// line, must be true when recorded (the plan's M10).
+    ///
+    /// A launch already told that its OMP reporter does not match is not told
+    /// again that its hook never reported: it is the same cause, and that
+    /// notification already says what the user loses.
+    ///
+    /// An agent whose report is only due after its first reply (Pi, OMP;
+    /// `RestartReadiness::due_by_first_prompt`) is not told at all: a first
+    /// turn can outlast any wait, so the silence proves nothing. The log line
+    /// the tripwire writes stays, as the diagnostic it always was.
+    async fn notify_hook_silent(&self, entry: &SessionEntry) {
+        if !entry
+            .snapshot
+            .kind
+            .restart_readiness()
+            .is_some_and(farhelm_proto::RestartReadiness::due_by_first_prompt)
+        {
+            return;
+        }
+        let id = entry.info.id.as_str();
+        let mismatch = super::notifications::NotificationKind::ReporterMismatch.as_str();
+        match self
+            .store
+            .has_session_notification(id, entry.generation, mismatch)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => return,
+            Err(error) => {
+                warn!(session = %id, error = %format!("{error:#}"),
+                    "could not check a silent hook's other notifications");
+                return;
+            }
+        }
+        self.notify_session(
+            entry.info.id.as_str(),
+            entry.generation,
+            super::notifications::NotificationKind::HookSilent,
+            super::notifications::HOOK_SILENT_TEXT,
+        )
+        .await;
     }
 }
 
-/// Start the launch's diagnostic clock on confirmed input to its agent pane.
+/// Start the launch's diagnostic clock on the first submitted line delivered
+/// to its agent pane.
 ///
 /// A launch can sit idle indefinitely before Codex has a prompt to report, so
-/// launch time is not a useful anchor. Empty frames do not count; a partly
-/// successful send does, since confirmed bytes reached the pane. Terminal replies
-/// can also start this clock, which may cause an early diagnostic but never an
-/// identity change. Nothing is persisted or spawned from the input path.
+/// launch time is not a useful anchor, and neither is any input at all: the
+/// terminal answers the agent TUI's own queries (device attributes, cursor
+/// position, colour queries, focus reports) without the user typing anything,
+/// and a clock started by those used to fire for an agent nobody had prompted.
+/// The caller therefore calls this only for delivered input containing a
+/// carriage return, which none of those replies carries (checked against the
+/// vendored xterm.js: CSI and DCS replies, and OSC answers terminated by ST).
+/// That firing is now a user-facing notification, so it must be true (SPEC.md,
+/// Status). A partly successful send counts, since confirmed bytes reached the
+/// pane. Nothing is persisted or spawned from the input path.
 pub(crate) fn note_first_input(entry: &SessionEntry) {
     entry
         .run
@@ -126,6 +184,51 @@ pub(crate) fn note_first_input(entry: &SessionEntry) {
         .lock()
         .expect("first-input mutex poisoned")
         .get_or_insert_with(Instant::now);
+}
+
+/// Whether one input frame to the agent pane submits a line: whether it holds
+/// an Enter that is not part of something else.
+///
+/// The silent-hook clock starts on the first such frame ([`note_first_input`]),
+/// because an agent has nothing to report before the user submits something,
+/// and its firing is a user-facing notification that must be true (SPEC.md,
+/// Status). A carriage return counts unless it is:
+///
+/// - preceded by ESC: Farhelm's own Shift+Enter (and Alt+Enter) sends `ESC CR`
+///   precisely so the agent inserts a newline instead of submitting
+///   (`shift-enter-key.js`);
+/// - inside a bracketed paste (`ESC [200~` .. `ESC [201~`) in the same frame:
+///   xterm.js turns a pasted newline into a carriage return, and an agent with
+///   bracketed paste enabled keeps the paste in its composer unsubmitted.
+///
+/// The terminal's automatic replies to the agent's own queries carry no
+/// carriage return at all (checked against the vendored xterm.js). Residuals,
+/// accepted: an Enter that answers a dialog (a trust prompt, a picker) counts,
+/// and a paste large enough to be split across frames has its middle frames
+/// judged without their markers.
+pub(crate) fn submits_a_line(frame: &[u8]) -> bool {
+    const PASTE_START: &[u8] = b"\x1b[200~";
+    const PASTE_END: &[u8] = b"\x1b[201~";
+    let mut in_paste = false;
+    let mut index = 0;
+    while index < frame.len() {
+        let rest = &frame[index..];
+        if rest.starts_with(PASTE_START) {
+            in_paste = true;
+            index += PASTE_START.len();
+            continue;
+        }
+        if rest.starts_with(PASTE_END) {
+            in_paste = false;
+            index += PASTE_END.len();
+            continue;
+        }
+        if frame[index] == b'\r' && !in_paste && (index == 0 || frame[index - 1] != 0x1b) {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 /// Publish an identity and immediately hint any changed restart offer.
@@ -230,14 +333,17 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
 /// not published yet can still produce one spurious line; this diagnostic does
 /// not serialize admission merely to make the log tidier. Carried Resume
 /// identities suppress it even when the new launch's hook stays silent.
-/// The count exposes actual emissions to tests without a tracing subscriber.
+/// Returns the entries it warned for, which the capture pass turns into
+/// notifications (this function holds a std mutex and records nothing
+/// itself) and which expose actual emissions to tests without a tracing
+/// subscriber.
 fn report_liveness_tripwire(
     entries: &[Arc<SessionEntry>],
     timeout: Duration,
     now: Instant,
-) -> usize {
+) -> Vec<Arc<SessionEntry>> {
     let ordering = std::sync::atomic::Ordering::Relaxed;
-    let mut warned = 0;
+    let mut warned = Vec::new();
     for entry in entries {
         if !entry.run.hooked.load(ordering) {
             continue;
@@ -263,7 +369,7 @@ fn report_liveness_tripwire(
             first
         };
         if warn_now {
-            warned += 1;
+            warned.push(Arc::clone(entry));
             warn!(session = %entry.info.id,
                 "this session was launched with a conversation hook but holds no conversation identity");
         }
@@ -337,12 +443,14 @@ mod tests {
                     &entries,
                     REPORT_WARNING_AFTER,
                     at + REPORT_WARNING_AFTER - Duration::from_nanos(1)
-                ),
+                )
+                .len(),
                 0,
                 "{kind:?}"
             );
             assert_eq!(
-                report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, at + REPORT_WARNING_AFTER),
+                report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, at + REPORT_WARNING_AFTER)
+                    .len(),
                 1,
                 "{kind:?}"
             );
@@ -351,7 +459,8 @@ mod tests {
                     &entries,
                     REPORT_WARNING_AFTER,
                     at + REPORT_WARNING_AFTER * 2
-                ),
+                )
+                .len(),
                 0,
                 "{kind:?}"
             );
@@ -384,11 +493,263 @@ mod tests {
                 entry(kind, true, None, false),
             ];
             assert_eq!(
-                report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, at + REPORT_WARNING_AFTER),
+                report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, at + REPORT_WARNING_AFTER)
+                    .len(),
                 0,
                 "{kind:?}"
             );
         }
+    }
+
+    /// Seed `id`'s stored row the way a hooked Claude launch leaves it,
+    /// with or without a captured conversation, and publish a matching entry
+    /// whose submitted-line clock started past the tripwire's budget.
+    async fn silent_hook_session(sup: &Supervisor, id: &str, captured: Option<&str>) {
+        silent_hook_session_of(sup, id, captured, AgentKind::Claude).await;
+    }
+
+    /// [`silent_hook_session`] for a launch integrated as `kind`, the part
+    /// the silent-hook rule asks about.
+    async fn silent_hook_session_of(
+        sup: &Supervisor,
+        id: &str,
+        captured: Option<&str>,
+        kind: AgentKind,
+    ) {
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: captured.map(|_| "hook".to_string()),
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    id: id.to_string(),
+                    parent: None,
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "claude".to_string(),
+                        agent_kind: AgentKind::Claude,
+                        resume_template: Some(vec![
+                            "claude".to_string(),
+                            "--resume".to_string(),
+                            "{conversation}".to_string(),
+                        ]),
+                    },
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: crate::store::LastOutcome::Running,
+                    canonical_cwd: None,
+                    captured_conversation: captured.map(str::to_string),
+                    generation: 0,
+                    launch_scoped: false,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session row");
+        let started = Instant::now()
+            .checked_sub(REPORT_WARNING_AFTER + Duration::from_secs(1))
+            .expect("a clock that has run for a minute");
+        let mut published = entry_with(None, crate::store::LastOutcome::Running);
+        published.info.id = id.to_string();
+        published.snapshot = IntegrationSnapshot {
+            kind,
+            resume_template: None,
+        };
+        *published.run.first_input.lock().unwrap() = Some(started);
+        published
+            .run
+            .hooked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::new(published));
+    }
+
+    /// Spec (SPEC.md, Status): a hooked launch that has not reported a
+    /// minute after the first submitted line gets exactly one notification,
+    /// carried on the session's replies; a launch whose identity is already
+    /// in the store gets none.
+    ///
+    /// Why: this is the tripwire turned user-facing, and the two ways it
+    /// could lie are both pinned here. Repeating it every pass would bury
+    /// the session's list in copies; and the in-memory check alone can miss
+    /// a report the store committed a moment ago (the plan's M10), which the
+    /// store re-read is there to catch, so the second session's mirror is
+    /// deliberately left without the identity its row holds.
+    #[farhelm_testtrace::test]
+    async fn a_silent_hook_notifies_once_unless_the_store_holds_an_identity() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        silent_hook_session(&sup, "silent", None).await;
+        silent_hook_session(&sup, "reported", Some("stored-conversation")).await;
+
+        sup.capture_pass(true).await;
+        sup.capture_pass(true).await;
+
+        let silent = sup
+            .store
+            .session_notifications("silent")
+            .await
+            .expect("list");
+        assert_eq!(silent.len(), 1, "one notification per launch: {silent:?}");
+        assert_eq!(
+            silent[0].text,
+            super::super::notifications::HOOK_SILENT_TEXT
+        );
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("silent")
+            .cloned()
+            .expect("entry");
+        let info = super::super::status::entry_info(
+            &entry,
+            &std::collections::HashMap::new(),
+            &Default::default(),
+            None,
+        );
+        assert_eq!(
+            info.notifications, silent,
+            "replies carry the recorded notification"
+        );
+
+        assert!(
+            sup.store
+                .session_notifications("reported")
+                .await
+                .expect("list")
+                .is_empty(),
+            "a stored identity suppresses the notification"
+        );
+    }
+
+    /// Spec (SPEC.md, Status): an agent that reports only after its first
+    /// reply (Pi here; OMP alike) is never told its hook is silent, because a
+    /// first turn can outlast any wait and the notification has to be true.
+    #[farhelm_testtrace::test]
+    async fn a_silent_hook_does_not_notify_for_an_agent_that_reports_after_its_reply() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        silent_hook_session_of(&sup, "pi-turn", None, AgentKind::Pi).await;
+
+        sup.capture_pass(true).await;
+
+        assert!(
+            sup.store
+                .session_notifications("pi-turn")
+                .await
+                .expect("list")
+                .is_empty()
+        );
+    }
+
+    /// Spec: the silent-hook notification is refused when the launch's
+    /// stored row already holds a captured conversation even though the
+    /// in-memory mirror does not yet (the store checks it in the same
+    /// statement as the insert), and when the launch already has a
+    /// reporter-mismatch notification (one cause, one notification).
+    ///
+    /// Why: the capture pass refreshes the mirror before the tripwire, so the
+    /// end-to-end test above never reaches the stale-mirror case; calling the
+    /// recorder directly with a stale mirror is what pins the durable guard.
+    #[farhelm_testtrace::test]
+    async fn a_silent_hook_is_not_recorded_over_a_stored_identity_or_a_reporter_mismatch() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        silent_hook_session(&sup, "stale-mirror", Some("stored-conversation")).await;
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("stale-mirror")
+            .cloned()
+            .expect("entry");
+        assert!(
+            entry
+                .run
+                .capture
+                .lock()
+                .unwrap()
+                .committed_conversation()
+                .is_none(),
+            "premise: the mirror has not caught up with the stored identity"
+        );
+        sup.notify_hook_silent(&entry).await;
+        assert!(
+            sup.store
+                .session_notifications("stale-mirror")
+                .await
+                .expect("list")
+                .is_empty(),
+            "a stored identity refuses the notification"
+        );
+
+        silent_hook_session(&sup, "mismatched", None).await;
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("mismatched")
+            .cloned()
+            .expect("entry");
+        sup.notify_session(
+            "mismatched",
+            entry.generation,
+            super::super::notifications::NotificationKind::ReporterMismatch,
+            "mismatch",
+        )
+        .await;
+        sup.notify_hook_silent(&entry).await;
+        let texts: Vec<String> = sup
+            .store
+            .session_notifications("mismatched")
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|notification| notification.text)
+            .collect();
+        assert_eq!(
+            texts,
+            vec!["mismatch".to_string()],
+            "one cause, one notification"
+        );
+    }
+
+    /// Spec: an Enter submits a line; Shift+Enter (`ESC CR`), a carriage
+    /// return inside a bracketed paste, and input with no carriage return at
+    /// all (the terminal's automatic replies) do not.
+    ///
+    /// Why: these are the inputs that start the silent-hook clock, whose
+    /// firing tells the user Restart cannot resume. Counting a newline the
+    /// user inserted while still composing their first prompt would tell them
+    /// that a minute before the agent had anything to report.
+    #[test]
+    fn only_a_real_enter_submits_a_line() {
+        assert!(submits_a_line(b"\r"));
+        assert!(submits_a_line(b"hello\r"));
+        assert!(
+            submits_a_line(b"\x1b[200~pasted\rtext\x1b[201~\r"),
+            "Enter after the paste"
+        );
+        assert!(!submits_a_line(b"\x1b\r"), "Shift+Enter inserts a newline");
+        assert!(
+            !submits_a_line(b"\x1b[200~line one\rline two\x1b[201~"),
+            "a pasted newline"
+        );
+        assert!(
+            !submits_a_line(b"\x1b[?1;2c\x1b[12;40R\x1b]11;rgb:0000/0000/0000\x1b\\"),
+            "terminal replies"
+        );
+        assert!(!submits_a_line(b"\x1b[I"), "a focus report");
+        assert!(!submits_a_line(b""));
     }
 
     /// Spec: a capture-state advance that changes the session's restart

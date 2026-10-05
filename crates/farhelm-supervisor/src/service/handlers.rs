@@ -7806,6 +7806,7 @@ mod tests {
                     tabs: Vec::new(),
                     github_repo: None,
                     working_copy: None,
+                    notifications: Vec::new(),
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -7822,6 +7823,7 @@ mod tests {
                 session: SessionCells {
                     last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                     last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+                    notifications: crate::service::core::notification_cell(),
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
@@ -7989,6 +7991,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
             terminal: None,
             run: RunCells {
@@ -8004,6 +8007,7 @@ mod tests {
                 last_work_started_at: crate::service::core::activity_stamp(
                     created_at.saturating_mul(1_000),
                 ),
+                notifications: crate::service::core::notification_cell(),
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
@@ -8181,6 +8185,7 @@ mod tests {
                     tabs: Vec::new(),
                     github_repo: None,
                     working_copy: None,
+                    notifications: Vec::new(),
                 },
                 terminal: None,
                 run: RunCells {
@@ -8194,6 +8199,7 @@ mod tests {
                 session: SessionCells {
                     last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                     last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+                    notifications: crate::service::core::notification_cell(),
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,

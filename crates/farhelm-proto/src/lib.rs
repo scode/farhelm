@@ -222,7 +222,8 @@ pub const PROTOCOL_VERSION: u32 = 42;
 /// in memory, a browser holding and rendering the capped array) does so in
 /// milliseconds. It is also what keeps a whole reply under
 /// [`MAX_FRAME_LEN`] for any ordinary fleet: a `SessionInfo` is a few
-/// hundred bytes, so five hundred of them are a fraction of the frame.
+/// hundred bytes, or about three kilobytes for a session holding its full
+/// ten notifications, so five hundred of them stay a fraction of the frame.
 /// A fleet of deliberately fat records (titles near the supervisor's
 /// 64 KiB field cap) could still overflow the frame; the writer refuses
 /// such a frame whole and the helm keeps its previous cache, which is an
@@ -1062,6 +1063,41 @@ pub struct SessionInfo {
     /// for lifetime; this projection is not the membership inventory.
     #[serde(default)]
     pub working_copy: Option<WorkingCopyInfo>,
+    /// The session's most recent notifications, newest first, at most
+    /// [`SESSION_NOTIFICATION_CAP`] of them (SPEC.md, Status): problems the
+    /// supervisor noticed with tracking this session's agent conversation,
+    /// each worded for the user.
+    ///
+    /// Additive, so no protocol bump was needed: a record from an older
+    /// supervisor decodes to an empty list, and an older helm ignores the
+    /// field and shows no bell. Only the sequence number,
+    /// time and text travel; what KIND of problem a notification is, and
+    /// which launch it belongs to, stay columns in the supervisor's store, so
+    /// a newer supervisor that adds a kind can never make this record fail to
+    /// decode in an older helm (which drops a session it cannot decode).
+    /// Read and cleared state are not here: the helm keeps those.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notifications: Vec<SessionNotification>,
+}
+
+/// How many notifications a session keeps; recording one more drops the
+/// oldest (SPEC.md, Status: "each session keeps its 10 most recent").
+pub const SESSION_NOTIFICATION_CAP: usize = 10;
+
+/// One session notification as it travels on [`SessionInfo`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionNotification {
+    /// Per-session sequence number. It only grows, so a client can name
+    /// "everything up to here" (the helm's read and cleared marks) without
+    /// comparing clocks, and a notification that aged out never has its
+    /// number reused.
+    pub seq: u64,
+    /// When the supervisor recorded it, in unix seconds on the session's
+    /// host clock.
+    pub at: i64,
+    /// What happened and what the user can do about it, written by the
+    /// supervisor. Peer text: a client renders it escaped.
+    pub text: String,
 }
 
 /// The activity stamp a reader should display and compare by: `last_activity_at`
@@ -1309,6 +1345,22 @@ pub enum ReadinessWording {
 }
 
 impl RestartReadiness {
+    /// Whether the report is due no later than the user's first prompt, so
+    /// that a report still missing a minute after it means the hook is not
+    /// working. False for [`RestartReadiness::FirstReply`]: an agent's first
+    /// reply can take as long as its first turn does, so no wait proves
+    /// anything, and the supervisor's silent-hook notification (SPEC.md,
+    /// Status) is not recorded for such an agent.
+    pub fn due_by_first_prompt(self) -> bool {
+        match self {
+            RestartReadiness::ShortlyAfterStart
+            | RestartReadiness::AtStart
+            | RestartReadiness::FirstPrompt
+            | RestartReadiness::FirstPromptWithHooks => true,
+            RestartReadiness::FirstReply => false,
+        }
+    }
+
     /// When Restart becomes available, as a clause that completes "Restart
     /// becomes available …" ("once you submit your first prompt").
     ///
@@ -4097,6 +4149,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
@@ -4234,6 +4287,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         info.github_repo = Some(parse_github_repo("acme/bar").expect("valid repo"));
         info.working_copy = Some(WorkingCopyInfo {
@@ -5228,6 +5282,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         let mut json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["agent_kind"], "goose");
@@ -5284,6 +5339,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -5432,6 +5488,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
 
         let sampled = at(1_700_000_000, 1_700_000_600);
@@ -5473,6 +5530,7 @@ mod tests {
             tabs: Vec::new(),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         assert_eq!(info.effective_work_started_at(), 1_700_000_000_000);
         info.last_activity_at = i64::MAX;
@@ -5524,6 +5582,7 @@ mod tests {
             ],
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["tabs"],
@@ -6135,6 +6194,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
         };
         let mut wire = Vec::new();
@@ -6267,6 +6327,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
         };
         assert_eq!(
@@ -6406,6 +6467,7 @@ mod tests {
                         tabs: Vec::new(),
                         github_repo: None,
                         working_copy: None,
+                        notifications: Vec::new(),
                     },
                 },
                 serde_json::json!({
@@ -7010,6 +7072,7 @@ mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             }],
             truncated: false,
         };

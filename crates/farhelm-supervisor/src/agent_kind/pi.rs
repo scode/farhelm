@@ -16,13 +16,13 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
         return HookInjection::skipped(argv, "Pi invocation is a utility command or is ambiguous");
     }
     if !policy.hooks.allows(farhelm_proto::AgentKind::Pi) {
-        return HookInjection::skipped(argv, "disabled by FARHELM_AGENT_HOOKS");
+        return HookInjection::skipped(argv, super::HOOKS_DISABLED_REASON);
     }
     let (Some(exe), Some(extension)) = (policy.exe, policy.vendor_extension) else {
         return HookInjection::skipped(
             argv,
             if policy.exe.is_none() {
-                "farhelm executable path is not utf-8"
+                super::EXE_NOT_UTF8_REASON
             } else {
                 "Pi extension artifact is unavailable"
             },

@@ -90,6 +90,7 @@ fn child_session(cwd: String) -> SessionInfo {
         tabs: Vec::<TabInfo>::new(),
         github_repo: None,
         working_copy: None,
+        notifications: Vec::new(),
     }
 }
 

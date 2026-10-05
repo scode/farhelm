@@ -429,6 +429,15 @@ pub(crate) fn entry_info(
         .session
         .last_work_started_at
         .load(std::sync::atomic::Ordering::Relaxed);
+    // Notifications are recorded long after the entry was built, so the
+    // clone carries whatever the entry started with; the session's cell is
+    // the current list (`SessionCells::notifications`).
+    info.notifications = entry
+        .session
+        .notifications
+        .lock()
+        .expect("notification cell poisoned")
+        .clone();
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
     // rediscovery IS the tab list. A terminal-less entry has no tmux
     // session and therefore no tabs, which the empty default states
