@@ -92,7 +92,7 @@ pub enum PayloadSelection {
     /// directory, verifying nothing (D3, operator-trusted).
     Directory(PathBuf),
     /// `--release-base-url`: download from this base URL instead of the
-    /// default GitHub release matching this build's version. Selectable on
+    /// default, this build's own release on get.farhelm.io. Selectable on
     /// ANY build (not just a release-shaped one) so tests and air-gapped
     /// mirrors can point at another server.
     Release { base_url: url::Url },
@@ -148,7 +148,7 @@ impl PayloadSource for UnreleasedPayloads {
 
 /// Payloads staged by an operator into a plain directory instead of
 /// downloaded — for air-gapped installs, mirrors, and tests that would
-/// rather not reach GitHub.
+/// rather not reach the network.
 ///
 /// Reads exactly the asset names a GitHub release publishes ([`assets`] is
 /// the single source of truth for those names), so the same directory an
@@ -960,8 +960,11 @@ fn remove_leftover_embedded_payloads(
 }
 
 /// Where a release-shaped build looks for its payloads when nothing on the
-/// command line says otherwise: the GitHub release tagged with this build's
-/// own version (D2).
+/// command line says otherwise: this build's own release on get.farhelm.io
+/// (D2), whose `SHA256SUMS` and signature are served there directly and
+/// whose archives redirect to wherever they are hosted. The release client
+/// follows those redirects over https only (`release_redirect_policy`), and
+/// nothing about integrity depends on where they point.
 ///
 /// Built from the version `production_payloads_with_key` is given, which in
 /// production is this build's own `CARGO_PKG_VERSION`, rather than written
@@ -974,10 +977,8 @@ fn remove_leftover_embedded_payloads(
 /// ([`UnreleasedPayloads`]) rather than asking for a release that does not
 /// exist.
 fn default_release_base_url(version: &str) -> anyhow::Result<url::Url> {
-    url::Url::parse(&format!(
-        "https://github.com/scode/farhelm/releases/download/v{version}/"
-    ))
-    .context("building the default release download URL")
+    url::Url::parse(&format!("https://get.farhelm.io/v{version}/"))
+        .context("building the default release download URL")
 }
 
 /// Every setting the release download client is built with.

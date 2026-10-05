@@ -68,7 +68,11 @@ class InstalledUninstall(unittest.TestCase):
     def setUpClass(cls):
         """Serve the immutable current release fixture for all cases.
 
-        The desktop fixture carries the text every desktop build since the
+        The server stands in for the whole release origin, in its layout:
+        `FARHELM_INSTALL_TEST_BASE_URL` is `<server>/current`, and the
+        installer asks for `<origin>/v<version>/SHA256SUMS` and archives
+        beside it, so the release lives in `current/v<version>/`. The
+        desktop fixture carries the text every desktop build since the
         side-by-side layout contains, which the installer checks for.
         """
         cls.release_dir = tempfile.TemporaryDirectory(prefix="farhelm-releases-")
@@ -82,9 +86,9 @@ class InstalledUninstall(unittest.TestCase):
             raise RuntimeError("installer supports native arm64 macOS only")
         cls.target = "aarch64-apple-darwin"
         for name, release_version in (("current", cls.version),):
-            release = root / name
+            release = root / name / ("v" + release_version)
             stage = root / (name + "-stage")
-            release.mkdir()
+            release.mkdir(parents=True)
             cli_dir = stage / ("farhelm-" + cls.target)
             cli_dir.mkdir(parents=True)
             cli = cli_dir / "farhelm"

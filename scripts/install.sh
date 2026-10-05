@@ -21,8 +21,8 @@
   # executable command, and the shell runs it immediately.
   #
   # The macOS desktop installer: checks the platform,
-  # downloads the matching release from GitHub, verifies it, and puts the
-  # binaries in place. The README's "Install" chapter is the same text as
+  # downloads the matching release from get.farhelm.io, verifies it against
+  # the release's checksums, and puts the binaries in place. The README's "Install" chapter is the same text as
   # this script's behavior and is the place to look for the user-facing
   # story.
   #
@@ -33,10 +33,13 @@
   # file, no sourcing, no helper scripts fetched separately.
   set -eu
 
-  REPO_URL="https://github.com/scode/farhelm"
-  RELEASES_PAGE="$REPO_URL/releases"
-  LATEST_URL="$RELEASES_PAGE/latest"
-  DOWNLOAD_PREFIX="$REPO_URL/releases/download"
+  # Every release file comes from this one origin, in a fixed layout that
+  # is a permanent contract with every client (SPEC_impl.md, "Verification
+  # chain (D3)"): /latest names the latest stable tag, and /<tag>/ holds
+  # that release's SHA256SUMS, its signature, its install.sh, and a
+  # redirect to each archive. Nothing here asks GitHub anything.
+  SITE_URL="https://get.farhelm.io"
+  RELEASES_PAGE="https://github.com/scode/farhelm/releases"
   CURL_PROTOCOL_MODE=default
 
   # ---------------------------------------------------------------------
@@ -751,14 +754,16 @@ PLIST_EOF
     esac
 
     # FARHELM_INSTALL_TEST_BASE_URL exists only so this script's own test
-    # suites can point it at a fixture server instead of GitHub. It
-    # deliberately has its own name: the helm's release mirror setting,
-    # FARHELM_RELEASE_BASE_URL, is safe for the helm because it verifies the
-    # release signature, and this script verifies none (SPEC.md,
-    # "Installation and updates"), so the helm's variable left exported in a
-    # shell must never redirect an install. Plain HTTP is accepted only for
-    # a loopback fixture (see validate_release_base_url); an HTTPS value
-    # keeps the same no-downgrade pinning as the default GitHub channel.
+    # suites can point it at a fixture server instead of get.farhelm.io. It
+    # stands in for the WHOLE origin (latest, and every <tag>/ path below
+    # it), never for one release's directory. It deliberately has its own
+    # name: the helm's release mirror setting, FARHELM_RELEASE_BASE_URL, is
+    # safe for the helm because it verifies the release signature, and this
+    # script verifies none itself (SPEC.md, "Installation and updates"), so
+    # the helm's variable left exported in a shell must never redirect an
+    # install. Plain HTTP is accepted only for a loopback fixture (see
+    # validate_release_base_url); an HTTPS value keeps the same
+    # no-downgrade pinning as the default origin.
     if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ]; then
       if ! validate_release_base_url "$FARHELM_INSTALL_TEST_BASE_URL"; then
         error 'FARHELM_INSTALL_TEST_BASE_URL must be an https URL, or an http URL on this machine (127.0.0.1, localhost or [::1]), with a host and no userinfo, query, or fragment; refusing it\n'
@@ -778,6 +783,23 @@ PLIST_EOF
           ;;
       esac
       printf 'using FARHELM_INSTALL_TEST_BASE_URL=%s\n' "$FARHELM_INSTALL_TEST_BASE_URL" >&2
+    fi
+    ORIGIN=${FARHELM_INSTALL_TEST_BASE_URL:-$SITE_URL}
+    ORIGIN=${ORIGIN%/}
+
+    # FARHELM_INSTALL_SUMS_FILE names a SHA256SUMS already on this machine,
+    # read INSTEAD of fetching the release's: the desktop app's updater
+    # verifies the release's signed checksums itself and hands them over
+    # here, so every archive this script downloads is checked against
+    # signed hashes rather than against a second fetch over TLS. Its
+    # interface (this variable and FARHELM_VERSION, and a checksum file that
+    # may list more files than this script needs) is a permanent contract
+    # with every shipped updater. Checked up front, so a bad path fails
+    # before anything is downloaded.
+    if [ -n "${FARHELM_INSTALL_SUMS_FILE:-}" ] &&
+      { [ ! -f "$FARHELM_INSTALL_SUMS_FILE" ] || [ ! -r "$FARHELM_INSTALL_SUMS_FILE" ]; }; then
+      error 'FARHELM_INSTALL_SUMS_FILE=%s is not a readable file; refusing it\n' "$FARHELM_INSTALL_SUMS_FILE"
+      exit 1
     fi
 
     # 2. Prerequisites.
@@ -821,59 +843,51 @@ PLIST_EOF
     # 3. Version.
     #
     # FARHELM_VERSION pins a release, including a -rc.N or -dev.N prerelease
-    # (D15); otherwise the script asks GitHub which tag "latest" currently
-    # means. Either way, exactly one candidate string and one error message
-    # are produced here, and normalize_version validates and normalizes that
-    # single candidate the same way regardless of where it came from.
+    # (D15); otherwise the script reads the origin's /latest, one line naming
+    # the latest STABLE tag. Either way, exactly one candidate string and one
+    # error message are produced here, and normalize_version validates and
+    # normalizes that single candidate the same way regardless of where it
+    # came from.
+    LATEST_LOOKUP=0
     if [ -n "${FARHELM_VERSION:-}" ]; then
       candidate=$FARHELM_VERSION
       version_error="FARHELM_VERSION='$FARHELM_VERSION' is not X.Y.Z, vX.Y.Z, or a -rc.N or -dev.N prerelease of one"
     else
-      # No -L: the redirect itself is the answer (a 302 whose Location
-      # names the release tag), not something to chase. `-I` sends HEAD, so
-      # this costs one round trip and no body.
-      latest_raw=$(curl_get -sI "$LATEST_URL") || latest_raw=""
-      latest_raw=$(printf '%s' "$latest_raw" | tr -d '\r')
-      # Through an HTTP(S) proxy, curl -I can print the CONNECT tunnel's
-      # own "200 Connection established" response ahead of the target's
-      # real one, as two blank-line-separated header blocks; without -L
-      # there is still exactly one block from the target itself, and it is
-      # always the LAST one.
-      latest_block=$(printf '%s\n' "$latest_raw" | awk 'BEGIN{RS=""} {block=$0} END{print block}')
-      latest_status=$(printf '%s\n' "$latest_block" | awk 'NR==1{print $2}')
-      # Header names are case-insensitive per RFC 9110; lowercase both
-      # sides before matching rather than trusting GitHub to always spell
-      # it "Location", and trim trailing header-value whitespace before
-      # using it.
-      latest_location=$(printf '%s\n' "$latest_block" | awk '
-        {
-          line = $0
-          if (tolower(line) ~ /^location:[ \t]*/) {
-            sub(/^[^:]*:[ \t]*/, "", line)
-            sub(/[ \t]+$/, "", line)
-            print line
-            exit
-          }
-        }
-      ')
-      # The Location value may be absolute or host-relative; either way
-      # the tag is whatever follows the final slash.
-      candidate=${latest_location##*/}
-      version_error="could not determine the latest release from GitHub (HTTP ${latest_status:-000}); set FARHELM_VERSION=vX.Y.Z or check $RELEASES_PAGE"
-      if [ "$latest_status" != "302" ]; then
-        # Force the normalize_version call below to fail with
-        # version_error above, rather than duplicating this branch's
-        # error handling.
+      LATEST_LOOKUP=1
+      # A small cap: the answer is one tag and a newline, so anything longer
+      # is not an answer, and there is no reason to read it. `-w` appends the
+      # final HTTP status on a line of its own (curl prints it even when `-f`
+      # failed the request, and "000" when nothing answered), so a release
+      # that is not published yet can be told apart from a network failure.
+      latest_reply=$(curl_get -fsS --max-filesize 256 -w "$NEWLINE%{http_code}" "$ORIGIN/latest" 2>/dev/null || true)
+      latest_status=${latest_reply##*"$NEWLINE"}
+      # The body, without the status line. Command substitution dropped the
+      # body's own trailing newline only if it was the last thing printed, so
+      # strip one here; a carriage return or any other stray byte still makes
+      # the value fail the version grammar below rather than being trimmed.
+      candidate=${latest_reply%"$NEWLINE"*}
+      candidate=${candidate%"$NEWLINE"}
+      if [ "$latest_status" = 404 ]; then
+        version_error="no release is published on $ORIGIN yet ($ORIGIN/latest answered HTTP 404); set FARHELM_VERSION=vX.Y.Z to pick one"
+      else
+        version_error="could not determine the latest release from $ORIGIN/latest (HTTP ${latest_status:-000}); set FARHELM_VERSION=vX.Y.Z to pick one"
+      fi
+      if [ "$latest_status" != 200 ]; then
         candidate=""
       fi
+      # One line, exactly: normalize_version greps line by line, so a body
+      # with a second line could pass on its first and carry the rest along.
+      case "$candidate" in
+        *"$NEWLINE"* | *"$CR"*) candidate="" ;;
+      esac
     fi
     # Builds of main carry the version 0.0.0-unreleased rather than a
     # release number (the root Cargo.toml explains why), and the installed
     # uninstall acceptance suite (scripts/test-uninstall.py) installs such a
     # build through this script as its "current" release. The sentinel names
     # no published release, so it is accepted ONLY together with the
-    # test-only base URL; pinned against GitHub it stays a version error like
-    # any other non-release suffix.
+    # test-only base URL; against the real origin it stays a version error
+    # like any other non-release suffix.
     if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ] &&
       { [ "$candidate" = "0.0.0-unreleased" ] || [ "$candidate" = "v0.0.0-unreleased" ]; }; then
       VERSION_TAG=v0.0.0-unreleased
@@ -881,12 +895,63 @@ PLIST_EOF
       error '%s\n' "$version_error"
       exit 1
     fi
+    # /latest never names a prerelease. One that did is a broken or
+    # tampered answer, so it is refused rather than installed; a prerelease
+    # is installed only when asked for by name.
+    if [ "$LATEST_LOOKUP" -eq 1 ]; then
+      case "$VERSION_TAG" in
+        *-*)
+          error '%s names %s, a prerelease; the latest release is always a stable one, so refusing it\n' "$ORIGIN/latest" "$VERSION_TAG"
+          exit 1
+          ;;
+      esac
+    fi
     VERSION_NUM=${VERSION_TAG#v}
 
-    # A real install always uses the release's normal download URL; the
-    # test-only override is described where it is validated above.
-    BASE_URL=${FARHELM_INSTALL_TEST_BASE_URL:-$DOWNLOAD_PREFIX/$VERSION_TAG}
-    BASE_URL=${BASE_URL%/}
+    # Everything this release needs lives under its tag on the origin.
+    BASE_URL="$ORIGIN/$VERSION_TAG"
+
+    # SHA256SUMS first, and before anything is created on this machine:
+    # every other download's integrity depends on it, and a release the
+    # origin does not have must be refused with nothing changed (not even
+    # an empty ~/.local/bin). It is read into SUMS_TEXT and written into the
+    # staging directory once that exists. Its own failure modes get named
+    # error messages instead of falling through to curl's generic one. `-L`
+    # because the origin may serve it through a redirect; `-w` appends the
+    # status of the FINAL response in the chain on a line of its own, which
+    # curl prints even when `-f` failed the request, and as "000" when
+    # nothing answered at all. The `|| true` sits inside the substitution so
+    # that output survives curl's non-zero exit.
+    #
+    # With FARHELM_INSTALL_SUMS_FILE (see where it is checked above) nothing
+    # is fetched: the caller's verified copy is the checksum file.
+    if [ "$ERR_TERMINAL" -eq 1 ]; then
+      printf '⏳ %sDownloading Farhelm %s%s\n' "$ERR_BOLD" "$VERSION_NUM" "$ERR_RESET" >&2
+      printf '%s   If it looks stuck, it is safe to press Ctrl-C and run the same command again.%s\n\n' "$ERR_DIM" "$ERR_RESET" >&2
+    fi
+    if [ -n "${FARHELM_INSTALL_SUMS_FILE:-}" ]; then
+      SUMS_TEXT=$(cat "$FARHELM_INSTALL_SUMS_FILE")
+    else
+      sums_url="$BASE_URL/SHA256SUMS"
+      sums_reply=$(curl_get -fsSL --max-filesize 1048576 -w "$NEWLINE%{http_code}" "$sums_url" 2>/dev/null || true)
+      sums_status=${sums_reply##*"$NEWLINE"}
+      SUMS_TEXT=${sums_reply%"$NEWLINE"*}
+      if [ "$sums_status" = 404 ]; then
+        # No backfill (releases from before get.farhelm.io are not
+        # published there) and no fallback to GitHub: a release the origin
+        # does not have is refused, in one line, before anything else is
+        # downloaded or changed.
+        if [ "$LATEST_LOOKUP" -eq 1 ]; then
+          error '%s is not published on %s (no %s), though %s/latest names it; retry in a few minutes\n' "$VERSION_TAG" "$ORIGIN" "$sums_url" "$ORIGIN"
+        else
+          error '%s is not published on %s (no %s); pick a release that is, or leave FARHELM_VERSION unset for the latest\n' "$VERSION_TAG" "$ORIGIN" "$sums_url"
+        fi
+        exit 1
+      elif [ "$sums_status" != 200 ]; then
+        error 'download failed (HTTP %s): %s\n' "${sums_status:-000}" "$sums_url"
+        exit 1
+      fi
+    fi
 
     INSTALL_DIR="$HOME/.local/bin"
     # Mask group/world write bits on any directory COMPONENT this specific
@@ -924,43 +989,7 @@ PLIST_EOF
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
-    # SHA256SUMS first: every other download's integrity depends on it, so
-    # its own failure modes get named error messages instead of falling
-    # through to curl's generic one. `-L` here matters: GitHub serves
-    # release assets — SHA256SUMS included — through a redirect to object
-    # storage, so without it this request never reaches the manifest at
-    # all and looks like a permanent failure. `-w '%{http_code}'` reports
-    # the status of the FINAL response in the chain, which is what the
-    # branches below need.
-    #
-    # `-f` makes curl itself exit non-zero on a 4xx/5xx response — but it
-    # still writes the real code to `-w` first, so the `|| true` here MUST
-    # sit inside the substitution (letting curl's already-captured output
-    # stand) rather than after it as a separate fallback assignment, which
-    # would silently replace a perfectly good "404" with the wrong "000"
-    # every time `-f` made curl's own exit status non-zero — precisely the
-    # case this whole block exists to detect. `-w` itself already prints
-    # "000" on a total connection failure (no response received at all),
-    # so nothing else is needed to cover that case.
-    if [ "$ERR_TERMINAL" -eq 1 ]; then
-      printf '⏳ %sDownloading Farhelm %s%s\n' "$ERR_BOLD" "$VERSION_NUM" "$ERR_RESET" >&2
-      printf '%s   If it looks stuck, it is safe to press Ctrl-C and run the same command again.%s\n\n' "$ERR_DIM" "$ERR_RESET" >&2
-    fi
-    sums_url="$BASE_URL/SHA256SUMS"
-    sums_status=$(curl_get -fsSL -w '%{http_code}' -o "$STAGING_DIR/SHA256SUMS" "$sums_url" 2>/dev/null || true)
-    if [ "$sums_status" = 404 ]; then
-      # D17: a 404 cannot tell "no such release" from "still publishing"
-      # apart, so both this script and the helm say exactly the same
-      # thing rather than guessing. Deviation from D17's own wording: the
-      # helm's version of this message ends "...or pass --payload-dir", a
-      # flag this script does not have; here it ends by pointing at the
-      # releases page instead.
-      error 'no SHA256SUMS for %s at %s (HTTP 404): the release is not published or is still publishing; retry in a few minutes, or check %s\n' "$VERSION_TAG" "$BASE_URL" "$RELEASES_PAGE"
-      exit 1
-    elif [ "$sums_status" != 200 ]; then
-      error 'download failed (HTTP %s): %s\n' "$sums_status" "$sums_url"
-      exit 1
-    fi
+    printf '%s\n' "$SUMS_TEXT" >"$STAGING_DIR/SHA256SUMS"
 
     # 5. Download, verify, and unpack the CLI and desktop archives. The
     # table keeps Linux rows for release-asset parity, not installation.

@@ -324,7 +324,7 @@ impl ReleasePayloadSource {
     /// own release's payloads and an upgraded helm must not inherit the old
     /// one's binaries, and the URL hash because a test or mirror pointed at
     /// some other server must be physically unable to poison — or be
-    /// confused by — the cache the real GitHub release wrote.
+    /// confused by — the cache the real release origin wrote.
     ///
     /// `base_url` is normalised to end in `/`, so an operator passing
     /// `--release-base-url https://example.invalid/farhelm/v1` gets asset
@@ -496,8 +496,8 @@ impl ReleasePayloadSource {
     /// A 404 on EITHER file reports D17's one message: a release that is
     /// still publishing has some of its assets and not others, and a single
     /// request cannot tell that apart from a release that does not exist,
-    /// so both consumers of this URL (here and `install.sh`) say the same
-    /// thing rather than guessing.
+    /// so this says both rather than guessing. (`install.sh` words its own
+    /// refusal for the origin's 404, naming get.farhelm.io.)
     async fn fetch_capped(&self, name: &str) -> anyhow::Result<Vec<u8>> {
         let version = &self.version;
         let response = self.get(name).await?;
@@ -1540,7 +1540,8 @@ pub(super) mod test_support {
         overrides: Arc<HashMap<String, Override>>,
     }
 
-    /// A loopback stand-in for a GitHub release, aborted when dropped.
+    /// A loopback stand-in for one release on the release origin, aborted
+    /// when dropped.
     ///
     /// It counts requests because several of this module's contracts are
     /// about requests NOT happening — a cache hit makes none, two concurrent
@@ -3028,7 +3029,7 @@ mod tests {
     /// Both halves are load-bearing: the version so an upgraded helm never
     /// serves the previous release's binaries out of a shared cache, and the
     /// URL hash so a fixture server, a mirror, or a prerelease URL cannot
-    /// read or poison what the real GitHub release wrote.
+    /// read or poison what the real release origin wrote.
     #[farhelm_testtrace::test]
     async fn the_cache_directory_is_keyed_by_version_and_base_url() {
         let release = FixtureRelease::start(Vec::new()).await;
@@ -3661,8 +3662,7 @@ mod tests {
     fn the_redirect_policy_allows_object_stores_and_refuses_downgrades() {
         use super::super::payloads::{RedirectDecision, release_redirect_decision};
 
-        let https =
-            Url::parse("https://github.com/scode/farhelm/releases/download/v0.0.3/").unwrap();
+        let https = Url::parse("https://get.farhelm.io/v0.0.3/").unwrap();
         let object_store = Url::parse("https://objects.githubusercontent.com/asset").unwrap();
         let plaintext = Url::parse("http://objects.githubusercontent.com/asset").unwrap();
         let mirror = Url::parse("http://127.0.0.1:8080/release/").unwrap();

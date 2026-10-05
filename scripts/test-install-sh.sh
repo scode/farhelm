@@ -297,8 +297,14 @@ build_decoy_bypass_release() {
 }
 
 # ---------------------------------------------------------------------------
-# A minimal HTTP server: static files under $1, plus one deliberate
-# redirect prefix. Every request under /redirect/<path> answers 302 to
+# A minimal HTTP server standing in for get.farhelm.io: each top-level
+# directory under $1 is one scenario's whole ORIGIN, served in the site's
+# layout. `/<scenario>/latest` is that directory's `latest` file, and
+# `/<scenario>/<tag>/<file>` is that directory's <file>, whatever the tag
+# (one fixture directory holds one release). A release file asked for
+# WITHOUT a tag segment answers 404, so an installer that regressed to the
+# old one-directory-per-release layout fails here instead of passing.
+# Plus one deliberate redirect prefix. Every request under /redirect/<path> answers 302 to
 # /redirect-real/<path> rather than serving directly -- GitHub serves
 # release assets (SHA256SUMS included) through exactly this kind of
 # redirect, and without `-L` on that specific request the installer never
@@ -355,6 +361,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # the EXIT trap on an ordinary success/failure).
         if self.path.startswith("/slow/"):
             time.sleep(2)
+        parts = self.path.split("?", 1)[0].split("/")
+        # ["", <scenario...>, <tag>, <file>]: drop the tag segment.
+        if len(parts) >= 4 and parts[-2].startswith("v"):
+            self.path = "/".join(parts[:-2] + parts[-1:])
+        elif parts[-1] == "SHA256SUMS" or parts[-1].endswith(".tar.gz"):
+            self.send_response(404)
+            self.end_headers()
+            return
         super().do_GET()
 
 
@@ -369,7 +383,7 @@ PY
   SERVER_PID=$!
 
   local tries=100
-  until curl -fsS -o /dev/null "http://127.0.0.1:$SERVER_PORT/good/SHA256SUMS" 2>/dev/null; do
+  until curl -fsS -o /dev/null "http://127.0.0.1:$SERVER_PORT/good/v1.2.3/SHA256SUMS" 2>/dev/null; do
     tries=$((tries - 1))
     if [ "$tries" -le 0 ]; then
       echo "fixture server never came up" >&2
@@ -1398,8 +1412,15 @@ HOME404="$WORKDIR/home404"
 mkdir -p "$HOME404"
 run_install "$TOOLCHAIN_FULL" "$HOME404" "$BASE/norelease" 1.2.3
 check "404 exits 1" [ "$RC" -ne 0 ]
-check "404 names the version and the HTTP code" contains "$ERR" "no SHA256SUMS for v1.2.3"
-check "404 message mentions HTTP 404" contains "$ERR" "(HTTP 404)"
+check "404 says the release is not published on the origin" \
+  contains "$ERR" "v1.2.3 is not published on $BASE/norelease"
+# The test origin's own "using FARHELM_INSTALL_TEST_BASE_URL" banner aside.
+check "404 is one line" \
+  [ "$(printf '%s\n' "$ERR" | grep -v '^using FARHELM_INSTALL_TEST_BASE_URL=' | grep -c .)" -eq 1 ]
+check "404 downloaded nothing but the checksum request" \
+  [ -z "$(grep 'norelease/' "$SERVER_LOG" | grep -v 'SHA256SUMS' || true)" ]
+check "404 created nothing under HOME, not even the install directory" \
+  [ -z "$(find "$HOME404" -mindepth 1 2>/dev/null)" ]
 check "404 leaves the install dir with no leftover staging/lock dot-files" \
   [ -z "$(find "$HOME404/.local/bin" -maxdepth 1 -name '.farhelm-install.*' 2>/dev/null || true)" ]
 
@@ -1972,7 +1993,7 @@ SENTINEL_503=$(cat "$INSTALL503/farhelm")
 run_install "$TOOLCHAIN_FULL" "$HOME503" "$BASE/sums503" 1.2.3
 check "F25: 503 exits 1" [ "$RC" -ne 0 ]
 check "F25: 503 uses the generic diagnostic naming the code and URL" \
-  contains "$ERR" "download failed (HTTP 503): $BASE/sums503/SHA256SUMS"
+  contains "$ERR" "download failed (HTTP 503): $BASE/sums503/v1.2.3/SHA256SUMS"
 check "F25: 503 preserves the existing sentinel farhelm" [ "$(cat "$INSTALL503/farhelm")" = "$SENTINEL_503" ]
 check "F25: 503 leaves no staging/lock/journal residue" \
   [ -z "$(find "$INSTALL503" -maxdepth 1 -name '.farhelm*' 2>/dev/null || true)" ]
@@ -1997,14 +2018,13 @@ check "F26: nothing else under \$HOME was created" \
   [ "$(find "$HOMEDEFAULT" -type f 2>/dev/null | wc -l)" -eq 7 ]
 
 # ===========================================================================
-# Scenario: the real production download URL, with no FARHELM_RELEASE_
-# BASE_URL override (F27) -- every OTHER successful scenario in this file
-# bypasses actual construction of https://github.com/scode/farhelm/
-# releases/download/vX.Y.Z/<asset>; this is the one that proves that URL
-# shape itself, via a curl double that refuses anything not shaped exactly
-# like it (a repo-name, tag-prefix, or path regression would show up as a
-# hard failure here, not a silently-passing test). Deliberately does not
-# touch the separate releases/latest lookup, per F27's own scope.
+# Scenario: the real production URLs, with no test origin (F27) -- every
+# OTHER successful scenario in this file bypasses actual construction of
+# https://get.farhelm.io/vX.Y.Z/<asset> and https://get.farhelm.io/latest;
+# this is the one that proves those URL shapes themselves, via a curl double
+# that refuses anything not shaped exactly like them (a host, tag-prefix, or
+# path regression would show up as a hard failure here, not a
+# silently-passing test). Run once pinned and once asking for the latest.
 # ===========================================================================
 echo
 echo "== F27: production download URL shape (no base-URL override) =="
@@ -2013,7 +2033,7 @@ F27_FIXTURE_DIR="$WWW/good"
 CURL_DOUBLE_F27="$WORKDIR/curl-double-f27.sh"
 cat >"$CURL_DOUBLE_F27" <<CURLDOUBLE
 #!/bin/sh
-expected_prefix="https://github.com/scode/farhelm/releases/download/v${F27_VERSION}/"
+expected_prefix="https://get.farhelm.io/v${F27_VERSION}/"
 fixture_dir="${F27_FIXTURE_DIR}"
 out=""
 prev=""
@@ -2023,12 +2043,16 @@ proto_redir=0
 proto_value=""
 proto_redir_value=""
 want_code=0
+code_format=""
 for arg in "\$@"; do
   if [ "\$prev" = "-o" ]; then
     out="\$arg"
   fi
-  if [ "\$arg" = "%{http_code}" ]; then
+  if [ "\$prev" = "-w" ]; then
+    # The installer asks for the status on a line of its own after the body;
+    # answer the format it gave, with the status filled in.
     want_code=1
+    code_format="\$arg"
   fi
   if [ "\$arg" = "--proto" ]; then
     proto=1
@@ -2050,16 +2074,26 @@ if [ "\$proto" -ne 1 ] || [ "\$proto_redir" -ne 1 ] || \
   echo "curl double: default request omitted HTTPS protocol pins" >&2
   exit 1
 fi
+reply_code() {
+  if [ "\$want_code" -eq 1 ]; then
+    printf '%s' "\$code_format" | sed 's/%{http_code}/200/'
+  fi
+}
 case "\$last" in
+  "https://get.farhelm.io/latest")
+    printf 'v%s\n' "${F27_VERSION}"
+    reply_code
+    exit 0
+    ;;
   "\${expected_prefix}"*)
     asset=\${last#"\$expected_prefix"}
     if [ -f "\$fixture_dir/\$asset" ]; then
       if [ -n "\$out" ]; then
         cp "\$fixture_dir/\$asset" "\$out"
+      else
+        cat "\$fixture_dir/\$asset"
       fi
-      if [ "\$want_code" -eq 1 ]; then
-        printf '200'
-      fi
+      reply_code
       exit 0
     fi
     echo "curl double: no fixture for \$asset" >&2
@@ -2091,6 +2125,17 @@ set -e
 check "F27: install against the real production URL shape exits 0" [ "$F27_RC" -eq 0 ]
 check "F27: installed farhelm reports the requested version" \
   contains "$(forward "$INSTALLF27/farhelm" --version 2>/dev/null || true)" "farhelm $F27_VERSION"
+
+HOMEF27L="$WORKDIR/homef27-latest"
+mkdir -p "$HOMEF27L/.local/bin"
+set +e
+env -i PATH="$TOOLS_F27" HOME="$HOMEF27L" \
+  /bin/sh "$INSTALL_SH" >"$WORKDIR/f27l-out" 2>"$WORKDIR/f27l-err"
+F27L_RC=$?
+set -e
+check "F27: install of the latest release via the production /latest exits 0" [ "$F27L_RC" -eq 0 ]
+check "F27: the latest install is the version /latest named" \
+  contains "$(forward "$HOMEF27L/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm $F27_VERSION"
 
 # ===========================================================================
 # Scenario: the curl|sh truncation invariant (F1, F22) -- every byte
@@ -2275,8 +2320,8 @@ HOME_M2="$WORKDIR/home-m2"
 run_install "$TOOLS_M2" "$HOME_M2" "" 1.2.3 FARHELM_RELEASE_BASE_URL="$BASE/good"
 check "M2 premise: the curl double was asked for at least one URL" [ -s "$M2_LOG" ]
 check "M2 (helm mirror variable set): no request goes to that mirror" not_contains "$(cat "$M2_LOG")" "$BASE"
-check "M2 (helm mirror variable set): the download goes to GitHub over HTTPS" \
-  contains "$(head -n 1 "$M2_LOG")" "https://github.com/"
+check "M2 (helm mirror variable set): the download goes to get.farhelm.io over HTTPS" \
+  contains "$(head -n 1 "$M2_LOG")" "https://get.farhelm.io/"
 check "M2 (helm mirror variable set): the installer does not mention it" not_contains "$ERR" "FARHELM_RELEASE_BASE_URL"
 
 # A loopback test URL that redirects to another host must still only talk
@@ -2289,6 +2334,99 @@ run_install "$TOOLCHAIN_FULL" "$HOME_M3" "$BASE/redirect-remote" 1.2.3
 check "M3 (loopback URL redirecting to another host): install exits 0" [ "$RC" -eq 0 ]
 check "M3 (loopback URL redirecting to another host): the redirected requests reached this machine" \
   [ "$(grep -c 'redirect-real' "$SERVER_LOG")" -gt "$M3_BEFORE" ]
+
+# ===========================================================================
+# Scenario: the latest release comes from the origin's /latest (G1-G4).
+#
+# Why this matters: /latest is the only thing that decides which release an
+# unpinned install gets, and it is served over TLS alone. It must name the
+# latest STABLE tag; a prerelease or anything malformed there is a broken or
+# tampered answer and must be refused before any download, never installed.
+# Spec: an unpinned install reads <origin>/latest, installs the tag it
+# names, and refuses a prerelease or a malformed value with nothing
+# downloaded or changed.
+# ===========================================================================
+echo
+echo "== G1-G4: latest from the origin =="
+for name in latest-good latest-pre latest-bad latest-twolines latest-none; do
+  build_good_release "$WWW/$name" 1.2.3
+done
+printf 'v1.2.3\n' >"$WWW/latest-good/latest"
+printf 'v1.2.4-rc.1\n' >"$WWW/latest-pre/latest"
+printf 'v1.2.3 extra\n' >"$WWW/latest-bad/latest"
+printf 'v1.2.3\nv1.2.4\n' >"$WWW/latest-twolines/latest"
+# latest-none has no `latest` file: the origin before any release.
+
+HOME_G1="$WORKDIR/home-g1"
+mkdir -p "$HOME_G1"
+run_install "$MAC_TOOLS" "$HOME_G1" "$BASE/latest-good" ""
+check "G1: an unpinned install exits 0" [ "$RC" -eq 0 ]
+check "G1: it asked the origin for /latest" contains "$(cat "$SERVER_LOG")" "GET /latest-good/latest "
+check "G1: it fetched the checksums of the tag /latest named" \
+  contains "$(cat "$SERVER_LOG")" "GET /latest-good/v1.2.3/SHA256SUMS "
+check "G1: the installed version is the one /latest named" \
+  contains "$(forward "$HOME_G1/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3"
+
+# Each refused /latest: the request reached /latest, nothing else was
+# requested, nothing was created under HOME, and the refusal says why.
+for spec in "pre|a prerelease" "bad|could not determine the latest release" \
+  "twolines|could not determine the latest release" "none|no release is published"; do
+  case_name=${spec%%|*}
+  says=${spec#*|}
+  home="$WORKDIR/home-g-$case_name"
+  mkdir -p "$home"
+  before=$(server_request_count)
+  run_install "$MAC_TOOLS" "$home" "$BASE/latest-$case_name" ""
+  requests=$(tail -n "+$((before + 1))" "$SERVER_LOG")
+  check "G2-G4 ($case_name /latest): refused" [ "$RC" -ne 0 ]
+  check "G2-G4 ($case_name /latest): /latest was requested" contains "$requests" "GET /latest-$case_name/latest "
+  # One line per request: the fixture server also logs an error line for a
+  # 404, which is not a request.
+  check "G2-G4 ($case_name /latest): nothing but /latest was requested" \
+    [ "$(printf '%s\n' "$requests" | grep -c '"GET ')" -eq 1 ]
+  check "G2-G4 ($case_name /latest): nothing was created under HOME" \
+    [ -z "$(find "$home" -mindepth 1 2>/dev/null)" ]
+  check "G2-G4 ($case_name /latest): the refusal says why" contains "$ERR" "$says"
+done
+
+# ===========================================================================
+# Scenario: FARHELM_INSTALL_SUMS_FILE replaces the checksum fetch (G5).
+#
+# Why this matters: the desktop app's updater verifies a release's SIGNED
+# checksums and hands them to this script, so the archives are checked
+# against signed hashes. If the script fetched SHA256SUMS anyway, an
+# attacker on the origin could swap both the archive and that second copy.
+# Spec: with FARHELM_INSTALL_SUMS_FILE set, the install uses that file and
+# makes no SHA256SUMS request at all; a file listing more entries than the
+# installer needs is accepted; a missing file is refused before anything
+# is downloaded.
+# ===========================================================================
+echo
+echo "== G5: FARHELM_INSTALL_SUMS_FILE =="
+build_good_release "$WWW/sums-file" 1.2.3
+cp "$WWW/sums-file/SHA256SUMS" "$WORKDIR/given-sums"
+printf '%s  install.sh\n' "$(printf 'x' | sha256sum | awk '{print $1}')" >>"$WORKDIR/given-sums"
+# The origin's own copy is wrong for every archive: an install that read it
+# would fail, so success proves the given file was the one used.
+corrupt_checksum "$WWW/sums-file" farhelm-aarch64-apple-darwin.tar.gz
+corrupt_checksum "$WWW/sums-file" farhelm-desktop-aarch64-apple-darwin.tar.gz
+HOME_G5="$WORKDIR/home-g5"
+mkdir -p "$HOME_G5"
+before=$(server_request_count)
+run_install "$MAC_TOOLS" "$HOME_G5" "$BASE/sums-file" 1.2.3 FARHELM_INSTALL_SUMS_FILE="$WORKDIR/given-sums"
+check "G5: install with a given checksum file exits 0" [ "$RC" -eq 0 ]
+check "G5: no SHA256SUMS request was made" \
+  [ "$(tail -n "+$((before + 1))" "$SERVER_LOG" | grep -c SHA256SUMS)" -eq 0 ]
+check "G5 premise: the archives were downloaded from the origin" \
+  [ "$(tail -n "+$((before + 1))" "$SERVER_LOG" | grep -c '/sums-file/v1.2.3/.*tar.gz')" -ge 1 ]
+HOME_G5B="$WORKDIR/home-g5b"
+mkdir -p "$HOME_G5B"
+before=$(server_request_count)
+run_install "$MAC_TOOLS" "$HOME_G5B" "$BASE/sums-file" 1.2.3 FARHELM_INSTALL_SUMS_FILE="$WORKDIR/no-such-sums"
+check "G5: a missing checksum file is refused" [ "$RC" -ne 0 ]
+check "G5: the refusal names the variable" contains "$ERR" "FARHELM_INSTALL_SUMS_FILE"
+check "G5: nothing was requested after a missing checksum file" \
+  [ "$(server_request_count)" -eq "$before" ]
 
 # ===========================================================================
 # Scenario: the app bundle's Info.plist mode does not follow the caller's
