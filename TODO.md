@@ -71,6 +71,27 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   shows no notice, which is exactly the case it was written for. Work out when the notice should show, make it show then
   and only then, and check that the release note's description of it holds.
 
+- **Deep end-to-end upgrade tests before a release ships.** Catch a release that bricks an existing installation before
+  it goes out: upgrade from real released artifacts (the previous release, and older ones users may still run) to the
+  candidate build, on every path a user upgrades through (the Mac app through the installer, the helm, and remote hosts
+  the helm updates), starting from real state with sessions, hosts and settings in it. Then check that it all still
+  works: the app opens, the helm serves, supervisors come back at the new version with their tmux sessions intact, and
+  sessions can be restarted and resumed. Host updates already have a recorded gap, folded in here from Maybe later.
+  Nothing in CI updates a host: the CentOS provisioning test only ever installs onto a fresh container, and the update
+  flow's own tests drive fake backends. The gap shipped a real field failure (2026-09-01), which is the worked example
+  any design here should be checked against: the first cross-protocol update ever attempted — a protocol-12 farhelm
+  0.1.1 host under a protocol-14 0.2.1 helm — failed at the PROBE, whose classifier treated the version-skew refusal as
+  a transport failure ("the supervisor probe closed before hello completion with exit status 0"), making exactly the
+  host the update action exists for un-updatable; the operator recovered by stopping the remote supervisor by hand so
+  the probe would see clean absence and take the fresh-install path. The eventual fix
+  (`ProbeObservation::SkewedSupervisor`) added unit and service-level regression tests, but the CLASS of bug wants
+  end-to-end coverage: something like a CentOS-leg variant that provisions a PREVIOUS RELEASE's binary (the harness
+  builds its payloads from this tree today; the helm's own verified release-download path — D13, `release_payloads.rs` —
+  is the existing machinery that can fetch a pinned released one), lets it register and run, then drives the panel's
+  update action to the workspace build and asserts the supervisor comes back at the new version with its tmux sessions
+  intact. The old half must be a real released artifact, not this tree's build — same-version update tests are exactly
+  what could never see this bug.
+
 - **Complete and deploy in-app feedback.** The feedback UI is implemented, but submissions cannot reach the maintainer
   until the private inbox and production endpoint are configured. Follow `docs/feedback-endpoint.md`: create the private
   inbox repository and its restricted token, configure the Vercel production variables and IP rate limit, verify the
@@ -503,21 +524,6 @@ are large mostly because of their tests.
   installer for the local machine, and the helm's host update for remote ones — snapshot the state directory (a copy, or
   SQLite's backup API, taken while the old version is stopped) before the new version first opens it, keep a bounded
   number of such snapshots, and document the restore. Noted 2026-09-03 while cutting 0.3.0-rc.1.
-
-- Automate end-to-end testing of the host UPDATE path, including across releases. Nothing in CI updates a host: the
-  CentOS provisioning test only ever installs onto a fresh container, and the update flow's own tests drive fake
-  backends. The gap shipped a real field failure (2026-09-01), which is the worked example any design here should be
-  checked against: the first cross-protocol update ever attempted — a protocol-12 farhelm 0.1.1 host under a protocol-14
-  0.2.1 helm — failed at the PROBE, whose classifier treated the version-skew refusal as a transport failure ("the
-  supervisor probe closed before hello completion with exit status 0"), making exactly the host the update action exists
-  for un-updatable; the operator recovered by stopping the remote supervisor by hand so the probe would see clean
-  absence and take the fresh-install path. The eventual fix (`ProbeObservation::SkewedSupervisor`) added unit and
-  service-level regression tests, but the CLASS of bug wants end-to-end coverage: something like a CentOS-leg variant
-  that provisions a PREVIOUS RELEASE's binary (the harness builds its payloads from this tree today; the helm's own
-  verified release-download path — D13, `release_payloads.rs` — is the existing machinery that can fetch a pinned
-  released one), lets it register and run, then drives the panel's update action to the workspace build and asserts the
-  supervisor comes back at the new version with its tmux sessions intact. The old half must be a real released artifact,
-  not this tree's build — same-version update tests are exactly what could never see this bug.
 
 - Consider dropping the race-proofing around host identity, keeping the identity itself. To be clear about what stays:
   the per-install identity the supervisor mints on first run and stores in its own database, independent of hostname and
