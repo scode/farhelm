@@ -3060,7 +3060,13 @@ fn restart_with_refusal(stored: &SessionLaunch, replacement: &SessionLaunch) -> 
 /// columns, and a restart is the moment a stored argv stops being data and
 /// becomes an exec.
 fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
-    if let Some(reason) = snapshot.restart_offer.unavailable_reason() {
+    // `restart_session` refuses first, knowing whether the session ended;
+    // this keeps the pure function's own guarantee that an unavailable
+    // offer never yields an argv.
+    if let Some(reason) = snapshot
+        .restart_offer
+        .unavailable_reason(snapshot.kind, false)
+    {
         return Err(RequestError::new(
             ErrorKind::Conflict,
             format!(
@@ -9844,10 +9850,37 @@ impl Supervisor {
             )
             .into());
         };
+        // Only for a conversation that WAS captured but cannot be resumed
+        // (an unattributed legacy Codex identity, a record that went
+        // missing). With nothing captured, the session has simply not
+        // reported yet (a Codex session never prompted), and the offer's own
+        // reason below says when it normally will; any other offer (no
+        // resume command, say) has its own reason too.
         if let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
-            && snapshot.restart_offer != RestartOffer::Resume
+            && snapshot.restart_offer == RestartOffer::NotCaptured
+            && snapshot.captured_conversation.is_some()
         {
             return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
+        }
+        // Whether the agent is gone for good, so the refusal can say the
+        // conversation was never captured rather than when it normally is.
+        let ended = matches!(
+            *entry.run.outcome.lock().expect("outcome mutex poisoned"),
+            LastOutcome::Exited { .. } | LastOutcome::Interrupted | LastOutcome::Error { .. }
+        );
+        if restart_with.is_none()
+            && let Some(reason) = snapshot
+                .restart_offer
+                .unavailable_reason(snapshot.kind, ended)
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "this session cannot be restarted: {reason}. Refresh the session rather than \
+                     retrying"
+                ),
+            )
+            .into());
         }
         let (argv, restart_with) = if let Some(launch) = restart_with {
             if let Some(refusal) = restart_with_refusal(&entry.info.launch, &launch) {
@@ -9855,7 +9888,10 @@ impl Supervisor {
             }
             // The same reason a plain restart's refusal gives
             // (`relaunch_argv`), so Restart with's dialog can show it.
-            if let Some(reason) = snapshot.restart_offer.unavailable_reason() {
+            if let Some(reason) = snapshot
+                .restart_offer
+                .unavailable_reason(snapshot.kind, ended)
+            {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     format!("this session cannot be restarted: {reason}"),
@@ -14760,14 +14796,15 @@ pub(crate) mod tests {
             RestartOffer::NoConversationReporting,
             RestartOffer::NoResumeCommand,
         ] {
-            let result = relaunch_argv(&snapshot_offering(offer));
-            match offer.unavailable_reason() {
+            let snapshot = snapshot_offering(offer);
+            let result = relaunch_argv(&snapshot);
+            match offer.unavailable_reason(snapshot.kind, false) {
                 None => assert!(result.is_ok(), "{offer:?}: {result:?}"),
                 Some(reason) => {
                     let error = result.expect_err("an unavailable offer must not relaunch");
                     assert_eq!(error_kind(&error), ErrorKind::Conflict, "{offer:?}");
                     assert!(
-                        format!("{error:#}").contains(reason),
+                        format!("{error:#}").contains(&reason),
                         "{offer:?}: the refusal must name the reason: {error:#}"
                     );
                 }
@@ -15333,6 +15370,133 @@ pub(crate) mod tests {
             Some(terminal),
             LastOutcome::Launching
         )));
+    }
+
+    /// Spec: Restart on a Codex session that has captured nothing yet (never
+    /// prompted) is refused with the offer's reason: while it runs, that for
+    /// Codex sessions Restart normally becomes available once the user
+    /// submits the first prompt; once it has exited, that Farhelm never
+    /// captured its conversation. A Codex session holding a captured
+    /// identity it cannot verify (a bare legacy id) is still refused with the
+    /// unverified-target refusal.
+    ///
+    /// Why: Codex reports its conversation only at the first prompt, so a
+    /// fresh Codex session is the commonest `not_captured` one, and its
+    /// refusal used to talk about an "unattributed legacy identity" it never
+    /// had. The unverified-target refusal exists for the second case, where
+    /// resuming could pick another transcript.
+    #[farhelm_testtrace::test]
+    async fn a_never_prompted_codex_restart_says_when_restart_becomes_available() {
+        let state = StateDir::new();
+        let cwd = tempfile::tempdir().expect("session cwd");
+        let canonical = std::fs::canonicalize(cwd.path())
+            .expect("canonical cwd")
+            .to_string_lossy()
+            .into_owned();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let exited = LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: None,
+        };
+        for (id, captured, outcome) in [
+            ("0b4f3c1e-5a52-4d1c-9d0e-2f6a1c7b8e91", None, exited.clone()),
+            (
+                "0b4f3c1e-5a52-4d1c-9d0e-2f6a1c7b8e92",
+                Some("a-bare-legacy-id".to_string()),
+                exited.clone(),
+            ),
+            // Still running, never prompted: the refusal says when Restart
+            // normally comes, before anything is stopped.
+            (
+                "0b4f3c1e-5a52-4d1c-9d0e-2f6a1c7b8e93",
+                None,
+                LastOutcome::Running,
+            ),
+        ] {
+            sup.store
+                .insert_session(
+                    crate::store::StoredSession {
+                        conversation_source: Some("hook".to_string()),
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
+                        id: id.to_string(),
+                        parent: None,
+                        title: id.to_string(),
+                        created_at: 1_700_000_000,
+                        last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: canonical.clone(),
+                        launch: farhelm_proto::SessionLaunch::Legacy {
+                            invocation: "codex".to_string(),
+                            agent_kind: farhelm_proto::AgentKind::Codex,
+                            resume_template: Some(vec![
+                                "codex".to_string(),
+                                "resume".to_string(),
+                                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                            ]),
+                        },
+                        tmux_name: format!("fh-{id}"),
+                        pane: String::new(),
+                        outcome: outcome.clone(),
+                        canonical_cwd: Some(canonical.clone()),
+                        captured_conversation: captured.clone(),
+                        generation: 0,
+                        launch_scoped: false,
+                    },
+                    None,
+                )
+                .await
+                .expect("seed the Codex row");
+            let mut entry = entry_with(None, outcome.clone());
+            entry.info.id = id.to_string();
+            entry.info.cwd = canonical.clone();
+            entry.canonical_cwd = Some(canonical.clone());
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.to_string(), Arc::new(entry));
+            let snapshot = sup
+                .session_snapshot(id)
+                .await
+                .expect("snapshot")
+                .expect("the seeded row");
+            assert_eq!(
+                snapshot.restart_offer,
+                RestartOffer::NotCaptured,
+                "fixture premise: {captured:?} offers no Resume"
+            );
+
+            let error = sup
+                .restart_session(id, true, None, None)
+                .await
+                .expect_err("a not-captured session does not restart");
+            assert_eq!(error_kind(&error), ErrorKind::Conflict, "{error:#}");
+            let message = format!("{error:#}");
+            let ended = "Farhelm never captured this Codex session's conversation";
+            let timing = "for Codex sessions, Restart normally becomes available once the user \
+                          submits the first prompt";
+            if captured.is_none() {
+                let expected = if outcome == LastOutcome::Running {
+                    timing
+                } else {
+                    ended
+                };
+                assert!(message.contains(expected), "{outcome:?}: {message}");
+                assert!(
+                    !message.contains("no verified foreground resume target"),
+                    "{message}"
+                );
+            } else {
+                assert!(
+                    message.contains("no verified foreground resume target"),
+                    "{message}"
+                );
+            }
+        }
     }
 
     /// An ambiguous create restarts without consent.

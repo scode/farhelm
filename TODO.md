@@ -55,13 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rename sends to another machine starting a second session is an accepted deficiency. Plan:
   `plans/queue/agent-retry-by-request.md`.
 
-- **Explain unavailable Restart in the user's terms.** While a session has no conversation Farhelm can resume yet,
-  Restart and Restart with are greyed out, and their hover text says no conversation was captured, so replace starts it
-  over. That reads as final and in Farhelm's own terms. Say instead what the user is waiting for with this agent, per
-  harness (for example, if Codex reports its conversation only after its first turn, say so), and that Restart will
-  resume once that happens; keep the final wording for the cases where it never will. Plan:
-  `plans/queue/restart-wait-hints.md`.
-
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
   as one choice, and ideally a color as well, so a session's host can be told apart at a glance.

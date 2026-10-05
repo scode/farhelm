@@ -231,7 +231,8 @@ test("an interrupted session's view leads with the resume offer, and declining c
  * Spec: for a `not_captured` interrupted session, the header Restart stays
  * visible but greyed out (`aria-disabled`, not natively disabled, so its
  * tooltip stays readable), its accessible name says Restart is unavailable,
- * its tooltip and description give the reason and point at Replace, a click
+ * its tooltip and description give the reason (the ended wording, since the
+ * session's agent is gone) and point at Replace, a click
  * sends nothing, and the interrupted card offers only Replace.
  */
 test("an interrupted session that cannot resume greys out Restart and offers only Replace", async ({ page }) => {
@@ -247,13 +248,22 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
   await expect(restart).toBeVisible();
   await expect(restart).toHaveAttribute("aria-disabled", "true");
   await expect(restart).toHaveAttribute("aria-label", "restart unavailable");
-  await expect(restart).toHaveAttribute("data-tooltip", /no conversation Farhelm can resume was captured.*replace/);
-  await expect(page.locator("#restart-offer-description")).toContainText("no conversation Farhelm can resume");
+  // The injected row names no agent kind and the session has ended, so the
+  // reason is the ended wording with no per-agent claim, plus the app's
+  // invitation to send feedback.
+  await expect(restart).toHaveAttribute(
+    "data-tooltip",
+    /Farhelm never captured this session's conversation, so Restart can't resume it; Replace starts the session over\. \(If you expected Restart here, please send feedback/,
+  );
+  await expect(page.locator("#restart-offer-description")).toContainText(
+    "Farhelm never captured this session's conversation",
+  );
   await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "true");
 
   const notice = page.locator(".interrupted-card");
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("choose Replace");
+  await expect(notice).toContainText("Farhelm never captured this session's conversation");
   await expect(notice.locator(".restart-from-notice")).toHaveCount(0);
   await expect(notice.locator(".replace-from-notice")).toBeVisible();
 

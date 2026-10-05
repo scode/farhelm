@@ -249,6 +249,24 @@ pub enum SessionAgentKind {
 /// map in `farhelm-supervisor/src/agent_kind/mod.rs` lists this place).
 #[warn(clippy::wildcard_enum_match_arm)]
 impl SessionAgentKind {
+    /// The wire's kind for this one, or `None` for a kind this build does
+    /// not recognize (a newer helm) or a row that carried none (an older
+    /// helm). Lets the per-kind facts the supervisor and the agent CLI also
+    /// use (`farhelm_proto::AgentKind::restart_readiness`, `display_name`)
+    /// reach the browser without a second copy here.
+    pub(crate) fn proto(self) -> Option<farhelm_proto::AgentKind> {
+        match self {
+            SessionAgentKind::Claude => Some(farhelm_proto::AgentKind::Claude),
+            SessionAgentKind::Codex => Some(farhelm_proto::AgentKind::Codex),
+            SessionAgentKind::Goose => Some(farhelm_proto::AgentKind::Goose),
+            SessionAgentKind::Pi => Some(farhelm_proto::AgentKind::Pi),
+            SessionAgentKind::Omp => Some(farhelm_proto::AgentKind::Omp),
+            SessionAgentKind::Grok => Some(farhelm_proto::AgentKind::Grok),
+            SessionAgentKind::Generic => Some(farhelm_proto::AgentKind::Generic),
+            SessionAgentKind::Unrecognized => None,
+        }
+    }
+
     /// How to copy in this agent when a plain mouse drag over its terminal
     /// copied nothing, or `None` when Farhelm knows nothing more specific
     /// than the generic advice.
