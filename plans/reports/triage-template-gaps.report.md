@@ -85,3 +85,45 @@ finding was addressed except these, each a recorded decision: the two-windows ca
 drop the new record of which installation the template named, by reusing the template's own host field instead, which
 was kept because it makes "the host came from a template" explicit where the check is made; and no second review round
 for either PR, since both fixes followed what both reviewers named and are covered by the updated tests.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as two squash commits on main, in order: #1652 (a template save is refused while the
+Templates panel's list is loading, reloading or failed) and #1653 (an agent's create is refused when its template's host
+now reaches another installation). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, the triage-install-uninstall-gaps plan landed (the linger log
+escaping, uninstall's identity check, and the Mac installer's symlink refusal). A separate reviewer that had not worked
+on either plan read the two against each other before anything merged: they share no code, and neither edits SPEC.md or
+SPEC_impl.md. Their triage ledger entries merged cleanly. Their lines in the review-feedback queue's index sat next to
+each other, so this stack's second commit met a conflict there on rebase. The landing resolved it by removing every line
+either plan removes; the index now lists exactly the feedback files left in the queue (checked against the queue's
+files). Resolving it touched no code.
+
+#### Review before merging
+
+The same reviewer found nothing outside the two PRs that the changes break. It confirmed:
+
+- No other browser test saves a template through the panel: the hover-text coverage test only opens and closes the
+  dialog, the docs screenshot for templates opens the edit form without saving, the screenshot staging creates templates
+  through the helm's API, and the README image and video do not touch templates. The one Templates test that saves after
+  an edit keeps the template's own name, which the new check does not refuse.
+- The new check before an agent's create does not overlap with the rule, landed earlier the same day, that a keyed
+  create must name `--host`: a keyed create without `--host` is refused before its template is read, so the check
+  applies only to agent creates whose host comes from a template, which are always unkeyed and without `--host`. Session
+  creates from the web UI take a different path, which this stack does not change. The check also refuses a connection
+  that reports no installation identity; that cannot block a working host, because the helm already refuses to connect a
+  host that has an identity on record and reports none, and shows it as identity unverified.
+
+#### Checks
+
+- Reused: the report's checks. The code that landed is the code they ran on: the rebase onto the install plan changed
+  only the review-feedback queue's index and the triage ledger, and the install plan's code shares nothing with this
+  one.
+- Run now, after the rebase: the review-feedback queue's index compared against the queue's files (they match), and
+  `dprint check` on the triage ledger (clean).
+- Skipped: running the Rust and browser tests again, for the reason above.
+
+Nothing in the report above was made untrue by the landing.
