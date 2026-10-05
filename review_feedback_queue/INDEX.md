@@ -7,7 +7,6 @@ One line per open item. This file must always match the feedback files in this d
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
 - `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
-- `feedback-queued-close.md` — A queued close can discard feedback while sending starts.
 - `template-empty-name.md` — Editing a template silently drops its instruction to clear the name.
 - `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
 

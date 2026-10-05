@@ -6926,7 +6926,10 @@
 - Completion criteria: Send followed by Cancel or Escape in one event burst does not close the dialog while the send is
   unresolved; closing before Send still works; a regression covers both close paths. Remove this feedback file and its
   index entry, or block with findings if the gate trips.
-- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
+- Execution: complete in jj change `lxsmzzoz`, bookmark `plan/triage-dialog-cancel-races/05-feedback-close`, PR
+  https://github.com/scode/farhelm/pull/1662. Cancel's and Escape's handlers read the live sending state when they run;
+  the modal's Escape fallback only clicks Cancel, so no script change was needed. A browser test sends Send followed by
+  each close in one burst.
 
 ## linger-control.md
 

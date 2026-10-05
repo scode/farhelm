@@ -119,6 +119,19 @@ enum SendState {
     Failed(String),
 }
 
+/// Whether the dialog may close now. Not while a send is in flight: closing
+/// would drop the send with no word on whether it arrived and lose the typed
+/// text, which a failed send must keep.
+///
+/// Every user close path asks this of the LIVE state when it runs, not of the
+/// render it was drawn in: Send sets the state synchronously, and a Cancel
+/// click or Escape queued right behind it in the same event burst still runs
+/// before the render that disables Cancel. The modal's own Escape fallback
+/// only clicks Cancel, so Cancel's handler covers it.
+fn may_close(state: &SendState) -> bool {
+    *state != SendState::Sending
+}
+
 /// The dialog. `version` is the version the sidebar shows, which is what
 /// is sent. `on_sent` fires on success, so the parent's always-mounted
 /// status region can announce it; `on_close` closes the dialog and the
@@ -215,10 +228,10 @@ pub(crate) fn FeedbackDialog(
                 // Closing while a send is in flight would cancel it with no
                 // word on whether it arrived and lose the text, so Escape
                 // and cancel wait for the send (bounded by the helm's
-                // timeout). Cancel is natively disabled meanwhile, which is
-                // what the modal's own Escape fallback checks.
+                // timeout), reading the live state (`may_close`). Cancel is
+                // also natively disabled meanwhile, once that render lands.
                 onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing() && !sending {
+                    if event.key() == Key::Escape && !event.is_composing() && may_close(&state.peek()) {
                         on_close.call(());
                     }
                 },
@@ -287,7 +300,11 @@ pub(crate) fn FeedbackDialog(
                         class: "btn btn-neutral feedback-cancel",
                         "data-tooltip": if state() == SendState::Sent { "close: your message was sent" } else { "cancel: close without sending" },
                         disabled: sending,
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| {
+                            if may_close(&state.peek()) {
+                                on_close.call(());
+                            }
+                        },
                         if state() == SendState::Sent { "close" } else { "cancel" }
                     }
                 }
@@ -312,5 +329,21 @@ mod tests {
         assert_eq!(os_name("iPad"), "iOS");
         assert_eq!(os_name("FreeBSD amd64"), "FreeBSD amd64");
         assert_eq!(os_name(""), "");
+    }
+
+    /// Spec (`may_close`): the dialog may close in every state but an
+    /// unresolved send. Why: every close path (Cancel, Escape, and the
+    /// modal's Escape fallback, which clicks Cancel) asks this of the live
+    /// state, so a close queued right behind Send cannot drop the send and
+    /// the typed text; this pins the rule they share. The browser spec
+    /// "a close queued behind send waits for the send" drives the paths.
+    #[farhelm_testtrace::test]
+    fn only_an_unresolved_send_keeps_the_dialog_open() {
+        assert!(may_close(&SendState::Editing), "closing before Send works");
+        assert!(!may_close(&SendState::Sending));
+        assert!(may_close(&SendState::Sent));
+        assert!(may_close(&SendState::Failed(
+            "Couldn't send feedback: no.".to_string()
+        )));
     }
 }
