@@ -6940,7 +6940,8 @@
   failed, the save is refused with a message saying so and a way to retry the list. Saving the template already open
   under its own name keeps working. A focused test holds or fails the list read while saving an existing name. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-template-gaps.md`.
+- Execution: complete in jj change `nxrmplsy`, bookmark `plan/triage-template-gaps/01-template-clobber`, PR
+  https://github.com/scode/farhelm/pull/1652, executed by `plans/queue/triage-template-gaps.md`.
 
 ## template-successor.md
 

@@ -101,6 +101,55 @@ fn tri_state<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// What the panel knows about the helm's template names at the moment of a
+/// save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ListedNames<'a> {
+    /// The list is being read: the first load, or a reload after a save, a
+    /// delete or a retry. A reload keeps showing the previous list until it
+    /// finishes, but that list may already be out of date (it lacks the
+    /// template just saved), so it proves nothing about a name.
+    Loading,
+    /// The last read failed.
+    Failed,
+    /// The list as last read, with no read in progress.
+    Loaded(Vec<&'a str>),
+}
+
+/// Why saving the form under `name` must not go ahead, or `None` when it may.
+///
+/// `previous` is the name of the template the form was opened from (`None`
+/// for a new one), and `listed` is what the panel knows about the names.
+///
+/// Saving under the template's own name replaces that template, which is
+/// the point of editing it (last write wins, SPEC.md). Any other save, a new
+/// template or a rename, would silently replace whichever template already
+/// has `name`, which SPEC_impl.md ("Templates") says the panel must refuse.
+/// So it needs a freshly loaded list to show that the name is free: a list
+/// being read, or one that failed to load, proves nothing, and treating it
+/// as "not taken" is how a slow or failed read used to let a save overwrite
+/// another template.
+fn save_name_refusal(previous: Option<&str>, name: &str, listed: &ListedNames) -> Option<String> {
+    if previous == Some(name) {
+        return None;
+    }
+    match listed {
+        ListedNames::Loading => Some(
+            "the template list is still loading, so Farhelm cannot check that no other template has this name; \
+             wait for it to load, then save again"
+                .to_string(),
+        ),
+        ListedNames::Failed => Some(
+            "the template list could not be loaded, so Farhelm cannot check that no other template has this name; \
+             retry loading it above, then save again"
+                .to_string(),
+        ),
+        ListedNames::Loaded(names) => names.contains(&name).then(|| {
+            format!("a template named {name:?} already exists; edit that one, or choose another name")
+        }),
+    }
+}
+
 /// The fields a form describes, or the reason it describes none. An empty
 /// text field means the template leaves that field alone; nothing is
 /// trimmed, because a command's spacing is the user's.
@@ -408,20 +457,28 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
         };
         let base = save_base.clone();
         let previous = editing();
-        // Saving a NEW template, or renaming one, under a name another
-        // template already has would replace that other template, which the
-        // user never opened. Last-write-wins (SPEC.md) is about two clients
-        // editing the same template, not this form clobbering a different one.
-        let taken = templates
-            .peek()
-            .as_ref()
-            .and_then(|listed| listed.as_ref().ok())
-            .is_some_and(|listed| listed.iter().any(|template| template.name == draft.name));
-        if previous.as_deref() != Some(draft.name.as_str()) && taken {
-            error.set(Some(format!(
-                "a template named {:?} already exists; edit that one, or choose another name",
-                draft.name
-            )));
+        // A new template or a rename must not land on a name another
+        // template has (`save_name_refusal` says why, and why an unloaded
+        // list refuses too).
+        let refusal = {
+            let listed = templates.peek();
+            // `pending()` first: a reload keeps the previous value in place,
+            // and that value must not count as the current list.
+            let names = match listed.as_ref() {
+                _ if templates.pending() => ListedNames::Loading,
+                None => ListedNames::Loading,
+                Some(Err(_)) => ListedNames::Failed,
+                Some(Ok(listed)) => ListedNames::Loaded(
+                    listed
+                        .iter()
+                        .map(|template| template.name.as_str())
+                        .collect(),
+                ),
+            };
+            save_name_refusal(previous.as_deref(), &draft.name, &names)
+        };
+        if let Some(message) = refusal {
+            error.set(Some(message));
             return;
         }
         busy.set(true);
@@ -473,7 +530,23 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
                 }
                 match listed {
                     None => rsx! { p { class: "host-settings-help", "loading templates" } },
-                    Some(Err(message)) => rsx! { p { class: "templates-error", role: "status", "templates unavailable: {message}" } },
+                    Some(Err(message)) => rsx! {
+                        p { class: "templates-error", role: "status", "templates unavailable: {message}" }
+                        // The only way back to a loaded list, which saving a
+                        // new template or a rename needs (`save_name_refusal`).
+                        // Wrapped so the dialog's column layout does not
+                        // stretch it to the dialog's width.
+                        div {
+                            button {
+                                r#type: "button",
+                                class: "btn btn-neutral templates-retry",
+                                "data-tooltip": "retry: load the template list again",
+                                disabled,
+                                onclick: move |_| templates.restart(),
+                                "retry"
+                            }
+                        }
+                    },
                     Some(Ok(list)) if list.is_empty() => rsx! { p { class: "host-settings-help", "no templates yet" } },
                     Some(Ok(list)) => rsx! {
                         ul { class: "templates-list",
@@ -728,6 +801,68 @@ mod tests {
             },
         ] {
             assert!(fields_from_form(&form).is_err(), "{form:?}");
+        }
+    }
+
+    /// Spec: a new template, or a rename, is saved only once the template
+    /// list has loaded with no read in progress and shows the name is free;
+    /// while the list is loading (the first load or a reload) or failed to
+    /// load, the save is refused saying so. Saving the template already open
+    /// under its own name is never refused.
+    ///
+    /// Why: the panel used to read an unloaded list as "no template has this
+    /// name", so saving a new template while the list was slow or failing
+    /// replaced an existing template the user never opened (SPEC_impl.md
+    /// "Templates" requires refusing a name another template has). A reload
+    /// counts as loading because the list it still shows can lack the
+    /// template just saved; the save handler maps a reload to `Loading`.
+    #[test]
+    fn a_new_or_renamed_template_needs_the_loaded_list() {
+        let loaded = ListedNames::Loaded(vec!["build", "review"]);
+        let taken =
+            |refusal: Option<String>| refusal.is_some_and(|text| text.contains("already exists"));
+        let loading =
+            |refusal: Option<String>| refusal.is_some_and(|text| text.contains("still loading"));
+        let failed = |refusal: Option<String>| {
+            refusal.is_some_and(|text| text.contains("could not be loaded"))
+        };
+
+        // A new template: a taken name is refused as taken, a free one is
+        // allowed, and either is refused while the list is not loaded.
+        assert!(taken(save_name_refusal(None, "build", &loaded)));
+        assert_eq!(save_name_refusal(None, "deploy", &loaded), None);
+        for name in ["build", "deploy"] {
+            assert!(
+                loading(save_name_refusal(None, name, &ListedNames::Loading)),
+                "{name}"
+            );
+            assert!(
+                failed(save_name_refusal(None, name, &ListedNames::Failed)),
+                "{name}"
+            );
+        }
+
+        // A rename is a new name too.
+        assert!(taken(save_name_refusal(Some("build"), "review", &loaded)));
+        assert_eq!(save_name_refusal(Some("build"), "deploy", &loaded), None);
+        assert!(loading(save_name_refusal(
+            Some("build"),
+            "deploy",
+            &ListedNames::Loading
+        )));
+        assert!(failed(save_name_refusal(
+            Some("build"),
+            "deploy",
+            &ListedNames::Failed
+        )));
+
+        // The template open under its own name saves whatever the list.
+        for listed in [loaded.clone(), ListedNames::Loading, ListedNames::Failed] {
+            assert_eq!(
+                save_name_refusal(Some("build"), "build", &listed),
+                None,
+                "{listed:?}"
+            );
         }
     }
 }
