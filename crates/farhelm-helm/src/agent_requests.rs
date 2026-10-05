@@ -940,6 +940,16 @@ struct ResolvedCreate {
     host: HostId,
     host_name: String,
     resolution: crate::agent_launch::Resolution,
+    /// The install identity a template named the host by, when the host
+    /// came from a template and from nothing else (not `--host`, not a
+    /// spawn's own host). Dispatch refuses unless the connection it sends on
+    /// still reaches that installation: the row can be pointed at another
+    /// machine, and the new installation adopted, between resolution and
+    /// dispatch (the approval's own recheck covers only the wait for the
+    /// user, not the stretches on either side of it), and SPEC.md has a
+    /// template's host then stop applying "rather than silently aiming at
+    /// the successor".
+    template_identity: Option<String>,
 }
 
 /// One `clone` verb's fields, moved out of [`AgentVerb`] so the handler arm
@@ -1191,16 +1201,24 @@ fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<
 /// [`AgentOutcome::Err`] like every other create precondition — this side
 /// never stats a path on another machine, and could not.
 ///
-/// The INSTALLATION behind the host. The host is the registry's durable
-/// [`HostId`], and `sessions::host_client` takes the connection currently
-/// published for that row — exactly what the lifecycle verbs do through
-/// `route_session`, and exactly what the REST create does through
-/// `create_target`. A row retargeted or adopted between the two reads sends
-/// the create to the new installation, and nothing here pins an incarnation
-/// to prevent that. The claim is what makes it safe rather than silent:
-/// every write below revalidates against the connection the create was
-/// actually sent on, so the create either lands on one coherent installation
-/// or fails.
+/// The INSTALLATION behind a host named by `--host`. The host is the
+/// registry's durable [`HostId`], and `sessions::host_client` takes the
+/// connection currently published for that row — exactly what the lifecycle
+/// verbs do through `route_session`, and exactly what the REST create does
+/// through `create_target`. A row retargeted or adopted between the two reads
+/// sends the create to the new installation, and nothing here pins an
+/// incarnation to prevent that. The claim is what makes it safe rather than
+/// silent: every write below revalidates against the connection the create
+/// was actually sent on, so the create either lands on one coherent
+/// installation or fails.
+///
+/// A host that came from a TEMPLATE is different: the template names an
+/// installation, not a row (SPEC.md, Launch templates), so its identity is
+/// carried from resolution to dispatch (`ResolvedCreate::template_identity`)
+/// and dispatch refuses when the connection's claim names another one
+/// (`template_host_moved`). That is an installation check; the approval
+/// path's own recheck (`approved`) is about the REQUESTING host's connection,
+/// not the target's.
 async fn create_for_agent(
     state: &AppState,
     origin: AgentOrigin,
@@ -1303,6 +1321,7 @@ async fn resolve_agent_create(
         edits.spawn.is_some(),
         edits.host.is_some(),
     )?;
+    let mut template_identity = None;
     let (host, host_name) = if edits.spawn.is_some() {
         if edits.host.is_some() {
             return Err(crate::sessions::invalid_request(
@@ -1323,6 +1342,7 @@ async fn resolve_agent_create(
         let view = crate::agent_launch::template_host_row(&views, identity).ok_or_else(|| {
             anyhow::anyhow!("a template's host matched no host row it was checked against")
         })?;
+        template_identity = Some(identity.clone());
         (view.id, view.name.clone())
     } else {
         return Err(crate::sessions::invalid_request(
@@ -1333,6 +1353,7 @@ async fn resolve_agent_create(
         host,
         host_name,
         resolution,
+        template_identity,
     })
 }
 
@@ -1392,6 +1413,7 @@ fn inherited_spawn_resolution(
             title: name.clone(),
             template_host: None,
         },
+        template_identity: None,
     })
 }
 
@@ -1500,6 +1522,35 @@ struct AgentCreateDispatch {
     request_fingerprint: Option<String>,
 }
 
+/// The refusal for a create whose host came from a template, when the
+/// connection it would be sent on reaches a different installation than the
+/// one the template names; `None` when it may go ahead.
+///
+/// Compared against the claim taken with the client, which is the identity
+/// of the connection the create would actually travel on, so a row pointed
+/// at another machine, and its new installation adopted, after resolution
+/// cannot carry the create to the replacement machine. A connection whose identity is
+/// unknown is refused too: it is not shown to be the template's install.
+fn template_host_moved(
+    template_identity: Option<&str>,
+    claim: &crate::manager::SessionClaim,
+    host_name: &str,
+) -> Option<anyhow::Error> {
+    let expected = template_identity?;
+    if claim.identity.as_deref() == Some(expected) {
+        return None;
+    }
+    Some(anyhow::Error::new(crate::SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::Conflict,
+        message: format!(
+            "the host {host_name} that the template names now reaches a different Farhelm \
+             installation than the one the template was made for, so nothing was created; \
+             check that host in the host list, or name a host with --host"
+        ),
+    }))
+}
+
 /// Send one resolved agent create to its host.
 async fn dispatch_agent_create(
     state: &AppState,
@@ -1513,6 +1564,11 @@ async fn dispatch_agent_create(
     // was actually sent on (see `sessions::host_client`).
     let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
     let host_name = resolved.host_name.as_str();
+    if let Some(refusal) =
+        template_host_moved(resolved.template_identity.as_deref(), &claim, host_name)
+    {
+        return Err(refusal);
+    }
     // The same paper trail [`resolve_target`] leaves for the lifecycle
     // verbs. `host_name` is the REGISTRY's own rendering of the matched row
     // rather than the string the request carried, so nothing
@@ -5064,6 +5120,94 @@ mod tests {
             panic!("no host anywhere is refused: {outcome:?}");
         };
         assert!(message.contains("--host is required"), "{message}");
+    }
+
+    /// Spec: a create whose host came from a template is sent only while the
+    /// host's connection still reaches the installation the template names.
+    /// When the machine behind the host entry is replaced and its new
+    /// identity adopted between resolution and dispatch, the create is
+    /// refused saying so and nothing is created; a create resolved and sent
+    /// before the replacement goes through. Explicit `--host` is not checked
+    /// this way (`an_explicit_host_wins_over_a_templates_host`).
+    ///
+    /// Why: SPEC.md names a template's host by install identity so that a
+    /// retargeted row makes the template's host stop applying "rather than
+    /// silently aiming at the successor"; resolution checks the identity,
+    /// but dispatch comes later and used to send on whatever the row then
+    /// reached. The resolutions come from the
+    /// real `resolve_agent_create`, so a resolution that stopped carrying
+    /// the template's identity fails here too.
+    #[farhelm_testtrace::test]
+    async fn a_template_host_that_now_reaches_another_install_is_refused() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        put_template(
+            &h,
+            "builder-shell",
+            farhelm_proto::launcher::TemplateFields {
+                host: Some("identity-builder".to_string()),
+                ..command_template("sh")
+            },
+        )
+        .await;
+        let request = LaunchEditsRequest {
+            host: None,
+            templates: vec!["builder-shell".to_string()],
+            edits: farhelm_proto::launcher::TemplateFields::default(),
+            spawn: None,
+        };
+        let resolve = async || {
+            resolve_agent_create(&h.state, origin_of(&h, local), &request)
+                .await
+                .expect("the template's host resolves")
+        };
+        let dispatch = || AgentCreateDispatch {
+            intent_key: None,
+            parent: None,
+            spawned: false,
+            request_fingerprint: None,
+        };
+        let before = resolve().await;
+        let held = resolve().await;
+        assert_eq!(held.host, remote);
+        assert_eq!(held.template_identity.as_deref(), Some("identity-builder"));
+
+        dispatch_agent_create(&h.state, origin_of(&h, local), "asker", before, dispatch())
+            .await
+            .expect("sent while the host still reaches the template's install");
+        assert_eq!(seen.lock().expect("seen mutex").len(), 1);
+
+        // The machine behind the entry is replaced and the user adopts the
+        // new install, all between `held`'s resolution and its dispatch.
+        h.fleet.edit(remote, |script| {
+            script.identity = Some("identity-replacement".to_string());
+        });
+        h.fleet.kill_connection(remote);
+        h.await_state(remote, |state| state.phase() == "identity-mismatch")
+            .await;
+        h.manager
+            .adopt(remote, "identity-replacement")
+            .await
+            .expect("adopt the replacement");
+        h.await_refreshed_as(remote, "identity-replacement", 0)
+            .await;
+
+        let refused =
+            dispatch_agent_create(&h.state, origin_of(&h, local), "asker", held, dispatch())
+                .await
+                .expect_err("a template host now reaching another install is refused");
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("different Farhelm installation"),
+            "{message}"
+        );
+        assert_eq!(
+            seen.lock().expect("seen mutex").len(),
+            1,
+            "no second create reached the template's install; the refusal above came before any send \
+             (the scripted replacement answers only listings, so a sent create would hang, not return)"
+        );
     }
 
     /// Spec: a spawn with launch flags creates on the asking session's own

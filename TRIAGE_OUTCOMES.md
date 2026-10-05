@@ -6958,7 +6958,8 @@
   with the client equals the template's identity, with a message saying the host now reaches a different install; a
   focused test retargets the row between resolution and dispatch and shows nothing is created. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/triage-template-gaps.md`.
+- Execution: complete in jj change `tplzsoxr`, bookmark `plan/triage-template-gaps/02-template-successor`, PR
+  https://github.com/scode/farhelm/pull/1653, executed by `plans/queue/triage-template-gaps.md`.
 
 ## uninstall-missing-id.md
 
