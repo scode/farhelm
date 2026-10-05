@@ -124,7 +124,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   release signing system (minisign over `SHA256SUMS`, checked with the key the running app carries, with any key
   rotation sequenced before that ships, per SPEC_impl.md "Release signing key"), possibly moving the installer off
   main's raw file to a locked-down location; and make sure agents working on this machine cannot cause a release
-  directly (push a release tag, run the release workflow, or upload release assets).
+  directly (push a release tag, run the release workflow, or upload release assets). Plan:
+  `plans/queue/get-site-cutover.md`.
 
 ## Doc todo
 
