@@ -19,8 +19,8 @@ You can leave the model unset in Farhelm. Goose then uses its configured provide
 
 ## Session tracking limitation
 
-Farhelm's Goose reporter records the session Goose identifies as current. The reporter credential proves that the report
-belongs to this Farhelm session, but the basic integration does not independently prove that the Goose session is the
+Farhelm's Goose reporter records the session Goose identifies as current. Farhelm checks that a Goose report came from
+this session's terminal under its current launch, but the basic integration does not prove that the Goose session is the
 foreground root. Goose native subagents can inherit the reporter and use their own session IDs, and a separately
 launched Goose can be given the same reporter. A child report can therefore replace the saved restart target.
 
