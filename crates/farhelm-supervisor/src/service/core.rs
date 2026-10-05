@@ -2472,6 +2472,16 @@ impl FarhelmArgsMode {
     }
 }
 
+/// What [`with_farhelm_args_using`] decides for one spawn: the argv, the
+/// agent's extra environment, whether the launch is hooked, and the hook skip
+/// to tell the user about, if any (see [`super::notifications::HookSkip`]).
+type FarhelmArgsExpansion = (
+    Vec<String>,
+    Vec<(String, String)>,
+    bool,
+    Option<super::notifications::HookSkip>,
+);
+
 /// The decision half of [`Supervisor::with_farhelm_args`]: the argv to
 /// spawn, the environment the agent gets on top of the shim's own, and
 /// whether the launch is HOOKED.
@@ -2480,10 +2490,10 @@ impl FarhelmArgsMode {
 /// guarantees) is replaced by the kind's arguments from
 /// [`crate::agent_kind::AgentIntegration::farhelm_args`], or by nothing for
 /// a kind with no integration; nothing else in the argv is read. A legacy
-/// session goes through [`with_hook_argv_using`], unchanged from before
+/// session goes through [`legacy_hook_injection`], unchanged from before
 /// launch kinds, and gets no separate environment because that path writes
 /// its reporter settings as an `env` prefix. Pure apart from tracing, like
-/// [`with_hook_argv_using`], whose docs explain the log policy this shares.
+/// [`legacy_hook_injection`], whose docs explain the log policy this shares.
 #[allow(clippy::too_many_arguments)]
 fn with_farhelm_args_using(
     argv: Vec<String>,
@@ -2494,9 +2504,9 @@ fn with_farhelm_args_using(
     exe: Option<&str>,
     vendor_extension: Option<&str>,
     session: &str,
-) -> (Vec<String>, Vec<(String, String)>, bool) {
+) -> FarhelmArgsExpansion {
     let FarhelmArgsMode::Expand(phase) = mode else {
-        let (argv, hooked) = with_hook_argv_using(
+        let (argv, hooked, skipped) = legacy_hook_injection(
             argv,
             snapshot,
             hooks,
@@ -2505,7 +2515,16 @@ fn with_farhelm_args_using(
             vendor_extension,
             session,
         );
-        return (argv, Vec::new(), hooked);
+        // The opt-out is checked here as well as by reason: several legacy
+        // injections inspect the command's shape before the opt-out, so a
+        // refused shape can come back with its own reason even when the user
+        // turned hooks off for that agent (SPEC.md: their choice never
+        // notifies).
+        let skip = skipped
+            .filter(|reason| crate::agent_kind::hook_skip_notifies(reason))
+            .filter(|_| hooks.allows(snapshot.kind))
+            .map(super::notifications::HookSkip::Legacy);
+        return (argv, Vec::new(), hooked, skip);
     };
     let expansion = match snapshot.integration() {
         Some(integration) => integration.farhelm_args(
@@ -2519,14 +2538,23 @@ fn with_farhelm_args_using(
         ),
         None => crate::agent_kind::FarhelmArgs::none(),
     };
+    let mut skip = None;
     match expansion.log {
         crate::agent_kind::HookLog::Silent => {}
-        crate::agent_kind::HookLog::Skipped(reason) => info!(
-            session = %session,
-            kind = ?snapshot.kind,
-            reason,
-            "conversation hook flags not injected"
-        ),
+        crate::agent_kind::HookLog::Skipped(reason) => {
+            info!(
+                session = %session,
+                kind = ?snapshot.kind,
+                reason,
+                "conversation hook flags not injected"
+            );
+            // A composed launch's only skip the user did not choose is a
+            // reporter that could not be set up; nothing in their command
+            // was in the way.
+            if crate::agent_kind::hook_skip_notifies(reason) {
+                skip = Some(super::notifications::HookSkip::ReporterUnavailable);
+            }
+        }
         crate::agent_kind::HookLog::Injected => info!(
             session = %session,
             kind = ?snapshot.kind,
@@ -2543,7 +2571,32 @@ fn with_farhelm_args_using(
             expanded.push(element);
         }
     }
-    (expanded, expansion.env, expansion.hooked)
+    (expanded, expansion.env, expansion.hooked, skip)
+}
+
+/// The two-value form of [`legacy_hook_injection`] that the injection tests
+/// call: the argv and whether it was hooked, without the skip reason. See
+/// [`legacy_hook_injection`] for the refusal list and its order.
+#[cfg(test)]
+fn with_hook_argv_using(
+    argv: Vec<String>,
+    snapshot: &IntegrationSnapshot,
+    hooks: &crate::agent_kind::AgentHooks,
+    instructions: crate::agent_kind::AgentInstructions,
+    exe: Option<&str>,
+    vendor_extension: Option<&str>,
+    session: &str,
+) -> (Vec<String>, bool) {
+    let (argv, hooked, _skipped) = legacy_hook_injection(
+        argv,
+        snapshot,
+        hooks,
+        instructions,
+        exe,
+        vendor_extension,
+        session,
+    );
+    (argv, hooked)
 }
 
 /// The LEGACY injection: how a session created before launch kinds gets
@@ -2566,8 +2619,10 @@ fn with_farhelm_args_using(
 /// this function owns the shared early return for un-integrated kinds and
 /// turns each decision's [`crate::agent_kind::HookLog`] into the log line.
 ///
-/// Returns the argv to launch and whether it was HOOKED, i.e. whether the
-/// tail was actually appended. The caller carries that bool to the
+/// Returns the argv to launch, whether it was HOOKED (whether the tail was
+/// actually appended), and the skip reason when injection was skipped, which
+/// the spawn turns into a session notification (see
+/// [`super::notifications::HookSkip`]). The caller carries the bool to the
 /// [`RunCells::hooked`] tripwire; it is deliberately not recoverable
 /// by inspecting the returned argv, because "does this argv end in flags
 /// that look like ours" is exactly the kind of re-derivation that goes
@@ -2604,7 +2659,7 @@ fn with_farhelm_args_using(
 /// `FARHELM_AGENT_HOOKS` off for a kind also silences the pointer for it,
 /// while `FARHELM_AGENT_INSTRUCTIONS=off` leaves identity capture entirely
 /// alone.
-fn with_hook_argv_using(
+fn legacy_hook_injection(
     argv: Vec<String>,
     snapshot: &IntegrationSnapshot,
     hooks: &crate::agent_kind::AgentHooks,
@@ -2612,9 +2667,9 @@ fn with_hook_argv_using(
     exe: Option<&str>,
     vendor_extension: Option<&str>,
     session: &str,
-) -> (Vec<String>, bool) {
+) -> (Vec<String>, bool, Option<&'static str>) {
     let Some(integration) = snapshot.integration() else {
-        return (argv, false);
+        return (argv, false, None);
     };
     let policy = crate::agent_kind::HookPolicy {
         hooks,
@@ -2623,14 +2678,18 @@ fn with_hook_argv_using(
         vendor_extension,
     };
     let injection = integration.inject_hooks(argv, &policy);
+    let mut skipped = None;
     match injection.log {
         crate::agent_kind::HookLog::Silent => {}
-        crate::agent_kind::HookLog::Skipped(reason) => info!(
-            session = %session,
-            kind = ?snapshot.kind,
-            reason,
-            "conversation hook flags not injected"
-        ),
+        crate::agent_kind::HookLog::Skipped(reason) => {
+            info!(
+                session = %session,
+                kind = ?snapshot.kind,
+                reason,
+                "conversation hook flags not injected"
+            );
+            skipped = Some(reason);
+        }
         crate::agent_kind::HookLog::Injected => info!(
             session = %session,
             kind = ?snapshot.kind,
@@ -2638,7 +2697,7 @@ fn with_hook_argv_using(
             "conversation hook flags injected"
         ),
     }
-    (injection.argv, injection.hooked)
+    (injection.argv, injection.hooked, skipped)
 }
 
 // OMP's interactive-shape grammar (utility commands, excluded options,
@@ -3690,7 +3749,7 @@ pub(crate) struct RunCells {
     /// picture: a launch that was REFUSED injection in the first place —
     /// an invocation carrying its own `--settings`, a bare `--`, a kind
     /// excluded by `FARHELM_AGENT_HOOKS`. Those are diagnosed at INJECTION
-    /// time, by [`with_hook_argv_using`]'s skip line, and they leave this
+    /// time, by [`legacy_hook_injection`]'s skip line, and they leave this
     /// flag clear, so the tripwire never arms for them and its silence is
     /// correct rather than a second failure. The two questions a reader
     /// has to keep apart are "were the flags ever put on the command line"
@@ -3824,6 +3883,27 @@ pub(crate) struct SessionCells {
     /// the cell is shared across generations: generation-conditional SQL
     /// alone would protect the row while an old capture still moved memory.
     pub(crate) last_work_started_at: Arc<std::sync::atomic::AtomicI64>,
+    /// The session's notifications as the listing carries them, newest first
+    /// (SPEC.md, Status; [`farhelm_proto::SessionInfo::notifications`]).
+    ///
+    /// SESSION-scoped like the two stamps above, and for the same reason: a
+    /// notification describes the session, a restart must not wipe the
+    /// problem it was told about, and a rename certainly must not. The store
+    /// is the truth (`session_notifications`, capped and once per launch);
+    /// this is its in-memory copy, because replies are built synchronously
+    /// from immutable entries (`status::entry_info` overlays it on every
+    /// reply). It is only ever REPLACED wholesale from the store
+    /// ([`Supervisor::reload_notification_cell`]), never edited in place, so
+    /// it cannot drift from what a supervisor restart would load.
+    pub(crate) notifications: Arc<std::sync::Mutex<Vec<farhelm_proto::SessionNotification>>>,
+}
+
+/// An empty [`SessionCells::notifications`] cell, for an entry the store has
+/// not been read for yet; [`Supervisor::reload_notification_cell`] fills it
+/// once the entry is published.
+pub(crate) fn notification_cell() -> Arc<std::sync::Mutex<Vec<farhelm_proto::SessionNotification>>>
+{
+    Arc::new(std::sync::Mutex::new(Vec::new()))
 }
 
 /// One host's session authority, shared by every connection.
@@ -5952,6 +6032,7 @@ impl Supervisor {
                         // cached entries cannot track later memberships.
                         github_repo: None,
                         working_copy: None,
+                        notifications: Vec::new(),
                     },
                     terminal,
                     run: RunCells {
@@ -5987,6 +6068,7 @@ impl Supervisor {
                         // years of history has never done anything.
                         last_activity_at: activity_stamp(row.last_activity_at),
                         last_work_started_at: activity_stamp(row.last_work_started_at),
+                        notifications: notification_cell(),
                     },
                     snapshot,
                     canonical_cwd: row.canonical_cwd,
@@ -6095,6 +6177,24 @@ impl Supervisor {
                     error = %format!("{e:#}"),
                     "could not load pending create reservations; leaving them for a retry"
                 ),
+            }
+        }
+        // Every reloaded session gets its stored notifications; a store that
+        // cannot be read leaves the cell empty rather than failing startup
+        // over a diagnostic.
+        for (id, entry) in &sessions {
+            match store.session_notifications(id).await {
+                Ok(stored) => {
+                    *entry
+                        .session
+                        .notifications
+                        .lock()
+                        .expect("notification cell poisoned") = stored;
+                }
+                Err(error) => {
+                    warn!(session = %id, error = %format!("{error:#}"),
+                        "could not read a session's notifications");
+                }
             }
         }
         Ok((sessions, may_write))
@@ -8065,6 +8165,12 @@ impl Supervisor {
                     )
                     .into());
                 }
+                // A replayed create answers with what the listing carries.
+                let replayed_notifications = self
+                    .store
+                    .session_notifications(&row.id)
+                    .await
+                    .unwrap_or_default();
                 let snapshot = IntegrationSnapshot::of(&row.launch);
                 let info = SessionInfo {
                     parent: row.parent,
@@ -8095,6 +8201,7 @@ impl Supervisor {
                     // Filled from the registry at the reply boundary below.
                     github_repo: None,
                     working_copy: None,
+                    notifications: replayed_notifications,
                 };
                 self.with_checkout_metadata(info).await
             }
@@ -8243,6 +8350,7 @@ impl Supervisor {
                 session: SessionCells {
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
+                    notifications: notification_cell(),
                 },
                 snapshot: snapshot.clone(),
                 canonical_cwd: canonical_cwd.map(str::to_string),
@@ -8250,6 +8358,9 @@ impl Supervisor {
                 scope,
             }),
         );
+        // The launch's own spawn may have recorded a notification before
+        // this entry existed (a hook it could not add).
+        self.reload_notification_cell(&info.id).await;
         // Retained rows are visible (and deletable) from here; the failed
         // create that published them replies with an error, so nothing else
         // would hint them.
@@ -9023,6 +9134,7 @@ impl Supervisor {
             // Filled at reply time, including memberships acquired later.
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         // Creation uses its own timestamp rather than pretending the
         // sampler observed a work transition. It still raises the allocator
@@ -9514,6 +9626,7 @@ impl Supervisor {
                     // has been seen happening here yet.
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
+                    notifications: notification_cell(),
                 },
                 snapshot,
                 canonical_cwd: canonical_cwd.clone(),
@@ -9527,6 +9640,9 @@ impl Supervisor {
                 scope: launch_scope,
             }),
         );
+        // The spawn above may have recorded a notification (a hook it could
+        // not add) before this entry existed to carry it.
+        self.reload_notification_cell(&info.id).await;
         // Marked at publication, not by the create handler: see `hints`.
         self.hint_sessions_changed();
         // Checkout metadata is projected HERE, after publication, so the
@@ -9542,6 +9658,10 @@ impl Supervisor {
         // reservation to reconcile it either, so the id is the only handle
         // that exists.
         let session_id = info.id.clone();
+        // The reply carries what the listing will: `info` was built before
+        // the spawn recorded anything.
+        let mut info = info;
+        info.notifications = self.published_notifications(&session_id).await;
         self.with_checkout_metadata(info).await.with_context(|| {
             format!(
                 "session {session_id} WAS created and is running; only describing its checkout \
@@ -11204,6 +11324,7 @@ impl Supervisor {
 
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         let published = relaunched_entry(
             entry,
@@ -11236,6 +11357,13 @@ impl Supervisor {
                 .expect("restarting-rows mutex poisoned")
                 .remove(&entry.info.id);
         }
+        // The relaunch's spawn may have recorded a notification while the
+        // session was out of the map (a hook it could not add), which
+        // nothing would otherwise copy into the cell, and the reply must
+        // carry what the listing will.
+        self.reload_notification_cell(&entry.info.id).await;
+        let mut info = info;
+        info.notifications = self.published_notifications(&entry.info.id).await;
         // Every relaunch publication goes through here, whichever request
         // or recovery drove it; see `hints` for why marks sit at
         // publication rather than in the handlers.
@@ -12850,7 +12978,7 @@ impl Supervisor {
         snapshot: &IntegrationSnapshot,
         vendor_extension: Option<&str>,
         session: &str,
-    ) -> (Vec<String>, Vec<(String, String)>, bool) {
+    ) -> FarhelmArgsExpansion {
         with_farhelm_args_using(
             argv,
             mode,
@@ -12967,7 +13095,7 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, env, hooked) =
+        let (argv, env, hooked, hook_skip) =
             self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
@@ -13175,6 +13303,20 @@ impl Supervisor {
                         }),
                         tmux_attempted: true,
                     });
+                }
+                // A hook Farhelm could not add, told to the user once the
+                // launch is known to be running. The store fences the record
+                // on this generation, which the row already carries (see the
+                // provenance write above), and a create's entry picks it up
+                // when it is published.
+                if let Some(skip) = hook_skip {
+                    self.notify_session(
+                        id,
+                        generation,
+                        super::notifications::NotificationKind::HookNotAdded,
+                        &skip.text(),
+                    )
+                    .await;
                 }
                 Ok(Spawned {
                     pane,
@@ -13414,6 +13556,7 @@ impl Supervisor {
             ),
             github_repo: None,
             working_copy: None,
+            notifications: Vec::new(),
         };
         let capture = match row.captured_conversation.as_deref() {
             Some(conversation) => CaptureState::Reported {
@@ -13445,6 +13588,7 @@ impl Supervisor {
                 session: SessionCells {
                     last_activity_at: activity_stamp(row.last_activity_at),
                     last_work_started_at: activity_stamp(row.last_work_started_at),
+                    notifications: notification_cell(),
                 },
                 snapshot,
                 canonical_cwd: row.canonical_cwd.clone(),
@@ -13453,6 +13597,10 @@ impl Supervisor {
             }),
         );
         drop(sessions);
+        // An entry built from a row is seeded from the store, as every other
+        // publication from a row is; a spawn that ran before this create
+        // was settled may have recorded something.
+        self.reload_notification_cell(&row.id).await;
         // A retained refusal is a new, already-terminal row: no pane will
         // die and no ticker transition follows, so this is its only hint.
         self.hint_sessions_changed();
@@ -16866,6 +17014,7 @@ pub(crate) mod tests {
                 tabs: Vec::new(),
                 github_repo: None,
                 working_copy: None,
+                notifications: Vec::new(),
             },
             terminal,
             run: RunCells {
@@ -16879,6 +17028,7 @@ pub(crate) mod tests {
             session: SessionCells {
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+                notifications: notification_cell(),
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
@@ -19448,6 +19598,22 @@ pub(crate) mod tests {
             persisted.selected_at.is_some(),
             "readiness withdrawal must preserve the restart-stable ordering fence"
         );
+        // The withdrawal is told to the user on the session once it is durable,
+        // and later passes, which find the offer already withdrawn, do not
+        // repeat it (SPEC.md, Status).
+        sup.capture_now().await;
+        let texts: Vec<String> = sup
+            .store
+            .session_notifications(&id)
+            .await
+            .expect("read notifications")
+            .into_iter()
+            .map(|notification| notification.text)
+            .collect();
+        assert_eq!(
+            texts,
+            vec![crate::service::notifications::resume_withdrawn_text("Grok")]
+        );
     }
 
     /// A historical Codex row — a bare id admitted before the ownership
@@ -20460,6 +20626,20 @@ exit 0
                 .await
         }
 
+        /// The session's stored notification texts, newest first.
+        async fn notification_texts(&self, id: &str) -> Vec<String> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session_notifications(id)
+                .await
+                .expect("read notifications")
+                .into_iter()
+                .map(|notification| notification.text)
+                .collect()
+        }
+
         /// The exact durable binding: locator token plus ownership
         /// version, asserted together because neither alone is the
         /// contract.
@@ -20596,6 +20776,17 @@ exit 0
             "the refusal names launch provenance: {error:#}"
         );
         assert_eq!(fixture.binding(&id).await, (None, 0));
+        // The user hears about it on the session (SPEC.md, Status).
+        assert_eq!(
+            fixture.notification_texts(&id).await,
+            vec![
+                crate::service::notifications::reporter_mismatch_text(
+                    crate::service::notifications::ReporterMismatch::OlderReporter,
+                    false,
+                )
+                .to_string()
+            ]
+        );
         assert_eq!(
             fixture.offer(&id).await,
             farhelm_proto::RestartOffer::NotCaptured
@@ -20650,6 +20841,17 @@ exit 0
             format!("{error:#}").contains("does not match this build"),
             "the refusal names the build identity: {error:#}"
         );
+        assert_eq!(
+            fixture.notification_texts(&id).await,
+            vec![
+                crate::service::notifications::reporter_mismatch_text(
+                    crate::service::notifications::ReporterMismatch::FileDiffers,
+                    false,
+                )
+                .to_string()
+            ],
+            "a diverged reporter is told to the user"
+        );
         std::fs::remove_file(&asset_path).expect("remove the asset");
         let error = fixture
             .admit_unanchored(
@@ -20665,6 +20867,36 @@ exit 0
             "unexpected refusal: {error:#}"
         );
         assert_eq!(fixture.binding(&id).await, (None, 0));
+        // A reporter that could not be read adds nothing: it may be a passing
+        // I/O problem. Judged on a second, fresh launch, so the once-per-launch
+        // rule cannot be what keeps it quiet.
+        let fresh = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &fresh,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        fixture
+            .admit_unanchored(
+                &fresh,
+                fixture.locator_token("omp-unreadable", None),
+                "session_start",
+                peer,
+            )
+            .await
+            .expect_err("a missing asset must fail closed");
+        assert!(
+            fixture.notification_texts(&fresh).await.is_empty(),
+            "an unreadable reporter tells the user nothing"
+        );
     }
 
     /// A legitimate parent's persistent report admits under the proof:
@@ -23350,8 +23582,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                26,
-                "the v17 fixture migrates through scan-column, profile-snapshot and launch-kind \
+                27,
+                "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind and \
+                 session-notification \
                  changes too"
             );
             assert_eq!(
@@ -26354,6 +26587,97 @@ exit 0
             .hook_argv(exe, instructions)
     }
 
+    /// Spec (SPEC.md, Status): a launch Farhelm could not add its
+    /// conversation hook to becomes a session notification, unless the user
+    /// turned hooks off for that agent themselves. For a composed launch the
+    /// only such skip is a reporter that could not be set up (Pi's and OMP's
+    /// extension missing); for a session from before launch kinds, the
+    /// injection's own reason travels into the text.
+    ///
+    /// Why: the opt-out is the user's choice and notifying about it would be
+    /// noise they cannot act on, while the other skips silently cost Restart
+    /// its resume, which is exactly what a notification is for. The legacy
+    /// reason is what names the flag in the way (the plan's M5).
+    #[farhelm_testtrace::test]
+    fn hook_skips_notify_except_for_the_users_own_opt_out() {
+        use crate::agent_kind::{AgentHooks, AgentInstructions, LaunchPhase};
+        use crate::service::notifications::HookSkip;
+        let argv = |program: &str| {
+            vec![
+                program.to_string(),
+                crate::agent_kind::FARHELM_ARGS_PLACEHOLDER.to_string(),
+            ]
+        };
+        let skip = |kind: AgentKind,
+                    mode: FarhelmArgsMode,
+                    hooks: &AgentHooks,
+                    extension: Option<&str>,
+                    argv: Vec<String>| {
+            with_farhelm_args_using(
+                argv,
+                mode,
+                &hook_snapshot(kind),
+                hooks,
+                AgentInstructions::On,
+                Some("/opt/farhelm"),
+                extension,
+                "session-1",
+            )
+            .3
+        };
+        let start = FarhelmArgsMode::Expand(LaunchPhase::Start);
+        assert_eq!(
+            skip(AgentKind::Pi, start, &AgentHooks::All, None, argv("pi")),
+            Some(HookSkip::ReporterUnavailable),
+            "a reporter that could not be set up notifies"
+        );
+        assert_eq!(
+            skip(AgentKind::Pi, start, &AgentHooks::None, None, argv("pi")),
+            None,
+            "the user's FARHELM_AGENT_HOOKS opt-out never notifies"
+        );
+        assert_eq!(
+            skip(
+                AgentKind::Claude,
+                start,
+                &AgentHooks::All,
+                Some("/opt/extension.ts"),
+                argv("claude")
+            ),
+            None,
+            "an injected launch has nothing to report"
+        );
+        let legacy = skip(
+            AgentKind::Claude,
+            FarhelmArgsMode::Legacy,
+            &AgentHooks::All,
+            None,
+            vec!["claude".to_string(), "--".to_string(), "prompt".to_string()],
+        );
+        assert_eq!(
+            legacy,
+            Some(HookSkip::Legacy("invocation contains a bare --"))
+        );
+        assert!(
+            legacy
+                .expect("a legacy skip")
+                .text()
+                .contains("invocation contains a bare --"),
+            "the legacy text names what was in the way"
+        );
+        assert_eq!(
+            skip(
+                AgentKind::Claude,
+                FarhelmArgsMode::Legacy,
+                &AgentHooks::None,
+                None,
+                vec!["claude".to_string(), "--".to_string()],
+            ),
+            None,
+            "the opt-out never notifies for a legacy session either"
+        );
+    }
+
     /// Spec: for a new launch, `{farhelm_args}` is replaced IN PLACE by the
     /// launch's kind's arguments for the phase being spawned, the reporter
     /// settings travel as environment rather than argv, and nothing else in
@@ -26399,7 +26723,7 @@ exit 0
                       hooks: &AgentHooks,
                       instructions: AgentInstructions| {
             let name = format!("{kind:?}").to_lowercase();
-            with_farhelm_args_using(
+            let (argv, env, hooked, _skip) = with_farhelm_args_using(
                 argv(&name),
                 FarhelmArgsMode::Expand(phase),
                 &hook_snapshot(kind),
@@ -26408,7 +26732,8 @@ exit 0
                 Some("/opt/farhelm"),
                 Some("/opt/extension.ts"),
                 "session-1",
-            )
+            );
+            (argv, env, hooked)
         };
         let goose_env = |enabled: u8, announce: u8| -> Vec<(String, String)> {
             vec![

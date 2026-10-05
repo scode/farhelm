@@ -429,7 +429,7 @@ pub trait AgentIntegration: Send + Sync {
     /// (the `FARHELM_AGENT_HOOKS` verdict, the executable path, the vendor
     /// extension artifact, the instructions setting) arrives resolved in
     /// `policy`, and the log line is returned rather than written, so the
-    /// caller (`service::core`'s `with_hook_argv_using`) owns the one place
+    /// caller (`service::core`'s `legacy_hook_injection`) owns the one place
     /// that traces it. Each kind keeps its own check order: Goose, Pi, and
     /// OMP check the invocation's shape before the opt-out, and Goose
     /// rewrites a resume even with hooks off; Claude, Codex, and Grok share
@@ -510,10 +510,10 @@ fn hook_tail_args(
     policy: &HookPolicy<'_>,
 ) -> FarhelmArgs {
     if !policy.hooks.allows(kind) {
-        return FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+        return FarhelmArgs::skipped(HOOKS_DISABLED_REASON);
     }
     let Some(exe) = policy.exe else {
-        return FarhelmArgs::skipped("farhelm executable path is not utf-8");
+        return FarhelmArgs::skipped(EXE_NOT_UTF8_REASON);
     };
     let tail = integration.hook_argv(exe, policy.instructions);
     // Grok reports through its own configured callbacks and has no tail;
@@ -541,10 +541,10 @@ pub(crate) fn reporter_extension_args(
     exe_env_var: &str,
 ) -> FarhelmArgs {
     if !policy.hooks.allows(kind) {
-        return FarhelmArgs::skipped("disabled by FARHELM_AGENT_HOOKS");
+        return FarhelmArgs::skipped(HOOKS_DISABLED_REASON);
     }
     let Some(exe) = policy.exe else {
-        return FarhelmArgs::skipped("farhelm executable path is not utf-8");
+        return FarhelmArgs::skipped(EXE_NOT_UTF8_REASON);
     };
     let Some(extension) = policy.vendor_extension else {
         return FarhelmArgs::skipped(unavailable);
@@ -582,6 +582,26 @@ pub struct HookPolicy<'a> {
     /// The materialized reporter extension for kinds that load one (Pi,
     /// OMP), or `None` when it is unavailable or the kind has none.
     pub vendor_extension: Option<&'a str>,
+}
+
+/// The skip reason for a kind whose hooks `FARHELM_AGENT_HOOKS` turned off.
+///
+/// Named because the supervisor treats it differently from every other skip:
+/// it is the user's own configuration, so it is logged but never becomes a
+/// session notification (SPEC.md, Status: "unless the user turned hooks off
+/// for that agent themselves").
+pub(crate) const HOOKS_DISABLED_REASON: &str = "disabled by FARHELM_AGENT_HOOKS";
+
+/// The skip reason for a farhelm executable path that is not UTF-8. A
+/// supervisor refuses to start on such a path, so a live launch never hits
+/// it; named so that it, too, stays out of session notifications.
+pub(crate) const EXE_NOT_UTF8_REASON: &str = "farhelm executable path is not utf-8";
+
+/// Whether a hook skip with this reason should tell the user, as a session
+/// notification, that Farhelm lost track of the launch's conversation: every
+/// skip except the user's own opt-out and the unreachable non-UTF-8 path.
+pub(crate) fn hook_skip_notifies(reason: &str) -> bool {
+    reason != HOOKS_DISABLED_REASON && reason != EXE_NOT_UTF8_REASON
 }
 
 /// What a hook decision asks its caller to log.
@@ -639,11 +659,11 @@ impl HookInjection {
 /// elements from [`AgentIntegration::hook_argv`] (Claude, Codex, Grok),
 /// with `vendor_refusal` as the one kind-specific check.
 ///
-/// The order is the contract: the opt-out, then the executable path, then a
-/// bare `--`, then the vendor's own refusal, then the tail. A kind whose
-/// tail is empty (Grok, which reports through its own configured
-/// callbacks) returns silently at the end, after any of the earlier skips
-/// has already been logged.
+/// The order is the contract: the opt-out, then the executable path, then
+/// whether the kind has a tail at all, then a bare `--`, then the vendor's
+/// own refusal. A kind whose tail is empty (Grok, which reports through its
+/// own configured callbacks) returns silently before the shape checks, so
+/// its command is never reported as one Farhelm could not add a hook to.
 fn inject_hook_argv_tail(
     integration: &dyn AgentIntegration,
     kind: AgentKind,
@@ -652,11 +672,28 @@ fn inject_hook_argv_tail(
     vendor_refusal: fn(&[String]) -> Option<&'static str>,
 ) -> HookInjection {
     if !policy.hooks.allows(kind) {
-        return HookInjection::skipped(argv, "disabled by FARHELM_AGENT_HOOKS");
+        return HookInjection::skipped(argv, HOOKS_DISABLED_REASON);
     }
     let Some(exe) = policy.exe else {
-        return HookInjection::skipped(argv, "farhelm executable path is not utf-8");
+        return HookInjection::skipped(argv, EXE_NOT_UTF8_REASON);
     };
+    let tail = integration.hook_argv(exe, policy.instructions);
+    // An integration that offers no tail does not use this hook form.
+    // Silently, and WITHOUT the injected line: claiming flags were injected
+    // when none were would arm the caller's tripwire against a launch that
+    // never had this hook to begin with, and every reader of that log line
+    // would be chasing a vendor bug that does not exist. Decided BEFORE the
+    // shape checks below, so a command those checks would refuse is not
+    // reported as a hook Farhelm "could not add" when it never adds one
+    // (Grok, which reports through hooks the user installed): that report is
+    // a session notification now, and it must be true.
+    if tail.is_empty() {
+        return HookInjection {
+            argv,
+            hooked: false,
+            log: HookLog::Silent,
+        };
+    }
     // Plan D4: both vendors take a trailing positional prompt, and a bare
     // `--` turns everything after it into that prompt's text. Appending
     // past one would not configure a hook, it would type our flags at the
@@ -666,19 +703,6 @@ fn inject_hook_argv_tail(
     }
     if let Some(reason) = vendor_refusal(&argv) {
         return HookInjection::skipped(argv, reason);
-    }
-    let tail = integration.hook_argv(exe, policy.instructions);
-    // An integration that offers no tail does not use this hook form.
-    // Silently, and WITHOUT the injected line: claiming flags were injected
-    // when none were would arm the caller's tripwire against a launch that
-    // never had this hook to begin with, and every reader of that log line
-    // would be chasing a vendor bug that does not exist.
-    if tail.is_empty() {
-        return HookInjection {
-            argv,
-            hooked: false,
-            log: HookLog::Silent,
-        };
     }
     argv.extend(tail);
     HookInjection::injected(argv)

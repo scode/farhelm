@@ -4,6 +4,33 @@
 use super::super::*;
 
 impl Supervisor {
+    /// Tell the user, on the session, that this OMP launch's reports cannot
+    /// be accepted because its reporter does not match this build (SPEC.md,
+    /// Status).
+    ///
+    /// Only the two definitive refusals call this: the launch's recorded
+    /// reporter is not the current one, or the installed file is there with
+    /// contents that differ from this build's. A reporter file that could not
+    /// be read, or is missing, may be a passing state and does not notify; a
+    /// provenance write that failed at launch does not either, since the
+    /// store that refused it would refuse the notification too.
+    async fn notify_omp_reporter_mismatch(
+        &self,
+        row: &StoredSession,
+        cause: crate::service::notifications::ReporterMismatch,
+    ) {
+        self.notify_session(
+            &row.id,
+            row.generation,
+            crate::service::notifications::NotificationKind::ReporterMismatch,
+            crate::service::notifications::reporter_mismatch_text(
+                cause,
+                row.captured_conversation.is_some(),
+            ),
+        )
+        .await;
+    }
+
     /// Record which launcher shape and reporter asset this OMP launch used,
     /// which OMP's admission proof later checks a report against. A failure
     /// is logged and leaves the session runnable without capture.
@@ -116,6 +143,11 @@ impl Supervisor {
         // byte-identical to this binary's asset, so a supervisor reload is
         // proven against the current asset rather than trusted.
         if row.omp_reporter_asset.as_deref() != Some(crate::pi_extension::OMP_ASSET.file_name) {
+            self.notify_omp_reporter_mismatch(
+                &row,
+                crate::service::notifications::ReporterMismatch::OlderReporter,
+            )
+            .await;
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "this session's launch did not install the current OMP reporter; \
@@ -129,7 +161,17 @@ impl Supervisor {
             .join(crate::pi_extension::OMP_ASSET.file_name);
         match crate::agent_kind::read_bounded_regular_file(&asset_path).await {
             Ok(Some(text)) if text.as_bytes() == crate::pi_extension::OMP_ASSET.source => {}
-            Ok(_) => {
+            Ok(found) => {
+                // Only a file that is there with different contents is a
+                // mismatch worth telling the user about; a missing one may be
+                // between Farhelm removing and reinstalling it.
+                if found.is_some() {
+                    self.notify_omp_reporter_mismatch(
+                        &row,
+                        crate::service::notifications::ReporterMismatch::FileDiffers,
+                    )
+                    .await;
+                }
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     "the installed OMP reporter does not match this build; \

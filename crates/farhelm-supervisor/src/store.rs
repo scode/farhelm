@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 26;
+const SCHEMA_VERSION: i64 = 27;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1567,7 +1567,20 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 26;
+             CREATE TABLE session_notifications (
+                 session_id  TEXT NOT NULL,
+                 seq         INTEGER NOT NULL,
+                 kind        TEXT NOT NULL,
+                 generation  INTEGER NOT NULL,
+                 recorded_at INTEGER NOT NULL,
+                 text        TEXT NOT NULL,
+                 PRIMARY KEY (session_id, seq),
+                 UNIQUE (session_id, generation, kind)
+             ) STRICT;
+             CREATE TRIGGER session_notifications_follow_sessions
+                 AFTER DELETE ON sessions
+                 BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
+             PRAGMA user_version = 27;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2162,6 +2175,40 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
     if version == 25 {
         migrate_to_launch_kinds(conn).context("migrating schema from version 25 to 26")?;
         version = 26;
+    }
+    if version == 26 {
+        // Session notifications (SPEC.md, Status; SPEC_impl.md's helm and
+        // supervisor storage notes). A new table and nothing else: no
+        // existing row changes. The once-per-launch rule IS the unique key,
+        // so it holds across a supervisor restart with no separate latch,
+        // and the trigger deletes a session's notifications with it on every
+        // one of the store's several delete paths instead of trusting each
+        // of them to remember. A future migration that rebuilds `sessions`
+        // (create a copy, drop, rename) must recreate this trigger, which
+        // SQLite drops with the table. `IF NOT EXISTS` because the store's own
+        // migration tests build an older database by rewinding a fresh one,
+        // which leaves tables a version added in place; a real older
+        // database never has it.
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS session_notifications (
+                 session_id  TEXT NOT NULL,
+                 seq         INTEGER NOT NULL,
+                 kind        TEXT NOT NULL,
+                 generation  INTEGER NOT NULL,
+                 recorded_at INTEGER NOT NULL,
+                 text        TEXT NOT NULL,
+                 PRIMARY KEY (session_id, seq),
+                 UNIQUE (session_id, generation, kind)
+             ) STRICT;
+             CREATE TRIGGER IF NOT EXISTS session_notifications_follow_sessions
+                 AFTER DELETE ON sessions
+                 BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
+             PRAGMA user_version = 27;
+             COMMIT;",
+        )
+        .context("migrating schema from version 26 to 27")?;
+        version = 27;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -4811,6 +4858,136 @@ impl SessionStore {
                     )
                     .context("recording the launch's OMP provenance")?;
                     Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Record one session notification for the launch `generation` of
+    /// session `id`, unless that launch already has one of this `kind`.
+    ///
+    /// Returns whether a notification was added. Nothing is added, and
+    /// `false` returned, when the session is gone or has moved on to another
+    /// launch (a notification belongs to the launch that earned it), or when
+    /// the `(session, generation, kind)` key already exists, which is the
+    /// whole once-per-launch rule (SPEC.md: "the same problem is reported at
+    /// most once per launch"). The sequence number is one past the session's
+    /// largest, so it never repeats even after older entries aged out. Adding
+    /// one beyond [`farhelm_proto::SESSION_NOTIFICATION_CAP`] drops the
+    /// oldest in the same transaction.
+    ///
+    /// With `unless_captured`, nothing is added either when the row already
+    /// holds a captured conversation: a notification that says Farhelm never
+    /// learned the conversation must be true when written, and checking the
+    /// row in the same statement as the insert is what closes the race with a
+    /// report committed a moment earlier (SPEC_impl.md, the tripwire).
+    pub async fn record_session_notification(
+        &self,
+        id: &str,
+        generation: i64,
+        kind: &str,
+        text: &str,
+        recorded_at: i64,
+        unless_captured: bool,
+    ) -> anyhow::Result<bool> {
+        let id = id.to_string();
+        let kind = kind.to_string();
+        let text = text.to_string();
+        self.conn
+            .call(
+                "session notification record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn.transaction()?;
+                    let added = tx
+                        .execute(
+                            "INSERT OR IGNORE INTO session_notifications \
+                             (session_id, seq, kind, generation, recorded_at, text) \
+                             SELECT ?1, \
+                                    COALESCE((SELECT MAX(seq) FROM session_notifications \
+                                              WHERE session_id = ?1), 0) + 1, \
+                                    ?3, ?2, ?4, ?5 \
+                             WHERE EXISTS (SELECT 1 FROM sessions \
+                                           WHERE id = ?1 AND generation = ?2 \
+                                           AND (?6 = 0 OR captured_conversation IS NULL))",
+                            rusqlite::params![
+                                id,
+                                generation,
+                                kind,
+                                recorded_at,
+                                text,
+                                unless_captured
+                            ],
+                        )
+                        .context("recording a session notification")?;
+                    if added > 0 {
+                        tx.execute(
+                            "DELETE FROM session_notifications WHERE session_id = ?1 \
+                             AND seq NOT IN (SELECT seq FROM session_notifications \
+                                             WHERE session_id = ?1 \
+                                             ORDER BY seq DESC LIMIT ?2)",
+                            rusqlite::params![id, farhelm_proto::SESSION_NOTIFICATION_CAP as i64],
+                        )
+                        .context("dropping a session's oldest notifications")?;
+                    }
+                    tx.commit()?;
+                    Ok(added > 0)
+                },
+            )
+            .await
+    }
+
+    /// Whether launch `generation` of session `id` already has a
+    /// notification of `kind`.
+    pub async fn has_session_notification(
+        &self,
+        id: &str,
+        generation: i64,
+        kind: &str,
+    ) -> anyhow::Result<bool> {
+        let id = id.to_string();
+        let kind = kind.to_string();
+        self.conn
+            .call(
+                "session notification probe task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    conn.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM session_notifications \
+                         WHERE session_id = ?1 AND generation = ?2 AND kind = ?3)",
+                        rusqlite::params![id, generation, kind],
+                        |row| row.get(0),
+                    )
+                    .context("probing for a session notification")
+                },
+            )
+            .await
+    }
+
+    /// Session `id`'s notifications as the listing carries them, newest
+    /// first. Empty for a session with none, or one that does not exist.
+    pub async fn session_notifications(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Vec<farhelm_proto::SessionNotification>> {
+        let id = id.to_string();
+        self.conn
+            .call(
+                "session notification read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<farhelm_proto::SessionNotification>> {
+                    let mut statement = conn.prepare(
+                        "SELECT seq, recorded_at, text FROM session_notifications \
+                         WHERE session_id = ?1 ORDER BY seq DESC",
+                    )?;
+                    let rows = statement
+                        .query_map([&id], |row| {
+                            Ok(farhelm_proto::SessionNotification {
+                                seq: row.get::<_, i64>(0)?.max(0) as u64,
+                                at: row.get(1)?,
+                                text: row.get(2)?,
+                            })
+                        })?
+                        .collect::<Result<Vec<_>, _>>()
+                        .context("reading a session's notifications")?;
+                    Ok(rows)
                 },
             )
             .await
@@ -8384,6 +8561,148 @@ mod tests {
             .delete_session("s1", None)
             .await
             .expect("deleting an already-deleted row must be idempotent");
+    }
+
+    /// Spec (SPEC.md, Status; SPEC_impl.md's notification storage): a
+    /// session keeps its 10 most recent notifications, numbered by a
+    /// sequence that only grows; one launch records at most one of each kind,
+    /// and that holds across a close and reopen of the database; a record for
+    /// a launch the session has moved past, or for a session that does not
+    /// exist, is refused; and deleting the session deletes them.
+    ///
+    /// Why: the cap and the once-per-launch key are the only things standing
+    /// between one stuck session and a list full of copies, the sequence is
+    /// what the helm's read and cleared marks count by (a reused number would
+    /// resurrect a cleared notification), and the delete trigger is what
+    /// keeps the store's several delete paths from each having to remember.
+    #[farhelm_testtrace::test]
+    async fn session_notifications_cap_once_per_launch_and_follow_the_session() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let generation = store
+            .session("s1")
+            .await
+            .expect("read")
+            .expect("row")
+            .generation;
+
+        assert!(
+            store
+                .record_session_notification("s1", generation, "hook_silent", "first", 100, false)
+                .await
+                .expect("record")
+        );
+        assert!(
+            !store
+                .record_session_notification("s1", generation, "hook_silent", "again", 101, false)
+                .await
+                .expect("record a duplicate"),
+            "one launch records one notification of a kind"
+        );
+        assert!(
+            !store
+                .record_session_notification(
+                    "s1",
+                    generation + 1,
+                    "hook_not_added",
+                    "x",
+                    102,
+                    false
+                )
+                .await
+                .expect("record for another launch"),
+            "a launch the row does not carry records nothing"
+        );
+        assert!(
+            !store
+                .record_session_notification("missing", 0, "hook_silent", "x", 103, false)
+                .await
+                .expect("record for a missing session"),
+            "a session that does not exist records nothing"
+        );
+        // `unless_captured` refuses a row that already holds an identity: the
+        // silent-hook notification must be true when written.
+        insert_running(&store, "captured").await;
+        let captured_generation = store
+            .session("captured")
+            .await
+            .expect("read")
+            .expect("row")
+            .generation;
+        store
+            .conn
+            .call("seed a captured identity", |conn| {
+                conn.execute(
+                    "UPDATE sessions SET captured_conversation = ?1 WHERE id = 'captured'",
+                    ["conversation-1"],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed a captured identity");
+        assert!(
+            !store
+                .record_session_notification(
+                    "captured",
+                    captured_generation,
+                    "hook_silent",
+                    "x",
+                    105,
+                    true
+                )
+                .await
+                .expect("record against a captured row"),
+            "a captured row refuses an unless-captured notification"
+        );
+
+        // Reopen: the once-per-launch key is durable.
+        drop(store);
+        let store = SessionStore::open(&dir.path().join("supervisor.db"), true)
+            .await
+            .expect("reopen");
+        assert!(
+            !store
+                .record_session_notification("s1", generation, "hook_silent", "after", 104, false)
+                .await
+                .expect("record after reopen"),
+            "a supervisor restart does not repeat a notification already recorded"
+        );
+
+        // Fill past the cap with distinct kinds, which the key allows.
+        for n in 0..12 {
+            store
+                .record_session_notification(
+                    "s1",
+                    generation,
+                    &format!("kind_{n}"),
+                    &format!("n{n}"),
+                    200 + n,
+                    false,
+                )
+                .await
+                .expect("record");
+        }
+        let listed = store.session_notifications("s1").await.expect("list");
+        assert_eq!(listed.len(), farhelm_proto::SESSION_NOTIFICATION_CAP);
+        let seqs: Vec<u64> = listed.iter().map(|n| n.seq).collect();
+        assert_eq!(
+            seqs,
+            (4..=13).rev().collect::<Vec<u64>>(),
+            "newest first, oldest dropped"
+        );
+        assert_eq!(listed[0].text, "n11");
+        assert_eq!(listed[0].at, 211);
+
+        store.delete_session("s1", None).await.expect("delete");
+        insert_running(&store, "s1").await;
+        assert!(
+            store
+                .session_notifications("s1")
+                .await
+                .expect("list")
+                .is_empty(),
+            "deleting a session deletes its notifications"
+        );
     }
 
     /// `created_at` (PLAN_M6.md item 1: load-bearing as of this PR, no
