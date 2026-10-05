@@ -211,9 +211,10 @@ fn focus_restart_with_cancel() {
 /// a host that asks before YOLO launches explains, and `yolo_error` why a "don't ask again"
 /// failed at its first step. It is shown inside the dialog because the dialog is modal:
 /// anything rendered beside it is inert. Confirming resubmits what the dialog shows NOW,
-/// with the override (`on_submit`'s second element), so the answer always applies to the
-/// settings on screen rather than to a snapshot the user may have edited since. The third
-/// element asks the parent to mark the host safe first.
+/// with the override (`on_submit`'s second element); the third element asks the parent to
+/// mark the host safe first. The parent accepts the override only by taking the live
+/// question, and only for the settings that question was about: settings edited since are
+/// refused with a reason, and restarting again asks about them.
 #[component]
 pub(crate) fn RestartWithDialog(
     session: Session,
@@ -613,11 +614,10 @@ pub(crate) fn RestartWithDialog(
                                 on_submit.call((edit_confirm.clone(), true, false));
                             }
                         },
-                        // The question stays up while the host is marked
-                        // safe, with its buttons disabled, which is exactly
-                        // the native disabling of a focused control this
-                        // module's rule forbids; the submit button is the
-                        // control that stays enabled.
+                        // The answer takes the question down while the host
+                        // is marked safe, which would drop the focus of this
+                        // button with it; the submit button is the control
+                        // that stays enabled.
                         on_confirm_and_stop_asking: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();

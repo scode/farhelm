@@ -257,15 +257,15 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
  * host cannot be marked, and restarts with the override once it can.
  *
  * Why: this dialog never lets focus fall to the page body (its module doc),
- * because its modal isolation then swallows the next keystroke. Marking the
- * host keeps the question up with its buttons disabled, which is exactly the
- * native disabling of a focused control that would drop focus; and the
- * button's promise ("don't ask again") is only kept if the host is marked
- * before the restart goes out. Specifies: activated from the keyboard, focus
- * moves to the dialog's submit (which stays enabled) while the mark is in
- * flight; a refused mark shows its reason in the question, which stays up,
- * and sends no restart; a mark that succeeds is followed by one restart that
- * carries the override, and the dialog closes. The host write and the restart
+ * because its modal isolation then swallows the next keystroke. Answering
+ * takes the question down while the host is marked, which would drop the
+ * focus of the button that was pressed; and the button's promise ("don't ask
+ * again") is only kept if the host is marked before the restart goes out.
+ * Specifies: activated from the keyboard, focus moves to the dialog's submit
+ * (which stays enabled) while the mark is in flight and the question is gone;
+ * a refused mark brings the question back with its reason and sends no
+ * restart; a mark that succeeds is followed by one restart that carries the
+ * override, and the dialog closes. The host write and the restart
  * are both route-mocked, so the shared helm's real host setting is untouched.
  */
 test("don't ask again from restart with keeps focus in the dialog and marks before restarting", async ({ page }) => {
@@ -333,13 +333,13 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   try {
     await page.keyboard.press("Enter");
     await expect.poll(() => marks.length, { message: "the mark reached the route" }).toBe(1);
-    await expect(stopAsking, "the question's buttons are disabled while the mark runs").toBeDisabled();
+    await expect(confirmation, "the answer took the question down while the mark runs").toHaveCount(0);
     await expect(dialog.locator(".restart-with-submit"), "focus stays in the dialog").toBeFocused();
   } finally {
     releaseMark();
   }
   await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
-  await expect(confirmation, "a refused mark leaves the question up").toBeVisible();
+  await expect(confirmation, "a refused mark brings the question back").toBeVisible();
   expect(restarts, "a refused mark sends no restart").toHaveLength(1);
 
   refuseMark = false;

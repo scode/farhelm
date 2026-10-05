@@ -458,6 +458,79 @@ struct PendingYoloReplace {
     guard: crate::DeleteGuard,
 }
 
+/// One opening of the YOLO question inside Restart with: the key its
+/// [`ConfirmSlot`] is open for.
+///
+/// The question is about the settings the helm refused (`edit`), and its
+/// answers are approval for exactly those. `opening` counts openings, so an
+/// answer drawn for an earlier question cannot take a later one, and a
+/// closed dialog clears whatever question it held. `ask` is what the
+/// question shows; the slot holds nothing else.
+#[derive(Clone, PartialEq)]
+struct RestartYoloQuestion {
+    opening: u64,
+    edit: crate::restart_with::RestartEdit,
+    ask: crate::yolo_confirm::YoloAsk,
+}
+
+/// What the session view does with an approval-bearing Restart with
+/// submission (`allow_yolo`); see [`take_restart_yolo`].
+#[derive(Debug, PartialEq)]
+enum RestartYoloAnswer {
+    /// The question was live and is now taken: restart with the override,
+    /// after marking `stop_asking`'s host (id and display name) safe when it
+    /// is set. Its question's `ask` comes along so a failure to mark the
+    /// host can put the question back.
+    Accepted {
+        stop_asking: Option<(crate::HostId, String, crate::yolo_confirm::YoloAsk)>,
+    },
+    /// No live question for this answer (cancelled, answered, or never
+    /// drawn), or "don't ask again" for a question that names no host:
+    /// nothing may happen.
+    Stale,
+    /// The settings submitted are not the ones the question asked about
+    /// (edited since). The question is taken down; restarting again asks
+    /// about the new settings.
+    SettingsChanged,
+}
+
+/// Accept an approval-bearing Restart with submission only by taking the
+/// live question it answers.
+///
+/// `question` is the question as the session view rendered it, which is
+/// the one the dialog's answer was drawn with; `edit` the settings the
+/// answer submits. Cancel followed by either answer in one event burst finds
+/// the question taken and gets [`RestartYoloAnswer::Stale`], so no restart
+/// and no host setting change follow. Only the settings the question was
+/// about can be approved by it, and the permanent answer needs the
+/// question's host: without one it is refused, never downgraded to a
+/// one-off approval.
+fn take_restart_yolo(
+    slot: &mut ConfirmSlot<RestartYoloQuestion>,
+    question: Option<&RestartYoloQuestion>,
+    edit: &crate::restart_with::RestartEdit,
+    stop_asking: bool,
+) -> RestartYoloAnswer {
+    let Some(question) = question else {
+        return RestartYoloAnswer::Stale;
+    };
+    let stop_asking = if stop_asking {
+        let Some(host) = question.ask.host else {
+            return RestartYoloAnswer::Stale;
+        };
+        Some((host, question.ask.host_name.clone(), question.ask.clone()))
+    } else {
+        None
+    };
+    if slot.take(question).is_none() {
+        return RestartYoloAnswer::Stale;
+    }
+    if question.edit != *edit {
+        return RestartYoloAnswer::SettingsChanged;
+    }
+    RestartYoloAnswer::Accepted { stop_asking }
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -538,11 +611,24 @@ pub(crate) fn SessionView(
     let mut restart_with_error = use_signal(|| None::<String>);
     // A restart-with the helm refused as a YOLO launch on a host that asks before YOLO launches:
     // what the restart-with dialog's confirmation explains (see
-    // `yolo_confirm`). Confirming resubmits the dialog's current settings.
-    // `restart_yolo_error` is why a "don't ask again" failed at its first
-    // step; the confirmation stays up with it.
-    let mut restart_yolo = use_signal(|| None::<crate::yolo_confirm::YoloAsk>);
+    // `yolo_confirm`). It is a `ConfirmSlot` (`RestartYoloQuestion`): an
+    // answer approves the refused settings only by taking it
+    // (`take_restart_yolo`). `restart_yolo_error` is why a "don't ask again"
+    // failed at its first step; the question comes back up with it.
+    let mut restart_yolo = use_confirm_slot::<RestartYoloQuestion, ()>();
+    let mut restart_yolo_openings = use_signal(|| 0u64);
     let mut restart_yolo_error = use_signal(|| None::<String>);
+    // Open the question about `edit` as a new opening.
+    let mut open_restart_yolo =
+        move |edit: crate::restart_with::RestartEdit, ask: crate::yolo_confirm::YoloAsk| {
+            let opening = *restart_yolo_openings.peek() + 1;
+            restart_yolo_openings.set(opening);
+            restart_yolo.open(RestartYoloQuestion { opening, edit, ask }, ());
+        };
+    // The question as this render draws it: the one every handler the dialog
+    // gets from this render answers, so a handler queued behind a Cancel
+    // still names the question the Cancel took.
+    let restart_question = restart_yolo.current_key();
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
@@ -1201,139 +1287,149 @@ pub(crate) fn SessionView(
     // (id and display name) the question named, to mark safe for YOLO
     // launches before the restart; nothing is restarted if that fails. Taken
     // from the question the user answered, not re-read from the session.
-    // Only a restart WITH new settings ever passes it.
-    let restart = move |stop_if_running: bool,
-                        with: Option<crate::restart_with::RestartEdit>,
-                        allow_yolo: bool,
-                        stop_asking: Option<(crate::HostId, String)>| {
-        if restarting() {
-            if with.is_none() {
-                view_claim.set(None);
+    // Only a restart WITH new settings ever passes it. The answer took the
+    // question down; a failure brings it back as a new opening about the
+    // same settings, with the reason.
+    let restart =
+        move |stop_if_running: bool,
+              with: Option<crate::restart_with::RestartEdit>,
+              allow_yolo: bool,
+              stop_asking: Option<(crate::HostId, String, crate::yolo_confirm::YoloAsk)>| {
+            if restarting() {
+                if with.is_none() {
+                    view_claim.set(None);
+                }
+                return;
             }
-            return;
-        }
-        restarting.set(true);
-        restart_error.set(None);
-        restart_with_error.set(None);
-        restart_epoch += 1;
-        let base = restart_base.clone();
-        let id = current.read().id.clone();
-        // Cloned per click: the spawned task owns what it captures, and this
-        // closure runs again for the next restart.
-        let refresh_after_restart = refresh_after_restart.clone();
-        spawn(async move {
-            // Nothing has been sent yet, so a failure here detaches nothing
-            // and needs none of the remount and epoch work below; the
-            // restart-with dialog keeps its claim and its confirmation, now
-            // with the reason.
-            if let Some((host, name)) = stop_asking {
-                if let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await {
+            restarting.set(true);
+            restart_error.set(None);
+            restart_with_error.set(None);
+            restart_epoch += 1;
+            let base = restart_base.clone();
+            let id = current.read().id.clone();
+            // Cloned per click: the spawned task owns what it captures, and this
+            // closure runs again for the next restart.
+            let refresh_after_restart = refresh_after_restart.clone();
+            spawn(async move {
+                // Nothing has been sent yet, so a failure here detaches nothing
+                // and needs none of the remount and epoch work below; the
+                // restart-with dialog keeps its claim, and the question the
+                // answer took comes back with the reason.
+                if let Some((host, name, ask)) = stop_asking
+                    && let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await
+                {
                     restart_yolo_error.set(Some(reason));
+                    if let Some(edit) = with.clone() {
+                        open_restart_yolo(edit, ask);
+                    }
                     restarting.set(false);
                     return;
                 }
-                restart_yolo.set(None);
-            }
-            let outcome =
-                restart_session(&base, &id, stop_if_running, with.as_ref(), allow_yolo).await;
-            match &outcome {
-                // Only a restart WITH new settings is ever refused this way;
-                // a plain restart relaunches a choice already made.
-                Err(e) if e.yolo_confirmation && with.is_some() => {
-                    let shown = current.peek();
-                    restart_yolo.set(Some(crate::yolo_confirm::YoloAsk {
-                        host: shown.host,
-                        host_name: shown
-                            .host_name
-                            .clone()
-                            .unwrap_or_else(|| "this host".to_string()),
-                        reason: crate::yolo_confirm::YoloReason::of_launch(
-                            with.as_ref()
-                                .and_then(crate::restart_with::RestartEdit::selection),
-                        ),
-                    }));
-                }
-                Err(e) if with.is_some() => restart_with_error.set(Some(e.text.clone())),
-                Err(e) => restart_error.set(Some(e.text.clone())),
-                // The reply says the relaunch happened, and that fact
-                // outruns the listing: the supervisor answers `Unknown`
-                // for the new run and the helm keeps the cached
-                // `Interrupted` until its next probe, so for a few
-                // seconds this view would otherwise keep the interrupted
-                // surface — and its restart control — over a session
-                // that is now running. `relaunched` is what lets the
-                // terminal mount at once instead (see `terminal_absence`).
-                Ok(_) => {
-                    relaunched.set(true);
-                    if with.is_some() {
-                        restart_with_open.set(None);
-                        focus_restart_with_trigger();
+                let outcome =
+                    restart_session(&base, &id, stop_if_running, with.as_ref(), allow_yolo).await;
+                match &outcome {
+                    // Only a restart WITH new settings is ever refused this way;
+                    // a plain restart relaunches a choice already made.
+                    Err(e) if e.yolo_confirmation && with.is_some() => {
+                        let ask = {
+                            let shown = current.peek();
+                            crate::yolo_confirm::YoloAsk {
+                                host: shown.host,
+                                host_name: shown
+                                    .host_name
+                                    .clone()
+                                    .unwrap_or_else(|| "this host".to_string()),
+                                reason: crate::yolo_confirm::YoloReason::of_launch(
+                                    with.as_ref()
+                                        .and_then(crate::restart_with::RestartEdit::selection),
+                                ),
+                            }
+                        };
+                        if let Some(edit) = with.clone() {
+                            open_restart_yolo(edit, ask);
+                        }
+                    }
+                    Err(e) if with.is_some() => restart_with_error.set(Some(e.text.clone())),
+                    Err(e) => restart_error.set(Some(e.text.clone())),
+                    // The reply says the relaunch happened, and that fact
+                    // outruns the listing: the supervisor answers `Unknown`
+                    // for the new run and the helm keeps the cached
+                    // `Interrupted` until its next probe, so for a few
+                    // seconds this view would otherwise keep the interrupted
+                    // surface — and its restart control — over a session
+                    // that is now running. `relaunched` is what lets the
+                    // terminal mount at once instead (see `terminal_absence`).
+                    Ok(_) => {
+                        relaunched.set(true);
+                        if with.is_some() {
+                            restart_with_open.set(None);
+                            focus_restart_with_trigger();
+                        }
                     }
                 }
-            }
-            // Remounted on both paths. A success obviously needs it (new
-            // pane, or a respawned one, and the server tore the old
-            // attachment down). A FAILURE needs it just as much: the
-            // server detaches before anything can fail, so a view that
-            // only remounted on success would leave the user staring at a
-            // permanently detached terminal for a session that is running
-            // perfectly well. Remounting when nothing changed is merely a
-            // reattach — the same thing a reload does.
-            mount_generation += 1;
-            // A SECOND bump, closing the other half of the staleness this
-            // counter exists for. The first bump (before the request)
-            // invalidates reads that were already in flight; without this
-            // one, a read that STARTED during the restart shares the new
-            // epoch, passes its own guard, and can land its mid-restart
-            // answer on top of the refresh below — putting the view back to
-            // describing the run that just ended. Bumping again means only
-            // reads launched after the restart finished are allowed to
-            // commit, which is exactly the set that can have seen the
-            // result.
-            restart_epoch += 1;
-            // Released before the refresh rather than after it, deliberately:
-            // the refresh is now a reader's business and a failing helm can
-            // keep it retrying for minutes, so holding the control until it
-            // lands would freeze the affordance on exactly the helm where a
-            // user most wants to try again. What that costs is a second
-            // restart acting on a `current` that predates the refresh — and
-            // that is still safe: the pre-restart status confirms if it read
-            // working, and if it did not, the supervisor refuses the
-            // unconfirmed restart while the new run still reads working.
-            restarting.set(false);
-            if with.is_none() || outcome.is_ok() {
-                view_claim.set(None);
-            }
-            // The authoritative refresh, asked for through the SAME door
-            // every other read uses and issued after the final bump so it
-            // carries the epoch it will be judged against.
-            //
-            // It is needed on both paths. After a success the reply's
-            // `status` is a deliberate `Unknown` (the supervisor cannot
-            // claim the agent execed yet); after a failure the refusal is
-            // most often a STALE OFFER, whose prescribed handling is to
-            // re-present the offer the session has NOW — and a failure is
-            // not even proof the restart did not happen, since the reply can
-            // be lost after the relaunch succeeded.
-            //
-            // Direct, this used to be: fetch here and write `current`
-            // straight through. That bypassed both guards at once. A slow
-            // direct reply could land on top of newer feed-driven state with
-            // nothing left to correct it, and a FAILED one left the view
-            // describing the run that just ended forever — the notice that
-            // would have re-read was already consumed by a read the epoch
-            // bump discarded, which reported itself answered. Through the
-            // door, the reader retries until an answer lands and every reply
-            // is ordered against every other.
-            //
-            // What is deliberately NOT carried over is the old 404 branch's
-            // "session no longer exists" claim: `fetch_session`'s docs are
-            // explicit that a 404 on the listing-backed detail route cannot
-            // be read as deletion, and the guarded commit says the honest
-            // thing instead (the staleness notice).
-            refresh_after_restart(Trigger::Explicit);
-        });
-    };
+                // Remounted on both paths. A success obviously needs it (new
+                // pane, or a respawned one, and the server tore the old
+                // attachment down). A FAILURE needs it just as much: the
+                // server detaches before anything can fail, so a view that
+                // only remounted on success would leave the user staring at a
+                // permanently detached terminal for a session that is running
+                // perfectly well. Remounting when nothing changed is merely a
+                // reattach — the same thing a reload does.
+                mount_generation += 1;
+                // A SECOND bump, closing the other half of the staleness this
+                // counter exists for. The first bump (before the request)
+                // invalidates reads that were already in flight; without this
+                // one, a read that STARTED during the restart shares the new
+                // epoch, passes its own guard, and can land its mid-restart
+                // answer on top of the refresh below — putting the view back to
+                // describing the run that just ended. Bumping again means only
+                // reads launched after the restart finished are allowed to
+                // commit, which is exactly the set that can have seen the
+                // result.
+                restart_epoch += 1;
+                // Released before the refresh rather than after it, deliberately:
+                // the refresh is now a reader's business and a failing helm can
+                // keep it retrying for minutes, so holding the control until it
+                // lands would freeze the affordance on exactly the helm where a
+                // user most wants to try again. What that costs is a second
+                // restart acting on a `current` that predates the refresh — and
+                // that is still safe: the pre-restart status confirms if it read
+                // working, and if it did not, the supervisor refuses the
+                // unconfirmed restart while the new run still reads working.
+                restarting.set(false);
+                if with.is_none() || outcome.is_ok() {
+                    view_claim.set(None);
+                }
+                // The authoritative refresh, asked for through the SAME door
+                // every other read uses and issued after the final bump so it
+                // carries the epoch it will be judged against.
+                //
+                // It is needed on both paths. After a success the reply's
+                // `status` is a deliberate `Unknown` (the supervisor cannot
+                // claim the agent execed yet); after a failure the refusal is
+                // most often a STALE OFFER, whose prescribed handling is to
+                // re-present the offer the session has NOW — and a failure is
+                // not even proof the restart did not happen, since the reply can
+                // be lost after the relaunch succeeded.
+                //
+                // Direct, this used to be: fetch here and write `current`
+                // straight through. That bypassed both guards at once. A slow
+                // direct reply could land on top of newer feed-driven state with
+                // nothing left to correct it, and a FAILED one left the view
+                // describing the run that just ended forever — the notice that
+                // would have re-read was already consumed by a read the epoch
+                // bump discarded, which reported itself answered. Through the
+                // door, the reader retries until an answer lands and every reply
+                // is ordered against every other.
+                //
+                // What is deliberately NOT carried over is the old 404 branch's
+                // "session no longer exists" claim: `fetch_session`'s docs are
+                // explicit that a 404 on the listing-backed detail route cannot
+                // be read as deletion, and the guarded commit says the honest
+                // thing instead (the staleness notice).
+                refresh_after_restart(Trigger::Explicit);
+            });
+        };
     // One lifecycle closure serves ordinary restart's direct and confirmed
     // paths, the interrupted card, and restart-with. Keeping the result
     // handling shared makes every successful relaunch reattach the terminal
@@ -2318,7 +2414,7 @@ pub(crate) fn SessionView(
                     session: opening.clone(),
                     busy: restarting(),
                     error: restart_with_error(),
-                    yolo_confirmation: restart_yolo(),
+                    yolo_confirmation: restart_question.as_ref().map(|question| question.ask.clone()),
                     yolo_error: restart_yolo_error(),
                     stop_first: restart_with_stops_first,
                     offer_label: restart_button_label(shown.restart_offer).to_string(),
@@ -2326,26 +2422,52 @@ pub(crate) fn SessionView(
                         if restarting() { return; }
                         restart_with_open.set(None);
                         restart_with_error.set(None);
-                        restart_yolo.set(None);
+                        // Closing the dialog closes any question inside it,
+                        // whichever opening it is: there is no dialog left
+                        // for it to be answered in. `clear` rather than a
+                        // handler's own opening because this is that
+                        // reconciliation, not an answer.
+                        restart_yolo.clear();
                         restart_yolo_error.set(None);
                         view_claim.set(None);
                         focus_restart_with_trigger();
                     },
-                    on_yolo_cancel: move |_| {
-                        restart_yolo.set(None);
-                        restart_yolo_error.set(None);
+                    on_yolo_cancel: {
+                        let question = restart_question.clone();
+                        move |_| {
+                            // Only the question this render drew: a cancel
+                            // drawn for an earlier one leaves a later one
+                            // (and its error) alone.
+                            if let Some(question) = &question
+                                && restart_yolo.take(question).is_some()
+                            {
+                                restart_yolo_error.set(None);
+                            }
+                        }
                     },
                     on_submit: move |(edit, allow_yolo, stop_asking): (crate::restart_with::RestartEdit, bool, bool)| {
                         if restarting() { return; }
-                        // "Don't ask again" keeps the confirmation up through
-                        // its first step; the restart task takes it down.
-                        // The host the question named, for "don't ask again".
-                        let stop_asking = if stop_asking {
-                            restart_yolo.peek().as_ref().and_then(|ask| {
-                                ask.host.map(|host| (host, ask.host_name.clone()))
-                            })
+                        // An approval-bearing answer acts only by taking the
+                        // live question it answers, about these settings
+                        // (`take_restart_yolo`). A plain restart answers any
+                        // open question too, as reconciliation.
+                        let stop_asking = if allow_yolo {
+                            match take_restart_yolo(&mut restart_yolo, restart_question.as_ref(), &edit, stop_asking) {
+                                RestartYoloAnswer::Accepted { stop_asking } => stop_asking,
+                                RestartYoloAnswer::Stale => return,
+                                RestartYoloAnswer::SettingsChanged => {
+                                    restart_yolo_error.set(None);
+                                    restart_with_error.set(Some(
+                                        "the settings changed after the YOLO question; restart again to be asked about these settings".to_string(),
+                                    ));
+                                    return;
+                                }
+                            }
                         } else {
-                            restart_yolo.set(None);
+                            // A plain restart supersedes whatever question is
+                            // open; it carries no approval, so a question it
+                            // closes approves nothing.
+                            restart_yolo.clear();
                             None
                         };
                         restart_yolo_error.set(None);
@@ -4259,5 +4381,131 @@ mod tests {
             Some(false),
             "the fixture's premise: nothing unseen"
         );
+    }
+
+    /// Spec (`take_restart_yolo`): the session view accepts approval from
+    /// Restart with's YOLO question only by taking the live question the
+    /// answer was drawn with, about the settings submitted. Cancel followed
+    /// by either answer in one event burst is refused; so is an answer with
+    /// no question drawn, an answer for an earlier opening, and "don't ask
+    /// again" for a question that names no host, which leaves the question
+    /// up rather than becoming a one-off approval. An answer submitting
+    /// settings other than the question's takes the question down without
+    /// approving anything. A genuine answer is accepted, carrying the host to
+    /// mark only for "don't ask again".
+    ///
+    /// Why: an accepted answer restarts the agent with no approval prompts,
+    /// and can stop a working agent first. The session view used to forward
+    /// the dialog's approval whatever the state of the question, so an
+    /// answer queued behind Cancel restarted anyway, and a permanent answer
+    /// whose question had gone became a one-off approval.
+    #[farhelm_testtrace::test]
+    fn a_cancelled_restart_with_question_approves_nothing() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<RestartYoloQuestion>>> =
+                const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<RestartYoloQuestion, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let edit = |command: &str| {
+            crate::restart_with::RestartEdit::Command(crate::CommandLaunch {
+                command: command.to_string(),
+                yolo: true,
+                agent: None,
+                resume: None,
+            })
+        };
+        let ask = |host: Option<crate::HostId>| crate::yolo_confirm::YoloAsk {
+            host,
+            host_name: "build box".to_string(),
+            reason: crate::yolo_confirm::YoloReason::Asserted,
+        };
+        let question = |opening: u64| RestartYoloQuestion {
+            opening,
+            edit: edit("codex --yolo"),
+            ask: ask(Some(7)),
+        };
+        let submitted = edit("codex --yolo");
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let mut slot = SLOT.with(Cell::get).expect("the slot mounted");
+
+        dom.in_runtime(|| {
+            for stop_asking in [false, true] {
+                let open = question(1);
+                slot.open(open.clone(), ());
+                assert!(slot.take(&open).is_some(), "premise: Cancel closes it");
+                assert_eq!(
+                    take_restart_yolo(&mut slot, Some(&open), &submitted, stop_asking),
+                    RestartYoloAnswer::Stale,
+                    "an answer queued behind Cancel (stop asking: {stop_asking}) approves nothing"
+                );
+                assert_eq!(
+                    take_restart_yolo(&mut slot, None, &submitted, stop_asking),
+                    RestartYoloAnswer::Stale,
+                    "an answer with no question drawn approves nothing"
+                );
+            }
+
+            // An answer drawn for an earlier opening.
+            slot.open(question(2), ());
+            assert_eq!(
+                take_restart_yolo(&mut slot, Some(&question(1)), &submitted, false),
+                RestartYoloAnswer::Stale,
+                "an answer for an earlier opening approves nothing"
+            );
+            assert!(slot.is_open(), "the later question is left alone");
+
+            // "Don't ask again" needs the question's host.
+            let hostless = RestartYoloQuestion {
+                opening: 3,
+                edit: edit("codex --yolo"),
+                ask: ask(None),
+            };
+            slot.open(hostless.clone(), ());
+            assert_eq!(
+                take_restart_yolo(&mut slot, Some(&hostless), &submitted, true),
+                RestartYoloAnswer::Stale,
+                "a permanent answer without its host is refused, not downgraded"
+            );
+            assert!(slot.is_open(), "and leaves the question up");
+
+            // Settings edited since the question.
+            slot.open(question(4), ());
+            assert_eq!(
+                take_restart_yolo(&mut slot, Some(&question(4)), &edit("codex --other"), false),
+                RestartYoloAnswer::SettingsChanged
+            );
+            assert!(
+                !slot.is_open(),
+                "the question about the old settings is gone"
+            );
+
+            // Positive controls.
+            slot.open(question(5), ());
+            assert_eq!(
+                take_restart_yolo(&mut slot, Some(&question(5)), &submitted, false),
+                RestartYoloAnswer::Accepted { stop_asking: None }
+            );
+            assert!(!slot.is_open());
+            slot.open(question(6), ());
+            assert_eq!(
+                take_restart_yolo(&mut slot, Some(&question(6)), &submitted, true),
+                RestartYoloAnswer::Accepted {
+                    stop_asking: Some((7, "build box".to_string(), ask(Some(7))))
+                }
+            );
+            assert!(
+                !slot.is_open(),
+                "the permanent answer took the question too"
+            );
+        });
     }
 }

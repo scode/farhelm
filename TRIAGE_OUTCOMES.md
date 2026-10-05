@@ -6903,7 +6903,11 @@
   current dialog opening and the settings being approved, and refuses a permanent answer without its host; a regression
   delivers a stale approval after cancellation and shows nothing is dispatched. Remove this feedback file and its index
   entry, or block with findings if the gate trips.
-- Execution: planned in `plans/queue/triage-dialog-cancel-races.md`.
+- Execution: complete in jj change `pwuxutqm`, bookmark `plan/triage-dialog-cancel-races/03-restart-parent`, PR
+  https://github.com/scode/farhelm/pull/1660. The session view holds the question in a `ConfirmSlot` keyed by its
+  opening and the refused settings, and accepts an approval only by taking it for those same settings; a permanent
+  answer without the question's host is refused. Settings edited after the question are refused with a reason rather
+  than approved.
 
 ## feedback-queued-close.md
 
