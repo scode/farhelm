@@ -53,10 +53,11 @@ appears: the rewrites are supposed to keep those out, and the check is what prov
 
 The PNGs are never committed on main. Each publish builds a snapshot, a root commit holding every shot the docs pages
 reference, and points `refs/docs-assets/keep` at a keeper commit whose parents are the new snapshot and every earlier
-snapshot replaced less than six weeks ago, plus the one main's manifest pins, whatever its age.
-`website/src/data/docs-shots.json` pins the newest snapshot, records which main commit its capture ran on
-(`captured_from`) and when (`captured_at`), and records each shot's size. Pages load each image from that snapshot's raw
-GitHub URL.
+snapshot replaced less than six weeks ago, plus the one main's manifest pins, whatever its age. That manifest is read
+from main on the remote as well as from the checkout that publishes, which may be behind main; a publish that would
+prune the keeper but cannot read main's manifest stops before pushing anything. `website/src/data/docs-shots.json` pins
+the newest snapshot, records which main commit its capture ran on (`captured_from`) and when (`captured_at`), and
+records each shot's size. Pages load each image from that snapshot's raw GitHub URL.
 
 The maintainer chose that shape for three reasons:
 

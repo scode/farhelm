@@ -16,7 +16,10 @@
 # tag from the last six weeks keep their images: a tag pins whatever snapshot
 # was current when it was cut, and that snapshot stopped being current only
 # when its successor was published. The snapshot main's manifest pins is
-# always kept, whatever its age. The ref is outside refs/heads/ so that clones
+# always kept, whatever its age: main as the remote has it, not just this
+# checkout, which may be older than main or carry a manifest change that
+# never landed, so pinning only the local manifest's snapshot could let the
+# live docs' images go. The ref is outside refs/heads/ so that clones
 # never fetch any of it: `jj git fetch` and a default `git fetch` only pull
 # branches.
 #
@@ -110,6 +113,41 @@ print("\n".join(sorted(names)))
 EOF
 }
 
+# The snapshot commit main's manifest pins on `remote`, or nothing when the
+# remote has no main or main has no manifest (before the first publish lands).
+# Fetched shallowly into the private repository `tmp`, so a publish does not
+# download main's history. Dies when main cannot be read or its manifest
+# cannot be parsed: the caller uses the answer to decide what NOT to prune,
+# so an unreadable main must stop the publish rather than read as "nothing
+# pinned". ls-remote's exit status 2 means "no such ref", the same way the
+# keeper's absence is told apart from an unreachable remote.
+remote_main_pin() {
+  local remote="$1" tmp="$2"
+  git ls-remote --exit-code "$remote" refs/heads/main >/dev/null 2>"$tmp/main-ls.err"
+  case $? in
+    0) ;;
+    2) return 0 ;;
+    *)
+      cat "$tmp/main-ls.err" >&2
+      die "cannot read main from $remote to see which snapshot it pins; not pruning blind"
+      ;;
+  esac
+  git -C "$tmp" fetch -q --depth 1 "$remote" "+refs/heads/main:refs/remote-main" ||
+    die "cannot fetch main from $remote to see which snapshot it pins; not pruning blind"
+  git -C "$tmp" cat-file -e "refs/remote-main:$MANIFEST" 2>/dev/null || return 0
+  # A manifest without a full commit hash is as unreadable as broken JSON:
+  # reading it as "nothing pinned" would prune the live docs' snapshot.
+  git -C "$tmp" show "refs/remote-main:$MANIFEST" | python3 -c '
+import json, re, sys
+try:
+    commit = json.load(sys.stdin)["commit"]
+except Exception as error:
+    raise SystemExit(f"not a manifest: {error!r}")
+if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+    raise SystemExit(f"its commit is not a full commit hash: {commit!r}")
+print(commit)' || die "cannot read $MANIFEST on main; not pruning blind"
+}
+
 # The snapshot commit the manifest pins, or nothing before the first publish.
 manifest_commit() {
   local file="$1/$MANIFEST"
@@ -199,7 +237,7 @@ EOF
 # manifest are used.
 publish() {
   local repo="$1" dry="$2" raw_check="$3"
-  local remote base source tmp old_keep newest pinned name file tree empty snapshot keep cutoff parent replaced url
+  local remote base source tmp old_keep newest pinned main_pinned name file tree empty snapshot keep cutoff parent replaced url
   local capture captured_from captured_at
   local -a names parents
   local tool
@@ -278,13 +316,15 @@ publish() {
   # Retention. Each earlier snapshot was current until the next newer one
   # replaced it; keep it while that replacement is younger than the window,
   # so a tag cut while it was current keeps its images for the full window.
-  # The snapshot the manifest pins is kept regardless.
+  # The snapshots this checkout's manifest and main's manifest pin are kept
+  # regardless. Main is read only when there is a keeper to prune.
   parents=(-p "$snapshot")
   if [ -n "$old_keep" ]; then
+    main_pinned="$(remote_main_pin "$remote" "$tmp")" || exit 1
     cutoff=$(($(date +%s) - RETENTION_DAYS * 86400))
     replaced=$(date +%s)
     for parent in $(git -C "$tmp" rev-list --parents -n 1 "$old_keep" | cut -d' ' -f2-); do
-      if [ "$replaced" -ge "$cutoff" ] || [ "$parent" = "$pinned" ]; then
+      if [ "$replaced" -ge "$cutoff" ] || [ "$parent" = "$pinned" ] || [ "$parent" = "$main_pinned" ]; then
         parents+=(-p "$parent")
       fi
       replaced="$(git -C "$tmp" log -1 --format=%ct "$parent")" || die "cannot date $parent"
@@ -323,10 +363,13 @@ publish() {
 # referenced shots, recording the capture's main commit; a partial or
 # incomplete capture is refused; a later publish drops shots no page
 # references; publishing an unchanged set pushes nothing but records the new
-# capture; and snapshots older than the window drop out of the keeper
-# while younger ones stay. Each publish runs as a child process whose own
-# environment points git at a test config that rewrites the GitHub-shaped
-# origin to the bare repository, so this process's environment never changes.
+# capture; snapshots older than the window drop out of the keeper while
+# younger ones stay, except those pinned by this checkout's manifest or by
+# main's on the remote; and an unreadable manifest on main refuses the
+# publish before anything is pushed. Each publish runs as a child process
+# whose own environment points git at a test config that rewrites the
+# GitHub-shaped origin to the bare repository, so this process's environment
+# never changes.
 self_test() {
   local work bare checkout cfg page fail=0 keep snapshot
   local origin="git@github.com:example/repo.git"
@@ -497,6 +540,56 @@ json.dump(manifest, open(sys.argv[1], "w"))' "$checkout/$MANIFEST" "$1" || die "
   captured "$main1"
   run >/dev/null 2>&1 || { echo "FAIL publish with an old pin"; fail=1; }
   kept "$p70" || { echo "FAIL the snapshot the manifest pins was dropped"; fail=1; }
+
+  # Main's own manifest pins a snapshot too, read from the remote rather than
+  # this checkout: here the checkout pins the newest snapshot while main pins
+  # one that retention alone would drop (replaced 50 days ago), and it stays.
+  # A manifest on main that cannot be parsed refuses the publish before it
+  # pushes anything; a main without a manifest, as before the first publish
+  # landed, is fine. (The cases above ran with no main on the remote at all.)
+  main_manifest() {
+    local src="$work/main-src"
+    rm -rf "$src" || die "cannot build a test main"
+    mkdir -p "$src/$(dirname "$MANIFEST")" || die "cannot build a test main"
+    git -C "$src" init -q || die "cannot build a test main"
+    # A parent commit first, so the publisher's depth-1 fetch of main really
+    # is shallow and its push goes out from a shallow repository, as a real
+    # main's does.
+    git -C "$src" -c user.name=t -c user.email=t@invalid -c commit.gpgsign=false commit -q --allow-empty -m base ||
+      die "cannot build a test main"
+    if [ -n "$1" ]; then
+      printf '%s\n' "$1" >"$src/$MANIFEST" || die "cannot build a test main"
+    else
+      printf 'no manifest yet\n' >"$src/README" || die "cannot build a test main"
+    fi
+    git -C "$src" add -A || die "cannot build a test main"
+    git -C "$src" -c user.name=t -c user.email=t@invalid -c commit.gpgsign=false commit -q -m main ||
+      die "cannot build a test main"
+    git -C "$src" push -q --force "$bare" HEAD:refs/heads/main || die "cannot push a test main"
+  }
+  local m5 m50 m70
+  m5="$(aged 5)" || die "cannot build an aged snapshot"
+  m50="$(aged 50)" || die "cannot build an aged snapshot"
+  m70="$(aged 70)" || die "cannot build an aged snapshot"
+  remote_git update-ref "$REF" "$(keeper_of "$m5" "$m50" "$m70")" || die "cannot install a test keeper"
+  pin "$m5"
+  main_manifest "{\"commit\": \"$m70\"}"
+  convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
+  captured "$main1"
+  run >/dev/null 2>&1 || { echo "FAIL publish with main pinning an old snapshot"; fail=1; }
+  kept "$m70" || { echo "FAIL the snapshot main's manifest pins was dropped"; fail=1; }
+  local unreadable out
+  convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
+  captured "$main1"
+  keep="$(remote_git rev-parse "$REF")"
+  for unreadable in "not json" '{"other": "x"}' '{"commit": ""}'; do
+    main_manifest "$unreadable"
+    out="$(run 2>&1)" && { echo "FAIL published with an unreadable manifest on main: $unreadable"; fail=1; }
+    grep -q "on main; not pruning blind" <<<"$out" || { echo "FAIL refused for another reason: $unreadable"; fail=1; }
+    test "$(remote_git rev-parse "$REF")" = "$keep" || { echo "FAIL an unreadable main moved the ref"; fail=1; }
+  done
+  main_manifest ""
+  run >/dev/null 2>&1 || { echo "FAIL a main without a manifest blocked publishing"; fail=1; }
 
   # A manifest pinning a snapshot the keeper no longer holds does not block
   # publishing what is captured locally.

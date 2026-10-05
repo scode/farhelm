@@ -6686,7 +6686,9 @@
   rather than the checkout, and refuses to prune when it cannot read it. `--self-test` gains a case where the local
   manifest differs from main's and main's aged snapshot survives. Run the self-test and `shellcheck` on the script.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tooling-output-ownership.md`.
+- Execution: complete — change `ntlpmzntsnrzwlynmqtswxqmpwyorxsu`, bookmark
+  `plan/triage-tooling-output-ownership/03-publisher-main-pin`, PR
+  [#1651](https://github.com/scode/farhelm/pull/1651/changes).
 
 ## installer-prune.md
 

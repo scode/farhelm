@@ -15,7 +15,6 @@ One line per open item. This file must always match the feedback files in this d
 - `yolo-restart-cancel.md` — Restart with accepts a cancelled YOLO answer.
 - `installer-symlink.md` — App updates can overwrite files outside a symlinked bundle directory.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
-- `publisher-main-pin.md` — Publishing from an older checkout may stop retaining main’s pinned images.
 - `feedback-queued-close.md` — A queued close can discard feedback while sending starts.
 - `template-empty-name.md` — Editing a template silently drops its instruction to clear the name.
 - `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
