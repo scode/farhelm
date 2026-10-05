@@ -6901,3 +6901,65 @@
   unresolved; closing before Send still works; a regression covers both close paths. Remove this feedback file and its
   index entry, or block with findings if the gate trips.
 - Execution: pending.
+
+## linger-control.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8b6ed392`. When enabling linger on a remote host fails in the degraded way,
+  the helm logs the host's stderr with tracing's display formatter (`stderr = %output.stderr.trim()`,
+  `crates/farhelm-helm/src/provisioning/backend.rs:2327`), which preserves terminal control bytes, so a remote host can
+  put escape sequences into the helm's log; viewed in a terminal they can repaint it, and on terminals that allow OSC
+  52, set the clipboard. SPEC_impl.md requires peer-supplied error text to be control-escaped wherever it is logged, and
+  SPEC.md's trust section treats remote supervisor output as untrusted. No exploit was run.
+- Decision: the user (2026-10-05) asked for the remaining highest-bucket items that are clearly worth fixing without
+  product or spec judgement or new complexity to be recorded as `fix code`; this is one of them.
+- Completion criteria: the stderr goes through the existing control-escaping helper (or a Debug-escaped field) before it
+  is logged; a focused test shows control bytes come out as escaped text. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## template-clobber.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8b6ed392`. The Templates panel's duplicate-name check treats a template list
+  that is still loading or failed to load as "name not taken" (`crates/farhelm-ui/src/list/templates.rs:415–419`), so
+  saving a new template, or renaming one, under an existing name while the list is unavailable replaces that other
+  template, which SPEC_impl.md ("Templates") says the panel must refuse. Only one client and a slow or failed list read
+  are needed. No runtime reproduction.
+- Decision: as recorded under `linger-control.md` (same date).
+- Completion criteria: saving a new template or a rename requires a successfully loaded list; while it is loading or
+  failed, the save is refused with a message saying so and a way to retry the list. Saving the template already open
+  under its own name keeps working. A focused test holds or fails the list read while saving an existing name. Remove
+  this feedback file and its index entry.
+- Execution: pending.
+
+## template-successor.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8b6ed392`. An agent create without `--host` whose template picks the host
+  resolves the template's install identity to a registry row (`crates/farhelm-helm/src/agent_requests.rs:1319–1326`),
+  but dispatch later takes whichever connection serves that row (`:1514`, via `sessions::host_client`) without comparing
+  that connection's identity with the template's. If the row is retargeted to another install in between (for example
+  while the create waits for approval), the create runs on the replacement machine. SPEC.md says a template names its
+  host by install identity so that a retargeted row makes the template's host inapplicable "rather than silently aiming
+  at the successor". Explicit `--host` and `farhelm spawn` are unaffected and stay so.
+- Decision: as recorded under `linger-control.md` (same date).
+- Completion criteria: when the host came from a template, dispatch refuses unless the identity in the claim it takes
+  with the client equals the template's identity, with a message saying the host now reaches a different install; a
+  focused test retargets the row between resolution and dispatch and shows nothing is created. Remove this feedback file
+  and its index entry.
+- Execution: pending.
+
+## uninstall-missing-id.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `8b6ed392`. Before uninstalling a connected host, the helm probes the
+  destination again and compares the reported identity with the recorded one only when one is recorded
+  (`crates/farhelm-helm/src/provisioning/service.rs:1260–1272`). SPEC_impl.md requires "the fresh probe reporting
+  exactly the recorded identity, a missing one included". A host whose row has no identity can connect (the manager
+  serves identityless supervisors), so a probe that now reaches a machine reporting an identity passes unchecked.
+  Whether that leads to removing the wrong installation was not established; the fix is to match the specified check.
+- Decision: as recorded under `linger-control.md` (same date).
+- Completion criteria: the check requires the reported and recorded identities to be equal as optional values, refusing
+  when either side has one the other lacks; a focused test covers a connected identityless row and a probe that reports
+  an identity. Remove this feedback file and its index entry.
+- Execution: pending.
