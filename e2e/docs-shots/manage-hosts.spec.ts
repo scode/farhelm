@@ -26,7 +26,7 @@ test("host menu", async ({ page, request }) => {
     side: "right",
     dy: -40,
   });
-  await director.callout(panel.locator(".host-settings"), "Its destination, its name, and whether it asks before YOLO launches.", {
+  await director.callout(panel.locator(".host-settings"), "Its destination, its name, and what Farhelm asks you before doing there.", {
     side: "right",
     dy: 0,
   });
@@ -50,10 +50,10 @@ test("host settings", async ({ page, request }) => {
   await row.locator(".host-settings").click();
   const dialog = page.locator(".host-settings-dialog");
   await expect(dialog).toBeVisible();
-  // The edit buttons sit at the dialog's right edge, so their callouts go to
-  // the right of the dialog, where the arrows stay short and cross no text.
-  // The YOLO one goes underneath, shifted right: on the left it would widen
-  // the crop past the docs' text column.
+  // All four callouts down the right of the dialog, where the arrows stay
+  // short and cross no text: the edit buttons sit at the dialog's right edge,
+  // and each checkbox's callout points at the end of its label. Anywhere else
+  // either crosses the help text or widens the crop past the docs' text column.
   await director.callout(dialog.locator(".host-edit"), "Change how Farhelm reaches the host over ssh.", {
     side: "right",
     dy: -40,
@@ -63,9 +63,14 @@ test("host settings", async ({ page, request }) => {
     dy: 30,
   });
   await director.callout(
-    dialog.locator(".host-yolo-without-asking-toggle"),
+    dialog.locator(".host-yolo-without-asking"),
     "Ticked: YOLO launches here start without asking.",
-    { side: "bottom", dx: 120, dy: 95 },
+    { side: "right", dy: 60 },
+  );
+  await director.callout(
+    dialog.locator(".host-commands-without-asking"),
+    "Ticked: agents here run farhelm commands without asking you first.",
+    { side: "right", dy: 50 },
   );
   await shot(page, `${PAGE}/host-settings`, [dialog], { maxWidth: 930 });
 });

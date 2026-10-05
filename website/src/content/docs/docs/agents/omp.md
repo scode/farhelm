@@ -19,11 +19,11 @@ Farhelm performs no OMP waiting-state recognition. When OMP shows an approval pr
 ordinary running/idle classification; it is never shown as waiting. This is a settled scope decision, not a detection
 gap — approve or answer prompts in OMP's own terminal, not by watching the sidebar.
 
-## Resume from your perspective
+## Restart from your perspective
 
-Farhelm offers Resume for the conversation the extension last reported. Typing `/new` starts a conversation that OMP
-18.2.4 persists immediately, so the fresh conversation can be resumable right away instead of waiting for a first
-assistant message.
+A restart resumes the conversation the extension last reported. Typing `/new` starts a conversation that OMP 18.2.4
+persists immediately, so the fresh conversation can be resumable right away instead of waiting for a first assistant
+message.
 
 Farhelm checks the reported session file before resuming: it reads a bounded prefix of the file without following
 symlinks and requires the session header inside it to match the conversation it was told about. If the file is missing,
@@ -38,10 +38,11 @@ interactive child must also pass process attribution: Farhelm checks the reporti
 the launch's recorded program, rather than trusting inherited reporting credentials.
 
 The launch record must name the current gated extension, whose installed bytes are checked before admission. Old
-launches without that provenance remain runnable but cannot capture a conversation until relaunched. Supported process
-chains include the Bun runtime running OMP's bundle or source entry, its compiled binary, the recognized `bun x` and
-`npx` launchers, and transparent shell trampolines. Nested runtimes, Node running OMP, and unknown wrappers are refused.
-A refused report leaves the saved identity unchanged; it cannot replace the root conversation's Resume target.
+launches without that provenance remain runnable but cannot capture a conversation, so **restart** stays greyed out for
+them; replace starts a new session with the current extension. Supported process chains include the Bun runtime running
+OMP's bundle or source entry, its compiled binary, the recognized `bun x` and `npx` launchers, and transparent shell
+trampolines. Nested runtimes, Node running OMP, and unknown wrappers are refused. A refused report leaves the saved
+identity unchanged; it cannot replace the conversation a restart would resume.
 
 Live lifecycle evidence covers the Bun-executed entry. Compiled and package-launcher forms have process-chain shape
 tests, but have not been exercised through the same live lifecycle scenarios.

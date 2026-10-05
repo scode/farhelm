@@ -15,7 +15,7 @@ a host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
 
 <Screenshot
   name="manage-hosts/host-menu"
-  alt="A remote host's menu, opened from its three dots, with retry, settings, and remove explained."
+  alt="A remote host's menu, opened from its three dots, with retry, settings, uninstall, and remove explained."
 />
 
 **update** installs your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
@@ -28,7 +28,7 @@ browser, or in a copy of Farhelm that is not installed in `~/Applications`, it i
 
 <Screenshot
   name="manage-hosts/host-settings"
-  alt="A host's settings dialog, with the destination and alias edit buttons and the YOLO checkbox explained."
+  alt="A host's settings dialog, with the destination and alias edit buttons and both checkboxes explained."
 />
 
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
@@ -36,7 +36,8 @@ alias is only for display: it changes how the host is shown everywhere in Farhel
 the host itself. Your Mac's destination cannot be changed. The YOLO checkbox is the same choice the YOLO confirmation
 offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). The **run farhelm commands from
 this host without asking** checkbox decides whether agents in this host's sessions ask you before they start, stop, or
-change sessions; [Approve what agents do](/docs/using/approve-agent-requests/) explains it.
+change sessions, or change your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/) explains
+it.
 
 ## Update a host
 
@@ -58,7 +59,10 @@ the data gone too.
 Uninstall never stops a session for you. If any session on the host has not ended (it is running, waiting or idle, or
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
 and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). It also needs
-Farhelm to be connected to the host so it can check, so fix a host that shows as unreachable first.
+Farhelm to be connected to the host so it can check, so fix a host that shows as unreachable first. A few less common
+setups are refused too, each with the reason: a host where Farhelm was set up by running `farhelm helm setup` on the
+host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
+`~/.local/lib/farhelm` directory is a symbolic link. **remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
 **uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service,

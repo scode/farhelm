@@ -78,7 +78,7 @@ test("edit form", async ({ page, request }) => {
   const fields = dialog.locator(".templates-field");
   await director.callout(
     fields.filter({ hasText: /^agent type/ }),
-    "codex-deep picks the agent, the model, and the effort, and nothing else.",
+    "codex-deep makes it an agent launch with Codex, its model, and its effort, and nothing else.",
     { side: "left" },
   );
   await director.callout(

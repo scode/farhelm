@@ -7,8 +7,8 @@ sidebar:
 
 import Screenshot from '../../../../components/Screenshot.astro';
 
-A session outlives its agent. Stopping the agent, or a reboot ending it, leaves the session in the list with its
-terminal readable, ready to start again. Only deleting a session removes it.
+A session outlives its agent. Stopping the agent, or a reboot ending it, leaves the session in the list, ready to start
+again; after a stop its terminal stays readable too. Only deleting a session removes it.
 
 ## The header's actions
 
@@ -17,24 +17,28 @@ terminal readable, ready to start again. Only deleting a session removes it.
   alt="The buttons at the right of the session header, with restart, replace, and clone explained."
 />
 
-Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has
-no conversation it can resume, because the agent cannot report one or none was captured, **restart** is greyed out and
-hovering over it says why. Replace is then how you start the session over. [Supported agents](/docs/agents/) says which
-agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
-[Custom commands](/docs/agents/custom-commands/).
+Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
+conversation it can resume, because the agent cannot report one or none was captured, **restart** is greyed out and
+hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex conversation once
+you submit your first prompt, a Pi or OMP conversation after the agent's first reply, and a Claude conversation a few
+seconds after it starts. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/)
+says which agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for
+it; see [Custom commands](/docs/agents/custom-commands/).
 
 **restart with** resumes the conversation the same way, with different settings: another model, effort, permission
 mode, or workspace trust. It is greyed out whenever **restart** is.
 
-**replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory, and asks you
-to confirm first, since the old conversation is not kept. **replace with** opens the
-[session launcher](/docs/using/start-a-session/) filled in with this session's choices; change what you like, and the
-new session takes this one's place. **clone** opens the launcher the same way but leaves this session alone, so you end
-up with two.
+**replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
+new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
+confirm first. **replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
+choices; change anything but the host, and the new session takes this one's place. **clone** opens the launcher the same
+way but leaves this session alone, so you end up with two.
 
-If the agent is still working when you choose **restart**, Farhelm asks you to confirm first, since restarting stops
-it. A session whose agent has already ended restarts straight away. **restart** never asks the YOLO question, even for a
-YOLO session, since it relaunches a choice you already made; **restart with** asks it when the new settings are YOLO.
+While the agent is working (its status is running), **restart** asks you to confirm first, since restarting stops it.
+An agent that is idle or waiting for you is stopped and restarted without asking, and a session whose agent has already
+ended restarts straight away. **restart** never asks the YOLO question, even for a YOLO session, since it relaunches a
+choice you already made; **restart with** asks it when the new settings are YOLO and the host asks before YOLO
+launches.
 
 ## Stop or delete
 
@@ -49,8 +53,9 @@ already ended and has no shell tabs open is deleted at once.
 
 ## After a reboot
 
-When a host reboots, every session on it ends, and each shows as interrupted. Farhelm does not start them again by
-itself; the session's terminal says it is waiting for you to choose restart or replace. Restart resumes the
+When a host reboots, every session still running on it ends and shows as interrupted, and its terminal contents are
+gone. Farhelm does not start them again by itself; opening one shows a notice that it is waiting for you to choose
+restart or replace. Restart resumes the
 conversation if Farhelm can, and replace starts the session over.
 [What survives what](/docs/how-it-works/what-survives-what/) has what else a reboot, or restarting Farhelm itself, does
 and does not keep.

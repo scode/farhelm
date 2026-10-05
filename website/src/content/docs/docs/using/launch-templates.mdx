@@ -24,8 +24,10 @@ directory of a project, and applying both sets up the whole launch.
 />
 
 The form offers every choice the launcher has, from the agent and model to the host, the directory, and the session's
-name. **set to** gives a choice a value, and **reset to default** sets it back to the agent's own default when the
-template is applied, which is different from leaving it as is. The destination can be a directory or a
+name. Most fields take a value straight from their menu; the model and resume command take **set to** and a text box.
+**reset to default**, offered for the model, effort, permissions, trust, and resume command, puts that choice back to
+the agent's own default when the template is applied (for the resume command, to none), which is different from leaving
+it as is. The destination can be a directory or a
 [fresh GitHub checkout](/docs/using/start-a-session/#start-from-a-fresh-github-checkout). Names must be unique; to
 change a template, edit it rather than saving a new one under its name.
 
@@ -37,7 +39,7 @@ a command still needs that command to exist on the host you launch on.
 
 <Screenshot
   name="launch-templates/edit-form"
-  alt="codex-deep open for editing: agent type Codex, model gpt-6.1-sol, effort high, the rest left as is."
+  alt="codex-deep open for editing: an agent launch with Codex, model gpt-6.1-sol, effort high, the rest left as is."
 />
 
 A session remembers the choices it was launched with, not which templates supplied them, so editing or deleting a
@@ -56,7 +58,8 @@ template never changes a session that already started from it.
 />
 
 Templates apply in the order you choose them, and where two set the same choice, the later one wins. A template only
-fills in what it holds, so anything the launch still needs, such as a directory, you choose by hand as usual.
+fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
+by hand as usual.
 
 A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
 did not fit: a model the chosen agent does not offer, for example, or a model while the launcher is on its **command**
@@ -73,7 +76,15 @@ farhelm agent create --template codex-deep --template api-repo
 
 Here `api-repo` supplies the host and directory, so the command needs neither `--host` nor `--cwd`. Other options such
 as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what each
-sets. Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
+sets.
+
+A few templates work in the launcher but not for agents. The `farhelm` command cannot make a fresh GitHub checkout, so a
+template with that destination is refused there unless `--cwd` gives a directory instead. `farhelm spawn` always starts
+on the agent's own host, so it refuses a template that sets a host. And on a host that asks before YOLO launches, an
+agent cannot use a template that makes the launch YOLO or a custom command
+([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
+
+Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
 Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
 unless you have told Farhelm not to ask for that agent's host ([Approve what agents
 do](/docs/using/approve-agent-requests/)). An agent's edit cannot remove a choice from a template, so it never drops a

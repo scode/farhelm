@@ -47,7 +47,7 @@ installed, however it got there.
 ## How updates are checked
 
 The update check and the download both go to GitHub over HTTPS, the same way the installer does when you run it
-yourself. Farhelm does not yet check a release's signature before installing it; it trusts what GitHub serves. See the
+yourself. Farhelm does not check a release's signature before installing it; it trusts what GitHub serves. See the
 [security model](/docs/how-it-works/security-model/) for the rest of what leaves your Mac.
 
 ## Update remote hosts, or uninstall

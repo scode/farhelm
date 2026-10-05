@@ -1,13 +1,13 @@
 ---
 title: Cursor
-description: Launching Cursor's cursor-agent CLI; conversation tracking and Resume are not supported.
+description: Launching Cursor's cursor-agent CLI; conversation tracking and restart are not supported.
 sidebar:
   order: 10
 ---
 
 Farhelm can launch Cursor's `cursor-agent` CLI, with optional model selection and a YOLO permission choice.
-**Conversation tracking and Resume are not supported**, so a Cursor session cannot be restarted: replace it to start
-over. Clone preserves launch choices, not the conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
+**Conversation tracking is not supported**, so a Cursor session cannot be restarted: replace it to start over. Clone
+preserves launch choices, not the conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
 
 ## Launching
 

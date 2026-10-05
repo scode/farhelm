@@ -95,10 +95,12 @@ staying in the chain, so it adds no level.
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop
-selects on), `FARHELM_SESSION_TOKEN` (the bearer credential proving a spawn request came from this session), and
-`FARHELM_SUPERVISOR_SOCK` (the supervisor socket, whose directory is also where conversation reports are saved). A
-wrapper inherits all four and passes them to its child by default, so this needs no thought unless your wrapper
-deliberately scrubs the environment.
+selects on), `FARHELM_SESSION_TOKEN` (the bearer credential proving that a `farhelm agent` or `farhelm spawn` request
+came from this session), and `FARHELM_SUPERVISOR_SOCK` (the supervisor socket, whose directory is also where
+conversation reports are saved). Goose, Pi, and OMP launches also carry variables their conversation reporters need. A
+wrapper inherits all of them and passes them to its child by default, so this needs no thought unless your wrapper
+deliberately scrubs the environment, in which case `farhelm` commands and conversation tracking stop working for that
+session.
 
 ## What happens on stop
 
