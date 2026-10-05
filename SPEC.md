@@ -908,25 +908,25 @@ or incremental listing, or per-order server-side indexing is wanted at any layer
 client to hold and sort the entire fleet in memory; a fleet that outgrows the cap is outside what this product is built
 for, and the notice is the whole of the answer to it.
 
-A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, and last
-activity time; status and locality marks occupy aligned columns. Compact ended rows replace the live dot with a distinct
-ended-state icon, preserving complete status details in accessible text and a tooltip. Noncompact rows show the complete
-ended status on a separate full-width line that wraps instead of truncating. Times share a right-aligned column before
-the row menu. A session whose host cannot yet be placed either way marks neither, rather than guessing. Its second line
-shows the helm-supplied host name (an alias when set), then `:`, then its working directory; a legacy row with no host
-name shows only the directory, rather than inventing a local identity or a dangling separator. The second line is hidden
-when the helm-wide compact preference is on, which defaults off and is shared at the next preference seed across
-clients. The working directory and launch command remain abbreviated only where shown, with their full, untouched values
-always available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value
-is recorded. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread
-toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status). Every
-session row carries one permission mark. An amber slashed shield means the session's launch is YOLO by the rule under
-Creation: its effective agent-launch permission is YOLO, or its command was asserted to be YOLO. A green plain shield
-means an agent launch in a non-YOLO mode, or a command asserted not to be YOLO. A session created before launch kinds
-existed that was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text
-name the specific agent-launch mode (default, approve, smart approve, chat, or YOLO), or say that the mark is the
-assertion made when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a
-pre-existing session's command was never classified.
+A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, a notification
+bell when the session has notifications (see Status), and last activity time; status and locality marks occupy aligned
+columns. Compact ended rows replace the live dot with a distinct ended-state icon, preserving complete status details in
+accessible text and a tooltip. Noncompact rows show the complete ended status on a separate full-width line that wraps
+instead of truncating. Times share a right-aligned column before the row menu. A session whose host cannot yet be placed
+either way marks neither, rather than guessing. Its second line shows the helm-supplied host name (an alias when set),
+then `:`, then its working directory; a legacy row with no host name shows only the directory, rather than inventing a
+local identity or a dangling separator. The second line is hidden when the helm-wide compact preference is on, which
+defaults off and is shared at the next preference seed across clients. The working directory and launch command remain
+abbreviated only where shown, with their full, untouched values always available on the row (a tooltip on the web and
+desktop clients); an abbreviation is never the only place a value is recorded. A row's own actions menu, beyond the
+lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or by clicking the dot itself
+— that sets the session's seen state directly (see Status). Every session row carries one permission mark. An amber
+slashed shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch permission is
+YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in a non-YOLO mode, or a
+command asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no
+assertion and carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (default,
+approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was launched, by the
+user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was never classified.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
@@ -1047,6 +1047,35 @@ agent. Grok is the explicit opt-in exception for conversation capture: users ins
 themselves, while an unconfigured Grok still launches normally and cannot be restarted. OMP and Grok both use generic
 activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
 decision, not a reader waiting to be written.
+
+When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
+will then be unable to resume it, it says so on that session as a notification rather than only in a log. In this
+version every notification is a session-tracking problem: a launch whose conversation hook should have reported which
+conversation the agent is in and has not, a minute after the first Enter the user sent it (an Enter inside a paste, or
+Shift+Enter, inserts a newline and does not count, while an Enter that only answers the agent's own prompt or picker
+does), for an agent that reports by its first prompt (Pi and OMP report only after their first reply, which can take as
+long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm could not add its
+conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok conversation record
+that Farhelm re-checks and finds missing or inconsistent, which withdraws the resume offer; and an OMP launch whose
+conversation reporter does not match the running Farhelm, the one refused conversation report that notifies. Every other
+refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
+delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
+conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. Each notification
+says what happened and what the user can do about it, or, when nothing can be done, what they lose; it never points at a
+log. The same problem is reported at most once per launch of the session's agent, so a supervisor restart does not
+repeat one.
+
+A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
+The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
+says how many are unread. Clicking it opens the session's notifications in a list in the style of the row's actions
+menu, never clipped by the sidebar, and does not open the session. The list is newest first, each entry saying how long
+ago it happened, with the full time available on the entry the way the row's activity age has it, and the entries new
+since the list was last opened set apart. Closing the list, by clicking away, pressing Escape, or clicking the bell
+again, marks everything it showed as read; there is no mark unread. A clear button removes them all, and the bell
+disappears until a new one arrives. Notifications persist across supervisor and helm restarts and reloads; each session
+keeps its 10 most recent, with no time-based expiry, and deleting a session deletes them. Read and cleared state is kept
+by the helm and shared by every client, the same way seen state is. Desktop or operating-system notifications, and
+notifications about a host or the whole app, are not part of v1.
 
 ## Terminal experience
 
@@ -1630,13 +1659,15 @@ the agent creates it.
 ## Errors and diagnostics
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
-  operation succeeded when it failed. Two best-effort exceptions log a failure but stay silent rather than surfacing it:
-  the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
+  operation succeeded when it failed. Three best-effort exceptions log a failure but stay silent rather than surfacing
+  it: the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
   choices), because losing next-launch convenience must not turn a choice that already took effect into a failed current
   operation, and a helm that lost the preference falls back to the defaults; and the automatic "mark seen" a session's
   own opening or activity advance triggers (see Status), because a lost automatic mark costs nothing worse than a dot
-  that is one open-and-close cycle behind, corrected by the next successful write. The manual "mark unread"/"mark read"
-  toggle is not covered by either exception — a failed toggle surfaces like any other operation.
+  that is one open-and-close cycle behind, corrected by the next successful write; and marking a session's notifications
+  read when their list closes (see Status), for the same reason: a lost mark costs a bell that stays loud until the list
+  is next closed. The manual "mark unread"/"mark read" toggle and the notification list's clear button are not covered —
+  a failed toggle or clear surfaces like any other operation.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   with the older-host update button also available inline, while the global details disclosure shows the evidence and
@@ -1774,6 +1805,7 @@ Further requirements:
 
 ## Non-goals for v1
 
+- Notifications outside a session (about a host or the whole app), and desktop or operating-system notifications.
 - Automatic initial-prompt delivery (at creation or spawn).
 - Terminal history persistence beyond what the live terminal retains. A durable history store is a possible future
   add-on; v1 leans on agent conversation resume instead.
