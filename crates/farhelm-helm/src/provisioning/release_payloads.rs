@@ -89,7 +89,15 @@ use url::Url;
 ///
 /// Published `SHA256SUMS` files are never re-signed or replaced, so a build
 /// carrying a key keeps verifying every release ever signed with it.
-pub const RELEASE_KEY_RING: &[&str] = &["RWSNQaVU+WXJm29s7DRqwrHGbzMgOJck6kLPfVU4Gvk1uCnwgdlzp/U/"];
+///
+/// The first entry is the primary key (`farhelm-release.pub`), which signs
+/// releases; the second is the backup (`farhelm-release-backup.pub`), whose
+/// secret half is kept offline until a rotation needs it. Verification
+/// treats them alike; the order only records which is which.
+pub const RELEASE_KEY_RING: &[&str] = &[
+    "RWQH7seI20xyl5JIq/XCQwXKqspR2ll3x85HPYY1CjMuN7KIm5E5uEXy",
+    "RWSb8nFBHwcfM92axeElkZZUXXqz/G2+pAbVvF6onvFpp20Ope9dTD/A",
+];
 
 /// The release THIS build asks for. A helm downloads the payloads matching
 /// its OWN version and no other, which is what keeps a provisioned host
