@@ -199,17 +199,19 @@ badge, and a right-aligned activity-time column before the narrow menu gutter. T
 directory, joined by `:` when the helm supplied a name. This restores host visibility for confirmed local sessions too:
 a host name is an identity fact, while the locality icon answers a separate question. The status and locality tracks
 keep fixed icon-sized widths: live status uses the first slot's dot, compact ended status replaces that dot with a
-distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank.
-Compact rows therefore remain one visual line; stale survives there as a small labelled glyph. The full status,
-annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never acquire the
-live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
-title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
-clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
-as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and a command
-launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the unclassified
-permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a command line.
-C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed inline mark, and
-an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
+distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank. A
+session with notifications adds a bell between the agent glyph (and its permission mark) and the activity-time column,
+in both densities; it is absent, taking no width, when the list is empty, and its hover help and accessible name carry
+the unread count. Compact rows therefore remain one visual line; stale survives there as a small labelled glyph. The
+full status, annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never
+acquire the live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line
+under the title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without
+ellipsis, clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded
+ages such as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and
+a command launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the
+unclassified permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a
+command line. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed
+inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
 `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
 matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
 ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
@@ -1634,10 +1636,17 @@ evidence, but cannot authorize another directory move.
   either no identity or one stored identity with its ownership version. Reload preserves historical identities
   regardless of source, without re-verifying old scan locators. Each refresh takes the per-session capture claim before
   reloading and verifying a reported row. Reply paths and the ticker both run this reconciliation, without a global pass
-  lock or coalescing. An injected launch holding no identity warns once after 65 seconds from first confirmed agent
-  input. Its anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch. A Resume
-  carries its identity and therefore stays silent even if its new hook never reports. The warning changes no offer or
-  admission rule.
+  lock or coalescing. An injected launch holding no identity warns once after 65 seconds from the first input frame
+  delivered to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage return that is not preceded by
+  ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame
+  (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk tmux confirmed. The terminal's
+  automatic replies to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports)
+  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. Residuals: an Enter
+  that only answers a dialog counts, and a paste large enough to span frames has its middle frames judged without their
+  markers. A launch the running supervisor did not spawn (one reloaded after a supervisor restart) is not checked at
+  all, because only the spawn knows whether it added the hook. Its anchor is an in-memory monotonic instant, reset with
+  the diagnostic latch on every relaunch. A Resume carries its identity and therefore stays silent even if its new hook
+  never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -2604,6 +2613,36 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
   starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
+- Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
+  depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
+  database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs
+  to, the time it was recorded, and its user-facing text. `(session, generation, kind)` is unique, which is the whole
+  once-per-launch rule and survives a supervisor restart with no separate latch; an insert beyond a session's 10th drops
+  its oldest, and deleting the session deletes its rows. The kinds are the hook that never reported (the 65-second
+  tripwire above, recorded by the capture pass that runs it, only for an agent whose report is due by its first prompt,
+  `RestartReadiness::due_by_first_prompt`, and not for a launch already told its OMP reporter does not match), a hook
+  that could not be added (recorded by the spawn that decided it, except when `FARHELM_AGENT_HOOKS` turned hooks off for
+  that agent, which is the user's own choice, and except for a kind that adds no hook at all), a Codex or Grok record
+  whose verification withdrew the resume offer (recorded only after the withdrawal is committed, and only on a clean
+  verdict, not a read error; the background refresh and Grok's final check before a Restart both record it), and an OMP
+  launch whose recorded reporter is older than this build's or whose installed reporter file is there with different
+  contents (a missing or unreadable file records nothing). The first two say Restart cannot resume, so they are refused
+  whenever the launch's row holds a captured conversation, checked in the same statement as the insert, which is also
+  what closes the race between a report's commit and the tripwire. The listing carries the last 10 on
+  `SessionInfo::notifications` as sequence number, time and text only: the kind and generation stay columns, because an
+  enum on `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm,
+  which drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell
+  and an older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list
+  lives in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
+  replaced after each recording, which then sends the `SessionsChanged` hint. The helm keeps read and cleared state as
+  two per-session sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside
+  `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
+  `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
+  holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
+  moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
+  cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
+  supervisor; the cap ages records out there. The UI renders each text as peer text.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by session id alone, not as a `session_cache` column: that cache is replaced WHOLESALE by
   each host's refresh, so a column there would need every refresh to carry forward a viewer fact the supervisor never
