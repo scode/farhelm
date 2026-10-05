@@ -3221,7 +3221,39 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                 intent_key.as_deref(),
             )
         }
+        // A template write: the name is quoted back in the helm's refusals
+        // and is a template name's shape, and the fields are bounded by the
+        // same cap the helm stores a template under, counted as the JSON they
+        // travel as. Whether the write is acceptable is the helm's.
+        AgentVerb::TemplateCreate { name, fields, host }
+        | AgentVerb::TemplateEdit { name, fields, host } => {
+            validate_template_name(name)?;
+            let fields_bytes = serde_json::to_string(fields).map_or(usize::MAX, |json| json.len());
+            if fields_bytes > farhelm_proto::launcher::TEMPLATE_FIELDS_CAP {
+                return Err(format!(
+                    "the template's fields are {fields_bytes} bytes, exceeding the {}-byte limit",
+                    farhelm_proto::launcher::TEMPLATE_FIELDS_CAP
+                ));
+            }
+            validate_create_fields(HostSelector::Optional(host.as_deref()), "", 0, None, None)
+        }
+        AgentVerb::TemplateDelete { name } => validate_template_name(name),
     }
+}
+
+/// Bound a template name an agent verb carries, as a `--template` name is
+/// bounded in a create: the helm stores names of at most `TEMPLATE_NAME_CAP`
+/// bytes and quotes them back in refusals, so a longer one or one with a
+/// control character is refused at this doorway.
+fn validate_template_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("a template needs a name".to_string());
+    }
+    if name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP || name.chars().any(char::is_control)
+    {
+        return Err("the template name is too long or contains control characters".to_string());
+    }
+    Ok(())
 }
 
 /// The shared bound on everything a CREATING verb can push downstream.
@@ -5137,6 +5169,47 @@ mod tests {
             .is_err(),
             "the cap counts bytes, not characters"
         );
+    }
+
+    /// Spec: the template verbs are bounded at this doorway like a create:
+    /// a name must be non-empty, at most `TEMPLATE_NAME_CAP` bytes and free
+    /// of control characters, and a write's fields at most
+    /// `TEMPLATE_FIELDS_CAP` bytes as JSON; a delete is held to the same
+    /// name rule.
+    ///
+    /// Why: the helm stores names of that size and quotes them back in its
+    /// refusals, and stores fields of that size; anything larger would only
+    /// be refused after crossing the connection, and a control character in
+    /// a quoted name is the injection the name rule exists to keep out.
+    #[farhelm_testtrace::test]
+    fn validate_agent_verb_bounds_template_writes() {
+        use farhelm_proto::launcher::{TEMPLATE_FIELDS_CAP, TEMPLATE_NAME_CAP, TemplateFields};
+        let create = |name: &str, command: Option<String>| AgentVerb::TemplateCreate {
+            name: name.to_string(),
+            fields: TemplateFields {
+                command,
+                ..Default::default()
+            },
+            host: None,
+        };
+        let longest = "n".repeat(TEMPLATE_NAME_CAP);
+        assert!(validate_agent_verb(&create(&longest, None)).is_ok());
+        for name in ["", "bad\u{1b}name", &format!("{longest}n")] {
+            assert!(
+                validate_agent_verb(&create(name, None)).is_err(),
+                "{name:?} is refused"
+            );
+            assert!(
+                validate_agent_verb(&AgentVerb::TemplateDelete {
+                    name: name.to_string()
+                })
+                .is_err(),
+                "a delete of {name:?} is refused"
+            );
+        }
+        let oversized = validate_agent_verb(&create("t", Some("c".repeat(TEMPLATE_FIELDS_CAP))))
+            .expect_err("oversized fields are refused");
+        assert!(oversized.contains("byte limit"), "{oversized}");
     }
 
     /// Spec: the two CREATING verbs refuse an empty, control-laced or

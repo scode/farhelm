@@ -19,8 +19,10 @@
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
-//! `do_restart_session` for the three lifecycle verbs, and
-//! `sessions::do_create_session` for `create` and `clone`. Not for economy:
+//! `do_restart_session` for the three lifecycle verbs,
+//! `sessions::do_create_session` for `create` and `clone`, and
+//! `templates::store_template`/`remove_template` for the template writes.
+//! Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
 //! Two listings assembled two ways would drift, and the drift would show
@@ -69,7 +71,8 @@
 //! # Acting verbs wait for the user first
 //!
 //! Every verb that changes something (rename, stop, restart, create, clone,
-//! and `farhelm spawn` through create) is carried out only once the user has
+//! `farhelm spawn` through create, and the template writes) is carried out
+//! only once the user has
 //! approved it on a card in the GUI, or the requesting host's "run farhelm
 //! commands from this host without asking" setting is on (SPEC.md,
 //! Agent-spawned sessions). [`approved`] is that gate: it asks
@@ -100,7 +103,11 @@
 //! host's sessions, another supervisor, the helm's machine, or helm-owned
 //! state. Each verb below answers only what the spec grants any agent, and
 //! the connection adds nothing to that grant; a supervisor cannot, for
-//! example, change a host's settings through this relay.
+//! example, change a host's settings through this relay. The template
+//! writes do change helm-owned state, but on the user's authority, not the
+//! connection's: each one is the write the user approved on its card (or
+//! that the user's "without asking" setting for the requesting host lets
+//! through), and it lands only on the template that card showed.
 
 use std::sync::{Arc, Weak};
 
@@ -431,6 +438,37 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
             }
             AgentVerb::Templates {} => template_listing(&state, origin.host).await,
+            AgentVerb::TemplateCreate { name, fields, host } => {
+                write_template_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    TemplateWrite {
+                        name,
+                        fields,
+                        host,
+                        create: true,
+                    },
+                )
+                .await
+            }
+            AgentVerb::TemplateEdit { name, fields, host } => {
+                write_template_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    TemplateWrite {
+                        name,
+                        fields,
+                        host,
+                        create: false,
+                    },
+                )
+                .await
+            }
+            AgentVerb::TemplateDelete { name } => {
+                delete_template_for_agent(&state, origin, session_id, name).await
+            }
             // `confirm_yolo` is ignored on both creating verbs: an agent has
             // no YOLO override (SPEC.md, Agent-spawned sessions), whatever a
             // modified CLI sends; `yolo_guard::check_agent` decides instead.
@@ -720,6 +758,15 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
+        AgentVerb::TemplateCreate { name, host, .. }
+        | AgentVerb::TemplateEdit { name, host, .. } => {
+            required(Some(name.as_str()), "the template name")?;
+            if host.as_deref() == Some("") {
+                return Err("--host must not be empty".to_string());
+            }
+            Ok(())
+        }
+        AgentVerb::TemplateDelete { name } => required(Some(name.as_str()), "the template name"),
         AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
     }
 }
@@ -1505,6 +1552,325 @@ async fn dispatch_agent_create(
         origin.host,
         asking_session,
     ))
+}
+
+/// One `template create` or `template edit`, moved out of [`AgentVerb`].
+struct TemplateWrite {
+    name: String,
+    fields: farhelm_proto::launcher::TemplateFields,
+    /// The host to pin the template to, by display name.
+    host: Option<String>,
+    /// `create` refuses an existing name; `edit` refuses a missing one.
+    create: bool,
+}
+
+/// `template create` and `template edit`: build the template the write would
+/// store, show the whole of it on a card, and store it through the GUI
+/// editor's own path (`templates::store_template`) once the user approves.
+///
+/// The host is named by display name and written as that host's recorded
+/// install identity, which is how every template names a host; a `host` field
+/// in the request itself is refused, so an agent cannot pin a template to an
+/// install the helm did not resolve. A fresh-checkout destination is refused,
+/// as the CLI refuses applying one. An edit sets only the fields it is given
+/// (SPEC.md: no way to unset one). The template is read again after the
+/// approval, and a write whose template changed during the wait is refused
+/// rather than applied over a change the card did not show.
+async fn write_template_for_agent(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    asking_session: &str,
+    write: TemplateWrite,
+) -> anyhow::Result<AgentReply> {
+    let TemplateWrite {
+        name,
+        mut fields,
+        host,
+        create,
+    } = write;
+    if fields.host.is_some() {
+        return Err(crate::sessions::invalid_request(
+            "name the template's host with --host, by the name farhelm agent hosts shows"
+                .to_string(),
+        ));
+    }
+    if matches!(
+        fields.destination,
+        Some(farhelm_proto::launcher::TemplateDestination::Github(_))
+    ) {
+        return Err(crate::sessions::invalid_request(
+            "a template written from the farhelm command line cannot use a fresh GitHub \
+             checkout; give --cwd a folder"
+                .to_string(),
+        ));
+    }
+    if !create && fields == farhelm_proto::launcher::TemplateFields::default() && host.is_none() {
+        return Err(crate::sessions::invalid_request(
+            "give at least one field to change".to_string(),
+        ));
+    }
+    // A YOLO assertion is about one command line, so a new command line
+    // needs its own: keeping the old one would carry "not YOLO" over to a
+    // command nobody said it about.
+    if fields.command.is_some() && fields.yolo.is_none() {
+        return Err(crate::sessions::invalid_request(
+            "--command needs --yolo or --no-yolo".to_string(),
+        ));
+    }
+    let mut host_name = None;
+    if let Some(host) = host {
+        let (id, name) = resolve_host(state, origin, host).await?;
+        let identity = crate::hosts::host_views(state)
+            .await?
+            .into_iter()
+            .find(|view| view.id == id)
+            .and_then(|view| view.identity);
+        let Some(identity) = identity else {
+            return Err(crate::sessions::invalid_request(format!(
+                "{name} has not reported an install yet, so a template cannot name it; retry \
+                 once it has connected"
+            )));
+        };
+        fields.host = Some(identity);
+        host_name = Some(name);
+    }
+    let before = find_template(state, &name).await?;
+    let template = match (&before, create) {
+        (Some(_), true) => {
+            return Err(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: ErrorKind::Conflict,
+                message: format!(
+                    "a template named {name:?} already exists; change it with farhelm agent \
+                     template edit"
+                ),
+            }));
+        }
+        (None, false) => return Err(no_such_template(&name)),
+        (None, true) => farhelm_proto::launcher::LaunchTemplate {
+            name,
+            fields: with_agent_kind(fields),
+        },
+        (Some(existing), false) => {
+            // The merge would let `--command`'s kind replace the stored one;
+            // a template that says which kind it is keeps saying so.
+            if matches!((existing.fields.kind, fields.kind), (Some(was), Some(now)) if was != now) {
+                return Err(changes_launch_kind(&name));
+            }
+            farhelm_proto::launcher::LaunchTemplate {
+                name,
+                fields: merge_template_fields(existing.fields.clone(), fields),
+            }
+        }
+    };
+    if mixes_launch_kinds(&template.fields) {
+        return Err(changes_launch_kind(&template.name));
+    }
+    farhelm_proto::launcher::check_template_shape(&template)
+        .map_err(crate::sessions::invalid_request)?;
+    let shown_host = match (&host_name, &template.fields.host) {
+        (Some(name), _) => Some(name.clone()),
+        (None, Some(identity)) => template_host_name(state, identity).await,
+        (None, None) => None,
+    };
+    approved(
+        state,
+        origin,
+        asking_session,
+        ApprovalAction::TemplateWrite {
+            name: template.name.clone(),
+            replaces_existing: !create,
+            fields: template.fields.clone(),
+            host_name: shown_host.clone(),
+        },
+    )
+    .await?;
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        template = escape_for_log(&template.name).as_str(),
+        "an agent is writing a launch template"
+    );
+    // The write lands only on the template the card was built from: another
+    // agent's create of the same name, or a GUI edit made while the card
+    // waited, refuses this one instead of being overwritten by it.
+    let unchanged = crate::templates::Precondition::Unchanged(before.map(|t| t.fields));
+    if !crate::templates::store_template(state, template.clone(), unchanged).await? {
+        return Err(template_changed());
+    }
+    Ok(AgentReply::TemplateWritten {
+        template: farhelm_proto::AgentTemplate::listed(&template, shown_host),
+    })
+}
+
+/// `template delete`: show the template as it is on a card, and remove it
+/// through the GUI's own path once the user approves, unless it changed
+/// during the wait.
+async fn delete_template_for_agent(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    asking_session: &str,
+    name: String,
+) -> anyhow::Result<AgentReply> {
+    let Some(existing) = find_template(state, &name).await? else {
+        return Err(no_such_template(&name));
+    };
+    let host_name = match &existing.fields.host {
+        Some(identity) => template_host_name(state, identity).await,
+        None => None,
+    };
+    approved(
+        state,
+        origin,
+        asking_session,
+        ApprovalAction::TemplateDelete {
+            name: name.clone(),
+            fields: existing.fields.clone(),
+            host_name,
+        },
+    )
+    .await?;
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        template = escape_for_log(&name).as_str(),
+        "an agent is deleting a launch template"
+    );
+    // Only the definition the card showed is deleted; one that changed or
+    // went away while the card waited is reported as changed.
+    let unchanged = crate::templates::Precondition::Unchanged(Some(existing.fields));
+    if !crate::templates::remove_template(state, name, unchanged).await? {
+        return Err(template_changed());
+    }
+    Ok(AgentReply::TemplateDeleted {})
+}
+
+/// `fields` with the agent launch kind written in when it sets an
+/// agent-launch choice and no kind.
+///
+/// The CLI's flags mean an agent launch unless `--command` is given (which
+/// writes the command kind itself), but a stored template without a kind
+/// applies to whichever kind the launcher is on: on the command kind, its
+/// `--agent` would become the command's declared agent type and its model
+/// would be refused. Writing the kind keeps the template meaning what the
+/// flags it was written from meant.
+fn with_agent_kind(
+    mut fields: farhelm_proto::launcher::TemplateFields,
+) -> farhelm_proto::launcher::TemplateFields {
+    let agent_choice = fields.model.is_some()
+        || fields.effort.is_some()
+        || fields.permissions.is_some()
+        || fields.workspace_trust.is_some();
+    if fields.kind.is_none() && agent_choice {
+        fields.kind = Some(farhelm_proto::launcher::LauncherKind::Agent);
+    }
+    fields
+}
+
+/// Whether `fields` holds choices only an agent launch takes beside choices
+/// only a command launch takes (or a kind that contradicts either).
+///
+/// Such a template can never apply (`launcher::apply_template` refuses the
+/// side that does not match the kind), and an agent cannot repair one: an
+/// edit cannot unset a field, and the flags never write the agent kind. Only
+/// the agent verbs' own merge can produce one, so it is refused there; the
+/// GUI's editor stores shape only (SPEC.md).
+fn mixes_launch_kinds(fields: &farhelm_proto::launcher::TemplateFields) -> bool {
+    use farhelm_proto::launcher::LauncherKind;
+    let agent_side = fields.kind == Some(LauncherKind::Agent)
+        || fields.model.is_some()
+        || fields.effort.is_some()
+        || fields.permissions.is_some()
+        || fields.workspace_trust.is_some();
+    let command_side = fields.kind == Some(LauncherKind::Command)
+        || fields.command.is_some()
+        || fields.yolo.is_some()
+        || fields.resume_command.is_some();
+    agent_side && command_side
+}
+
+/// `existing` with every field `edits` sets replaced, and every other field
+/// left as it was. `None` in `edits` means "not given", never "unset": an
+/// edit has no way to remove a field (SPEC.md).
+fn merge_template_fields(
+    existing: farhelm_proto::launcher::TemplateFields,
+    edits: farhelm_proto::launcher::TemplateFields,
+) -> farhelm_proto::launcher::TemplateFields {
+    let farhelm_proto::launcher::TemplateFields {
+        kind,
+        agent,
+        model,
+        effort,
+        permissions,
+        workspace_trust,
+        command,
+        yolo,
+        resume_command,
+        host,
+        destination,
+        name,
+    } = edits;
+    farhelm_proto::launcher::TemplateFields {
+        kind: kind.or(existing.kind),
+        agent: agent.or(existing.agent),
+        model: model.or(existing.model),
+        effort: effort.or(existing.effort),
+        permissions: permissions.or(existing.permissions),
+        workspace_trust: workspace_trust.or(existing.workspace_trust),
+        command: command.or(existing.command),
+        yolo: yolo.or(existing.yolo),
+        resume_command: resume_command.or(existing.resume_command),
+        host: host.or(existing.host),
+        destination: destination.or(existing.destination),
+        name: name.or(existing.name),
+    }
+}
+
+/// The template named `name`, if the helm holds one.
+async fn find_template(
+    state: &AppState,
+    name: &str,
+) -> anyhow::Result<Option<farhelm_proto::launcher::LaunchTemplate>> {
+    Ok(state
+        .store
+        .launch_templates()
+        .await?
+        .into_iter()
+        .find(|template| template.name == name))
+}
+
+/// The display name of the host whose recorded install is `identity`, if
+/// one is registered.
+async fn template_host_name(state: &AppState, identity: &str) -> Option<String> {
+    let views = crate::hosts::host_views(state).await.ok()?;
+    crate::agent_launch::template_host_row(&views, identity).map(|view| view.name.clone())
+}
+
+fn no_such_template(name: &str) -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::NotFound,
+        message: format!("no template is named {name:?}; farhelm agent templates lists them"),
+    })
+}
+
+/// The refusal of a template write that would switch a template between
+/// the agent and command launch kinds, or leave it holding both kinds'
+/// choices (see [`mixes_launch_kinds`]).
+fn changes_launch_kind(name: &str) -> anyhow::Error {
+    crate::sessions::invalid_request(format!(
+        "this would change template {name:?} between an agent launch and a command launch, \
+         or leave it with choices for both, which no launch can apply; an edit cannot change \
+         a template's launch kind, so delete it and create it again"
+    ))
+}
+
+fn template_changed() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::Conflict,
+        message: "the template changed while this request waited for approval, so nothing was \
+                  written; look at it again and retry"
+            .to_string(),
+    })
 }
 
 /// `templates`: every template the helm holds, its command texts withheld
@@ -5962,6 +6328,441 @@ mod tests {
         assert!(
             h.state.approvals.list().is_empty(),
             "no card for a refused launch"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Template writes (SPEC.md, Agent-spawned sessions)
+    // -----------------------------------------------------------------
+
+    fn template_fields(command: &str) -> farhelm_proto::launcher::TemplateFields {
+        farhelm_proto::launcher::TemplateFields {
+            kind: Some(farhelm_proto::launcher::LauncherKind::Command),
+            command: Some(command.to_string()),
+            yolo: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Spec: `template create` stores the template with its host written as
+    /// that host's install identity and refuses a taken name; `template edit`
+    /// sets only the fields it is given, keeping the command text the agent
+    /// never saw; `template delete` removes it; a template naming its host
+    /// directly, or a fresh-checkout destination, is refused.
+    ///
+    /// Why: these are SPEC.md's template verbs for agents. An edit that
+    /// replaced the whole template would silently drop command text the
+    /// listing withholds, and a template whose host field an agent could set
+    /// itself could pin launches to an install the helm never resolved.
+    #[farhelm_testtrace::test]
+    async fn template_writes_create_merge_and_delete() {
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let ask = |verb| {
+            let handler = Arc::clone(&handler);
+            async move { handler.handle(origin, "local-live", verb).await }
+        };
+        let created = ask(AgentVerb::TemplateCreate {
+            name: "t".to_string(),
+            fields: template_fields("secret-tool --go"),
+            host: Some("this machine".to_string()),
+        })
+        .await;
+        match created {
+            AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten { template },
+            } => {
+                assert!(template.sets_command);
+                assert_eq!(
+                    template.fields.command, None,
+                    "the reply withholds command text"
+                );
+                assert_eq!(template.host_name.as_deref(), Some("this machine"));
+            }
+            other => panic!("created, got {other:?}"),
+        }
+        let stored = h.store.launch_templates().await.unwrap();
+        assert_eq!(stored[0].fields.host.as_deref(), Some("identity-local"));
+
+        let taken = ask(AgentVerb::TemplateCreate {
+            name: "t".to_string(),
+            fields: template_fields("other"),
+            host: None,
+        })
+        .await;
+        assert!(
+            matches!(
+                &taken,
+                AgentOutcome::Err {
+                    kind: ErrorKind::Conflict,
+                    ..
+                }
+            ),
+            "{taken:?}"
+        );
+
+        let edited = ask(AgentVerb::TemplateEdit {
+            name: "t".to_string(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                name: Some("titled".to_string()),
+                ..Default::default()
+            },
+            host: None,
+        })
+        .await;
+        assert!(matches!(edited, AgentOutcome::Ok { .. }), "{edited:?}");
+        let stored = h.store.launch_templates().await.unwrap();
+        assert_eq!(
+            stored[0].fields.command.as_deref(),
+            Some("secret-tool --go")
+        );
+        assert_eq!(stored[0].fields.name.as_deref(), Some("titled"));
+        assert_eq!(stored[0].fields.host.as_deref(), Some("identity-local"));
+
+        h.store
+            .put_launch_template(farhelm_proto::launcher::LaunchTemplate {
+                name: "agent-kind".to_string(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
+                    agent: Some(farhelm_proto::LaunchHarness::Claude),
+                    ..Default::default()
+                },
+            })
+            .await
+            .unwrap();
+        // Each refusal is told apart by its kind and its own wording, so a
+        // case that is refused for some other reason fails here.
+        let refusals: Vec<(AgentVerb, ErrorKind, &str)> = vec![
+            (
+                AgentVerb::TemplateEdit {
+                    name: "missing".to_string(),
+                    fields: template_fields("x"),
+                    host: None,
+                },
+                ErrorKind::NotFound,
+                "missing",
+            ),
+            (
+                AgentVerb::TemplateCreate {
+                    name: "pinned".to_string(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        host: Some("identity-local".to_string()),
+                        ..template_fields("x")
+                    },
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "with --host",
+            ),
+            (
+                AgentVerb::TemplateCreate {
+                    name: "checkout".to_string(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
+                            "o/r".to_string(),
+                        )),
+                        ..template_fields("x")
+                    },
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "fresh GitHub checkout",
+            ),
+            (
+                AgentVerb::TemplateEdit {
+                    name: "t".to_string(),
+                    fields: Default::default(),
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "at least one field",
+            ),
+            (
+                AgentVerb::TemplateEdit {
+                    name: "t".to_string(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        command: Some("new-command".to_string()),
+                        ..Default::default()
+                    },
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "--yolo or --no-yolo",
+            ),
+            (
+                AgentVerb::TemplateEdit {
+                    name: "t".to_string(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        model: Some(Some("opus".to_string())),
+                        ..Default::default()
+                    },
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "launch kind",
+            ),
+            // An explicit kind is never replaced, even when the result
+            // would hold nothing contradictory (`agent` is both kinds').
+            (
+                AgentVerb::TemplateEdit {
+                    name: "agent-kind".to_string(),
+                    fields: template_fields("claude {farhelm_args}"),
+                    host: None,
+                },
+                ErrorKind::InvalidRequest,
+                "launch kind",
+            ),
+        ];
+        for (verb, expected_kind, fragment) in refusals {
+            match ask(verb).await {
+                AgentOutcome::Err { kind, message } => {
+                    assert_eq!(kind, expected_kind, "{message}");
+                    assert!(message.contains(fragment), "{fragment:?} in {message}");
+                }
+                other => panic!("refused, got {other:?}"),
+            }
+        }
+        assert_eq!(h.store.launch_templates().await.unwrap().len(), 2);
+        assert_eq!(
+            h.store.launch_templates().await.unwrap()[0].fields.kind,
+            Some(farhelm_proto::launcher::LauncherKind::Agent),
+            "the refused kind change wrote nothing"
+        );
+
+        let deleted = ask(AgentVerb::TemplateDelete {
+            name: "t".to_string(),
+        })
+        .await;
+        assert!(
+            matches!(
+                deleted,
+                AgentOutcome::Ok {
+                    reply: AgentReply::TemplateDeleted {}
+                }
+            ),
+            "{deleted:?}"
+        );
+        assert_eq!(
+            h.store.launch_templates().await.unwrap().len(),
+            1,
+            "only the agent-kind fixture is left"
+        );
+    }
+
+    /// Spec: with the host asking, a template edit waits for a card that
+    /// shows the whole resulting template, the existing command text
+    /// included, and a denial leaves the template as it was.
+    ///
+    /// Why: a template's command line may later run on any host, and the
+    /// agent never saw it (the listing withholds it); the card is the one
+    /// place the user can see what the write would leave behind.
+    #[farhelm_testtrace::test]
+    async fn a_template_write_card_shows_the_whole_template() {
+        let (h, local, _remote) = two_host_fleet().await;
+        h.store
+            .put_launch_template(farhelm_proto::launcher::LaunchTemplate {
+                name: "t".to_string(),
+                fields: template_fields("hidden-command --flag"),
+            })
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let asking = Arc::clone(&handler);
+        let task = tokio::spawn(async move {
+            asking
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::TemplateEdit {
+                        name: "t".to_string(),
+                        fields: farhelm_proto::launcher::TemplateFields {
+                            name: Some("new title".to_string()),
+                            ..Default::default()
+                        },
+                        host: None,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        match card.action {
+            ApprovalAction::TemplateWrite {
+                name,
+                replaces_existing,
+                fields,
+                ..
+            } => {
+                assert_eq!(name, "t");
+                assert!(replaces_existing);
+                assert_eq!(fields.command.as_deref(), Some("hidden-command --flag"));
+                assert_eq!(fields.name.as_deref(), Some("new title"));
+            }
+            other => panic!("a template card, got {other:?}"),
+        }
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Err { message, .. } => {
+                assert!(message.contains("declined"), "{message}");
+            }
+            other => panic!("declined, got {other:?}"),
+        }
+        assert_eq!(
+            h.store.launch_templates().await.unwrap()[0].fields.name,
+            None,
+            "a denied edit writes nothing"
+        );
+    }
+
+    /// Spec: an approved template write or delete lands only on the template
+    /// its card showed. Two creates of one name waiting at once both get
+    /// cards, but only the first allowed is written; the second is refused
+    /// as changed. An edit or delete whose template the GUI changed while
+    /// the card waited is refused the same way, and the GUI's version stays.
+    ///
+    /// Why: SPEC.md lets the GUI's own template writes win last, but an
+    /// agent's write was approved against a specific card. Without the
+    /// condition, the second create would silently replace the first (the
+    /// store upserts) and an approved delete could remove a definition the
+    /// user never saw on any card. The helm enforces this inside the store
+    /// transaction that writes (`HelmStore::put_launch_template_if`), whose
+    /// comparison `conditional_template_writes_refuse_any_other_template` in
+    /// the store tests pins; this test pins that the agent verbs use it. That
+    /// the comparison and the write share one transaction is structural and
+    /// not exercised by a forced interleaving here.
+    #[farhelm_testtrace::test]
+    async fn an_approved_template_write_lands_only_on_what_its_card_showed() {
+        use tower::ServiceExt;
+        let (h, local, _remote) = two_host_fleet().await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let ask = |verb: AgentVerb| {
+            let handler = Arc::clone(&handler);
+            tokio::spawn(async move { handler.handle(origin, "local-live", verb).await })
+        };
+        let changed = |outcome: AgentOutcome| match outcome {
+            AgentOutcome::Err {
+                kind: ErrorKind::Conflict,
+                message,
+                ..
+            } => assert!(message.contains("changed"), "{message}"),
+            other => panic!("refused as changed, got {other:?}"),
+        };
+        // The GUI's own write: the REST editor, which has no precondition.
+        let gui_put = |command: &'static str| {
+            let router = h.router();
+            async move {
+                let status = router
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .method("PUT")
+                            .uri("/api/templates/t")
+                            .header("host", "127.0.0.1:7433")
+                            .header("content-type", "application/json")
+                            .body(axum::body::Body::from(
+                                serde_json::to_string(&template_fields(command)).unwrap(),
+                            ))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .status();
+                assert_eq!(status, axum::http::StatusCode::OK);
+            }
+        };
+
+        // Two creates of one name, both waiting on cards.
+        let first = ask(AgentVerb::TemplateCreate {
+            name: "t".to_string(),
+            fields: template_fields("first"),
+            host: None,
+        });
+        await_card(&h, &first).await;
+        let second = ask(AgentVerb::TemplateCreate {
+            name: "t".to_string(),
+            fields: template_fields("second"),
+            host: None,
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+        while h.state.approvals.list().len() < 2 {
+            assert!(
+                tokio::time::Instant::now() < deadline && !second.is_finished(),
+                "premise: both creates wait on cards"
+            );
+            // sleep-ok: polling interval while the second card is listed.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcomes = [first.await.unwrap(), second.await.unwrap()];
+        let written = outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, AgentOutcome::Ok { .. }))
+            .count();
+        assert_eq!(written, 1, "exactly one create lands: {outcomes:?}");
+        for outcome in outcomes {
+            if !matches!(outcome, AgentOutcome::Ok { .. }) {
+                changed(outcome);
+            }
+        }
+        let after_creates = h.store.launch_templates().await.unwrap();
+        assert_eq!(after_creates.len(), 1);
+
+        // An edit whose template the GUI rewrites while the card waits.
+        let edit = ask(AgentVerb::TemplateEdit {
+            name: "t".to_string(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                name: Some("agent title".to_string()),
+                ..Default::default()
+            },
+            host: None,
+        });
+        await_card(&h, &edit).await;
+        gui_put("gui-edit").await;
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        changed(edit.await.unwrap());
+        let stored = h.store.launch_templates().await.unwrap();
+        assert_eq!(stored[0].fields, template_fields("gui-edit"));
+
+        // A delete whose template the GUI rewrites while the card waits.
+        let delete = ask(AgentVerb::TemplateDelete {
+            name: "t".to_string(),
+        });
+        await_card(&h, &delete).await;
+        gui_put("gui-again").await;
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        changed(delete.await.unwrap());
+        let stored = h.store.launch_templates().await.unwrap();
+        assert_eq!(
+            stored[0].fields,
+            template_fields("gui-again"),
+            "the GUI's version survives an approved delete of the old one"
         );
     }
 }
