@@ -147,17 +147,21 @@ impl SessionEnv {
         Some(hook_log_path(socket.parent()?, id))
     }
 
-    /// The credential the hook reports with, or `None` unless all three
-    /// values are present and UTF-8.
+    /// Where the hook drops its report, or `None` unless all three values
+    /// are present and UTF-8.
     ///
-    /// Anything short of all three is "no credential": there is no
-    /// supervisor to report to, whether the environment is absent entirely
-    /// or a session predating spawn support left the token out.
+    /// Anything short of all three is "no credential": this is not a
+    /// Farhelm launch to report for, whether the environment is absent
+    /// entirely or a session predating spawn support left the token out.
+    /// The token is required but not carried: the report lands in the
+    /// supervisor's private state directory (the socket's parent) and needs
+    /// no secret, but a launch without one is not one this supervisor made.
     pub(crate) fn hook_credential(&self) -> Option<HookCredential> {
+        self.token.as_ref()?.to_str()?;
+        let socket = std::path::Path::new(self.socket.as_ref()?.to_str()?);
         Some(HookCredential {
             session_id: self.session_id.as_ref()?.to_str()?.to_string(),
-            token: self.token.as_ref()?.to_str()?.to_string(),
-            socket: PathBuf::from(self.socket.as_ref()?.to_str()?),
+            state_dir: socket.parent()?.to_path_buf(),
         })
     }
 }
@@ -754,8 +758,9 @@ mod tests {
         );
     }
 
-    /// Spec: the hook reports only with all three values, and treats a
-    /// non-UTF-8 value as absent rather than failing.
+    /// Spec: the hook reports only with all three values, drops its report
+    /// beside the socket, and treats a non-UTF-8 value as absent rather than
+    /// failing.
     ///
     /// A hook runs inside the agent's own tool loop, so a hard error there
     /// is an error the user sees in their agent; absence is the one answer
@@ -764,8 +769,15 @@ mod tests {
     fn the_hook_credential_needs_all_three_readable_values() {
         let credential = full_env().hook_credential().expect("complete env");
         assert_eq!(credential.session_id, "s-1");
-        assert_eq!(credential.token, "secret");
-        assert_eq!(credential.socket, PathBuf::from("/state/supervisor.sock"));
+        assert_eq!(credential.state_dir, PathBuf::from("/state"));
+        let tokenless = SessionEnv {
+            token: None,
+            ..full_env()
+        };
+        assert!(
+            tokenless.hook_credential().is_none(),
+            "a launch without its token is not one to report for"
+        );
         let garbled = SessionEnv {
             session_id: Some(not_utf8()),
             ..full_env()

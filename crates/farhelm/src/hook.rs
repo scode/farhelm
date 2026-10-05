@@ -5,10 +5,16 @@
 //! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
-//! the agent process, inside the agent's terminal, with the session credential
-//! already in its environment. It reads one JSON payload from stdin and sends
-//! one `ControlMsg::ReportConversation` over the supervisor socket. Everything
-//! else about it is a consequence of *where* it runs.
+//! the agent process, inside the agent's terminal, with the session's
+//! identity already in its environment. It reads one JSON payload from
+//! stdin, records its own process ancestry, and drops the report as a file
+//! into the session's drop directory under the supervisor's state directory
+//! (`farhelm_supervisor::hook_report`), where the supervisor applies it on
+//! its next reconciliation pass. It never talks to the supervisor and never
+//! waits for it, so a report made while no supervisor is running (on the
+//! Mac, whenever the desktop app is closed) waits on disk instead of being
+//! lost, and the agent is never held up by a slow or absent supervisor.
+//! Everything else about it is a consequence of *where* it runs.
 //!
 //! ## The contract
 //!
@@ -31,35 +37,34 @@
 //!    `InternalCmd::Hook` arm) installs a no-op panic hook so a panic
 //!    prints nothing, and [`run_with`] catches unwinds so no failure can
 //!    turn into a non-zero status the vendor surfaces as a hook error.
-//! 3. **One budget for the whole run, stdin included.** Overrunning the
-//!    vendor's own hook timeout is exactly the failure that shows up in
-//!    the agent's UI, so the budget covers reading the payload as well as
-//!    the socket round trip. The production budget is 30 seconds: long
-//!    enough for a supervisor that is present but briefly busy, while still
-//!    bounded for a hook running inside an agent turn. A refused or missing
-//!    Unix socket gets a shorter reconnect window, because it proves that no
-//!    supervisor process is listening; a connection that succeeds is allowed
-//!    to use the full budget. See [`run_with`] for why the shared deadline
-//!    forces a detached reader thread rather than any async-stdin design.
+//! 3. **A bounded stdin read.** Everything after the read is local and
+//!    quick (a few `/proc` reads, one small file written and renamed), but
+//!    the read itself waits on the vendor, which may hold the pipe open.
+//!    Overrunning the vendor's own hook timeout is exactly the failure that
+//!    shows up in the agent's UI, so the read is bounded by [`HOOK_BUDGET`];
+//!    see [`run_with`] for why that forces a detached reader thread.
 //! 4. **No credential, no IDENTITY work.** Without the three injected
-//!    environment values there is no supervisor to talk to (someone ran
-//!    the agent outside Farhelm with its callback still configured); the run
-//!    logs `no-credential` and stops without touching a socket. This rule
-//!    is scoped to identity capture only: [`announce`] needs no credential
-//!    at all and still prints [`POINTER_LINE`] whenever `--announce` was
-//!    passed, credential or not — the pointer is a fact about the launch,
-//!    not about whether the supervisor is reachable.
+//!    environment values (session id, session token, supervisor socket)
+//!    this is not a Farhelm launch (someone ran the agent outside Farhelm
+//!    with its callback still configured); the run logs `no-credential` and
+//!    stops without writing a report. The token is not written anywhere —
+//!    the report file sits in the supervisor's private state directory and
+//!    needs none — but its presence is still what marks a real launch. This
+//!    rule is scoped to identity capture only: [`announce`] needs no
+//!    credential at all and still prints [`POINTER_LINE`] whenever
+//!    `--announce` was passed — the pointer is a fact about the launch, not
+//!    about whether a report can be made.
 //! 5. **Nothing about the payload is trusted.** Unknown fields are
 //!    ignored, and the reported id is an opaque string this side merely
-//!    length-checks — the supervisor owns plausibility (see
-//!    `ControlMsg::ReportConversation`'s "Trust boundary").
+//!    length-checks — the supervisor owns plausibility and every admission
+//!    check (`farhelm_supervisor::hook_report`'s "Trust" section).
 //!
 //! ## The hook log
 //!
 //! Because nothing may be printed, the per-session log file is the only
 //! place a failure is ever visible. Every run that reaches its logger appends
 //! **exactly one line** and then stops; a run never writes two lines, so
-//! counting lines counts completed runs. A vendor that kills the child first
+//! counting this hook's lines counts completed runs. A vendor that kills the child first
 //! can prevent that final diagnostic write. Pi and OMP reporters do exactly
 //! that at their published two-second child timer (see `pi_extension.rs` for
 //! why that timer stays). The file lives at
@@ -73,6 +78,16 @@
 //! behind. Only a run with no session id or no socket at all has nowhere
 //! to write, and then there is nothing to say about which session it
 //! belonged to either.
+//!
+//! The line says what THIS run did: whether it wrote a report, not whether
+//! the supervisor accepted it. The supervisor judges the report later, on its
+//! next reconciliation pass, and appends its own verdict line to the same file
+//! (`acked`, or `refused <error kind> <reason>`, with the same identity pair).
+//! The report is in place before this run appends its own line, so a pass
+//! that lands in between can, rarely, put the verdict above the `written`
+//! line it answers.
+//! The shape and the sanitizing of both writers' lines are defined once, in
+//! `farhelm_supervisor::hook_report`.
 //!
 //! ```text
 //! <unix-seconds> <outcome> [<outcome detail> ]<conversation-id> <source>
@@ -93,62 +108,50 @@
 //! on every Grok event as `bad-payload source-not-a-string`; an absent or
 //! `null` one on the other events still renders as `-`.
 //!
-//! There is deliberately no separate "reported" line ahead of the outcome:
-//! one line per run is the whole promise, so the outcome word is always the
-//! *terminal* outcome, and the identity rides along in the detail.
-//!
 //! Outcome words, and the detail each carries:
 //!
 //! | Outcome | Detail |
 //! | --- | --- |
-//! | `acked` | — (the supervisor replied `ConversationReported`) |
-//! | `refused` | `<error kind> <message>`, or `unexpected <message type>` |
+//! | `written` | —, or `no-ancestry: <error>` when the process ancestry could not be recorded |
+//! | `write-failed` | the I/O error |
 //! | `no-credential` | — |
-//! | `bad-payload` | a one-word reason (`unparsable`, `missing-session-id`, …), or `no-reader: <io error>` |
-//! | `connect-failed` | `<phase>: <error>` |
-//! | `timeout` | the phase the overall budget expired in |
+//! | `bad-payload` | a one-word reason (`unparsable`, `missing-session-id`, `subagent-report`, …), or `no-reader: <io error>` |
+//! | `timeout` | `stdin` |
 //! | `panic` | — |
 //!
-//! Phases are `stdin`, `connect`, `handshake`, `send`, `reply`.
-//!
-//! Two details do not name a phase in that vocabulary, because the failure
-//! is on this side rather than on the wire: `bad-payload no-reader: <io
-//! error>` is a reader thread that could not be started at all, and
-//! `connect-failed runtime: <error>` is a tokio runtime that could not be
-//! built. Both are process-level resource failures, filed under the
-//! outcome whose observable effect they share.
+//! A report written without its ancestry is still worth writing — the
+//! supervisor will refuse it, since it cannot tie the report to the
+//! session's current launch, but its refusal names that — and the detail
+//! says why the evidence was missing.
 //!
 //! ```text
-//! 1724470000 acked conv-1 startup
-//! 1724470000 refused invalid_request implausible conversation id conv-1 startup
+//! 1724470000 written conv-1 startup
+//! 1724470002 acked conv-1 startup
+//! 1724470000 write-failed No such file or directory (os error 2) conv-1 -
 //! 1724470000 timeout stdin
-//! 1724470000 connect-failed connect: No such file or directory (os error 2) conv-1 -
 //! ```
 //!
 //! Every value interpolated into a line is sanitized and length-capped
 //! before it is written: control characters and the Unicode
 //! direction-and-line controls always become `_`, and the two
 //! trailing identity fields additionally lose their spaces so they stay
-//! single positional tokens. Free-form detail keeps its spaces, since a
-//! supervisor's refusal message is a sentence. The conversation id and
-//! source come from the agent — the same process that could otherwise
-//! embed a newline and forge a log line — and a log nobody can trust to be
-//! one-line-per-run is worse than no log.
+//! single positional tokens. Free-form detail keeps its spaces, since an
+//! I/O error is a sentence. The conversation id and source come from the
+//! agent — the same process that could otherwise embed a newline and forge
+//! a log line — and a log nobody can trust to be one-line-per-run is worse
+//! than no log.
 //!
 //! Every failure of logging itself — a missing directory that cannot be
 //! created, an unwritable path, a full disk — is ignored. The log exists
 //! to explain a broken run, never to become one.
 
-use farhelm_proto::io::{
-    ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake_with_session_auth,
-    parse_control,
-};
-use farhelm_proto::{ControlMsg, Frame, SessionAuth};
+use farhelm_proto::ReportVendor;
+use farhelm_supervisor::hook_report::{self, HookReport};
 use std::io::Read;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Largest stdin payload accepted. A hook payload is normally a few hundred
 /// bytes of JSON; the cap exists so a vendor (or anything else
@@ -158,105 +161,23 @@ const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 
 /// Longest `session_id` this side will forward. Purely a sanity bound —
 /// the supervisor makes the real plausibility judgement — but forwarding
-/// a megabyte "id" would only convert a bad payload into a bad request.
+/// a megabyte "id" would only convert a bad payload into a bad report.
 const MAX_SESSION_ID_BYTES: usize = 128;
 
-/// Size past which the hook log is truncated before the next append.
+/// The production bound on reading the vendor's payload, shared by every
+/// vendor entry point.
 ///
-/// Truncation rather than rotation is deliberate: this file is a
-/// last-resort diagnostic for a session someone is actively looking at,
-/// and losing an old line is cheaper than owning a rotation scheme (and
-/// its own failure modes) for a file nothing else reads.
-const MAX_LOG_BYTES: u64 = 64 * 1024;
-
-/// The correlation id every hook request uses. One request per process,
-/// so there is nothing to correlate against.
-const REQUEST_ID: u64 = 1;
-
-/// The production hook budget shared by every vendor entry point.
-///
-/// This gives hooks with configurable vendor timers enough time to wait while
-/// a present supervisor is briefly busy. A supervisor restart is bounded
-/// separately by `CONNECT_RETRY_CAP`; the published Pi and OMP reporters
-/// retain their own child timers, while tests may pass a lower value through
-/// the child-only environment seam in `main.rs`.
+/// Reading stdin is the one step of a run that waits on anyone else: a
+/// vendor normally closes the pipe right after writing a few hundred bytes,
+/// but one that holds it open must not hold the hook past the vendor's own
+/// timer. Farhelm sets or documents 60-second timers for its hook
+/// declarations, and sessions launched before an upgrade may still carry
+/// Claude's or Codex's old five-second one, where a vendor that never
+/// closes the pipe kills the hook first and its log line is lost. The
+/// published Pi and OMP reporters keep their own two-second child timers;
+/// tests may pass a lower value through the child-only environment seam in
+/// `main.rs`.
 pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
-
-/// A supervisor that is absent gets a short reconnect window. A live
-/// connection receives the full hook budget, but repeated refused or missing
-/// socket attempts stop after this cap: an unattended session whose supervisor
-/// is down should not hold every hook, including Grok's prompt-path hook, for
-/// the full 30 seconds, and sessions launched before the upgrade may still
-/// have Claude or Codex's old five-second outer timer. Grok configurations
-/// that still carry the earlier three-second timer are not covered: Grok can
-/// kill the hook mid-retry while the supervisor is down, so its docs ask users
-/// to raise that timer to 60 seconds.
-///
-/// A stopped supervisor and a restarting one produce the same socket errors,
-/// so this cap covers both. Unlinking the socket on clean shutdown would not
-/// distinguish them: a restart is a clean shutdown too, and startup removes
-/// the stale socket before binding its replacement.
-const CONNECT_RETRY_CAP: Duration = Duration::from_secs(4);
-/// The first pause between attempts while a supervisor is absent.
-const RETRY_INITIAL_DELAY: Duration = Duration::from_millis(100);
-/// The exponential reconnect pause stops growing at this bound. A connected
-/// peer that lives at least this long counts as long-lived and earns a fresh
-/// reconnect window after it drops.
-const RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
-/// A failed write may race a refusal frame already buffered by the peer.
-const SEND_FAILURE_REPLY_PROBE: Duration = Duration::from_millis(100);
-
-/// Retry pacing and test-only observers for one hook report.
-struct RetryConfig {
-    connect_cap: Duration,
-    initial_delay: Duration,
-    max_delay: Duration,
-    #[cfg(test)]
-    retry_observer: Option<std::sync::mpsc::Sender<()>>,
-    #[cfg(test)]
-    probe_observer: Option<std::sync::mpsc::Sender<()>>,
-}
-
-impl RetryConfig {
-    const PRODUCTION: Self = Self {
-        connect_cap: CONNECT_RETRY_CAP,
-        initial_delay: RETRY_INITIAL_DELAY,
-        max_delay: RETRY_MAX_DELAY,
-        #[cfg(test)]
-        retry_observer: None,
-        #[cfg(test)]
-        probe_observer: None,
-    };
-
-    /// Return a copy that notifies a test on every retryable failure. The
-    /// hook's production configuration has no observer; this seam lets a
-    /// fixture publish its listener after the first failed attempt, removing
-    /// a timing race from the test.
-    #[cfg(test)]
-    fn observing(mut self, observer: std::sync::mpsc::Sender<()>) -> Self {
-        self.retry_observer = Some(observer);
-        self
-    }
-
-    /// Mark the failed-send refusal probe for a deterministic unit test.
-    #[cfg(test)]
-    fn observing_probe(mut self, observer: std::sync::mpsc::Sender<()>) -> Self {
-        self.probe_observer = Some(observer);
-        self
-    }
-
-    /// Return the bounded exponential pause before the next attempt.
-    ///
-    /// The shift reaches its maximum at attempt four; later attempts keep the
-    /// configured cap instead of growing without bound.
-    fn delay(&self, attempt: u32) -> Duration {
-        let factor = 1u32 << attempt.min(4);
-        self.initial_delay
-            .checked_mul(factor)
-            .unwrap_or(self.max_delay)
-            .min(self.max_delay)
-    }
-}
 
 /// The one line the hook is allowed to say out loud — the pointer that
 /// tells an agent `farhelm agent instructions` exists.
@@ -314,27 +235,27 @@ pub fn announce(out: &mut impl std::io::Write) {
     let _ = writeln!(out, "{POINTER_LINE}");
 }
 
-/// The injected session credential, already extracted from the
-/// environment by the caller.
+/// Where a report goes, derived by the caller from a complete session
+/// credential in the environment.
 ///
-/// A struct rather than three arguments read from the environment inside
+/// A struct rather than values read from the environment inside
 /// [`run_with`] because this repo's tests never mutate the process
 /// environment — and, more sharply, because a test process running inside
 /// a real farhelm session already carries those variables and would
-/// otherwise pick up a live supervisor. The environment read stays in the
-/// `main.rs` arm; everything testable takes the credential as a value.
+/// otherwise drop reports into a live supervisor's state directory. The
+/// environment read stays in the `main.rs` arm; everything testable takes
+/// the destination as a value. It exists only for a complete credential
+/// (contract rule 4), although the token itself is not carried.
 pub struct HookCredential {
-    /// The farhelm session this hook is reporting for — the identity the
-    /// supervisor authenticates, not the vendor's conversation id.
+    /// The farhelm session this hook is reporting for — the identity whose
+    /// drop directory receives the report, not the vendor's conversation id.
     pub session_id: String,
-    /// The unguessable bearer minted for that session.
-    pub token: String,
-    /// The supervisor's unix socket path.
-    pub socket: PathBuf,
+    /// The supervisor's state directory: the parent of its socket.
+    pub state_dir: PathBuf,
 }
 
-/// Run one hook report to completion, or to the end of `budget`, whichever
-/// comes first, and record the outcome in `hook_log`.
+/// Run one hook report to completion and record the outcome in `hook_log`.
+/// `budget` bounds the stdin read, the only step that waits on anyone.
 ///
 /// Never returns an error and never panics out: the caller's only job
 /// after this returns is to exit 0. `payload` is taken by value because it
@@ -342,76 +263,26 @@ pub struct HookCredential {
 ///
 /// ## Why the payload is read on a detached thread
 ///
-/// `budget` covers reading stdin, and two otherwise-obvious designs cannot
-/// honour that:
-///
-/// - A blocking `std::io::Read` cannot be interrupted by a tokio timeout
-///   at all. Wrapping the read in `tokio::time::timeout` bounds nothing;
-///   the runtime simply never gets the thread back.
-/// - `tokio::io::stdin()` is a `spawn_blocking` read, and dropping the
-///   runtime waits for blocking tasks to finish. The timeout would fire,
-///   and then the runtime's `Drop` would block for as long as the vendor
-///   holds the pipe open — moving the overrun from the read to the
-///   teardown without removing it.
-///
-/// So the read happens on a plain `std::thread` that is spawned and never
-/// joined, handing bytes back over a channel; the main thread waits with
-/// `recv_timeout`. A stuck reader thread is simply abandoned. The socket
-/// round trip then runs under `tokio::time::timeout` on a current-thread
-/// runtime built and dropped inside this function — with no
-/// `spawn_blocking` and no spawned tasks anywhere in it, so that drop
-/// cannot block either.
-///
-/// The remaining hazard is a destructor outliving the budget after this
-/// returns, which is why the caller exits the process rather than
-/// returning up through `main`.
+/// `budget` covers reading stdin, and a blocking `std::io::Read` cannot be
+/// interrupted once it is waiting on a pipe the vendor keeps open. So the
+/// read happens on a plain `std::thread` that is spawned and never joined,
+/// handing bytes back over a channel; the main thread waits with
+/// `recv_timeout`. A stuck reader thread is simply abandoned, and the
+/// caller exits the process shortly afterwards, which is what makes the
+/// abandonment immediate instead of merely eventual.
 pub fn run_with(
     credential: Option<HookCredential>,
     payload: impl Read + Send + 'static,
     budget: Duration,
     hook_log: Option<PathBuf>,
-    entry_vendor: farhelm_proto::ReportVendor,
-) {
-    run_with_config(
-        credential,
-        payload,
-        budget,
-        hook_log,
-        entry_vendor,
-        RetryConfig::PRODUCTION,
-    );
-}
-
-/// Test-only entry point for choosing a short reconnect cap without changing
-/// the process environment. Real hook children always use [`run_with`]'s
-/// production retry policy; focused unit tests use this seam to keep their
-/// absence and reconnect cases bounded to milliseconds.
-#[cfg(test)]
-fn run_with_retry_config(
-    credential: Option<HookCredential>,
-    payload: impl Read + Send + 'static,
-    budget: Duration,
-    hook_log: Option<PathBuf>,
-    entry_vendor: farhelm_proto::ReportVendor,
-    retry: RetryConfig,
-) {
-    run_with_config(credential, payload, budget, hook_log, entry_vendor, retry);
-}
-
-fn run_with_config(
-    credential: Option<HookCredential>,
-    payload: impl Read + Send + 'static,
-    budget: Duration,
-    hook_log: Option<PathBuf>,
-    entry_vendor: farhelm_proto::ReportVendor,
-    retry: RetryConfig,
+    entry_vendor: ReportVendor,
 ) {
     // Two nested catches, for two different failures. The inner one turns
     // a panic in the work into the `panic` outcome, so the log still gets
     // its one line; the outer one guarantees that even a panic while
     // logging cannot escape into the caller, which must reach `exit(0)`.
     let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        run_inner(credential, payload, budget, entry_vendor, retry)
+        run_inner(credential, payload, budget, entry_vendor)
     })) {
         Ok(outcome) => outcome,
         Err(_) => Outcome::word("panic"),
@@ -430,25 +301,19 @@ fn run_with_config(
 ///
 /// Returns the single outcome the run is described by. Phase order is the
 /// contract's priority order: a missing credential short-circuits before
-/// stdin is even read, because there is nowhere to send a payload and the
+/// stdin is even read, because there is nowhere to drop a payload and the
 /// vendor's `SessionStart` payload is far smaller than a pipe buffer, so
 /// declining to drain it cannot block the agent.
 fn run_inner(
     credential: Option<HookCredential>,
     payload: impl Read + Send + 'static,
     budget: Duration,
-    entry_vendor: farhelm_proto::ReportVendor,
-    retry: RetryConfig,
+    entry_vendor: ReportVendor,
 ) -> Outcome {
-    let deadline = Instant::now() + budget;
     let Some(credential) = credential else {
         return Outcome::word("no-credential");
     };
-
-    // `remaining`, not `budget`: every phase from here on spends against
-    // the one deadline, so the stdin read cannot quietly get a fresh
-    // allowance of its own.
-    let bytes = match read_payload(payload, remaining(deadline)) {
+    let bytes = match read_payload(payload, budget) {
         Ok(bytes) => bytes,
         Err(PayloadError::Timeout) => return Outcome::detail("timeout", "stdin"),
         Err(PayloadError::Reason(reason)) => return Outcome::detail("bad-payload", reason),
@@ -456,35 +321,53 @@ fn run_inner(
             return Outcome::detail("bad-payload", format!("no-reader: {err}"));
         }
     };
-    let request = match parse_payload(&bytes, entry_vendor) {
-        Ok(parsed) => parsed,
+    let mut report = match parse_payload(&bytes, entry_vendor) {
+        Ok(report) => report,
         Err(reason) => return Outcome::detail("bad-payload", reason),
     };
-    let ControlMsg::ReportConversation {
-        conversation,
-        source,
-        ..
-    } = &request
-    else {
-        unreachable!("the payload parser constructs only conversation reports");
-    };
-
-    // Every failure from here on has an id to name, so the outcome carries
-    // the identity pair even when the report never landed.
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .enable_time()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            return Outcome::detail("connect-failed", format!("runtime: {err}"))
-                .about(conversation, source);
+    // A report that names a sub-agent is never accepted, and writing it
+    // would replace whatever report the session's own agent left in the same
+    // slot and has not had applied yet — while the supervisor is down, that
+    // could be the only record of a conversation switch. So it is dropped
+    // here, before it can take the slot; the supervisor still refuses one
+    // that arrives some other way.
+    if let Some(reason) = subagent_refusal(report.agent_id.as_ref()) {
+        return Outcome::detail("bad-payload", reason).about(&report.conversation, &report.source);
+    }
+    // The ancestry is recorded HERE, while this process and its parents are
+    // still running: it is the evidence the supervisor attributes the report
+    // with, possibly long after they have all exited. A failure to read it
+    // does not stop the report — see the module docs on `no-ancestry`.
+    let missing_ancestry = match hook_report::record_own_ancestry() {
+        Ok(recorded) => {
+            report.ancestry = Some(recorded.links);
+            report.ancestry_ended = recorded.ended;
+            None
         }
+        Err(error) => Some(error),
     };
-    runtime
-        .block_on(report(credential, &request, deadline, retry))
-        .about(conversation, source)
+    let outcome =
+        match hook_report::write_report(&credential.state_dir, &credential.session_id, &report) {
+            Ok(()) => match missing_ancestry {
+                None => Outcome::word("written"),
+                Some(error) => Outcome::detail("written", format!("no-ancestry: {error}")),
+            },
+            Err(error) => Outcome::detail("write-failed", error.to_string()),
+        };
+    outcome.about(&report.conversation, &report.source)
+}
+
+/// Why a report must not be written because of its sub-agent marker, or
+/// `None` when it names no sub-agent. Mirrors the supervisor's own check: a
+/// non-empty string marker is a sub-agent, an absent, `null` or empty one is
+/// none, and any other shape is refused rather than read as absent.
+fn subagent_refusal(agent_id: Option<&serde_json::Value>) -> Option<&'static str> {
+    match agent_id {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(marker)) if marker.is_empty() => None,
+        Some(serde_json::Value::String(_)) => Some("subagent-report"),
+        Some(_) => Some("agent-id-not-a-string"),
+    }
 }
 
 /// Why a payload never arrived intact.
@@ -538,6 +421,28 @@ fn read_payload(
     }
 }
 
+/// A report with no ancestry yet, in this build's file format.
+fn new_report(
+    vendor: ReportVendor,
+    conversation: String,
+    source: String,
+    transcript_path: Option<serde_json::Value>,
+    hook_event_name: Option<serde_json::Value>,
+    agent_id: Option<serde_json::Value>,
+) -> HookReport {
+    HookReport {
+        version: hook_report::FORMAT_VERSION,
+        vendor,
+        conversation,
+        source,
+        transcript_path,
+        hook_event_name,
+        agent_id,
+        ancestry: None,
+        ancestry_ended: None,
+    }
+}
+
 /// Build a bounded report without interpreting vendor-specific evidence.
 ///
 /// `entry_vendor` is the `--vendor` flag on this hook's own command line —
@@ -555,11 +460,7 @@ fn read_payload(
 /// kept purely as a consistency check: present-and-mismatched rejects,
 /// absent-or-agreeing passes. Agreement grants nothing — the entry point
 /// is authoritative either way.
-fn parse_payload(
-    bytes: &[u8],
-    entry_vendor: farhelm_proto::ReportVendor,
-) -> Result<ControlMsg, &'static str> {
-    use farhelm_proto::ReportVendor;
+fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport, &'static str> {
     use farhelm_supervisor::agent_kind::LocatorVendor;
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
     if entry_vendor == ReportVendor::Grok {
@@ -619,25 +520,23 @@ fn parse_payload(
         };
         let encoded = farhelm_supervisor::agent_kind::encode_locator(expected, locator)
             .map_err(|_| "invalid-locator")?;
-        return Ok(ControlMsg::ReportConversation {
-            req_id: REQUEST_ID,
-            vendor: entry_vendor,
-            conversation: encoded,
+        return Ok(new_report(
+            entry_vendor,
+            encoded,
             source,
-            transcript_path: None,
-            hook_event_name: None,
-            agent_id: value.get("agent_id").cloned(),
-        });
+            None,
+            None,
+            value.get("agent_id").cloned(),
+        ));
     }
-    Ok(ControlMsg::ReportConversation {
-        req_id: REQUEST_ID,
-        vendor: entry_vendor,
-        conversation: session_id.clone(),
+    Ok(new_report(
+        entry_vendor,
+        session_id.clone(),
         source,
-        transcript_path: value.get("transcript_path").cloned(),
-        hook_event_name: value.get("hook_event_name").cloned(),
-        agent_id: value.get("agent_id").cloned(),
-    })
+        value.get("transcript_path").cloned(),
+        value.get("hook_event_name").cloned(),
+        value.get("agent_id").cloned(),
+    ))
 }
 
 /// Parse the three manually configured Grok callbacks into one bounded,
@@ -648,9 +547,7 @@ fn parse_payload(
 /// the expected type and name the same value. This matters most for the
 /// selection timestamp, because accepting a half-malformed duplicate would
 /// let a delayed event bypass the durable ordering fence.
-fn parse_grok_payload(value: &serde_json::Value) -> Result<ControlMsg, &'static str> {
-    use farhelm_proto::ReportVendor;
-
+fn parse_grok_payload(value: &serde_json::Value) -> Result<HookReport, &'static str> {
     match value.get("vendor") {
         None | Some(serde_json::Value::Null) => {}
         Some(serde_json::Value::String(vendor)) if vendor == "grok" => {}
@@ -760,293 +657,14 @@ fn parse_grok_payload(value: &serde_json::Value) -> Result<ControlMsg, &'static 
     )
     .map_err(|_| "invalid-grok-evidence")?;
 
-    Ok(ControlMsg::ReportConversation {
-        req_id: REQUEST_ID,
-        vendor: ReportVendor::Grok,
+    Ok(new_report(
+        ReportVendor::Grok,
         conversation,
-        source: source.unwrap_or_default(),
-        transcript_path: None,
-        hook_event_name: Some(serde_json::Value::String(event.to_string())),
+        source.unwrap_or_default(),
+        None,
+        Some(serde_json::Value::String(event.to_string())),
         agent_id,
-    })
-}
-
-/// Retry one authenticated report while the supervisor is absent or a live
-/// connection drops. Refused protocol replies are final: they prove a
-/// supervisor is alive and deliberately rejected this request, so replaying
-/// them would only duplicate a refusal. Transport failures after a long-lived
-/// connection get a fresh absence window; repeated immediate drops stay within
-/// the current window, and neither path exceeds the overall hook deadline. A
-/// send that fails after the peer may have written a
-/// refusal gets a short read probe first, because a closed socket can carry a
-/// final protocol frame even though the write returned `BrokenPipe`.
-async fn report(
-    credential: HookCredential,
-    request: &ControlMsg,
-    deadline: Instant,
-    retry: RetryConfig,
-) -> Outcome {
-    let mut absence_started = None;
-    let mut attempt = 0;
-    loop {
-        match report_once(&credential, request, deadline, &retry).await {
-            Attempt::Done(outcome) => return outcome,
-            Attempt::Retry(failure) => {
-                #[cfg(test)]
-                if let Some(observer) = &retry.retry_observer {
-                    let _ = observer.send(());
-                }
-                let now = Instant::now();
-                let reset_window = absence_started.is_none()
-                    || failure.connected_at.is_some_and(|connected_at| {
-                        now.duration_since(connected_at) >= retry.max_delay
-                    });
-                let started = if reset_window {
-                    *absence_started.insert(now)
-                } else {
-                    absence_started.expect("a retry window exists")
-                };
-                let absence_left = retry
-                    .connect_cap
-                    .saturating_sub(now.duration_since(started));
-                let overall_left = remaining(deadline);
-                let delay = retry.delay(if reset_window { 0 } else { attempt });
-                if delay >= absence_left {
-                    return failure.into_outcome();
-                }
-                if delay >= overall_left {
-                    return Outcome::detail("timeout", failure.phase);
-                }
-                tokio::time::sleep(delay).await;
-                // Replaying is safe after a transport drop: Claude, Goose,
-                // and Pi write the same id, while Codex, Grok, and OMP rerun
-                // admission against the stored binding. Explicit protocol
-                // refusals never reach this branch and remain final.
-                attempt = if reset_window {
-                    1
-                } else {
-                    attempt.saturating_add(1)
-                };
-            }
-        }
-    }
-}
-
-/// The result of one connection attempt, retaining enough structure to decide
-/// whether a transport error is safe to replay without parsing log text.
-enum Attempt {
-    Done(Outcome),
-    Retry(RetryFailure),
-}
-
-/// A retryable transport failure and the phase that produced it.
-struct RetryFailure {
-    phase: &'static str,
-    detail: String,
-    connected_at: Option<Instant>,
-}
-
-impl RetryFailure {
-    fn into_outcome(self) -> Outcome {
-        Outcome::detail("connect-failed", format!("{}: {}", self.phase, self.detail))
-    }
-}
-
-/// One bounded connect/handshake/report/reply exchange.
-async fn report_once(
-    credential: &HookCredential,
-    request: &ControlMsg,
-    deadline: Instant,
-    retry: &RetryConfig,
-) -> Attempt {
-    #[cfg(not(test))]
-    let _ = retry;
-    // A refused connect or missing socket means no process is listening; a
-    // successful connect means one held the socket at that instant. The
-    // supervisor may leave the pathname behind while it restarts, so the
-    // caller retries both Unix-socket errors for the same bounded window.
-    let connect = tokio::net::UnixStream::connect(&credential.socket);
-    let stream = match tokio::time::timeout(remaining(deadline), connect).await {
-        Err(_) => return Attempt::Done(Outcome::detail("timeout", "connect")),
-        Ok(Err(err)) if retryable_connect_error(&err) => {
-            return Attempt::Retry(RetryFailure {
-                phase: "connect",
-                detail: err.to_string(),
-                connected_at: None,
-            });
-        }
-        Ok(Err(err)) => return Attempt::Done(Outcome::io("connect", &err)),
-        Ok(Ok(stream)) => stream,
-    };
-    let connected_at = Instant::now();
-    let (read, write) = tokio::io::split(stream);
-    let mut reader = FrameReader::new(read);
-    let mut writer = FrameWriter::new(write);
-
-    let auth = SessionAuth {
-        session_id: credential.session_id.clone(),
-        token: credential.token.clone(),
-    };
-    let handshake = handshake_with_session_auth(&mut reader, &mut writer, auth);
-    match tokio::time::timeout(remaining(deadline), handshake).await {
-        Err(_) => return Attempt::Done(Outcome::detail("timeout", "handshake")),
-        Ok(Err(err)) if retryable_handshake_error(&err) => {
-            return Attempt::Retry(RetryFailure {
-                phase: "handshake",
-                detail: err.to_string(),
-                connected_at: Some(connected_at),
-            });
-        }
-        Ok(Err(err)) => return Attempt::Done(Outcome::io("handshake", &err)),
-        Ok(Ok(_peer_hello)) => {}
-    }
-
-    match tokio::time::timeout(remaining(deadline), writer.write_control(request)).await {
-        Err(_) => return Attempt::Done(Outcome::detail("timeout", "send")),
-        Ok(Err(err)) if retryable_transport_error(&err) => {
-            // A supervisor can write an explicit refusal and close while this
-            // side is still flushing the request. Probe briefly before
-            // replaying: the refusal is final, while an empty/closed probe
-            // preserves the normal transport retry path.
-            let probe_window = remaining(deadline).min(SEND_FAILURE_REPLY_PROBE);
-            #[cfg(test)]
-            if let Some(observer) = &retry.probe_observer {
-                let _ = observer.send(());
-            }
-            match tokio::time::timeout(probe_window, reader.read_frame()).await {
-                Ok(Ok(Some(frame))) => return classify_reply(frame),
-                Ok(Err(reply_error)) if !retryable_transport_error(&reply_error) => {
-                    return Attempt::Done(Outcome::io("reply", &reply_error));
-                }
-                Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {}
-            }
-            return Attempt::Retry(RetryFailure {
-                phase: "send",
-                detail: err.to_string(),
-                connected_at: Some(connected_at),
-            });
-        }
-        Ok(Err(err)) => return Attempt::Done(Outcome::io("send", &err)),
-        Ok(Ok(())) => {}
-    }
-
-    let frame = match tokio::time::timeout(remaining(deadline), reader.read_frame()).await {
-        Err(_) => return Attempt::Done(Outcome::detail("timeout", "reply")),
-        Ok(Err(err)) if retryable_transport_error(&err) => {
-            return Attempt::Retry(RetryFailure {
-                phase: "reply",
-                detail: err.to_string(),
-                connected_at: Some(connected_at),
-            });
-        }
-        Ok(Err(err)) => return Attempt::Done(Outcome::io("reply", &err)),
-        Ok(Ok(None)) => {
-            return Attempt::Retry(RetryFailure {
-                phase: "reply",
-                detail: "closed before answering".to_string(),
-                connected_at: Some(connected_at),
-            });
-        }
-        Ok(Ok(Some(frame))) => frame,
-    };
-    classify_reply(frame)
-}
-
-/// Classify the one frame a supervisor sends after an authenticated report.
-/// Keeping this separate lets a failed write inspect a refusal that was
-/// already buffered by the peer before its socket closed.
-fn classify_reply(frame: Frame) -> Attempt {
-    match parse_control(&frame) {
-        Err(err) => Attempt::Done(Outcome::io("reply", &err)),
-        // The reply's `req_id` is not checked: this connection carried
-        // exactly one request, so there is nothing a mismatched id could
-        // disambiguate, and refusing on it would only convert a
-        // successful report into a confusing log line.
-        Ok(ControlMsg::ConversationReported { .. }) => Attempt::Done(Outcome::word("acked")),
-        Ok(ControlMsg::Error { kind, message, .. }) => Attempt::Done(Outcome::detail(
-            "refused",
-            format!("{} {message}", error_kind_word(kind)),
-        )),
-        Ok(other) => Attempt::Done(Outcome::detail(
-            "refused",
-            format!("unexpected {}", control_tag(&other)),
-        )),
-    }
-}
-
-fn retryable_connect_error(error: &std::io::Error) -> bool {
-    // A full Unix-listener backlog can report WouldBlock. That rare
-    // present-listener saturation case is deliberately outside this retry
-    // classifier; the ordinary restart shapes are NotFound and Refused.
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-    )
-}
-
-/// Identify handshake failures that mean the connected peer disappeared.
-///
-/// Version skew is checked first because it is a deliberate protocol refusal,
-/// while the remaining transport errors can be retried against a restarted
-/// supervisor.
-fn retryable_handshake_error(error: &std::io::Error) -> bool {
-    if VersionSkew::cause_of(error).is_some() {
-        return false;
-    }
-    ClosedBeforeHello::is_cause_of(error) || retryable_transport_error(error)
-}
-
-/// Identify transport failures that are safe to replay on a new connection.
-///
-/// Timeouts and `NotConnected` are included because they describe a broken
-/// exchange, not an explicit supervisor decision; protocol `Error` frames are
-/// classified separately and remain final.
-fn retryable_transport_error(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::ConnectionAborted
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::NotConnected
-            | std::io::ErrorKind::UnexpectedEof
-            | std::io::ErrorKind::TimedOut
-    )
-}
-
-/// Time left before the shared deadline, saturating at zero.
-///
-/// A zero duration handed to `tokio::time::timeout` still polls the future
-/// once, so an already-expired budget reports the phase it expired in
-/// rather than skipping straight past it.
-fn remaining(deadline: Instant) -> Duration {
-    deadline.saturating_duration_since(Instant::now())
-}
-
-/// The wire spelling of an [`farhelm_proto::ErrorKind`], for the log.
-///
-/// Routed through serde rather than a hand-written match so the log always
-/// says exactly what the protocol says, and so a new kind cannot silently
-/// become a stale word here.
-fn error_kind_word(kind: farhelm_proto::ErrorKind) -> String {
-    match serde_json::to_value(kind) {
-        Ok(serde_json::Value::String(word)) => word,
-        _ => "unknown".to_string(),
-    }
-}
-
-/// The `type` tag of an unexpected reply, for the log.
-///
-/// `ControlMsg` is an internally-tagged enum, so its own serialization is
-/// the authoritative name; `Debug` would drag the whole payload — possibly
-/// including a session listing — into a log line.
-fn control_tag(message: &ControlMsg) -> String {
-    match serde_json::to_value(message) {
-        Ok(serde_json::Value::Object(map)) => match map.get("type") {
-            Some(serde_json::Value::String(tag)) => tag.clone(),
-            _ => "unknown".to_string(),
-        },
-        _ => "unknown".to_string(),
-    }
+    ))
 }
 
 /// The one line a run leaves behind.
@@ -1064,7 +682,7 @@ struct Outcome {
 }
 
 impl Outcome {
-    /// An outcome with no detail, such as `acked` or `no-credential`.
+    /// An outcome with no detail, such as `written` or `no-credential`.
     fn word(word: &'static str) -> Self {
         Outcome {
             word,
@@ -1082,16 +700,6 @@ impl Outcome {
         }
     }
 
-    /// A socket-side I/O failure, named by the phase it happened in.
-    ///
-    /// Every I/O failure on the socket shares the `connect-failed` word,
-    /// including ones in the later `send` and `reply` phases: the log's
-    /// outcome vocabulary is fixed, and the phase prefix is what tells a
-    /// reader which step actually broke.
-    fn io(phase: &'static str, err: &std::io::Error) -> Self {
-        Outcome::detail("connect-failed", format!("{phase}: {err}"))
-    }
-
     /// Attach the reported identity, once the payload has yielded one.
     fn about(mut self, conversation: &str, source: &str) -> Self {
         self.about = Some((conversation.to_string(), source.to_string()));
@@ -1100,125 +708,28 @@ impl Outcome {
 
     /// Render the log line, sanitizing every interpolated value.
     fn render(&self, seconds: u64) -> String {
-        let mut line = format!("{seconds} {}", self.word);
-        if !self.detail.is_empty() {
-            line.push(' ');
-            line.push_str(&sanitize(&self.detail, 512, false));
-        }
-        if let Some((conversation, source)) = &self.about {
-            line.push(' ');
-            line.push_str(&sanitize(conversation, MAX_SESSION_ID_BYTES, true));
-            line.push(' ');
-            // A missing `source` becomes `-` rather than an empty field so
-            // the line keeps a fixed shape: a trailing space is invisible
-            // in a log and turns "no source" into "unparsable line".
-            if source.is_empty() {
-                line.push('-');
-            } else {
-                line.push_str(&sanitize(source, 64, true));
-            }
-        }
-        line
+        let about = self
+            .about
+            .as_ref()
+            .map(|(conversation, source)| (conversation.as_str(), source.as_str()));
+        hook_report::render_log_line(seconds, self.word, &self.detail, about)
     }
 }
 
-/// Make a value safe to interpolate into one log line.
-///
-/// Every character [`farhelm_proto::text::is_presentation_unsafe`] names
-/// becomes `_`. Control characters are the obvious case: they stop an
-/// agent-supplied conversation id from embedding a newline and forging an
-/// extra line. The rest do the same damage without being controls (line
-/// separators many viewers break on, bidi controls that make a `refused` line
-/// render as an `acked` one) or let two different ids read identically
-/// (zero-width characters), which in an audit log is the same lie.
-/// `single_token` additionally collapses spaces, and is used for the
-/// trailing identity fields: those are positional, so a space inside one
-/// would silently shift the other. Free-form detail keeps its spaces,
-/// because a supervisor's refusal message is a sentence and mangling it
-/// would defeat the log's only purpose.
-///
-/// The length cap is counted in chars and applied before replacement, so a
-/// hostile value cannot outgrow its field.
-fn sanitize(value: &str, max_chars: usize, single_token: bool) -> String {
-    value
-        .chars()
-        .take(max_chars)
-        .map(|c| {
-            if farhelm_proto::text::is_presentation_unsafe(c) || (single_token && c.is_whitespace())
-            {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// Append one line to the hook log, ignoring every failure.
-///
-/// Creates the parent directory 0700 if missing — it holds one file per
-/// session under the supervisor's state directory, and nothing outside
-/// that state directory has any business reading them. Truncates the file
-/// first when it has grown past [`MAX_LOG_BYTES`].
-///
-/// ## One line, one write
-///
-/// The line and its trailing newline go out in a SINGLE `write_all`, never
-/// as a `writeln!` that may reach the descriptor in pieces. There is no
-/// locking here and deliberately so: several agents can be launched in one
-/// session, and two hooks appending at once would, with a split write,
-/// interleave halfway through a line and destroy the one property this
-/// format promises. With one write per line the worst case is whole lines
-/// out of order, which costs a reader nothing. This relies on
-/// `O_APPEND` + a single small write, which is atomic on the local
-/// filesystems this file lives on; it is a diagnostic, not a ledger, and
-/// that is the right amount of guarantee to buy for it.
-///
-/// ## Why no symlink hardening
-///
-/// The path is inside the supervisor's own 0700 state directory. Any
-/// process able to plant a symlink or a FIFO there already holds the
-/// session credential sitting beside it and already has the user's own
-/// file access, so `O_NOFOLLOW` would defend a boundary that was crossed
-/// before this function ran.
-///
-/// Nothing here reports failure, by design: this function exists to
-/// explain a broken run, and a hook that fails because its own diagnostics
-/// failed would be the worst outcome of all.
+/// Append one line to the hook log, ignoring every failure; see
+/// `hook_report::append_hook_log` for the rules (one write per line, no
+/// locking, truncation past a size cap, private directory).
 fn append_log(path: Option<&Path>, line: &str) {
-    use std::io::Write as _;
-    use std::os::unix::fs::DirBuilderExt as _;
-
-    let Some(path) = path else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(parent);
+    if let Some(path) = path {
+        hook_report::append_hook_log(path, line);
     }
-    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > MAX_LOG_BYTES) {
-        // Truncate rather than rotate; see MAX_LOG_BYTES.
-        let _ = std::fs::File::create(path);
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    else {
-        return;
-    };
-    let _ = file.write_all(format!("{line}\n").as_bytes());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use farhelm_proto::ReportVendor;
-    use farhelm_teststate::thread::FixtureThread;
     use std::io::Cursor;
-    use std::os::fd::AsRawFd;
+    use std::time::Instant;
 
     /// The Claude Code 2.1.241 `SessionStart` payload, verbatim from the
     /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s
@@ -1230,554 +741,15 @@ mod tests {
     /// ignored hook tests). It carries two fields Claude's does not.
     const CODEX_PAYLOAD: &str = r#"{"session_id":"0198d3ac-0000-7000-8000-000000000000","transcript_path":"/home/u/.codex/sessions/x.jsonl","cwd":"/home/u/src","hook_event_name":"SessionStart","model":"gpt-5-codex","permission_mode":"default","source":"startup"}"#;
 
-    /// A budget short enough to keep the timeout tests fast while staying
-    /// far above the scheduling jitter of a loaded CI runner.
+    /// A stdin budget short enough to keep the timeout test fast while
+    /// staying far above the scheduling jitter of a loaded CI runner.
     const TEST_BUDGET: Duration = Duration::from_millis(300);
-    /// Success and refusal fixtures have generous time to start their peer.
-    const SUCCESS_BUDGET: Duration = Duration::from_secs(5);
-
-    /// Keep reconnect tests quick while preserving the production pacing
-    /// shape: a short absence cap and exponentially spaced attempts.
-    const TEST_RETRY: RetryConfig = RetryConfig {
-        connect_cap: Duration::from_millis(60),
-        initial_delay: Duration::from_millis(5),
-        max_delay: Duration::from_millis(20),
-        retry_observer: None,
-        probe_observer: None,
-    };
-
-    /// How long a test's fake supervisor will wait for any single
-    /// milestone before giving up.
-    ///
-    /// Every blocking wait on a server thread is bounded by this, and the
-    /// reason is CI rather than speed: an unbounded `accept` or `recv` in a
-    /// test server turns a regression in the code under test into a job
-    /// that hangs until the runner's global timeout kills it, with no
-    /// output naming the culprit. Bounded, the same regression fails the
-    /// assertion that follows. It is set generously — orders of magnitude
-    /// above what these round trips need on a loaded runner — because its
-    /// only job is to be finite.
-    const SERVER_DEADLINE: Duration = Duration::from_secs(10);
-
-    /// Poll interval for the one server that has to accept without
-    /// blocking. Short enough not to distort a budget test, long enough
-    /// not to spin a core.
-    const SERVER_POLL: Duration = Duration::from_millis(5);
-
-    /// Owns a silent supervisor fixture and witnesses for its connection and release edges.
-    ///
-    /// The witnesses let focused tests prove both cancellation before a dial and
-    /// cancellation while a peer is held, without synchronizing on sleeps.
-    struct SilentSupervisor {
-        owner: FixtureThread,
-        stop: mpsc::Sender<()>,
-        accepted: mpsc::Receiver<()>,
-        released: mpsc::Receiver<()>,
-    }
-
-    /// Hold an accepted peer open without speaking until cancellation or the safety deadline.
-    ///
-    /// Keeping the peer alive preserves the timeout premise; closing it early would test
-    /// connection failure instead. The listener must be nonblocking so cancellation can
-    /// interrupt the accept loop. The owner retains the test trace through thread exit.
-    fn spawn_silent_supervisor(
-        listener: std::os::unix::net::UnixListener,
-        context: farhelm_testtrace::ThreadContext,
-    ) -> SilentSupervisor {
-        let (stop, stop_rx) = mpsc::channel::<()>();
-        let (accepted_tx, accepted) = mpsc::channel();
-        let (released_tx, released) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            context.enter(|| {
-                let deadline = Instant::now() + SERVER_DEADLINE;
-                let mut held = None;
-                while Instant::now() < deadline {
-                    // Drop cleanup can happen before the hook ever dials. Poll
-                    // cancellation before every accept attempt so that case
-                    // does not fall through to another wait.
-                    match stop_rx.try_recv() {
-                        Ok(()) | Err(mpsc::TryRecvError::Disconnected) => {
-                            drop(listener);
-                            let _ = released_tx.send(());
-                            return;
-                        }
-                        Err(mpsc::TryRecvError::Empty) => {}
-                    }
-                    match listener.accept() {
-                        Ok(connection) => {
-                            let _ = accepted_tx.send(());
-                            held = Some(connection);
-                            break;
-                        }
-                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                            // sleep-ok: the nonblocking accept loop must also observe owner cancellation before a client connects.
-                            std::thread::sleep(SERVER_POLL);
-                        }
-                        Err(err) => panic!("accept failed: {err}"),
-                    }
-                }
-                let _ = stop_rx.recv_timeout(SERVER_DEADLINE);
-                drop(held);
-                drop(listener);
-                let _ = released_tx.send(());
-            });
-        });
-        let cancellation = stop.clone();
-        let owner = FixtureThread::new("hook-silent-supervisor", server, move || {
-            let _ = cancellation.send(());
-        })
-        .expect("start fixture join observer");
-        SilentSupervisor {
-            owner,
-            stop,
-            accepted,
-            released,
-        }
-    }
-
-    /// Owns an async round-trip fixture and reports whether its transaction succeeded.
-    struct RoundTripSupervisor {
-        owner: FixtureThread,
-        outcome: mpsc::Receiver<Result<(), &'static str>>,
-    }
-
-    /// Run the complete supervisor exchange under one deadline and report cancellation separately.
-    ///
-    /// The nonblocking listener belongs to a separate runtime because the synchronous hook
-    /// entry point creates its own runtime. The captured context covers this server runtime's
-    /// full lifetime, including teardown, rather than only its protocol future.
-    fn spawn_round_trip_supervisor(
-        listener: std::os::unix::net::UnixListener,
-        context: farhelm_testtrace::ThreadContext,
-        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
-    ) -> RoundTripSupervisor {
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-        let (outcome_tx, outcome) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            context
-                .with_runtime(
-                    farhelm_testtrace::RuntimeConfig {
-                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
-                        worker_threads: None,
-                        start_paused: false,
-                    },
-                    |runtime| {
-                        runtime.block_on(async move {
-                            let listener = tokio::net::UnixListener::from_std(listener)
-                                .expect("adopt listener");
-                            // One aggregate bound covers the whole exchange. The stage
-                            // bounds retain useful diagnostics, but cannot multiply the
-                            // time this fixture keeps the test alive.
-                            let transaction = async {
-                                let (stream, _) =
-                                    tokio::time::timeout(SERVER_DEADLINE, listener.accept())
-                                        .await
-                                        .expect("the hook must connect within the deadline")
-                                        .expect("accept");
-                                let (read, write) = tokio::io::split(stream);
-                                let mut reader = FrameReader::new(read);
-                                let mut writer = FrameWriter::new(write);
-                                let hello = tokio::time::timeout(
-                                    SERVER_DEADLINE,
-                                    farhelm_proto::io::handshake(
-                                        &mut reader,
-                                        &mut writer,
-                                        "supervisor",
-                                    ),
-                                )
-                                .await
-                                .expect("the handshake must complete within the deadline")
-                                .expect("handshake");
-                                let auth = match hello {
-                                    ControlMsg::Hello { auth, .. } => auth,
-                                    other => panic!("expected a hello, got {other:?}"),
-                                };
-                                let frame =
-                                    tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
-                                        .await
-                                        .expect("the report must arrive within the deadline")
-                                        .expect("read the report")
-                                        .expect("a frame, not EOF");
-                                match parse_control(&frame).expect("decode the report") {
-                                    ControlMsg::ReportConversation {
-                                        req_id,
-                                        conversation,
-                                        source,
-                                        ..
-                                    } => {
-                                        let _ = seen_tx.send((conversation, source, auth));
-                                        tokio::time::timeout(
-                                            SERVER_DEADLINE,
-                                            writer.write_control(
-                                                &ControlMsg::ConversationReported { req_id },
-                                            ),
-                                        )
-                                        .await
-                                        .expect(
-                                            "the acknowledgement must be written within the deadline",
-                                        )
-                                        .expect("acknowledge");
-                                    }
-                                    other => panic!("expected a report, got {other:?}"),
-                                }
-                                Ok::<(), &'static str>(())
-                            };
-                            let outcome = match tokio::time::timeout(SERVER_DEADLINE, async {
-                                tokio::select! {
-                                    _ = cancel_rx => Err("fixture cancelled"),
-                                    result = transaction => result,
-                                }
-                            })
-                            .await
-                            {
-                                Ok(outcome) => outcome,
-                                Err(_) => Err("aggregate timeout"),
-                            };
-                            let _ = outcome_tx.send(outcome);
-                        });
-                    },
-                )
-                .expect("server runtime");
-        });
-        let owner = FixtureThread::new("hook-round-trip-supervisor", server, move || {
-            let _ = cancel_tx.send(());
-        })
-        .expect("start fixture join observer");
-        RoundTripSupervisor { owner, outcome }
-    }
-
-    /// Which controlled peer behavior a retry test should expose.
-    #[derive(Clone, Copy)]
-    enum RetryPeer {
-        /// Drop the first connected socket, then complete the next exchange.
-        CloseFirst,
-        /// Read the first report, drop the connection before its reply, then
-        /// complete the same report on the next connection.
-        CloseAfterReport,
-        /// Keep a received report pending past the short reconnect cap, then
-        /// drop it and acknowledge the replay. This models a busy supervisor
-        /// that restarts while the hook is still waiting for admission.
-        HoldThenClose(Duration),
-        /// Drop every accepted connection, so the hook must exhaust the short
-        /// reconnect window rather than resetting it on each crash.
-        AlwaysClose,
-        /// Answer one valid request with a protocol refusal and reject any retry.
-        Refuse,
-        /// Write an uncorrelated refusal before reading the report, then close
-        /// so the hook's failed-send probe must preserve the final answer.
-        RefuseAndClose,
-        /// Speak an incompatible protocol hello and reject any retry.
-        VersionMismatch,
-    }
-
-    /// Serve one deterministic retry scenario without putting sleeps in the hook
-    /// test itself. The listener remains owned by the fixture thread, so a
-    /// failed assertion still closes every accepted socket during cleanup.
-    fn spawn_retry_supervisor(
-        listener: std::os::unix::net::UnixListener,
-        context: farhelm_testtrace::ThreadContext,
-        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
-        peer: RetryPeer,
-    ) -> RoundTripSupervisor {
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-        let (outcome_tx, outcome) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            context
-                .with_runtime(
-                    farhelm_testtrace::RuntimeConfig {
-                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
-                        worker_threads: None,
-                        start_paused: false,
-                    },
-                    |runtime| {
-                        runtime.block_on(async move {
-                            let listener = tokio::net::UnixListener::from_std(listener)
-                                .expect("adopt retry listener");
-                            let transaction = async {
-                                let (stream, _) =
-                                    tokio::time::timeout(SERVER_DEADLINE, listener.accept())
-                                        .await
-                                        .map_err(|_| "first accept timeout")?
-                                        .map_err(|_| "first accept failed")?;
-                                if matches!(peer, RetryPeer::AlwaysClose) {
-                                    drop(stream);
-                                    while let Ok(Ok((stream, _))) = tokio::time::timeout(
-                                        Duration::from_millis(200),
-                                        listener.accept(),
-                                    )
-                                    .await
-                                    {
-                                        drop(stream);
-                                    }
-                                } else if matches!(peer, RetryPeer::CloseFirst) {
-                                    drop(stream);
-                                    serve_retry_exchange(&listener, &seen_tx).await?;
-                                } else {
-                                    serve_retry_peer(stream, &listener, &seen_tx, peer).await?;
-                                }
-                                Ok::<(), &'static str>(())
-                            };
-                            let result = match tokio::time::timeout(SERVER_DEADLINE, async {
-                                tokio::select! {
-                                    _ = cancel_rx => Err("fixture cancelled"),
-                                    result = transaction => result,
-                                }
-                            })
-                            .await
-                            {
-                                Ok(result) => result,
-                                Err(_) => Err("aggregate timeout"),
-                            };
-                            let _ = outcome_tx.send(result);
-                        });
-                    },
-                )
-                .expect("retry server runtime");
-        });
-        let owner = FixtureThread::new("hook-retry-supervisor", server, move || {
-            let _ = cancel_tx.send(());
-        })
-        .expect("start retry fixture join observer");
-        RoundTripSupervisor { owner, outcome }
-    }
-
-    /// Leave the socket absent long enough to force one failed connect, then
-    /// publish a supervisor that can accept the retried report.
-    fn spawn_delayed_retry_supervisor(
-        socket: std::path::PathBuf,
-        context: farhelm_testtrace::ThreadContext,
-        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
-        retry_ready: mpsc::Receiver<()>,
-        peer: Option<RetryPeer>,
-    ) -> RoundTripSupervisor {
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-        let (outcome_tx, outcome) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            if retry_ready.recv_timeout(SERVER_DEADLINE).is_err() {
-                let _ = outcome_tx.send(Err("hook never observed an absent socket"));
-                return;
-            }
-            context
-                .with_runtime(
-                    farhelm_testtrace::RuntimeConfig {
-                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
-                        worker_threads: None,
-                        start_paused: false,
-                    },
-                    |runtime| {
-                        runtime.block_on(async move {
-                            let transaction = async {
-                                let listener = std::os::unix::net::UnixListener::bind(&socket)
-                                    .map_err(|_| "delayed bind failed")?;
-                                listener
-                                    .set_nonblocking(true)
-                                    .map_err(|_| "delayed nonblocking failed")?;
-                                let listener = tokio::net::UnixListener::from_std(listener)
-                                    .map_err(|_| "adopt delayed listener failed")?;
-                                if let Some(peer) = peer {
-                                    let (stream, _) = listener
-                                        .accept()
-                                        .await
-                                        .map_err(|_| "delayed accept failed")?;
-                                    serve_retry_peer(stream, &listener, &seen_tx, peer).await
-                                } else {
-                                    serve_retry_exchange(&listener, &seen_tx).await
-                                }
-                            };
-                            let result = match tokio::time::timeout(SERVER_DEADLINE, async {
-                                tokio::select! {
-                                    _ = cancel_rx => Err("fixture cancelled"),
-                                    result = transaction => result,
-                                }
-                            })
-                            .await
-                            {
-                                Ok(result) => result,
-                                Err(_) => Err("aggregate timeout"),
-                            };
-                            let _ = outcome_tx.send(result);
-                        });
-                    },
-                )
-                .expect("delayed retry server runtime");
-        });
-        let owner = FixtureThread::new("hook-delayed-retry-supervisor", server, move || {
-            let _ = cancel_tx.send(());
-        })
-        .expect("start delayed retry fixture join observer");
-        RoundTripSupervisor { owner, outcome }
-    }
-
-    /// Accept one connection and complete a report exchange on it.
-    async fn serve_retry_exchange(
-        listener: &tokio::net::UnixListener,
-        seen_tx: &mpsc::Sender<(String, String, Option<SessionAuth>)>,
-    ) -> Result<(), &'static str> {
-        let (stream, _) = tokio::time::timeout(SERVER_DEADLINE, listener.accept())
-            .await
-            .map_err(|_| "accept timeout")?
-            .map_err(|_| "accept failed")?;
-        let (read, write) = tokio::io::split(stream);
-        let mut reader = FrameReader::new(read);
-        let mut writer = FrameWriter::new(write);
-        let hello = tokio::time::timeout(
-            SERVER_DEADLINE,
-            farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor"),
-        )
-        .await
-        .map_err(|_| "handshake timeout")?
-        .map_err(|_| "handshake failed")?;
-        let auth = match hello {
-            ControlMsg::Hello { auth, .. } => auth,
-            _ => return Err("second hello shape"),
-        };
-        let frame = tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
-            .await
-            .map_err(|_| "report timeout")?
-            .map_err(|_| "report read failed")?
-            .ok_or("report eof")?;
-        match parse_control(&frame).map_err(|_| "second report decode")? {
-            ControlMsg::ReportConversation {
-                req_id,
-                conversation,
-                source,
-                ..
-            } => {
-                let _ = seen_tx.send((conversation, source, auth));
-                tokio::time::timeout(
-                    SERVER_DEADLINE,
-                    writer.write_control(&ControlMsg::ConversationReported { req_id }),
-                )
-                .await
-                .map_err(|_| "ack timeout")?
-                .map_err(|_| "ack failed")?;
-                Ok(())
-            }
-            _ => Err("second message shape"),
-        }
-    }
-
-    /// Handle the first connection for a refusal or version-skew test and prove
-    /// that the hook does not open a second socket after the final answer.
-    async fn serve_retry_peer(
-        stream: tokio::net::UnixStream,
-        listener: &tokio::net::UnixListener,
-        seen_tx: &mpsc::Sender<(String, String, Option<SessionAuth>)>,
-        peer: RetryPeer,
-    ) -> Result<(), &'static str> {
-        if matches!(peer, RetryPeer::VersionMismatch) {
-            let (read, write) = tokio::io::split(stream);
-            let mut reader = FrameReader::new(read);
-            let mut writer = FrameWriter::new(write);
-            writer
-                .write_control(&ControlMsg::Hello {
-                    protocol_version: farhelm_proto::PROTOCOL_VERSION + 1,
-                    build_version: "test-version-skew".to_string(),
-                    role: "supervisor".to_string(),
-                    host_identity: None,
-                    auth: None,
-                })
-                .await
-                .map_err(|_| "version hello write failed")?;
-            let _ = reader.read_frame().await;
-        } else {
-            let stream_fd = stream.as_raw_fd();
-            let (read, write) = tokio::io::split(stream);
-            let mut reader = FrameReader::new(read);
-            let mut writer = FrameWriter::new(write);
-            let hello = if matches!(peer, RetryPeer::RefuseAndClose) {
-                // Read the hook's hello before shutting down this half. The
-                // hook cannot send its report until it has read our hello,
-                // so this makes the failed-send probe deterministic.
-                reader
-                    .read_frame()
-                    .await
-                    .map_err(|_| "early refusal hello read failed")?
-                    .ok_or("early refusal hello eof")?;
-                // SAFETY: the split read half owns this live Unix socket fd.
-                let result = unsafe { libc::shutdown(stream_fd, libc::SHUT_RD) };
-                if result != 0 {
-                    return Err("early refusal read shutdown failed");
-                }
-                writer
-                    .write_control(&ControlMsg::Hello {
-                        protocol_version: farhelm_proto::PROTOCOL_VERSION,
-                        build_version: "test-refusal".to_string(),
-                        role: "supervisor".to_string(),
-                        host_identity: None,
-                        auth: None,
-                    })
-                    .await
-                    .map_err(|_| "early refusal hello write failed")?;
-                ControlMsg::Hello {
-                    protocol_version: farhelm_proto::PROTOCOL_VERSION,
-                    build_version: "test-refusal".to_string(),
-                    role: "supervisor".to_string(),
-                    host_identity: None,
-                    auth: None,
-                }
-            } else {
-                farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .map_err(|_| "refusal handshake failed")?
-            };
-            let auth = match hello {
-                ControlMsg::Hello { auth, .. } => auth,
-                _ => return Err("refusal hello shape"),
-            };
-            if matches!(peer, RetryPeer::RefuseAndClose) {
-                writer
-                    .write_control(&ControlMsg::Error {
-                        req_id: REQUEST_ID,
-                        kind: farhelm_proto::ErrorKind::Unauthorized,
-                        message: "test refusal before report".to_string(),
-                    })
-                    .await
-                    .map_err(|_| "early refusal write failed")?;
-                drop(writer);
-                drop(reader);
-            } else {
-                let frame = reader
-                    .read_frame()
-                    .await
-                    .map_err(|_| "refusal report read failed")?
-                    .ok_or("refusal report eof")?;
-                let ControlMsg::ReportConversation {
-                    req_id,
-                    conversation,
-                    source,
-                    ..
-                } = parse_control(&frame).map_err(|_| "refusal report decode")?
-                else {
-                    return Err("refusal report shape");
-                };
-                let _ = seen_tx.send((conversation, source, auth));
-                if let RetryPeer::HoldThenClose(hold) = peer {
-                    // sleep-ok: hold an already received report past the old absence window to exercise a busy peer restarting, not fixture readiness.
-                    tokio::time::sleep(hold).await;
-                }
-                if matches!(
-                    peer,
-                    RetryPeer::CloseAfterReport | RetryPeer::HoldThenClose(_)
-                ) {
-                    drop(writer);
-                    drop(reader);
-                    serve_retry_exchange(listener, seen_tx).await?;
-                    return Ok(());
-                }
-                writer
-                    .write_control(&ControlMsg::Error {
-                        req_id,
-                        kind: farhelm_proto::ErrorKind::Conflict,
-                        message: "test refusal".to_string(),
-                    })
-                    .await
-                    .map_err(|_| "refusal write failed")?;
-            }
-        }
-        match tokio::time::timeout(Duration::from_millis(100), listener.accept()).await {
-            Ok(Ok(_)) => Err("hook retried a final peer answer"),
-            Ok(Err(_)) | Err(_) => Ok(()),
+    /// A complete credential whose reports drop into `state_dir`, the way
+    /// `main.rs` derives one from a session's environment.
+    fn credential(state_dir: &Path) -> HookCredential {
+        HookCredential {
+            session_id: "sess-1".to_string(),
+            state_dir: state_dir.to_path_buf(),
         }
     }
 
@@ -1803,15 +775,12 @@ mod tests {
     /// conversation, and the failure is silent by design.
     #[farhelm_testtrace::test]
     fn parses_the_verbatim_claude_payload() {
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             source,
             ..
         } = parse_payload(CLAUDE_PAYLOAD.as_bytes(), ReportVendor::Claude)
-            .expect("claude payload parses")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("claude payload parses");
         assert_eq!(id, "6af192d4-0000-4000-8000-000000000000");
         assert_eq!(source, "startup");
     }
@@ -1822,15 +791,12 @@ mod tests {
     /// ignored rather than being a second shape to maintain.
     #[farhelm_testtrace::test]
     fn parses_the_verbatim_codex_payload() {
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             source,
             ..
         } = parse_payload(CODEX_PAYLOAD.as_bytes(), ReportVendor::Codex)
-            .expect("codex payload parses")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("codex payload parses");
         assert_eq!(id, "0198d3ac-0000-7000-8000-000000000000");
         assert_eq!(source, "startup");
     }
@@ -1843,15 +809,12 @@ mod tests {
     #[farhelm_testtrace::test]
     fn ignores_unknown_payload_fields() {
         let payload = r#"{"session_id":"abc","source":"resume","future_field":{"nested":[1,2]},"another":null}"#;
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             source,
             ..
         } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
-            .expect("unknown fields are ignored")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("unknown fields are ignored");
         assert_eq!(id, "abc");
         assert_eq!(source, "resume");
     }
@@ -1861,15 +824,12 @@ mod tests {
     /// Claude sends `clear`; nothing may key on the field's presence.
     #[farhelm_testtrace::test]
     fn missing_source_defaults_to_empty() {
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             source,
             ..
         } = parse_payload(br#"{"session_id":"abc"}"#, ReportVendor::Claude)
-            .expect("id alone is enough")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("id alone is enough");
         assert_eq!(id, "abc");
         assert_eq!(source, "");
     }
@@ -1910,13 +870,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn accepts_a_session_id_at_the_cap() {
         let payload = format!(r#"{{"session_id":"{}"}}"#, "x".repeat(MAX_SESSION_ID_BYTES));
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id, ..
         } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
-            .expect("an id at the cap is fine")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("an id at the cap is fine");
         assert_eq!(id.len(), MAX_SESSION_ID_BYTES);
     }
 
@@ -1936,13 +893,10 @@ mod tests {
         let at_cap = "😀".repeat(MAX_SESSION_ID_BYTES / 4);
         assert_eq!(at_cap.len(), MAX_SESSION_ID_BYTES, "fixture sanity");
         let payload = format!(r#"{{"session_id":"{at_cap}"}}"#);
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id, ..
         } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
-            .expect("128 bytes is at the cap")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("128 bytes is at the cap");
         assert_eq!(id.len(), MAX_SESSION_ID_BYTES);
 
         // One character more is four bytes more, and therefore over.
@@ -1969,7 +923,7 @@ mod tests {
     /// point keeps that choice with the injector.
     #[farhelm_testtrace::test]
     fn vendor_payloads_encode_locators_per_vendor_and_stay_closed() {
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             source,
             vendor,
@@ -1979,10 +933,7 @@ mod tests {
             "session_file":"/tmp/s/conv.jsonl","source":"session_start"}"#,
             ReportVendor::Omp,
         )
-        .expect("omp payload parses")
-        else {
-            panic!("expected a conversation report");
-        };
+        .expect("omp payload parses");
         assert!(
             id.starts_with("omp:"),
             "OMP reports under its own prefix: {id}"
@@ -1990,29 +941,23 @@ mod tests {
         assert_eq!(source, "session_start");
         assert_eq!(vendor, ReportVendor::Omp);
 
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             vendor,
             ..
         } = parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#, ReportVendor::Pi)
-            .expect("pi payload parses")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("pi payload parses");
         assert!(id.starts_with("pi:"), "Pi's spelling is unchanged: {id}");
         assert_eq!(vendor, ReportVendor::Pi);
 
         // The entry point is authoritative without a payload vendor: a Pi
         // entry encodes the locator even when the JSON names none.
-        let ControlMsg::ReportConversation {
+        let HookReport {
             conversation: id,
             vendor,
             ..
         } = parse_payload(br#"{"session_id":"pi-2"}"#, ReportVendor::Pi)
-            .expect("a vendorless pi payload still encodes")
-        else {
-            panic!("expected a conversation report");
-        };
+            .expect("a vendorless pi payload still encodes");
         assert!(id.starts_with("pi:"), "entry decides the encoding: {id}");
         assert_eq!(vendor, ReportVendor::Pi);
 
@@ -2065,7 +1010,7 @@ mod tests {
             "source":"new",
             "subagentType":"general-purpose"
         }"#;
-        let ControlMsg::ReportConversation {
+        let HookReport {
             vendor,
             conversation,
             source,
@@ -2073,10 +1018,7 @@ mod tests {
             hook_event_name,
             agent_id,
             ..
-        } = parse_payload(payload, ReportVendor::Grok).expect("Grok callback parses")
-        else {
-            panic!("expected a conversation report");
-        };
+        } = parse_payload(payload, ReportVendor::Grok).expect("Grok callback parses");
         assert_eq!(vendor, ReportVendor::Grok);
         assert_eq!(source, "new");
         assert_eq!(transcript_path, None, "evidence stays inside the locator");
@@ -2154,7 +1096,7 @@ mod tests {
             "missing-timestamp"
         );
 
-        let ControlMsg::ReportConversation {
+        let HookReport {
             source,
             hook_event_name,
             conversation,
@@ -2163,10 +1105,7 @@ mod tests {
             br#"{"sessionId":"a","hookEventName":"user_prompt_submit","transcriptPath":"/tmp/a/updates.jsonl"}"#,
             ReportVendor::Grok,
         )
-        .expect("enrichment needs neither source nor timestamp")
-        else {
-            panic!("expected a conversation report");
-        };
+        .expect("enrichment needs neither source nor timestamp");
         assert_eq!(source, "");
         assert_eq!(hook_event_name, Some(serde_json::json!("UserPromptSubmit")));
         let locator: serde_json::Value = serde_json::from_str(
@@ -2177,14 +1116,11 @@ mod tests {
         .expect("the locator is JSON");
         assert_eq!(locator["selected_at"], serde_json::Value::Null);
 
-        let ControlMsg::ReportConversation { conversation, .. } = parse_payload(
+        let HookReport { conversation, .. } = parse_payload(
             br#"{"sessionId":"a","hookEventName":"stop","timestamp":"2026-09-22T12:00:00.123456789+00:00","transcriptPath":"/tmp/a/updates.jsonl"}"#,
             ReportVendor::Grok,
         )
-        .expect("enrichment timestamps are validated but not persisted")
-        else {
-            panic!("expected a conversation report");
-        };
+        .expect("enrichment timestamps are validated but not persisted");
         let locator: serde_json::Value = serde_json::from_str(
             conversation
                 .strip_prefix("grok:")
@@ -2202,7 +1138,7 @@ mod tests {
         );
     }
 
-    /// Raw subagent evidence crosses the socket verbatim: the hook never
+    /// Raw subagent evidence crosses into the report verbatim: the hook never
     /// interprets it, so a typed marker survives for the supervisor to
     /// reject before sanitation, and absence stays distinguishable from a
     /// malformed value.
@@ -2213,42 +1149,35 @@ mod tests {
     /// to absent, the doorway could not tell the two apart.
     #[farhelm_testtrace::test]
     fn agent_identity_crosses_verbatim_for_the_doorway() {
-        let ControlMsg::ReportConversation { agent_id, .. } = parse_payload(
+        let HookReport { agent_id, .. } = parse_payload(
             br#"{"session_id":"abc","agent_id":"sub-1"}"#,
             ReportVendor::Claude,
         )
-        .expect("an agent identity parses") else {
-            panic!("expected a conversation report");
-        };
+        .expect("an agent identity parses");
         assert_eq!(
             agent_id,
             Some(serde_json::Value::String("sub-1".to_string()))
         );
 
-        let ControlMsg::ReportConversation { agent_id, .. } =
+        let HookReport { agent_id, .. } =
             parse_payload(br#"{"session_id":"abc"}"#, ReportVendor::Claude)
-                .expect("absence parses")
-        else {
-            panic!("expected a conversation report");
-        };
+                .expect("absence parses");
         assert_eq!(agent_id, None);
 
-        let ControlMsg::ReportConversation { agent_id, .. } = parse_payload(
+        let HookReport { agent_id, .. } = parse_payload(
             br#"{"session_id":"abc","agent_id":7}"#,
             ReportVendor::Claude,
         )
-        .expect("a wrong-typed identity still parses here") else {
-            panic!("expected a conversation report");
-        };
+        .expect("a wrong-typed identity still parses here");
         assert_eq!(agent_id, Some(serde_json::Value::from(7)));
     }
 
-    /// Without a credential the run must stop before any socket work, and
+    /// Without a credential the run must stop before writing a report, and
     /// say so. This is the "agent launched outside farhelm" case: it is
     /// expected, not an error, and the log line is the only way to tell it
     /// apart from a hook that never ran at all.
     #[farhelm_testtrace::test]
-    fn no_credential_stops_before_any_socket_work() {
+    fn no_credential_stops_before_writing_a_report() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
         let started = Instant::now();
@@ -2309,19 +1238,16 @@ mod tests {
     }
 
     /// Every payload rejection reaches the log with its own reason word,
-    /// and none of them dials the supervisor.
+    /// and none of them writes a report.
     ///
     /// [`parse_payload`]'s own test pins the reasons in isolation; this
     /// one pins that they survive the whole of [`run_with`] — the layer a
-    /// human actually reads — and that the run STOPS there. The second
-    /// claim rides on the socket path being absent: a dial would have
-    /// replaced the ending with `connect-failed connect: No such file or
-    /// directory`, so a line ending in the reason word is proof the socket
-    /// was never touched. Reporting an id we could not parse is the bug
-    /// this guards against; the supervisor would have to refuse it, and
-    /// the refusal would look like a supervisor problem.
+    /// human actually reads — and that the run STOPS there. Reporting an id
+    /// we could not parse is the bug this guards against; the supervisor
+    /// would have to refuse it, and the refusal would look like a
+    /// supervisor problem.
     #[farhelm_testtrace::test]
-    fn a_bad_payload_is_logged_without_dialing_the_supervisor() {
+    fn a_bad_payload_is_logged_without_writing_a_report() {
         let dir = tempfile::tempdir().expect("tempdir");
         let cases: [(&[u8], &str); 4] = [
             (b"not json at all", "unparsable"),
@@ -2335,11 +1261,7 @@ mod tests {
         for (index, (payload, reason)) in cases.into_iter().enumerate() {
             let log = dir.path().join("hook-log").join(format!("{index}.log"));
             run_with(
-                Some(HookCredential {
-                    session_id: "sess-1".to_string(),
-                    token: "tok".to_string(),
-                    socket: dir.path().join("absent.sock"),
-                }),
+                Some(credential(dir.path())),
                 Cursor::new(payload.to_vec()),
                 TEST_BUDGET,
                 Some(log.clone()),
@@ -2352,6 +1274,10 @@ mod tests {
                 String::from_utf8_lossy(payload)
             );
         }
+        assert!(
+            !dir.path().join(hook_report::REPORTS_DIR).exists(),
+            "no report was written for any rejected payload"
+        );
     }
 
     /// A Goose report with no `AGENT_SESSION_ID` still leaves its one hook
@@ -2362,18 +1288,14 @@ mod tests {
     /// became resumable and the hook log, the one place a reporter failure
     /// is supposed to show, stayed empty. Spec: the adapter's payload for a
     /// missing id is logged as `bad-payload missing-session-id` without
-    /// dialing the supervisor.
+    /// writing a report.
     #[farhelm_testtrace::test]
     fn a_goose_report_without_a_session_id_is_logged() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("goose.log");
         let payload = serde_json::to_vec(&crate::goose_hook::report_payload(None)).unwrap();
         run_with(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+            Some(credential(dir.path())),
             Cursor::new(payload),
             TEST_BUDGET,
             Some(log.clone()),
@@ -2406,11 +1328,7 @@ mod tests {
         {
             let log = dir.path().join("hook-log").join(format!("{index}.log"));
             run_with(
-                Some(HookCredential {
-                    session_id: "sess-1".to_string(),
-                    token: "tok".to_string(),
-                    socket: dir.path().join("absent.sock"),
-                }),
+                Some(credential(dir.path())),
                 Cursor::new(payload.to_string().into_bytes()),
                 TEST_BUDGET,
                 Some(log.clone()),
@@ -2447,17 +1365,12 @@ mod tests {
             Some(log.clone()),
             ReportVendor::Claude,
         );
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+        run_with(
+            Some(credential(dir.path())),
             Cursor::new(b"not json at all".to_vec()),
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
-            TEST_RETRY,
         );
 
         let text = std::fs::read_to_string(&log).expect("hook log should exist");
@@ -2470,472 +1383,145 @@ mod tests {
         );
     }
 
-    /// A stale socket that refuses connections must produce a
-    /// `connect-failed` line and an ordinary return — never a panic and never
-    /// a message on a descriptor the agent can see. A stale or removed socket
-    /// is a real situation (a supervisor restart mid-session), so it has to be
-    /// the boring path.
+    /// Spec: a run with a credential and a good payload writes the report
+    /// into the session's drop directory, with the hook's own process
+    /// ancestry starting at the hook itself, and logs `written` with the
+    /// reported identity.
+    ///
+    /// Why: this is the whole delivery path now. The supervisor attributes
+    /// the report from the recorded ancestry long after this process has
+    /// exited, so the chain must be recorded at report time and must start
+    /// at the reporter; and the log line is the only trace a human sees.
     #[farhelm_testtrace::test]
-    fn a_refused_stale_socket_reports_connect_failed() {
+    fn a_good_payload_is_written_with_its_ancestry() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
-        // A dropped listener leaves the Unix pathname behind on Linux, so this
-        // exercises the refused-socket branch explicitly.
-        let stale = dir.path().join("stale.sock");
-        let stale_listener =
-            std::os::unix::net::UnixListener::bind(&stale).expect("bind stale socket");
-        drop(stale_listener);
-        assert!(
-            stale.exists(),
-            "the dropped listener must leave its pathname behind"
-        );
-        let started = Instant::now();
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: stale,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+        run_with(
+            Some(credential(dir.path())),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
-            TEST_RETRY,
         );
         let line = single_line(&log);
-        let detail = line.splitn(3, ' ').nth(2).expect("outcome word and detail");
         assert!(
-            line.contains(" connect-failed connect: "),
+            line.ends_with(" written 6af192d4-0000-4000-8000-000000000000 startup"),
             "line was {line:?}"
         );
-        assert!(
-            detail.to_ascii_lowercase().contains("refused"),
-            "the stale pathname must exercise ConnectionRefused: {line:?}"
-        );
-        // The identity pair still rides along on a failed report: knowing
-        // which conversation went unreported is the point of the log.
-        assert!(
-            detail.ends_with(" 6af192d4-0000-4000-8000-000000000000 startup"),
-            "line was {line:?}"
-        );
-        assert!(
-            started.elapsed() >= TEST_RETRY.connect_cap - TEST_RETRY.max_delay,
-            "a refused socket must exhaust the reconnect window before giving up: {:?}",
-            started.elapsed()
+        let slot = hook_report::session_dir(dir.path(), "sess-1")
+            .expect("valid id")
+            .join(hook_report::Slot::Latest.file_name());
+        let written: HookReport =
+            serde_json::from_slice(&std::fs::read(&slot).expect("the report was written"))
+                .expect("the report parses");
+        assert_eq!(written.vendor, ReportVendor::Claude);
+        assert_eq!(written.conversation, "6af192d4-0000-4000-8000-000000000000");
+        let ancestry = written.ancestry.expect("the ancestry was recorded");
+        assert_eq!(
+            ancestry.first().map(|link| link.pid),
+            Some(std::process::id()),
+            "the recorded chain starts at the reporting process"
         );
     }
 
-    /// When the overall hook budget ends before the next reconnect attempt,
-    /// the log names the exhausted phase as `timeout` rather than treating
-    /// the supervisor's absence as a completed reconnect failure.
+    /// Spec: a payload naming a sub-agent is logged as `bad-payload
+    /// subagent-report` and writes nothing, and a marker of the wrong type
+    /// is refused the same way rather than read as absent.
+    ///
+    /// Why: the supervisor refuses such a report anyway, but it would only
+    /// get to refuse it after the report had replaced whatever the session's
+    /// own agent left in the same slot. While the supervisor is down, that
+    /// could be the only record of a conversation switch, lost to a report
+    /// that was never going to count.
     #[farhelm_testtrace::test]
-    fn a_reconnect_attempt_can_hit_the_overall_budget() {
+    fn a_subagent_report_is_not_written() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            TEST_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            RetryConfig {
-                connect_cap: Duration::from_secs(60),
-                initial_delay: Duration::from_secs(1),
-                max_delay: Duration::from_secs(1),
-                ..TEST_RETRY
-            },
-        );
-        assert!(single_line(&log).contains(" timeout connect"));
-    }
-
-    /// A supervisor that appears during the reconnect window receives the
-    /// original report. A first refusal is not the final outcome when the
-    /// socket was absent: the retry is what bridges a brief restart gap.
-    #[farhelm_testtrace::test]
-    fn a_supervisor_appearing_during_absence_is_retried_and_acked() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let (seen_tx, seen_rx) = mpsc::channel();
-        let (retry_tx, retry_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server =
-            spawn_delayed_retry_supervisor(socket.clone(), context, seen_tx, retry_rx, None);
-        let retry = RetryConfig {
-            connect_cap: Duration::from_secs(4),
-            ..TEST_RETRY
+        for (index, (payload, reason)) in [
+            (
+                r#"{"session_id":"conv-sub","agent_id":"sub-1"}"#,
+                "subagent-report",
+            ),
+            (
+                r#"{"session_id":"conv-sub","agent_id":7}"#,
+                "agent-id-not-a-string",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let log = dir.path().join("hook-log").join(format!("{index}.log"));
+            run_with(
+                Some(credential(dir.path())),
+                Cursor::new(payload.as_bytes().to_vec()),
+                TEST_BUDGET,
+                Some(log.clone()),
+                ReportVendor::Claude,
+            );
+            let line = single_line(&log);
+            assert!(
+                line.contains(&format!(" bad-payload {reason} conv-sub ")),
+                "line was {line:?}"
+            );
         }
-        .observing(retry_tx);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            retry,
-        );
-        assert!(single_line(&log).contains(" acked"));
-        let (conversation, source, _) = seen_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("appearing supervisor saw the retried report");
-        assert_eq!(conversation, "6af192d4-0000-4000-8000-000000000000");
-        assert_eq!(source, "startup");
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("delayed retry supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("delayed retry supervisor outcome"),
-            Ok(())
-        );
-    }
-
-    /// A busy peer may hold the report longer than the absence cap before
-    /// restarting. That connected wait must not consume the next reconnect
-    /// window: both exchanges must carry the same report and end in an ack.
-    #[farhelm_testtrace::test]
-    fn a_long_lived_connection_gets_a_fresh_reconnect_window() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        assert!(!socket.exists(), "the first attempt must observe absence");
-        let (seen_tx, seen_rx) = mpsc::channel();
-        let (retry_tx, retry_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_delayed_retry_supervisor(
-            socket.clone(),
-            context,
-            seen_tx,
-            retry_rx,
-            Some(RetryPeer::HoldThenClose(Duration::from_secs(1))),
-        );
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            RetryConfig {
-                // Leave real thread/runtime startup headroom while holding the
-                // connected report long enough to outlast this absence cap.
-                connect_cap: Duration::from_millis(500),
-                ..TEST_RETRY
-            }
-            .observing(retry_tx),
-        );
-        let line = single_line(&log);
-        assert!(line.contains(" acked"), "line was {line:?}");
-        let first = seen_rx.recv_timeout(SERVER_DEADLINE).expect("first report");
-        let second = seen_rx
-            .recv_timeout(SERVER_DEADLINE)
-            .expect("replayed report");
-        assert_eq!(
-            first, second,
-            "reconnection must preserve the report and auth"
-        );
-        server
-            .owner
-            .finish(SERVER_DEADLINE)
-            .expect("hold-and-drop fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(SERVER_DEADLINE)
-                .expect("fixture outcome"),
-            Ok(())
-        );
-    }
-
-    /// A crashing listener must not keep a hook alive for its full budget by
-    /// repeatedly opening and closing sockets. Several immediate failures
-    /// share one short window and finish as a transport failure, not timeout.
-    #[farhelm_testtrace::test]
-    fn immediate_connection_drops_share_the_reconnect_cap() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, _) = mpsc::channel();
-        let (retry_tx, retry_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::AlwaysClose);
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            RetryConfig {
-                // Scheduling the controlled peer must have substantially more
-                // headroom than the tiny pacing used by ordinary unit cases.
-                connect_cap: Duration::from_millis(500),
-                max_delay: Duration::from_millis(100),
-                ..TEST_RETRY
-            }
-            .observing(retry_tx),
-        );
-        let line = single_line(&log);
         assert!(
-            line.contains(" connect-failed handshake:"),
+            !dir.path().join(hook_report::REPORTS_DIR).exists(),
+            "no report was written for a sub-agent"
+        );
+    }
+
+    /// Spec: a report that cannot be written is logged as `write-failed`
+    /// with the error and the identity, and the run still returns normally.
+    ///
+    /// Why: a state directory that does not exist (no supervisor ever ran
+    /// here) or cannot be written must not become a visible hook error; the
+    /// log line is the only place the lost report shows.
+    #[farhelm_testtrace::test]
+    fn an_unwritable_report_is_logged_as_write_failed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        run_with(
+            Some(credential(&dir.path().join("no-such-state"))),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
+            TEST_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+        );
+        let line = single_line(&log);
+        assert!(line.contains(" write-failed "), "line was {line:?}");
+        assert!(
+            line.ends_with(" 6af192d4-0000-4000-8000-000000000000 startup"),
             "line was {line:?}"
         );
-        assert!(
-            retry_rx.try_iter().count() >= 2,
-            "must exercise repeated connected failures"
-        );
-        server
-            .owner
-            .finish(SERVER_DEADLINE)
-            .expect("crashing peer fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(SERVER_DEADLINE)
-                .expect("fixture outcome"),
-            Ok(())
-        );
     }
 
-    /// A connected supervisor can disappear before answering while a restart
-    /// races the hook. The same report is safe to resend, so the second
-    /// connection must receive and acknowledge it.
+    /// Spec: Grok's `SessionStart` and its later events land in separate
+    /// slots, so a run of enrichments never replaces the selection.
+    ///
+    /// Why: Grok's enrichment is refused unless its selection is applied
+    /// first; while the supervisor is down, every prompt fires another
+    /// enrichment, and a single slot would lose the selection to them.
     #[farhelm_testtrace::test]
-    fn a_closed_connection_is_retried_and_acked() {
+    fn grok_selection_survives_later_enrichments() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, seen_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::CloseFirst);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            TEST_RETRY,
-        );
-        assert!(single_line(&log).contains(" acked"));
-        let (conversation, source, _) = seen_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("retrying supervisor saw the second report");
-        assert_eq!(conversation, "6af192d4-0000-4000-8000-000000000000");
-        assert_eq!(source, "startup");
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("retry supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("retry supervisor outcome"),
-            Ok(())
-        );
-    }
-
-    /// A supervisor can receive the report and disappear before sending its
-    /// acknowledgement. The hook must treat the reply-phase EOF as a
-    /// transport loss and replay the same report on the next connection.
-    #[farhelm_testtrace::test]
-    fn a_reply_drop_is_retried_and_acked() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, seen_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server =
-            spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::CloseAfterReport);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            TEST_RETRY,
-        );
-        assert!(single_line(&log).contains(" acked"));
-        let first = seen_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("reply-drop supervisor saw the first report");
-        let second = seen_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("reply-drop supervisor saw the retried report");
-        assert_eq!(
-            first, second,
-            "the replay must carry the same report and auth"
-        );
-        assert_eq!(second.0, "6af192d4-0000-4000-8000-000000000000");
-        assert_eq!(second.1, "startup");
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("reply-drop supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("reply-drop supervisor outcome"),
-            Ok(())
-        );
-    }
-
-    /// An explicit supervisor refusal proves the peer is alive and is never
-    /// retried, even though the same hook retries a dropped transport.
-    #[farhelm_testtrace::test]
-    fn a_refusal_is_logged_once_without_retrying() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, _seen_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::Refuse);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            TEST_RETRY,
-        );
-        assert!(single_line(&log).contains(" refused conflict test refusal"));
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("refusal supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("refusal supervisor outcome"),
-            Ok(())
-        );
-    }
-
-    /// A refusal frame may reach the hook just as the peer closes, making the
-    /// report write fail. The short read probe must preserve that refusal and
-    /// must not replay the report as though the supervisor had restarted.
-    #[farhelm_testtrace::test]
-    fn a_refusal_before_report_is_logged_once_without_retrying() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, _seen_rx) = mpsc::channel();
-        let (probe_tx, probe_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::RefuseAndClose);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            TEST_RETRY.observing_probe(probe_tx),
-        );
-        assert!(single_line(&log).contains(" refused unauthorized test refusal before report"));
-        probe_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("failed-send refusal probe ran");
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("early refusal supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("early refusal supervisor outcome"),
-            Ok(())
-        );
-    }
-
-    /// A protocol-version refusal is a deterministic incompatibility, not a
-    /// restarting supervisor. It must finish after one handshake and never
-    /// open a second connection.
-    #[farhelm_testtrace::test]
-    fn a_handshake_version_refusal_is_not_retried() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, _seen_rx) = mpsc::channel();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::VersionMismatch);
-
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            SUCCESS_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-            TEST_RETRY,
-        );
-        assert!(single_line(&log).contains(" connect-failed handshake: protocol version mismatch"));
-        server
-            .owner
-            .finish(Duration::from_secs(1))
-            .expect("version supervisor fixture");
-        assert_eq!(
-            server
-                .outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("version supervisor outcome"),
-            Ok(())
-        );
+        let selection = br#"{"sessionId":"019a0000-0000-7000-8000-000000000001","hookEventName":"SessionStart","source":"new","timestamp":"2026-10-01T00:00:00Z"}"#;
+        let enrichment =
+            br#"{"sessionId":"019a0000-0000-7000-8000-000000000001","hookEventName":"Stop"}"#;
+        for payload in [&selection[..], &enrichment[..], &enrichment[..]] {
+            run_with(
+                Some(credential(dir.path())),
+                Cursor::new(payload.to_vec()),
+                TEST_BUDGET,
+                None,
+                ReportVendor::Grok,
+            );
+        }
+        let session = hook_report::session_dir(dir.path(), "sess-1").expect("valid id");
+        let mut names: Vec<String> = std::fs::read_dir(&session)
+            .expect("drop dir")
+            .map(|entry| entry.expect("entry").file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["enrichment.json", "selection.json"]);
     }
 
     /// A payload reader that never reaches EOF must cost the budget and no
@@ -2946,16 +1532,12 @@ mod tests {
     fn a_blocking_payload_reader_gives_up_at_the_budget() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
-        // A socketpair whose write half the test keeps alive: the read
+        // A connected pair whose other end the test keeps alive: the read
         // half blocks forever, exactly like a vendor holding our stdin.
         let (read_half, _write_half) = std::os::unix::net::UnixStream::pair().expect("socketpair");
         let started = Instant::now();
         run_with(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+            Some(credential(dir.path())),
             read_half,
             TEST_BUDGET,
             Some(log.clone()),
@@ -2971,210 +1553,6 @@ mod tests {
             "{:?}",
             single_line(&log)
         );
-    }
-
-    /// A supervisor that accepts the connection and then says nothing must
-    /// also cost only the budget. A wedged supervisor is the failure most
-    /// likely to push the hook past the vendor's own timeout, which is the
-    /// one failure the user would actually see.
-    #[farhelm_testtrace::test]
-    fn an_unanswering_supervisor_gives_up_at_the_budget() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        // This server leaves the wrapped test thread, so retain the capture
-        // while its bounded hold and cleanup run on the raw thread.
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let SilentSupervisor {
-            owner: server,
-            stop: stop_tx,
-            accepted: _,
-            released,
-        } = spawn_silent_supervisor(listener, context);
-
-        let started = Instant::now();
-        run_with(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            TEST_BUDGET,
-            Some(log.clone()),
-            ReportVendor::Claude,
-        );
-        assert!(
-            started.elapsed() < TEST_BUDGET + Duration::from_millis(500),
-            "run took {:?}",
-            started.elapsed()
-        );
-        let line = single_line(&log);
-        // Which phase the budget dies in depends on how far the handshake
-        // got before the silence; the contract is only that it is a
-        // timeout and that it names a phase.
-        assert!(
-            line.contains(" timeout connect") || line.contains(" timeout handshake"),
-            "line was {line:?}"
-        );
-
-        let _ = stop_tx.send(());
-        server
-            .finish(Duration::from_secs(1))
-            .expect("silent supervisor fixture");
-        released
-            .recv_timeout(Duration::from_secs(1))
-            .expect("silent supervisor released its listener and peer");
-    }
-
-    /// Cancellation before accept must release the listener during assertion unwind.
-    #[farhelm_testtrace::test]
-    fn a_silent_supervisor_cancels_before_accept_on_unwind() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let SilentSupervisor {
-            owner,
-            stop,
-            accepted,
-            released,
-        } = spawn_silent_supervisor(listener, context);
-        drop(stop);
-        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _owner = owner;
-            panic!("exercise cancellation before accept");
-        }));
-        assert!(unwind.is_err());
-        assert!(accepted.try_recv().is_err());
-        released
-            .recv_timeout(Duration::from_secs(1))
-            .expect("cancellation released the pre-accept listener");
-        // Unlinking would permit rebinding even while the original listener remained alive.
-        assert!(
-            std::os::unix::net::UnixStream::connect(&socket).is_err(),
-            "the original listener must refuse new connections"
-        );
-    }
-
-    /// Cancellation while a peer is held must close that peer during unwind.
-    #[farhelm_testtrace::test]
-    fn a_silent_supervisor_cancels_while_holding_a_peer_on_unwind() {
-        use std::io::Read as _;
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let SilentSupervisor {
-            owner,
-            stop,
-            accepted,
-            released,
-        } = spawn_silent_supervisor(listener, context);
-        let mut peer = std::os::unix::net::UnixStream::connect(&socket).expect("connect peer");
-        accepted
-            .recv_timeout(Duration::from_secs(1))
-            .expect("fixture accepted the peer");
-        peer.set_read_timeout(Some(Duration::from_secs(1)))
-            .expect("bound peer read");
-        drop(stop);
-        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _owner = owner;
-            panic!("exercise cancellation while holding a peer");
-        }));
-        assert!(unwind.is_err());
-        released
-            .recv_timeout(Duration::from_secs(1))
-            .expect("cancellation released the held peer");
-        let mut byte = [0; 1];
-        assert_eq!(peer.read(&mut byte).expect("peer EOF"), 0);
-        // Unlinking would permit rebinding even while the original listener remained alive.
-        assert!(
-            std::os::unix::net::UnixStream::connect(&socket).is_err(),
-            "the original listener must refuse new connections"
-        );
-    }
-
-    /// The whole point, end to end: a supervisor that completes the
-    /// handshake and acknowledges gets the reported id and source, and the
-    /// hook logs `acked`. Everything else in this module is a failure
-    /// path; this is the one that has to work.
-    #[farhelm_testtrace::test]
-    fn a_completed_round_trip_reports_and_acks() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = dir.path().join("hook-log").join("s.log");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, seen_rx) = mpsc::channel::<(String, String, Option<SessionAuth>)>();
-
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let RoundTripSupervisor {
-            owner: server,
-            outcome,
-        } = spawn_round_trip_supervisor(listener, context, seen_tx);
-
-        run_with(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok-1".to_string(),
-                socket,
-            }),
-            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
-            Duration::from_secs(5),
-            Some(log.clone()),
-            ReportVendor::Claude,
-        );
-        server
-            .finish(SERVER_DEADLINE)
-            .expect("round-trip supervisor fixture");
-        assert_eq!(
-            outcome
-                .recv_timeout(SERVER_DEADLINE)
-                .expect("round-trip outcome"),
-            Ok(())
-        );
-
-        let (conversation, source, auth) = seen_rx
-            .recv_timeout(SERVER_DEADLINE)
-            .expect("the server saw a report");
-        assert_eq!(conversation, "6af192d4-0000-4000-8000-000000000000");
-        assert_eq!(source, "startup");
-        let auth = auth.expect("the hook authenticates as its session");
-        assert_eq!(auth.session_id, "sess-1");
-        assert_eq!(auth.token, "tok-1");
-
-        let line = single_line(&log);
-        assert!(
-            line.ends_with(" acked 6af192d4-0000-4000-8000-000000000000 startup"),
-            "line was {line:?}"
-        );
-    }
-
-    /// Cancellation before accept must produce an explicit unsuccessful transaction result.
-    #[farhelm_testtrace::test]
-    fn a_round_trip_fixture_reports_cancellation_before_accept() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let socket = dir.path().join("supervisor.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let (seen_tx, seen_rx) = mpsc::channel::<(String, String, Option<SessionAuth>)>();
-        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
-        let RoundTripSupervisor { owner, outcome } =
-            spawn_round_trip_supervisor(listener, context, seen_tx);
-        drop(owner);
-        assert_eq!(
-            outcome
-                .recv_timeout(Duration::from_secs(1))
-                .expect("round-trip cancellation outcome"),
-            Err("fixture cancelled")
-        );
-        assert!(seen_rx.try_recv().is_err());
     }
 
     /// The log directory is created on demand and kept private.
@@ -3232,7 +1610,7 @@ mod tests {
 
     /// A log grown past its cap is truncated before the next append, so a
     /// long-lived session cannot fill the state directory. Truncation is
-    /// the deliberate choice over rotation (see `MAX_LOG_BYTES`); this
+    /// the deliberate choice over rotation (see `hook_report::MAX_LOG_BYTES`); this
     /// test is what would catch a future "improvement" that silently
     /// removed the bound.
     #[farhelm_testtrace::test]
@@ -3241,7 +1619,11 @@ mod tests {
         let log_dir = dir.path().join("hook-log");
         std::fs::create_dir_all(&log_dir).expect("create log dir");
         let log = log_dir.join("s.log");
-        std::fs::write(&log, vec![b'x'; (MAX_LOG_BYTES + 1024) as usize]).expect("seed a big log");
+        std::fs::write(
+            &log,
+            vec![b'x'; (hook_report::MAX_LOG_BYTES + 1024) as usize],
+        )
+        .expect("seed a big log");
 
         run_with(
             None,
@@ -3278,17 +1660,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
         let payload = r#"{"session_id":"a\nb 1724470000 acked","source":"c\td"}"#;
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+        run_with(
+            Some(credential(dir.path())),
             Cursor::new(payload.to_string().into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
-            TEST_RETRY,
         );
         let line = single_line(&log);
         assert!(
@@ -3302,7 +1679,7 @@ mod tests {
     ///
     /// U+2028 is a line separator plenty of viewers break on, and the bidi
     /// overrides reorder what a human SEES without changing a byte — so a
-    /// `connect-failed` line could be made to read as an `acked` one to
+    /// `write-failed` line could be made to read as a `written` one to
     /// the only audience this file has. Both are written into the payload
     /// as raw characters, exactly as a hostile agent would send them, and
     /// both must come back as `_`. This is a regression case: the
@@ -3316,17 +1693,12 @@ mod tests {
             r#"{{"session_id":"a{}b{}c","source":"d{}e"}}"#,
             '\u{2028}', '\u{202e}', '\u{2066}'
         );
-        run_with_retry_config(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+        run_with(
+            Some(credential(dir.path())),
             Cursor::new(payload.into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
-            TEST_RETRY,
         );
         let line = single_line(&log);
         assert!(line.ends_with(" a_b_c d_e"), "line was {line:?}");
@@ -3345,11 +1717,7 @@ mod tests {
             "p".repeat(MAX_PAYLOAD_BYTES)
         );
         run_with(
-            Some(HookCredential {
-                session_id: "sess-1".to_string(),
-                token: "tok".to_string(),
-                socket: dir.path().join("absent.sock"),
-            }),
+            Some(credential(dir.path())),
             Cursor::new(payload.into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),

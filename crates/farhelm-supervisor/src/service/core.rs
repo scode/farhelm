@@ -4348,6 +4348,18 @@ pub struct Supervisor {
     /// lifecycle claim — and claim waits are bounded by the admission
     /// deadline rather than held open.
     pub(super) capture_locks: Arc<KeyedLocks>,
+    /// Serializes drains of the hooks' dropped report files
+    /// (`report_files`). Held for a whole drain, so two drains never take
+    /// the same slot, and a drain can treat a taken slot it finds at its
+    /// start as a leftover of a supervisor that died mid-drain. Ordinary
+    /// passes skip the drain while another holds this rather than waiting.
+    pub(super) report_drain: tokio::sync::Mutex<()>,
+    /// Sessions whose waiting report has already been warned about as being
+    /// retried. A retry repeats every pass for as long as its cause lasts (a
+    /// store or tmux that cannot be read), so it warns once per session and
+    /// logs at debug after that; the session leaves this set when one of its
+    /// reports settles.
+    pub(super) report_retry_warned: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 /// The refusal every lifecycle verb returns for an UNRECOGNIZED foreign
@@ -4459,19 +4471,33 @@ async fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// The doorway-validated contents of one `ReportConversation` wire
-/// message, traveling as one value from the doorway through every
-/// admission branch. One struct rather than seven positional parameters:
-/// the fields are validated as a unit at the doorway (discriminator, raw
-/// identity evidence, bounded source), and no call site may reorder, drop,
-/// or substitute one of them on the way to the proof that consumes it.
+/// The validated contents of one dropped report file (see
+/// `crate::hook_report`), traveling as one value from the drain through
+/// every admission branch. One struct rather than seven positional
+/// parameters: the fields are validated as a unit before admission
+/// (discriminator, raw identity evidence, bounded source), and no call site
+/// may reorder, drop, or substitute one of them on the way to the proof that
+/// consumes it.
+///
+/// `ancestry` is the reporting hook's recorded process chain ALREADY
+/// ANCHORED at this session's current pane process (`procs::anchor_chain`):
+/// reporter first, pane process last. The anchor is what ties the report to
+/// the current launch, so admission never re-anchors it; the per-kind
+/// corridors read it as it is. `None` means no anchored chain exists, which
+/// the attributed kinds refuse.
 pub(crate) struct ReportedConversation {
     pub(crate) vendor: farhelm_proto::ReportVendor,
     pub(crate) conversation: String,
     pub(crate) source: String,
     pub(crate) transcript_path: Option<serde_json::Value>,
     pub(crate) hook_event_name: Option<serde_json::Value>,
-    pub(crate) peer: Option<crate::procs::ProcessIdentity>,
+    pub(crate) ancestry: Option<Vec<crate::procs::ChainLink>>,
+    /// The launch generation whose pane `ancestry` was anchored at. A relaunch
+    /// can publish a new generation between the anchor and admission, and the
+    /// anchor proved nothing about the new launch's pane, so admission refuses
+    /// a report whose generation is not the one it resolves. `None` only for
+    /// admission exercised directly, with no anchored ancestry.
+    pub(crate) launch_generation: Option<i64>,
 }
 
 impl Supervisor {
@@ -5194,6 +5220,8 @@ impl Supervisor {
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             user_home,
             capture_locks: Arc::new(KeyedLocks::default()),
+            report_drain: tokio::sync::Mutex::new(()),
+            report_retry_warned: std::sync::Mutex::new(std::collections::HashSet::new()),
         });
         // Reconcile reports and exact-file readiness before serving the
         // reloaded sessions. This needs the completed supervisor and its claims.
@@ -6458,16 +6486,9 @@ impl Supervisor {
             match accepted {
                 Ok((stream, _)) => {
                     accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
-                    let peer = stream
-                        .peer_cred()
-                        .ok()
-                        .and_then(|credentials| credentials.pid())
-                        .and_then(|pid| u32::try_from(pid).ok())
-                        .and_then(crate::procs::ProcessIdentity::read)
-                        .map(|identity| (identity.pid, identity.start));
                     let sup = Arc::clone(self);
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(sup, stream, peer).await {
+                        if let Err(e) = handle_connection(sup, stream).await {
                             warn!(error = %e, "connection ended with error");
                         }
                     });
@@ -9812,8 +9833,10 @@ impl Supervisor {
         // offer, and validating against the pre-commit answer is the
         // staleness this whole contract exists to exclude. A restart is a
         // rare, user-initiated operation; waiting out report reconciliation
-        // is free.
-        self.capture_now().await;
+        // is free. That includes waiting for a report drain already running
+        // rather than skipping it the way a listing does: a report waiting on
+        // disk may name the conversation this restart must resume.
+        self.capture_pass(true).await;
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
             return Err(RequestError::new(
@@ -13612,10 +13635,11 @@ impl Supervisor {
     /// has landed. Resume construction then applies the kind's readiness
     /// rules: a Codex pending-clear locator is durable but is not a resume
     /// target until its exact root record appears. A failed write changes
-    /// nothing in memory and has no supervisor-owned retry queue. The hook can
-    /// retry transport loss before admission answers, but a failed admission
-    /// is not replayed by the supervisor: another lifecycle event may send a
-    /// fresh report. A store that
+    /// nothing in memory and has no supervisor-owned retry queue beyond the
+    /// report file itself: a report refused for a store or tmux failure
+    /// (`Internal`) stays in its slot for the next pass (`report_files`),
+    /// while any other refusal is final and another lifecycle event may send
+    /// a fresh report. A store that
     /// cannot write is a supervisor in trouble, not a state to engineer a
     /// queue around.
     ///
@@ -13690,33 +13714,35 @@ impl Supervisor {
     /// Claude's hook fires at the new agent process's startup — squarely
     /// inside that window. Waiting on the claim would queue the report
     /// behind the tail of the restart that caused it. The report claim is
-    /// capture-only and unbounded: all work under it is local, and the hook
-    /// owns the total time budget.
+    /// capture-only and unbounded: all work under it is local, and no hook
+    /// waits on it (the hook dropped its report and exited long ago).
     ///
     /// The store's generation CAS rejects a report if the generation changes
     /// after this handler observes it. It does not identify the sender's
     /// generation: the credential survives relaunch, and the wire message
     /// carries no generation. Ordinary stale reporters are removed by the
     /// restart's whole-process-tree sweep before the replacement runs.
-    /// Codex and Grok additionally require the peer to remain attributable
-    /// to the current pane's foreground process around exact-record
-    /// verification, and OMP to its launched runtime. Claude requires the
-    /// peer's hook to have been run by the pane process or its direct child,
-    /// checked once before the capture claim.
+    /// Every report arrives with the hook's recorded process chain already
+    /// anchored at the session's current pane process, which ties it to the
+    /// current launch (`report_files`). Codex and Grok additionally require
+    /// that chain to run through the pane's one native runtime, and OMP
+    /// through its launched runtime; Claude requires the hook to have been
+    /// run by the pane process or its direct child, checked before the
+    /// capture claim.
     ///
     /// ## Admission order
     ///
     /// Admit one conversation-identity report through the five-step
     /// ownership contract (SPEC_impl's admission ordering):
     ///
-    /// 1. Cheap envelope/kind/generation gating, no vendor I/O — the
-    ///    doorway has already authenticated, bounded, and
-    ///    discriminator-checked, and this re-checks against the
+    /// 1. Cheap envelope/kind/generation gating, no vendor I/O — the drain
+    ///    has already bounded and discriminator-checked the report and
+    ///    anchored its chain, and this re-checks against the
     ///    generation-fenced resolution.
     /// 2. The unbounded capture claim, then a reload comparing
     ///    kind/generation and the complete prior binding.
-    /// 3. Mutation-free runtime ownership and vendor root proofs, with
-    ///    repeat attribution around the evidence.
+    /// 3. Mutation-free runtime ownership and vendor root proofs, the
+    ///    ownership read from the recorded chain.
     /// 4. The atomic generation-plus-complete-binding
     ///    CAS committing identity, locator, provenance, source,
     ///    readiness, and ambiguity reset together.
@@ -13780,6 +13806,18 @@ impl Supervisor {
                 }
             },
         };
+        // The anchor that tied this report to a launch was taken against a
+        // particular generation; evidence for that launch must not be
+        // committed into a newer one that was published in between.
+        if report
+            .launch_generation
+            .is_some_and(|anchored| anchored != generation)
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
         // Step 1 tail: the authoritative discriminator check, against the
         // generation-fenced kind rather than the doorway's preliminary
         // read. Cheap parsing, still no vendor I/O.
@@ -13806,7 +13844,7 @@ impl Supervisor {
                 id,
                 report.conversation,
                 report.source,
-                report.peer,
+                report.ancestry,
                 kind,
                 generation,
                 entry,
@@ -13852,21 +13890,22 @@ impl Supervisor {
     }
 
     /// Legacy admission for kinds whose ownership proof is not yet
-    /// implemented: the original acceptance (credential, shape, generation
-    /// fence, replace within the generation) behind the discriminator gate,
-    /// under the shared claim discipline.
+    /// implemented: the original acceptance (shape, generation fence,
+    /// replace within the generation) behind the discriminator gate, under
+    /// the shared claim discipline.
     ///
-    /// Claude additionally has to pass [`Supervisor::claude_foreground`]
-    /// before taking the capture claim: the hook must have been run by the
-    /// session's pane process or its direct child, so a shelled-out `claude`
-    /// that inherited the credential cannot replace its parent's conversation.
-    /// It runs before the claim because a long local wait can outlive the
-    /// reporting hook; the generation-fenced write keeps a check made before
-    /// a relaunch from committing into the new launch.
+    /// Claude additionally has to pass its positional corridor
+    /// (`procs::claude_corridor`) over the recorded chain: the hook must have
+    /// been run by the session's pane process or its direct child, so a
+    /// shelled-out `claude` that inherited the credential cannot replace its
+    /// parent's conversation. The check reads only the recorded evidence, so
+    /// it runs before the claim at no cost; the generation-fenced write keeps
+    /// a check made before a relaunch from committing into the new launch.
     ///
-    /// That check sits after the id-shape check, so a malformed report
-    /// still answers `InvalidRequest` without any tmux or process
-    /// inspection. Goose and Pi ignore `peer` and are admitted as before.
+    /// That check sits after the id-shape check, so a malformed report is
+    /// refused as `InvalidRequest` before any evidence is read. Goose and Pi
+    /// ignore `ancestry` here (the drain has already tied their report to the
+    /// current launch by anchoring it) and are admitted as before.
     ///
     /// The write deliberately does NOT touch `capture_ownership_version`,
     /// Claude's included: these rows stay at 0 — ownership not established
@@ -13882,12 +13921,12 @@ impl Supervisor {
         id: &str,
         conversation: String,
         source: String,
-        peer: Option<crate::procs::ProcessIdentity>,
+        ancestry: Option<Vec<crate::procs::ChainLink>>,
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
     ) -> Result<(), RequestError> {
-        // A malformed identity can be rejected before any process inspection.
+        // A malformed identity can be rejected before any evidence is read.
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             warn!(
                 session = %id,
@@ -13902,35 +13941,9 @@ impl Supervisor {
             ));
         }
 
-        // Claude's attribution must run before the claim: a long local wait
-        // can outlive the hook process that supplied the peer identity. The
-        // later generation-fenced write makes this early check safe across a
-        // relaunch; proven vendors keep their evidence checks under the claim.
-        // Two nearby Claude reports can therefore attribute concurrently, and
-        // the slower one may commit second within one generation. That small
-        // last-commit race is accepted: two starts that close together are
-        // not a realistic lifecycle, and another coordination layer would
-        // put the hook-process lifetime back behind the claim.
         match kind {
             AgentKind::Claude => {
-                let row = self
-                    .store
-                    .session(id)
-                    .await
-                    .map_err(|_| {
-                        RequestError::new(ErrorKind::Internal, "could not verify the launch")
-                    })?
-                    .ok_or_else(|| {
-                        RequestError::new(ErrorKind::NotFound, "the session no longer exists")
-                    })?;
-                if row.generation != generation || row.agent_kind() != kind {
-                    return Err(RequestError::new(
-                        ErrorKind::Conflict,
-                        "this session has moved on to another launch",
-                    ));
-                }
-                self.attribute_claude_report(&row, peer, id, generation, &source)
-                    .await?;
+                self.attribute_claude_report(ancestry.as_deref(), id, generation, &source)?;
             }
             AgentKind::Codex
             | AgentKind::Goose
@@ -13984,6 +13997,19 @@ impl Supervisor {
             entry,
             row.capture_ownership_version,
         )
+    }
+
+    /// Run one reconciliation pass now: apply every report the session
+    /// hooks have dropped, then refresh report-backed readiness, exactly as
+    /// the ticker's next pass would.
+    ///
+    /// Reports are applied asynchronously, on that pass, so a test that has
+    /// just watched a hook exit needs a way to say "and now the supervisor
+    /// has looked" without sleeping for a tick. Compiled only for tests and
+    /// the `test-seams` feature (which the e2e tests enable).
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn reconcile_for_test(&self) {
+        self.capture_pass(true).await;
     }
 
     /// Commit `conversation` as this session's reported identity, durably and
@@ -14123,18 +14149,24 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Resolve the session's owned pane to its live foreground process id,
-    /// recovering the pane from tmux during publication gaps. Shared by the
-    /// per-kind foreground proofs: the pane binding is framework evidence,
-    /// and only the walk past it differs per kind. No lifecycle lock: the
-    /// reporting hook may be running inside the launch whose publication
-    /// that lock protects.
-    async fn owned_pane_pid(&self, row: &StoredSession, kind: &str) -> Result<u32, RequestError> {
+    /// Resolve the session's owned pane to the anchor its reports' recorded
+    /// chains must reach: the pane process's pid, plus its start token while
+    /// it is alive (see `procs::PaneAnchor`). The pane is recovered from tmux
+    /// during publication gaps. No lifecycle lock: a reporting hook may be
+    /// running inside the launch whose publication that lock protects.
+    ///
+    /// A tmux that could not be asked is `Internal`, which the report drain
+    /// treats as transient and retries on a later pass; a pane that is gone
+    /// or no longer this session's is `Conflict`, a definitive refusal.
+    pub(crate) async fn owned_pane_anchor(
+        &self,
+        row: &StoredSession,
+    ) -> Result<crate::procs::PaneAnchor, RequestError> {
         let pane = if row.pane.is_empty() {
             let states = self.tmux.pane_states().await.map_err(|_| {
                 RequestError::new(
-                    ErrorKind::Conflict,
-                    format!("the {kind} foreground pane could not be inspected"),
+                    ErrorKind::Internal,
+                    "the session's foreground pane could not be inspected",
                 )
             })?;
             agent_pane_from_states(&states, &row.tmux_name, &row.id)
@@ -14142,7 +14174,7 @@ impl Supervisor {
                 .ok_or_else(|| {
                     RequestError::new(
                         ErrorKind::Conflict,
-                        format!("the {kind} foreground pane is unavailable"),
+                        "the session's foreground pane is unavailable",
                     )
                 })?
         } else {
@@ -14154,23 +14186,31 @@ impl Supervisor {
             .await
             .map_err(|_| {
                 RequestError::new(
-                    ErrorKind::Conflict,
-                    format!("the {kind} foreground process could not be inspected"),
+                    ErrorKind::Internal,
+                    "the session's foreground process could not be inspected",
                 )
             })?;
         let crate::tmux::PaneProbe::Owned(process) = process else {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                format!("the {kind} foreground pane is no longer owned by this session"),
+                "the session's foreground pane is no longer owned by this session",
             ));
         };
-        if process.dead {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                format!("the {kind} foreground process has exited"),
-            ));
-        }
-        Ok(process.pid)
+        // A live pane process anchors by pid and start token. One that has
+        // exited (still listed under `remain-on-exit`) or exits right now has
+        // no token left to read, and anchors by pid alone.
+        let start = if process.dead {
+            None
+        } else {
+            match crate::procs::read_process(process.pid) {
+                Ok(Some((_, start, crate::procs::ProcessState::Running))) => Some(start),
+                _ => None,
+            }
+        };
+        Ok(crate::procs::PaneAnchor {
+            pid: process.pid,
+            start,
+        })
     }
 
     /// Offer a witnessed transition to `session`'s durable outcome and
@@ -16539,8 +16579,58 @@ pub(crate) mod tests {
             source: source.to_string(),
             transcript_path: None,
             hook_event_name: None,
-            peer: None,
+            ancestry: None,
+            launch_generation: None,
         }
+    }
+
+    /// A dropped report as a hook at `reporter` would write it: its
+    /// ancestry recorded from the live process now, or none at all.
+    fn recorded_report(
+        vendor: farhelm_proto::ReportVendor,
+        conversation: String,
+        source: &str,
+        reporter: Option<crate::procs::ProcessIdentity>,
+    ) -> crate::hook_report::HookReport {
+        let ancestry = reporter.map(|reporter| {
+            crate::procs::collect_ancestry(reporter).expect("collect the reporter's ancestry")
+        });
+        crate::hook_report::HookReport {
+            version: crate::hook_report::FORMAT_VERSION,
+            vendor,
+            conversation,
+            source: source.to_string(),
+            transcript_path: None,
+            hook_event_name: None,
+            agent_id: None,
+            ancestry: ancestry.as_ref().map(|ancestry| {
+                ancestry
+                    .links
+                    .iter()
+                    .map(crate::hook_report::RecordedLink::from)
+                    .collect()
+            }),
+            ancestry_ended: ancestry.and_then(|ancestry| ancestry.ended),
+        }
+    }
+
+    /// The chain a hook at `reporter` would record, anchored at the
+    /// session's current pane exactly as the drain anchors it, for tests
+    /// that call admission directly.
+    async fn anchored_ancestry(
+        sup: &Supervisor,
+        id: &str,
+        reporter: crate::procs::ProcessIdentity,
+    ) -> Vec<crate::procs::ChainLink> {
+        let row = sup.store.session(id).await.unwrap().unwrap();
+        let pane = sup
+            .owned_pane_anchor(&row)
+            .await
+            .expect("the session's pane anchors");
+        let ancestry = crate::procs::collect_ancestry(reporter).expect("collect");
+        crate::procs::anchor_chain(&ancestry.links, ancestry.ended.as_deref(), pane)
+            .expect("the reporter descends from the session's pane")
+            .to_vec()
     }
 
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
@@ -18818,7 +18908,7 @@ pub(crate) mod tests {
             "claude-after-wait".to_string(),
             "clear",
         );
-        report.peer = Some(peer);
+        report.ancestry = Some(anchored_ancestry(sup, &id, peer).await);
         assert_report_survives_busy_claim(sup, &id, report, Some(peer)).await;
     }
 
@@ -18849,8 +18939,44 @@ pub(crate) mod tests {
         let file = fixture.session_file("wait.jsonl", "omp-after-wait");
         let token = fixture.locator_token("omp-after-wait", Some(&file));
         let mut report = reported(farhelm_proto::ReportVendor::Omp, token, "session_start");
-        report.peer = Some(peer);
+        report.ancestry = Some(anchored_ancestry(fixture.sup.as_ref().unwrap(), &id, peer).await);
         assert_report_survives_busy_claim(fixture.sup.as_ref().unwrap(), &id, report, None).await;
+    }
+
+    /// Spec: admission refuses a report anchored at an earlier launch
+    /// generation than the one it resolves, and records nothing.
+    ///
+    /// Why: the drain anchors a report's ancestry at the pane of the launch
+    /// it read, and a relaunch can publish a new generation before admission
+    /// runs. The anchor proved nothing about the new launch's pane, so the
+    /// old evidence must not be committed into it.
+    #[farhelm_testtrace::test]
+    async fn a_report_anchored_at_an_earlier_generation_is_refused() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        seed_codex_row(&sup, &id, None, None, 0).await;
+        let row = sup.store.session(&id).await.unwrap().unwrap();
+        let mut report = reported(
+            farhelm_proto::ReportVendor::Codex,
+            "conv-stale".to_string(),
+            "startup",
+        );
+        report.launch_generation = Some(row.generation - 1);
+        let error = sup
+            .report_conversation(&id, report)
+            .await
+            .expect_err("an earlier generation's evidence is refused");
+        assert_eq!(error.kind, farhelm_proto::ErrorKind::Conflict);
+        assert!(
+            error.message.contains("another launch"),
+            "{}",
+            error.message
+        );
+        let after = sup.store.session(&id).await.unwrap().unwrap();
+        assert_eq!(after.captured_conversation, None, "nothing is recorded");
     }
 
     /// A report from an unattributable process against a pristine row is
@@ -18877,18 +19003,16 @@ pub(crate) mod tests {
         let peer = crate::procs::ProcessIdentity::read(std::process::id())
             .expect("the test process is live");
 
+        let row = sup.store.session(&id).await.unwrap().unwrap();
+        let mut report = recorded_report(
+            farhelm_proto::ReportVendor::Codex,
+            "child-conv".to_string(),
+            "startup",
+            Some(peer),
+        );
+        report.hook_event_name = Some(serde_json::json!("SessionStart"));
         let error = sup
-            .report_conversation(
-                &id,
-                ReportedConversation {
-                    vendor: farhelm_proto::ReportVendor::Codex,
-                    conversation: "child-conv".to_string(),
-                    source: "startup".to_string(),
-                    transcript_path: None,
-                    hook_event_name: Some(serde_json::json!("SessionStart")),
-                    peer: Some(peer),
-                },
-            )
+            .admit_hook_report(&id, &row, report)
             .await
             .expect_err("an unattributable reporter must be refused");
         assert_eq!(
@@ -19786,7 +19910,8 @@ exit 0
         }
 
         /// Spawn the entry-shaped runtime and wait for its hook-shaped
-        /// reporter, returning the reporter's kernel-attributed identity.
+        /// reporter, returning the reporter's process identity (what a hook
+        /// at that process would record its ancestry from).
         /// The pane answer names the runtime under `id`'s session. A
         /// missing Bun interpreter is a `SKIPPED` early return, never a
         /// failure: the substrate is absent, not the proof.
@@ -19863,7 +19988,7 @@ exit 0
         }
 
         /// Spawn one runtime, premise-assert its reporter's parentage,
-        /// and return the reporter's kernel-attributed identity. The
+        /// and return the reporter's process identity. The
         /// runtime's process group is owned from spawn — before the
         /// readiness wait and the premise assertions — so a timeout, a
         /// failed assertion, or a cancelled wait still leaves every
@@ -19895,7 +20020,7 @@ exit 0
                 "the reporter must be parented under the runtime, or the walked chain does not exist"
             );
             let peer = crate::procs::ProcessIdentity::read(reporter_pid)
-                .expect("the reporter must have a kernel-attributed identity");
+                .expect("the reporter must have a readable process identity");
             Some(peer)
         }
 
@@ -20065,14 +20190,46 @@ exit 0
             .unwrap()
         }
 
-        /// One external report down the real admission path.
+        /// One report down the real path a dropped report takes: the
+        /// checks, the anchor at the session's current pane, and admission.
+        /// `reporter` is the process the hook would be; its ancestry is
+        /// recorded now, the way the hook records its own, and `None` drops
+        /// a report with no ancestry at all.
         async fn report(
             &self,
             id: &str,
             token: String,
             source: &str,
-            peer: Option<crate::procs::ProcessIdentity>,
+            reporter: Option<crate::procs::ProcessIdentity>,
         ) -> Result<(), RequestError> {
+            let sup = self.sup.as_ref().expect("supervisor");
+            let row = sup
+                .store
+                .session(id)
+                .await
+                .expect("read the reporting session")
+                .expect("the reporting session exists");
+            sup.admit_hook_report(
+                id,
+                &row,
+                recorded_report(farhelm_proto::ReportVendor::Omp, token, source, reporter),
+            )
+            .await
+        }
+
+        /// Admission alone, with `reporter`'s recorded but unanchored
+        /// ancestry and without the drain's checks or pane anchor: for the
+        /// tests that pin what OMP admission refuses before it reads any
+        /// process evidence (launch provenance, the installed asset), which
+        /// a fixture without an owned pane could not otherwise reach.
+        async fn admit_unanchored(
+            &self,
+            id: &str,
+            token: String,
+            source: &str,
+            reporter: crate::procs::ProcessIdentity,
+        ) -> Result<(), RequestError> {
+            let ancestry = crate::procs::collect_ancestry(reporter).expect("collect");
             self.sup
                 .as_ref()
                 .expect("supervisor")
@@ -20084,7 +20241,8 @@ exit 0
                         source: source.to_string(),
                         transcript_path: None,
                         hook_event_name: None,
-                        peer,
+                        ancestry: Some(ancestry.links),
+                        launch_generation: None,
                     },
                 )
                 .await
@@ -20209,11 +20367,11 @@ exit 0
         let peer = crate::procs::ProcessIdentity::read(std::process::id())
             .expect("the test process has a kernel identity");
         let error = fixture
-            .report(
+            .admit_unanchored(
                 &id,
                 fixture.locator_token("omp-old", None),
                 "session_start",
-                Some(peer),
+                peer,
             )
             .await
             .expect_err("an unprovenanced launch must fail closed");
@@ -20264,11 +20422,11 @@ exit 0
             .join(crate::pi_extension::OMP_ASSET.file_name);
         std::fs::write(&asset_path, b"not the gated asset").expect("tamper with the asset");
         let error = fixture
-            .report(
+            .admit_unanchored(
                 &id,
                 fixture.locator_token("omp-tampered", None),
                 "session_start",
-                Some(peer),
+                peer,
             )
             .await
             .expect_err("a diverged asset must fail closed");
@@ -20282,11 +20440,11 @@ exit 0
         );
         std::fs::remove_file(&asset_path).expect("remove the asset");
         let error = fixture
-            .report(
+            .admit_unanchored(
                 &id,
                 fixture.locator_token("omp-tampered", None),
                 "session_start",
-                Some(peer),
+                peer,
             )
             .await
             .expect_err("a missing asset must fail closed");

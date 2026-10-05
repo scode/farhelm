@@ -884,8 +884,8 @@ enum InternalCmd {
     /// can never fire there).
     Launch { spec: PathBuf },
     /// An agent hook adapter: read the vendor's JSON payload from stdin and
-    /// report the conversation identity it names to the supervisor that
-    /// launched this session.
+    /// drop a report of the conversation identity it names for the
+    /// supervisor that launched this session to apply.
     ///
     /// Farhelm injects `<farhelm_exe> internal hook` for vendors with a
     /// per-launch hook surface. Grok instead uses manually configured
@@ -1183,12 +1183,12 @@ fn main() -> anyhow::Result<()> {
                     vendor.report_vendor(),
                 );
 
-                // AFTER the report, never before. The identity round trip
-                // is the part the session's correctness depends on, and it
-                // is the part with a deadline; the pointer is a nicety
-                // that costs a small write to a pipe the vendor is
-                // draining. Ordering it second means a stdout that
-                // somehow will not take the line cannot delay the report.
+                // AFTER the report, never before. The report is the part
+                // the session's correctness depends on, and its stdin read
+                // is the part with a deadline; the pointer is a nicety that
+                // costs a small write to a pipe the vendor is draining.
+                // Ordering it second means a stdout that somehow will not
+                // take the line cannot delay the report.
                 if announce {
                     hook::announce(&mut std::io::stdout());
                 }

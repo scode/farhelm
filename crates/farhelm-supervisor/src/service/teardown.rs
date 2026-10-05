@@ -896,6 +896,19 @@ impl Supervisor {
                 "could not remove a deleted session's conversation-hook trace"
             );
         }
+        // Reports its hooks dropped and no pass applied yet go too, in the
+        // same best-effort spirit: they describe a session that no longer
+        // exists. A hook racing this delete can recreate the directory; the
+        // next reconciliation pass removes it once it finds no session row.
+        if let Some(reports) = crate::hook_report::session_dir(&self.state_dir, session_id)
+            && let Err(e) = tokio::fs::remove_dir_all(&reports).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                session = %session_id, path = %reports.display(), error = %e,
+                "could not remove a deleted session's waiting conversation reports"
+            );
+        }
 
         Ok((!notices.is_empty()).then(|| notices.join(" ")))
     }
@@ -1271,8 +1284,8 @@ mod tests {
     }
 
     /// Delete removes the deleted session's files (uploaded attachments,
-    /// preparation state, hook trace) only after releasing the supervisor-wide
-    /// `attachments` guard.
+    /// preparation state, hook trace, reports its hooks dropped) only after
+    /// releasing the supervisor-wide `attachments` guard.
     ///
     /// Why it matters: that guard serializes attach, input, resize and output
     /// flow control for every session on the host, and the file removal is
@@ -1315,6 +1328,10 @@ mod tests {
         std::fs::create_dir_all(hook_log.parent().expect("hook log has a parent"))
             .expect("create the hook-log directory");
         std::fs::write(&hook_log, b"hook").expect("seed a hook trace");
+        let reports =
+            crate::hook_report::session_dir(state.path(), &id).expect("a UUID names a dir");
+        std::fs::create_dir_all(&reports).expect("create the drop directory");
+        std::fs::write(reports.join("latest.json"), b"{}").expect("seed a waiting report");
         let quarantine = crate::attachments::attachments_root(state.path()).join(".quarantine");
         let quarantined_uploads = || -> Vec<std::path::PathBuf> {
             std::fs::read_dir(&quarantine)
@@ -1369,6 +1386,7 @@ mod tests {
             "the cleanup removes the quarantined upload"
         );
         assert!(!hook_log.exists(), "the cleanup removes the hook trace");
+        assert!(!reports.exists(), "the cleanup removes the waiting reports");
     }
 
     /// Stop fails when the session's recorded scope cannot even be checked

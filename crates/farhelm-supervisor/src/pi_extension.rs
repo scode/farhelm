@@ -25,9 +25,10 @@ pub(crate) struct VendorAsset {
 ///
 /// The embedded reporter deliberately keeps its published two-second child
 /// timer. Changing those source bytes would require a new asset identity, so
-/// keep the published value and rely on Pi's end-of-turn reports to heal a
-/// report cut short by that timer; the shared hook can still retry within the
-/// vendor-controlled bound.
+/// keep the published value. The hook it spawns only records its ancestry
+/// and writes a report file, which fits well inside that timer whether or
+/// not a supervisor is running; Pi's end-of-turn reports heal the rare
+/// report that does not.
 ///
 /// `v2` because the bytes changed after `v1` had shipped (#811, first in
 /// v0.13.0) and [`materialize_asset`] refuses a published file whose bytes

@@ -321,7 +321,7 @@ async fn raw_restart_with(
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side, None).await;
+        let _ = handle_connection(sup, server_side).await;
     });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
@@ -1056,7 +1056,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         client.send_input(chan, b"first prompt\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
-        report_client(&client, chan, &mut rx, &mut seen, &conversation).await;
+        report_client(&sup, &client, chan, &mut rx, &mut seen, &conversation).await;
 
         // An accepted report commits before the hook returns. Check both the
         // identity and its source so the scanner cannot satisfy this premise.
@@ -1383,6 +1383,9 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
         client.send_input(chan, b"report conv-h\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "HOOK-REPORTED:conv-h", 30).await;
+        // The hook has dropped its report; apply it now rather than waiting
+        // for the ticker's pass.
+        sup.reconcile_for_test().await;
         assert_eq!(
             sup.session_snapshot(&session.id)
                 .await

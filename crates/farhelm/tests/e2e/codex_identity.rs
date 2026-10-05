@@ -3,7 +3,7 @@
 //! The fixture deliberately imitates only the vendor behavior this failure
 //! needs: a foreground native `codex` process fires a real hook, then a
 //! nested native `codex` process inherits its launch credential and fires
-//! another. The hook, Unix socket, peer identity, ancestry inspection,
+//! another. The hook, its report file and recorded ancestry, attribution,
 //! durable store, offers, and restart are all the shipped implementation.
 //! This keeps CI credential-free without replacing the mechanism that failed
 //! against Codex 0.155.1.
@@ -68,60 +68,71 @@ fn marker_id(transcript: &[u8], marker: &str) -> String {
     id.to_owned()
 }
 
-/// The hook finishes and writes its diagnostic line before the nested child
-/// prints this witness. Reading the owned log at that point proves the child
-/// did reach the real socket path; it did not merely exit after a parse or
-/// connection failure. A nested child is expected to be refused by the
+/// The supervisor's verdict on a report: the `acked` or `refused` line it
+/// appended to the session's hook log after `offset`, for `conversation`
+/// (and `source`, when given). Runs a reconciliation pass first, so a
+/// report the hook has already dropped has been judged by the time the log
+/// is read; the hook's own `written` line for the same identity is skipped.
+async fn supervisor_verdict(
+    sup: &Supervisor,
+    path: &std::path::Path,
+    offset: usize,
+    conversation: &str,
+    source: Option<&str>,
+) -> String {
+    sup.reconcile_for_test().await;
+    let log = std::fs::read_to_string(path).expect("read the owned hook log");
+    let added = log
+        .get(offset..)
+        .expect("the fixture hook log must not rotate");
+    added
+        .lines()
+        .find(|line| {
+            let identified = match source {
+                Some(source) => line.ends_with(&format!(" {conversation} {source}")),
+                None => line.contains(&format!(" {conversation} ")),
+            };
+            let word = line.split_whitespace().nth(1);
+            identified && matches!(word, Some("acked" | "refused"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no supervisor verdict for {conversation} in {}:\n{added}",
+                path.display()
+            )
+        })
+        .to_string()
+}
+
+/// The nested child's hook finishes before the child prints its witness, so
+/// its report is on disk by then. The supervisor's verdict on it proves the
+/// report reached the supervisor's judgement; it did not merely fail to
+/// parse or to be written. A nested child is expected to be refused by the
 /// foreground check, while the root may be acknowledged.
-fn assert_nested_hook_reached_supervisor(h: &Harness, session_id: &str, child: &str) {
+async fn assert_nested_hook_reached_supervisor(h: &Harness, session_id: &str, child: &str) {
     let path = h
         .state
         .path()
         .join("hook-log")
         .join(format!("{session_id}.log"));
-    let log = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-        panic!(
-            "nested hook left no owned log at {}: {error}",
-            path.display()
-        )
-    });
-    let line = log
-        .lines()
-        .find(|line| line.contains(child))
-        .unwrap_or_else(|| {
-            panic!(
-                "nested hook {child} has no log line in {}:\n{log}",
-                path.display()
-            )
-        });
-    assert!(
-        line.contains(" acked ") || line.contains(" refused "),
-        "nested hook must have received a supervisor response, not failed before it: {line}"
-    );
+    supervisor_verdict(&h.sup, &path, 0, child, None).await;
 }
 
-/// A silent hook timeout also lets the fake agent print its terminal marker.
-/// Require this invocation's actual supervisor reply, not an older compact or
-/// an ancestry refusal after the peer died, before trusting the gated race.
-fn assert_hook_reply_since(
+/// Require this invocation's actual supervisor verdict, not an older
+/// compact's, before trusting the gated race: the verdict for
+/// `conversation`/`source` written after `offset` must contain `expected`.
+async fn assert_hook_reply_since(
+    sup: &Supervisor,
     path: &std::path::Path,
     offset: usize,
     conversation: &str,
     source: &str,
     expected: &str,
 ) {
-    let log = std::fs::read_to_string(path).expect("read the owned hook log");
-    let added = log
-        .get(offset..)
-        .expect("the fixture hook log must not rotate");
-    let identity = format!(" {conversation} {source}");
-    let line = added
-        .lines()
-        .find(|line| line.ends_with(&identity))
-        .unwrap_or_else(|| panic!("the gated hook left no matching response:\n{added}"));
+    let line = supervisor_verdict(sup, path, offset, conversation, Some(source)).await;
     assert!(
         line.contains(expected),
-        "the gated hook did not receive the required live-supervisor response:\n{line}"
+        "the report did not get the required supervisor verdict:\n{line}"
     );
 }
 
@@ -261,8 +272,16 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
         .path()
         .join("hook-log")
         .join(format!("{}.log", session.id));
-    assert_hook_reply_since(&log, 0, &child, "startup", " refused ");
-    assert_hook_reply_since(&log, 0, &child, "startup", "unclassified intermediary");
+    assert_hook_reply_since(&h.sup, &log, 0, &child, "startup", " refused ").await;
+    assert_hook_reply_since(
+        &h.sup,
+        &log,
+        0,
+        &child,
+        "startup",
+        "unclassified intermediary",
+    )
+    .await;
     assert_eq!(
         durable_binding(h.state.path(), &session.id).await,
         pristine,
@@ -285,7 +304,7 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
         "CODEX-STARTUP-REPORTED:",
     )
     .await;
-    assert_hook_reply_since(&log, offset, &root, "startup", " acked ");
+    assert_hook_reply_since(&h.sup, &log, offset, &root, "startup", " acked ").await;
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
     let (binding, provenance, source) = durable_binding(h.state.path(), &session.id).await;
     assert!(
@@ -303,13 +322,15 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
 ///
 /// This test matters because a child native Codex inherits the real launch
 /// credential by normal process inheritance. Before foreground attribution,
-/// its valid socket report could become the session's resume target. The
+/// its valid report could become the session's resume target. The
 /// actual-resume checks below make that failure observable as history from a
 /// child (or a missing child history), not merely as a changed internal id.
 ///
-/// The first launch is deliberately stranded before publication. Its hook must
-/// establish the durable identity without an in-memory entry or recorded pane,
-/// and a replacement supervisor must recover it before the rest of the journey.
+/// The first launch is deliberately stranded before publication. Its hook's
+/// report must wait on disk rather than be applied without an in-memory entry
+/// or recorded pane, and the replacement supervisor that publishes the session
+/// must apply it, through the full ownership contract, before the rest of the
+/// journey.
 /// Once B is bound, even another valid foreground report must not silently
 /// rebind its exact file to a different persistent thread.
 #[farhelm_testtrace::test]
@@ -375,9 +396,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     assert!(failure.to_string().contains("simulated crash"), "{failure}");
 
     // A list would reconcile the unfinished launch and erase the boundary this
-    // check is about. The hook's diagnostic file is written only after its
-    // request finishes; observe that witness without asking the supervisor to
-    // publish the entry, then inspect the already-committed durable row.
+    // check is about. The hook's diagnostic line is written only after its
+    // report is on disk; observe that witness without asking the supervisor to
+    // publish the entry, then inspect the durable row and the drop directory.
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open owned store");
@@ -405,17 +426,19 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     assert!(
         row.pane.is_empty(),
-        "the report must work before the pane is published"
-    );
-    assert_eq!(row.conversation_source.as_deref(), Some("hook"));
-    assert!(
-        row.captured_conversation.is_some(),
-        "the foreground hook must commit its identity before publication"
+        "the report must have been made before the pane was published"
     );
     assert_eq!(
-        row.capture_ownership_version, 1,
-        "reservation before publication still commits provenance 1: the \
-         pre-publication report passed the full ownership contract"
+        row.captured_conversation, None,
+        "a report for an unpublished launch waits instead of being applied"
+    );
+    let waiting = farhelm_supervisor::hook_report::session_dir(h.state.path(), &id)
+        .expect("a session id names a drop directory")
+        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+    assert!(
+        waiting.exists(),
+        "the pre-publication report must wait on disk for the supervisor that publishes \
+         the session"
     );
     drop(store);
 
@@ -480,6 +503,24 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         row.generation,
         "recovery must adopt the existing foreground process, not silently relaunch it",
     );
+    // Recovery published the session; its waiting report is applied on the
+    // next pass, through the full ownership contract, with the pane now
+    // recovered from tmux.
+    h.sup.reconcile_for_test().await;
+    let (recovered, provenance, source) = durable_binding(h.state.path(), &id).await;
+    assert_eq!(source.as_deref(), Some("hook"));
+    assert!(
+        recovered.is_some(),
+        "the report made before publication is applied once a supervisor publishes the session"
+    );
+    assert_eq!(
+        provenance, 1,
+        "the waiting report passed the full ownership contract"
+    );
+    assert!(
+        !waiting.exists(),
+        "the applied report is settled and removed"
+    );
 
     let (channel, initial, mut stream) = h
         .client
@@ -520,7 +561,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
             .contains(&format!("CODEX-NESTED:persisted:{persisted_child}:codex")),
         "the nested reporter must execute the real codex-named image, not only inherit its argv"
     );
-    assert_nested_hook_reached_supervisor(&h, &session.id, &persisted_child);
+    assert_nested_hook_reached_supervisor(&h, &session.id, &persisted_child).await;
 
     send_and_wait(
         &h.client,
@@ -540,7 +581,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         ephemeral_child, persisted_child,
         "each child invocation must mint a fresh id"
     );
-    assert_nested_hook_reached_supervisor(&h, &session.id, &ephemeral_child);
+    assert_nested_hook_reached_supervisor(&h, &session.id, &ephemeral_child).await;
 
     // Shell descendants are refused by the corridor — the live shell
     // between reporter and runtime matches no narrow trampoline — no
@@ -600,7 +641,15 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
             )),
             "the completion witness must tie the runtime to its observed intermediary"
         );
-        assert_hook_reply_since(&shell_log, log_offset, &shell_child, source, " refused ");
+        assert_hook_reply_since(
+            &h.sup,
+            &shell_log,
+            log_offset,
+            &shell_child,
+            source,
+            " refused ",
+        )
+        .await;
         assert_eq!(
             durable_binding(h.state.path(), &session.id).await,
             pre_shell,
@@ -650,7 +699,15 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
             )),
             "the nested image witness must survive its shell wrapping"
         );
-        assert_hook_reply_since(&shell_log, log_offset, &shell_child, "startup", " refused ");
+        assert_hook_reply_since(
+            &h.sup,
+            &shell_log,
+            log_offset,
+            &shell_child,
+            "startup",
+            " refused ",
+        )
+        .await;
         assert_eq!(
             durable_binding(h.state.path(), &session.id).await,
             pre_shell,
@@ -765,7 +822,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         pending_child, cleared_b,
         "an unrelated reporter must not reuse B's identity"
     );
-    assert_nested_hook_reached_supervisor(&h, &session.id, &pending_child);
+    assert_nested_hook_reached_supervisor(&h, &session.id, &pending_child).await;
     wait_for_offer(
         &h.client,
         &session.id,
@@ -827,7 +884,15 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         farhelm_proto::RestartOffer::NotCaptured,
         "promoting the discarded conversation must not cause a legitimate clear to be lost"
     );
-    assert_hook_reply_since(&hook_log, clear_log_offset, &cleared_b, "clear", " acked ");
+    assert_hook_reply_since(
+        &h.sup,
+        &hook_log,
+        clear_log_offset,
+        &cleared_b,
+        "clear",
+        " acked ",
+    )
+    .await;
 
     // Pause a real compact report before its capture transaction. Publish B's
     // file and let the public listing bind it, then replace only the persistent
@@ -841,9 +906,33 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         .expect("read prior hook outcomes")
         .len();
     h.client.send_input(channel, b"compact\r".to_vec()).await;
+    // The hook only saves its report; a reconciliation pass is what carries
+    // it to the gate. Wait for the saved report, then drive that pass here
+    // rather than leaving it to the ticker's timing.
+    let saved_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let log = std::fs::read(&hook_log).unwrap_or_default();
+        let added = String::from_utf8_lossy(log.get(race_log_offset..).unwrap_or_default());
+        if added
+            .lines()
+            .any(|line| line.contains(" written ") && line.ends_with(" compact"))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < saved_deadline,
+            "the compact hook never saved its report:\n{added}"
+        );
+        // sleep-ok: polling interval for a file the hook child appends to.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let gated_pass = tokio::spawn({
+        let sup = Arc::clone(&h.sup);
+        async move { sup.reconcile_for_test().await }
+    });
     tokio::time::timeout(Duration::from_secs(5), report_entered.notified())
         .await
-        .expect("the foreground hook must reach the pre-transaction boundary");
+        .expect("the report drain must reach the pre-transaction boundary");
     root["payload"]["id"] = serde_json::json!(cleared_b);
     root["payload"]["session_id"] = serde_json::json!(cleared_b);
     let bound_b = format!("{root}\n");
@@ -853,6 +942,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     std::fs::write(&race_record, format!("{root}\n"))
         .expect("replace the persistent ID after refresh bound B");
     report_release.notify_one();
+    gated_pass
+        .await
+        .expect("the gated reconciliation pass completes");
     let compact_marker = format!("CODEX-COMPACT:{cleared_b}");
     wait_for_after_from(
         &mut stream,
@@ -865,6 +957,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .await;
     wait_for_marker_line(&mut stream, &mut seen, race_from, &compact_marker).await;
     assert_hook_reply_since(
+        &h.sup,
         &hook_log,
         race_log_offset,
         &cleared_b,
@@ -873,7 +966,8 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
             " refused invalid_request the Codex report's exact record could not be verified: ",
             "Codex record changed its persistent thread identity",
         ),
-    );
+    )
+    .await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::NotCaptured,

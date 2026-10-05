@@ -1202,6 +1202,12 @@ Local sessions have full behavioral parity with remote ones; what differs in v1 
 supervisor runs while the app runs (or when started manually — see Topology), and per the rule above, its sessions keep
 running while the supervisor is down and reattach when it returns. Sessions persist across app restarts.
 
+Conversation tracking keeps working while a host's supervisor is down: when an agent reports which conversation it is in
+(a new session, a `/clear`), the report waits on the host and the supervisor applies it when it returns, so a later
+Restart resumes the conversation the agent was actually in. Asking Farhelm for something from inside a session does not
+work while the supervisor is down, and that is expected for now: an agent's `farhelm spawn` and `farhelm agent` commands
+fail until the supervisor is running again. On the Mac that is whenever the desktop app is closed.
+
 The environment contract: a session process behaves as if the user had SSHed into the host and typed the command in
 their interactive shell — PATH, rc-file variables, locale included — even though the supervisor starts at boot. That
 SSH-and-type test is the contract when shell sourcing subtleties (login vs. non-login, `.profile` vs. `.bashrc`) would
@@ -1242,18 +1248,19 @@ whose report never arrived, has no captured identity and cannot be restarted: Re
 session over. What capture never does is write to the agent's own configuration or record directories. A hook passed on
 the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
 conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
-absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
-Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
-installs its hook entries, and Farhelm itself never writes, edits, or removes them. Every integrated agent type
-identifies conversations only through accepted reports; Farhelm never selects a conversation by scanning vendor state.
-Historical stored identities remain usable under the same per-type Resume rules, regardless of their source. A reporting
-credential alone does not establish which Codex conversation is in the foreground. Goose persists a credential-free
-named MCP reporter with the conversation and reuses it on resume; Pi loads a private static extension from Farhelm's
-state directory on every launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume,
-Farhelm reads the bounded first record of that exact file without following symlinks and requires its session ID to
-match. A failed check withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume
-request so the user can refresh; it never silently launches fresh under that request.
+absolute: the report it delivers is written to a file in farhelm's own state directory and from there lands in farhelm's
+own database, and every run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the
+no-agent-configuration rule from Status is protecting, and that rule's own example — hooks written into the agent's
+configuration — still stands. Grok is the documented opt-in exception: the user installs its hook entries, and Farhelm
+itself never writes, edits, or removes them. Every integrated agent type identifies conversations only through accepted
+reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities remain usable under
+the same per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
+conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
+it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
+file without following symlinks and requires its session ID to match. A failed check withdraws the durable resume offer,
+which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
+launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;

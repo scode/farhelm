@@ -270,70 +270,6 @@ fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, 
 /// still leaving room for a caller that prefers structured keys.
 const INTENT_KEY_CAP: usize = 512;
 
-/// Byte cap on `ControlMsg::ReportConversation`'s `conversation`, enforced
-/// alongside the plausibility check and before any WRITE.
-///
-/// Not before every lookup: the credential check runs first and reads the
-/// session row, because answering an unauthenticated peer's malformed
-/// request with anything more specific than `Unauthorized` would tell it
-/// which half it got wrong. What this cap precedes is the store WRITE and
-/// the log line, which are the two places an unbounded field would cost
-/// something.
-///
-/// This envelope must fit either locator-reporting vendor's encoded ID and
-/// file locator. A post-handshake control frame otherwise permits megabytes,
-/// so the handler bounds the whole report before the kind-specific validation
-/// in `Supervisor::report_conversation`. Ordinary Claude, Codex, and Goose IDs
-/// still have a separate 128-byte limit; accepting an envelope of this size
-/// does not make an equally large ID valid.
-const MAX_CONVERSATION_BYTES: usize = crate::agent_kind::MAX_LOCATOR_BYTES;
-
-/// Byte cap on `ControlMsg::ReportConversation`'s `source` — the vendor's
-/// own word for why the hook fired (`startup`, `resume`, `clear`,
-/// `compact`, ...).
-///
-/// Unlike the conversation id, this field is never stored and never reaches
-/// an argv; it only ever appears in log lines. That is exactly why it needs
-/// a bound of its own rather than riding on the id's. A `source` is not
-/// validated for shape — a vendor may add an event name at any time, and
-/// refusing an unrecognized one would throw away a perfectly good report
-/// over a diagnostic string — so the field is whatever the peer sends, and
-/// the peer is any process inside the agent's tree holding the session
-/// credential. Without a cap, one such process turns the supervisor log
-/// into an unbounded write target.
-///
-/// Generous next to every real value (the longest vendor event is a
-/// handful of characters) and small enough that a log line stays readable.
-const MAX_SOURCE_BYTES: usize = 64;
-
-/// `source` reduced to something safe to put in a log line: at most
-/// [`MAX_SOURCE_BYTES`] bytes, with every control character replaced.
-///
-/// Sanitizing rather than refusing, deliberately. The report itself is the
-/// valuable thing and the `source` is a diagnostic beside it; rejecting a
-/// report because its event name was odd would trade a correct resume for a
-/// tidy log. So an over-long or control-laced value is trimmed and passed
-/// on, and the report is judged on its identity alone.
-///
-/// Control characters are what make this more than a length cap. The log is
-/// line-oriented and read by humans and by whatever tails it; a newline in
-/// this field lets a session-held credential forge log ENTRIES, and a
-/// terminal escape lets it repaint the operator's screen. Replacement keeps
-/// the value legible while making both impossible.
-///
-/// Truncation is on a CHARACTER boundary rather than a byte one — slicing a
-/// `String` mid-UTF-8 would panic, and this input is attacker-chosen.
-fn sanitized_source(source: &str) -> String {
-    source
-        .chars()
-        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
-        .scan(0usize, |used, c| {
-            *used += c.len_utf8();
-            (*used <= MAX_SOURCE_BYTES).then_some(c)
-        })
-        .collect()
-}
-
 /// Cap on how many argv elements `CreateSession`'s `resume_template`
 /// override may carry (PLAN_M3.md items 6 and 7).
 ///
@@ -2916,27 +2852,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_commit_upload(ctx.tx, ctx.upload_routes, req_id, channel).await
         }
         ControlMsg::AbortUpload { channel } => handle_abort_upload(ctx.upload_routes, channel),
-        // A REQUEST this authority may not make, and therefore one that
-        // needs a real reply rather than the catch-all below. A helm holds
-        // full authority over every session, but reporting a conversation
-        // identity is not an authority question at all — it is a claim to
-        // BE a particular session's agent, which only that agent's own
-        // credential can support (`handle_restricted_control`). Falling
-        // through to the catch-all would log a line and send nothing,
-        // leaving a helm that sent this waiting on a reply that never
-        // comes, and leaving a test with nothing to assert on.
-        ControlMsg::ReportConversation { req_id, .. } => {
-            reply_error(
-                ctx.tx,
-                req_id,
-                ErrorKind::Unauthorized,
-                "only the session's own agent may report its conversation".to_string(),
-            )
-            .await;
-        }
-        // The same reasoning as `ReportConversation`: an agent request is
-        // made AS a particular session, which only that session's credential
-        // can establish, so a full-authority connection cannot make one. The
+        // An agent request is made AS a particular session, which only that
+        // session's credential can establish, so a full-authority connection
+        // cannot make one. The
         // refusal rides in `AgentResponse`, the one reply shape an agent
         // request's sender decodes; the catch-all below would leave it waiting.
         ControlMsg::AgentRequest { req_id, .. } => {
@@ -2968,27 +2886,25 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
 /// session-authenticated peer.
 ///
 /// Presence of hello auth selected this path before any request was read.
-/// The peer can create a child and report its own conversation identity,
-/// and nothing else; keeping that split outside ordinary dispatch means a
-/// future handler cannot accidentally become available to spawn merely by
-/// being added to the full-authority match.
+/// The peer can create a child and ask the helm about the fleet, and
+/// nothing else; keeping that split outside ordinary dispatch means a future
+/// handler cannot accidentally become available to spawn merely by being
+/// added to the full-authority match. (Conversation reports do not come this
+/// way at all: a hook drops them as files, see `super::report_files`.)
 ///
-/// The three admitted operations are admitted for three different reasons,
-/// which is worth keeping in view when a fourth is proposed. A create is an
-/// action the peer takes on the host, so it is authorized and serialized
-/// like any other lifecycle operation. A report is the peer describing
-/// ITSELF — something no other authority can do, which is exactly why the
-/// full-authority dispatch refuses it. An agent request is neither: this
-/// supervisor does not answer it at all, it carries it to the helm and
-/// brings the answer back (see [`super::agent_relay`]), so what is being
-/// authorized here is the right to ASK AS this session, not any authority
-/// over what the answer contains.
+/// The two admitted operations are admitted for different reasons, which is
+/// worth keeping in view when a third is proposed. A create is an action the
+/// peer takes on the host, so it is authorized and serialized like any other
+/// lifecycle operation. An agent request is not: this supervisor does not
+/// answer it at all, it carries it to the helm and brings the answer back
+/// (see [`super::agent_relay`]), so what is being authorized here is the
+/// right to ASK AS this session, not any authority over what the answer
+/// contains.
 pub(crate) async fn handle_restricted_control(
     sup: &Arc<Supervisor>,
     msg: ControlMsg,
     tx: &mpsc::Sender<Frame>,
     auth: &farhelm_proto::SessionAuth,
-    peer: Option<crate::procs::ProcessIdentity>,
 ) {
     match msg {
         ControlMsg::CreateSession {
@@ -3125,163 +3041,6 @@ pub(crate) async fn handle_restricted_control(
                 Some(auth),
             )
             .await;
-        }
-        ControlMsg::ReportConversation {
-            req_id,
-            vendor,
-            conversation,
-            source,
-            transcript_path,
-            hook_event_name,
-            agent_id,
-        } => {
-            // NO lifecycle claim, deliberately, and the contrast with the
-            // `CreateSession` arm directly above is the point rather than
-            // an oversight. `restart_session` holds a session's lifecycle
-            // claim for the whole restart, and Claude's hook fires at the
-            // replacement process's startup — inside that window. Queuing
-            // this behind the claim would put the tail of a restart in
-            // front of a hook that has a bounded budget. The hook can retry
-            // transport loss while the supervisor restarts, but it cannot
-            // keep waiting behind a lifecycle claim after its own budget.
-            // `Supervisor::report_conversation` carries the full argument,
-            // including what the generation fence has to cover instead.
-            if let Err((kind, message)) = require_session_auth(sup, auth).await {
-                reply_error(tx, req_id, kind, message).await;
-                return;
-            }
-            // The length bound is this handler's own, not one inherited
-            // from the record parser: a post-handshake frame is capped
-            // only by `MAX_FRAME_LEN`, and the hello-only caps in
-            // `farhelm_proto::io` never applied here. Same job
-            // `MAX_LEASE_BYTES` does for a lease name.
-            if conversation.len() > MAX_CONVERSATION_BYTES {
-                warn!(
-                    session = %auth.session_id, bytes = conversation.len(),
-                    "refused a reported conversation identity this build will not store"
-                );
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    format!(
-                        "not a conversation identity this build will store: {}",
-                        truncate_for_error(&conversation)
-                    ),
-                )
-                .await;
-                return;
-            }
-            // The discriminator gate sits HERE, at the doorway, before any
-            // vendor I/O: the destination row's durable kind is
-            // authoritative, and a report naming another kind's adapter is
-            // refused without reading a single vendor file. Kind is
-            // immutable for a session, so this read cannot race a
-            // relaunch; `report_conversation` re-checks against the
-            // generation-fenced resolution anyway, and that second check
-            // is the authoritative one.
-            let expected_kind = crate::agent_kind::agent_kind_of_vendor(vendor);
-            let doorway_kind = match sup.sessions.lock().await.get(&auth.session_id) {
-                Some(entry) => Some(entry.snapshot.kind),
-                None => sup
-                    .store
-                    .session(&auth.session_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|row| row.agent_kind()),
-            };
-            if doorway_kind.is_some_and(|kind| kind != expected_kind) {
-                warn!(
-                    session = %auth.session_id,
-                    expected = ?expected_kind,
-                    "refused a conversation report whose vendor does not match this \
-                     session's durable agent kind"
-                );
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    "the reported conversation identity does not match this \
-                                  session's agent kind"
-                        .to_string(),
-                )
-                .await;
-                return;
-            }
-            // Raw semantic evidence is type-checked BEFORE diagnostic
-            // sanitation, so an invalid value can never be normalized
-            // into an allowed word. A present subagent identity is a
-            // rejection signal on every kind; a value of an unexpected
-            // type is distinct from an absent one and is rejected rather
-            // than coerced to absent.
-            if let Some(identity) = agent_id.as_ref().and_then(|value| match value {
-                serde_json::Value::Null => None,
-                other => Some(other),
-            }) {
-                let subagent = match identity {
-                    serde_json::Value::String(marker) => !marker.is_empty(),
-                    _ => {
-                        reply_error(
-                            tx,
-                            req_id,
-                            ErrorKind::InvalidRequest,
-                            "the reported agent identity has an unexpected shape".to_string(),
-                        )
-                        .await;
-                        return;
-                    }
-                };
-                if subagent {
-                    reply_error(
-                        tx,
-                        req_id,
-                        ErrorKind::InvalidRequest,
-                        "a delegated agent may not report its session's conversation".to_string(),
-                    )
-                    .await;
-                    return;
-                }
-            }
-            // Each vendor's transition vocabulary is checked against the RAW
-            // source: sanitation exists for log safety, and a vocabulary
-            // decision must not depend on what it rewrites. Unknown tags
-            // refuse at the doorway, before the discriminator's second check
-            // and long before any vendor I/O; admission re-checks against the
-            // same allowlist (see `foreground_source_refusal`).
-            if let Some(refusal) = crate::agent_kind::foreground_source_refusal(vendor, &source) {
-                reply_error(tx, req_id, ErrorKind::InvalidRequest, refusal.to_string()).await;
-                return;
-            }
-            // Bounded and stripped of control characters HERE, at the
-            // doorway, so nothing downstream has to remember that this
-            // field is attacker-chosen: `report_conversation` puts it in
-            // several log lines and would otherwise be the place a
-            // credential-holding process could write megabytes of
-            // newline-laced text into the supervisor's log.
-            let source = sanitized_source(&source);
-            let reply = match sup
-                .report_conversation(
-                    &auth.session_id,
-                    super::core::ReportedConversation {
-                        vendor,
-                        conversation,
-                        source,
-                        transcript_path,
-                        hook_event_name,
-                        peer,
-                    },
-                )
-                .await
-            {
-                Ok(()) => ControlMsg::ConversationReported { req_id },
-                Err(e) => ControlMsg::Error {
-                    req_id,
-                    message: e.message,
-                    kind: e.kind,
-                },
-            };
-            send_reply(tx, &reply).await;
         }
         ControlMsg::AgentRequest {
             req_id,
@@ -3455,8 +3214,8 @@ pub(crate) async fn handle_restricted_control(
                 tx,
                 other.request_req_id().unwrap_or(0),
                 ErrorKind::Unauthorized,
-                "a session-authenticated peer may only create sessions, report its \
-                              conversation, and ask the helm about the fleet"
+                "a session-authenticated peer may only create sessions and ask the helm \
+                              about the fleet"
                     .to_string(),
             )
             .await;
@@ -4153,7 +3912,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4214,7 +3972,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4258,7 +4015,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4315,7 +4071,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -5066,7 +4821,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let listing = rx.try_recv().expect("a listing must not wait on the fence");
@@ -5093,7 +4847,6 @@ mod tests {
                     },
                     &tx,
                     &auth,
-                    None,
                 )
                 .await;
             }
@@ -5172,7 +4925,6 @@ mod tests {
                 },
                 &tx,
                 &auth,
-                None,
             ),
         )
         .await
@@ -5263,7 +5015,6 @@ mod tests {
                     },
                     &tx,
                     &auth,
-                    None,
                 )
                 .await;
             }
@@ -5370,7 +5121,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
 
@@ -5425,7 +5175,6 @@ mod tests {
                     },
                     &tx,
                     &auth,
-                    None,
                 )
                 .await;
             }
@@ -5496,7 +5245,6 @@ mod tests {
                     },
                     &tx,
                     &auth,
-                    None,
                 )
                 .await;
             }
@@ -6112,8 +5860,8 @@ mod tests {
     /// falling through to a catch-all; creating, which is on the list,
     /// still cannot forge a sibling or ancestor relationship.
     ///
-    /// The list is no longer "create only" — `ReportConversation` joined
-    /// it — so the two halves here are about different things: the first
+    /// The list is not "create only" — agent requests are on it too — so
+    /// the two halves here are about different things: the first
     /// pins that the allowlist is still an ALLOWLIST (an off-list message
     /// gets `Unauthorized`, not a reply built from the session's own
     /// credential), and the second pins the one check that has to happen
@@ -6129,14 +5877,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
-        handle_restricted_control(
-            &sup,
-            ControlMsg::ListSessions { req_id: 41 },
-            &tx,
-            &auth,
-            None,
-        )
-        .await;
+        handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
         let unauthorized: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("authority refusal").body).unwrap();
         assert!(matches!(
@@ -6166,7 +5907,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let forged: ControlMsg =
@@ -6230,7 +5970,6 @@ mod tests {
                 },
                 &tx,
                 &auth,
-                None,
             )
             .await;
             let reply: ControlMsg =
@@ -6261,7 +6000,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -6288,7 +6026,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -6334,7 +6071,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
         let reply: ControlMsg =
@@ -6540,7 +6276,6 @@ mod tests {
             },
             &tx,
             &auth,
-            None,
         )
         .await;
 
@@ -6605,7 +6340,7 @@ mod tests {
         };
         // Keep the request future owned by this test: a timeout drops it,
         // rather than detaching a task that might later create a session.
-        let create = handle_restricted_control(&sup, request, &tx, &auth, None);
+        let create = handle_restricted_control(&sup, request, &tx, &auth);
         tokio::pin!(create);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             tokio::select! {
@@ -6796,7 +6531,7 @@ mod tests {
             github_checkout: None,
             key_lives_with_session: false,
         };
-        let create = handle_restricted_control(&sup, request, &tx, &auth, None);
+        let create = handle_restricted_control(&sup, request, &tx, &auth);
         tokio::pin!(create);
         tokio::time::timeout(Duration::from_secs(5), async {
             tokio::select! {
@@ -6979,9 +6714,9 @@ mod tests {
         }
     }
 
-    /// Send one `ReportConversation` down a restricted connection and
-    /// decode the single reply it produces, with the ordinary `startup`
-    /// source every test that is not about the source field wants. The
+    /// Run one report through the checks and admission (see
+    /// [`admit_report`]), with the ordinary `startup` source every test that
+    /// is not about the source field wants. The
     /// discriminator is the caller's: tests targeting the kind's own
     /// adapter pass it, and the mismatch tests pass another kind's.
     async fn send_report(
@@ -6989,7 +6724,7 @@ mod tests {
         auth: &farhelm_proto::SessionAuth,
         req_id: u64,
         conversation: &str,
-    ) -> ControlMsg {
+    ) -> Reply {
         send_report_with_vendor(sup, auth, req_id, conversation, ReportVendor::Goose).await
     }
 
@@ -7002,20 +6737,21 @@ mod tests {
         req_id: u64,
         conversation: &str,
         vendor: ReportVendor,
-    ) -> ControlMsg {
+    ) -> Reply {
         send_report_with_vendor_and_source(sup, auth, req_id, conversation, vendor, "startup").await
     }
 
     /// [`send_report`] with the vendor's `source` string chosen by the
     /// caller, for the one test that has to drive a HOSTILE value through
-    /// the real dispatch rather than through `sanitized_source` alone.
+    /// the real checks and admission rather than through the sanitizer
+    /// alone.
     async fn send_report_with_source(
         sup: &Arc<Supervisor>,
         auth: &farhelm_proto::SessionAuth,
         req_id: u64,
         conversation: &str,
         source: &str,
-    ) -> ControlMsg {
+    ) -> Reply {
         send_report_with_vendor_and_source(
             sup,
             auth,
@@ -7028,8 +6764,8 @@ mod tests {
     }
 
     /// [`send_report_with_vendor_and_source`] with the raw agent identity
-    /// chosen by the caller, for the tests that pin the doorway's
-    /// subagent rejection before sanitation.
+    /// chosen by the caller, for the tests that pin the subagent rejection
+    /// before sanitation.
     async fn send_report_with_agent_identity(
         sup: &Arc<Supervisor>,
         auth: &farhelm_proto::SessionAuth,
@@ -7037,29 +6773,22 @@ mod tests {
         conversation: &str,
         vendor: ReportVendor,
         agent_id: Option<serde_json::Value>,
-    ) -> ControlMsg {
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        handle_restricted_control(
-            sup,
-            ControlMsg::ReportConversation {
-                vendor,
-                transcript_path: None,
-                hook_event_name: None,
-                agent_id,
-                req_id,
-                conversation: conversation.to_string(),
-                source: "startup".to_string(),
-            },
-            &tx,
-            auth,
-            None,
-        )
-        .await;
-        serde_json::from_slice(&rx.recv().await.expect("a report is always answered").body)
-            .expect("decode the report reply")
+    ) -> Reply {
+        let report = crate::hook_report::HookReport {
+            version: crate::hook_report::FORMAT_VERSION,
+            vendor,
+            conversation: conversation.to_string(),
+            source: "startup".to_string(),
+            transcript_path: None,
+            hook_event_name: None,
+            agent_id,
+            ancestry: None,
+            ancestry_ended: None,
+        };
+        admit_report(sup, auth, req_id, report).await
     }
 
-    /// The full-shape helper the three shorthands above funnel into: the
+    /// The full-shape helper the shorthands above funnel into: the
     /// discriminator, the identity, and the raw source each chosen by the
     /// caller, with no agent identity attached.
     async fn send_report_with_vendor_and_source(
@@ -7069,81 +6798,86 @@ mod tests {
         conversation: &str,
         vendor: ReportVendor,
         source: &str,
-    ) -> ControlMsg {
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        handle_restricted_control(
-            sup,
-            ControlMsg::ReportConversation {
-                vendor,
-                transcript_path: None,
-                hook_event_name: None,
-                agent_id: None,
-                req_id,
-                conversation: conversation.to_string(),
-                source: source.to_string(),
-            },
-            &tx,
-            auth,
-            None,
-        )
-        .await;
-        serde_json::from_slice(&rx.recv().await.expect("a report is always answered").body)
-            .expect("decode the report reply")
+    ) -> Reply {
+        let report = crate::hook_report::HookReport {
+            version: crate::hook_report::FORMAT_VERSION,
+            vendor,
+            conversation: conversation.to_string(),
+            source: source.to_string(),
+            transcript_path: None,
+            hook_event_name: None,
+            agent_id: None,
+            ancestry: None,
+            ancestry_ended: None,
+        };
+        admit_report(sup, auth, req_id, report).await
     }
 
-    /// A helm — full authority over every session on the host — may not
-    /// report a conversation identity, and is TOLD so rather than ignored.
+    /// The outcome of one report, in the shape these tests were written
+    /// against when reports arrived over the socket and were answered there:
+    /// `Reported` for an accepted report, `Error` for a refusal, each carrying
+    /// the caller's `req_id` so a test can tell its reports apart.
+    #[derive(Debug)]
+    enum Reply {
+        Reported {
+            req_id: u64,
+        },
+        Error {
+            req_id: u64,
+            kind: ErrorKind,
+            message: String,
+        },
+    }
+
+    /// Run one report through the checks a dropped report gets
+    /// (`report_files::check_hook_report`) and then admission itself,
+    /// reading the session row the way the drain does.
     ///
-    /// Reporting is not an authority question. It is a claim to BE a
-    /// particular session's agent, which only that session's own
-    /// credential can support; a helm that could make it could silently
-    /// redirect any session's resume to any conversation. The full-
-    /// authority dispatch's catch-all would log the message and send
-    /// nothing, which is worse than a refusal in a specific way: the
-    /// sender waits on a reply that never arrives, and a request/reply
-    /// client with no timeout hangs forever. That is why this arm exists
-    /// at all, and why the exact message is pinned — it is the only thing
-    /// telling the sender which door to use instead.
-    #[farhelm_testtrace::test]
-    async fn a_helm_may_not_report_a_conversation_identity() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+    /// The anchor at the session's pane is skipped and the report is
+    /// admitted without ancestry: these fixtures have no pane, and they pin
+    /// the checks and the legacy admission mechanics (claim, shape,
+    /// generation fence, replace, store-failure handling), not the launch
+    /// tie, which the report-file and e2e tests cover. The session must
+    /// exist; `auth` names it and its token is not consulted, since a
+    /// dropped report carries no credential.
+    async fn admit_report(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        report: crate::hook_report::HookReport,
+    ) -> Reply {
+        let row = sup
+            .store
+            .session(&auth.session_id)
             .await
-            .expect("supervisor");
-        let (_tasks, mut rx) = dispatch_for_test(
-            &sup,
-            ControlMsg::ReportConversation {
-                vendor: ReportVendor::Claude,
-                transcript_path: None,
-                hook_event_name: None,
-                agent_id: None,
-                req_id: 61,
-                conversation: "conv-helm".to_string(),
-                source: "startup".to_string(),
-            },
-        )
-        .await;
-        let reply: ControlMsg = serde_json::from_slice(
-            &rx.recv()
+            .expect("read the reporting session")
+            .expect("the reporting session exists");
+        let admitted = match super::super::report_files::check_hook_report(&row, &report) {
+            Err(error) => Err(error),
+            Ok(source) => {
+                sup.report_conversation(
+                    &auth.session_id,
+                    super::super::core::ReportedConversation {
+                        vendor: report.vendor,
+                        conversation: report.conversation,
+                        source,
+                        transcript_path: report.transcript_path,
+                        hook_event_name: report.hook_event_name,
+                        ancestry: None,
+                        launch_generation: None,
+                    },
+                )
                 .await
-                .expect("the refusal must be SENT, not merely logged")
-                .body,
-        )
-        .unwrap();
-        let ControlMsg::Error {
-            req_id,
-            kind,
-            message,
-        } = reply
-        else {
-            panic!("a helm's report must be refused: {reply:?}");
+            }
         };
-        assert_eq!(req_id, 61);
-        assert_eq!(kind, ErrorKind::Unauthorized);
-        assert_eq!(
-            message,
-            "only the session's own agent may report its conversation"
-        );
+        match admitted {
+            Ok(()) => Reply::Reported { req_id },
+            Err(error) => Reply::Error {
+                req_id,
+                kind: error.kind,
+                message: error.message,
+            },
+        }
     }
 
     /// An agent request on a full-authority connection gets a refusal
@@ -7191,50 +6925,6 @@ mod tests {
         );
     }
 
-    /// A report carrying a credential that does not authenticate is
-    /// refused, exactly as a create with the same credential would be.
-    ///
-    /// Hello-time authentication is admission to the connection, not
-    /// standing for each request on it — the session behind a cached
-    /// bearer can be deleted, or the token replaced, while the connection
-    /// stays open. Reporting revalidates for the same reason creating
-    /// does, and this is the check that stops a stale or forged credential
-    /// from rewriting a live session's resume identity.
-    #[farhelm_testtrace::test]
-    async fn a_report_with_an_invalid_credential_is_unauthorized() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let auth = reporting_session(&sup, "reporting-session").await;
-        let forged = farhelm_proto::SessionAuth {
-            session_id: auth.session_id.clone(),
-            token: "not-the-session-token".to_string(),
-        };
-
-        let reply = send_report(&sup, &forged, 62, "conv-forged").await;
-        assert!(
-            matches!(
-                reply,
-                ControlMsg::Error {
-                    req_id: 62,
-                    kind: ErrorKind::Unauthorized,
-                    ..
-                }
-            ),
-            "a report with a credential that does not authenticate must be refused: {reply:?}"
-        );
-        assert_eq!(
-            sup.session_snapshot(&auth.session_id)
-                .await
-                .unwrap()
-                .expect("the session still exists")
-                .captured_conversation,
-            None,
-            "a refused report must not have written anything"
-        );
-    }
-
     /// An identity this build will not store is refused as an INVALID
     /// REQUEST, before any WRITE.
     ///
@@ -7275,7 +6965,7 @@ mod tests {
             .expect("supervisor");
         let auth = reporting_session(&sup, "reporting-session").await;
 
-        let oversized = "a".repeat(MAX_CONVERSATION_BYTES + 1);
+        let oversized = "a".repeat(super::super::report_files::MAX_CONVERSATION_BYTES + 1);
         for (req_id, conversation) in [
             (63u64, "-bad"),
             (64, "has space"),
@@ -7283,7 +6973,7 @@ mod tests {
             (66, oversized.as_str()),
         ] {
             let reply = send_report(&sup, &auth, req_id, conversation).await;
-            let ControlMsg::Error {
+            let Reply::Error {
                 req_id: answered,
                 kind,
                 ..
@@ -7342,7 +7032,7 @@ mod tests {
             (75, ReportVendor::Grok),
         ] {
             let reply = send_report_with_vendor(&sup, &auth, req_id, "conv-foreign", vendor).await;
-            let ControlMsg::Error {
+            let Reply::Error {
                 req_id: answered,
                 kind,
                 ..
@@ -7389,7 +7079,7 @@ mod tests {
         let auth = reporting_session(&sup, "reporting-session").await;
 
         let reply = send_report(&sup, &auth, 75, "conv-own").await;
-        let ControlMsg::ConversationReported { req_id } = reply else {
+        let Reply::Reported { req_id } = reply else {
             panic!("the session's own adapter must be accepted: {reply:?}");
         };
         assert_eq!(req_id, 75);
@@ -7413,12 +7103,12 @@ mod tests {
     /// Why this test matters: Claude admission requires the hook to have
     /// been run by the pane process or its direct child, so that a
     /// shelled-out `claude` holding the inherited credential cannot replace
-    /// its parent's conversation. A report with no kernel-attributed peer
-    /// is the cheapest shape of "cannot be attributed", and it must fail
+    /// its parent's conversation. A report with no recorded ancestry is
+    /// the cheapest shape of "cannot be attributed", and it must fail
     /// closed rather than fall through to the old credential-only
     /// acceptance. The ordering half pins that the positional check runs
-    /// after the no-I/O shape check, so a bad id never costs a tmux or
-    /// process-table read. The positional rule itself is covered by the
+    /// after the shape check, so a bad id is refused before any evidence
+    /// is read. The positional rule itself is covered by the
     /// corridor tests in `procs` and end to end in `e2e/hook_identity.rs`.
     #[farhelm_testtrace::test]
     async fn an_unattributed_claude_report_is_refused_and_changes_nothing() {
@@ -7437,7 +7127,7 @@ mod tests {
 
         let reply =
             send_report_with_vendor(&sup, &auth, 90, "conv-child", ReportVendor::Claude).await;
-        let ControlMsg::Error { req_id, kind, .. } = reply else {
+        let Reply::Error { req_id, kind, .. } = reply else {
             panic!("an unattributed Claude report must be refused: {reply:?}");
         };
         assert_eq!(req_id, 90);
@@ -7445,7 +7135,7 @@ mod tests {
 
         let reply =
             send_report_with_vendor(&sup, &auth, 91, "--resume", ReportVendor::Claude).await;
-        let ControlMsg::Error { req_id, kind, .. } = reply else {
+        let Reply::Error { req_id, kind, .. } = reply else {
             panic!("an implausible Claude id must be refused: {reply:?}");
         };
         assert_eq!(req_id, 91);
@@ -7522,7 +7212,7 @@ mod tests {
                 agent_id,
             )
             .await;
-            let ControlMsg::Error {
+            let Reply::Error {
                 req_id: answered,
                 kind,
                 ..
@@ -7547,7 +7237,7 @@ mod tests {
         )
         .await;
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 79 }),
+            matches!(reply, Reply::Reported { req_id: 79 }),
             "a null agent identity must stay accepted: {reply:?}"
         );
         assert_eq!(
@@ -7589,7 +7279,7 @@ mod tests {
 
         let first = send_report(&sup, &auth, 67, "conv-first").await;
         assert!(
-            matches!(first, ControlMsg::ConversationReported { req_id: 67 }),
+            matches!(first, Reply::Reported { req_id: 67 }),
             "a plausible report from the session's own agent must be accepted: {first:?}"
         );
         let snapshot = sup
@@ -7609,7 +7299,7 @@ mod tests {
 
         let second = send_report(&sup, &auth, 68, "conv-second").await;
         assert!(
-            matches!(second, ControlMsg::ConversationReported { req_id: 68 }),
+            matches!(second, Reply::Reported { req_id: 68 }),
             "a second report is a new conversation, not a duplicate request: {second:?}"
         );
         let snapshot = sup
@@ -7663,7 +7353,7 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::SeqCst);
 
         let reply = send_report(&sup, &auth, 69, "conv-unrecorded").await;
-        let ControlMsg::Error {
+        let Reply::Error {
             req_id,
             kind,
             message,
@@ -7737,7 +7427,7 @@ mod tests {
         let auth = reporting_session(&sup, "reporting-session").await;
 
         let reply = send_report(&sup, &auth, 70, "conv-unwritable").await;
-        let ControlMsg::Error { req_id, kind, .. } = reply else {
+        let Reply::Error { req_id, kind, .. } = reply else {
             panic!("a report whose write failed must be refused: {reply:?}");
         };
         assert_eq!(req_id, 70);
@@ -7813,7 +7503,7 @@ mod tests {
              report path started taking it and would otherwise deadlock the suite",
         );
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 71 }),
+            matches!(reply, Reply::Reported { req_id: 71 }),
             "a report must not wait on the claim a restart holds: {reply:?}"
         );
         drop(held);
@@ -7826,43 +7516,6 @@ mod tests {
                 .as_deref(),
             Some("conv-during-restart"),
             "and it must have written, not merely replied"
-        );
-    }
-
-    /// The hook's `source` is bounded and de-controlled before it reaches a
-    /// log line, and doing so never costs the report.
-    ///
-    /// The field is unvalidated by design — a vendor may add an event name
-    /// at any time, and refusing an unrecognized one would throw away a
-    /// good report over a diagnostic string — so whatever a
-    /// credential-holding process in the agent's tree sends ends up in the
-    /// supervisor's log. Unbounded, that is an unbounded write target;
-    /// with control characters intact, a newline forges log ENTRIES and an
-    /// escape sequence repaints the operator's terminal.
-    ///
-    /// The multibyte case is not decoration: truncation has to land on a
-    /// character boundary, because slicing a `String` mid-UTF-8 panics and
-    /// this input is attacker-chosen. A cap enforced with `&s[..N]` would
-    /// turn a log-hygiene measure into a remote panic.
-    #[farhelm_testtrace::test]
-    fn a_reported_source_is_bounded_and_stripped_of_control_characters() {
-        assert_eq!(sanitized_source("startup"), "startup");
-        assert_eq!(
-            sanitized_source("start\nup\u{1b}[2J"),
-            "start\u{fffd}up\u{fffd}[2J",
-            "newlines and escapes must not survive into a line-oriented log"
-        );
-        assert!(
-            sanitized_source(&"a".repeat(4096)).len() <= MAX_SOURCE_BYTES,
-            "an unbounded source must not become an unbounded log line"
-        );
-        // Four-byte characters, so a byte-indexed cap would land inside one.
-        let wide = sanitized_source(&"🙂".repeat(64));
-        assert!(wide.len() <= MAX_SOURCE_BYTES);
-        assert_eq!(
-            wide.chars().count(),
-            MAX_SOURCE_BYTES / 4,
-            "truncation lands on a character boundary rather than splitting one"
         );
     }
 
@@ -7899,7 +7552,7 @@ mod tests {
         let hostile = format!("start\nup\u{1b}[2J{}", "🙂".repeat(1024));
         let reply = send_report_with_source(&sup, &auth, 79, "conv-hostile-source", &hostile).await;
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 79 }),
+            matches!(reply, Reply::Reported { req_id: 79 }),
             "a diagnostic field's shape must never decide a report's fate: {reply:?}"
         );
         assert_eq!(
@@ -7969,7 +7622,7 @@ mod tests {
 
         let reply = send_report(&sup, &auth, 73, "conv-early").await;
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 73 }),
+            matches!(reply, Reply::Reported { req_id: 73 }),
             "a report arriving before publication must be accepted, not lost: {reply:?}"
         );
         assert_eq!(
@@ -8029,7 +7682,7 @@ mod tests {
         );
 
         let reply = send_report(&sup, &auth, 74, "conv-stale").await;
-        let ControlMsg::Error { req_id, kind, .. } = reply else {
+        let Reply::Error { req_id, kind, .. } = reply else {
             panic!("a report for a superseded launch must be refused: {reply:?}");
         };
         assert_eq!(req_id, 74);
@@ -8065,16 +7718,16 @@ mod tests {
         let at_cap = "a".repeat(128);
         let reply = send_report(&sup, &auth, 72, &at_cap).await;
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 72 }),
+            matches!(reply, Reply::Reported { req_id: 72 }),
             "an ordinary id of exactly 128 bytes is inside the bound: {reply:?}"
         );
         let oversized = format!("{at_cap}a");
-        assert!(oversized.len() < MAX_CONVERSATION_BYTES);
+        assert!(oversized.len() < super::super::report_files::MAX_CONVERSATION_BYTES);
         let reply = send_report(&sup, &auth, 73, &oversized).await;
         assert!(
             matches!(
                 reply,
-                ControlMsg::Error {
+                Reply::Error {
                     req_id: 73,
                     kind: ErrorKind::InvalidRequest,
                     ..
@@ -8147,7 +7800,7 @@ mod tests {
             key_lives_with_session: false,
         };
 
-        handle_restricted_control(&sup, spawn(61), &tx, &parent, None).await;
+        handle_restricted_control(&sup, spawn(61), &tx, &parent).await;
         let first: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
         let ControlMsg::SessionCreated { session: child, .. } = first else {
@@ -8163,7 +7816,7 @@ mod tests {
                 .expect("the spawned child has a credential"),
         };
 
-        handle_restricted_control(&sup, spawn(62), &tx, &child_auth, None).await;
+        handle_restricted_control(&sup, spawn(62), &tx, &child_auth).await;
         let second: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("second reply").body).expect("decode");
         let ControlMsg::SessionCreated {
@@ -8273,7 +7926,7 @@ mod tests {
             key_lives_with_session: false,
         };
         let mut send = async |msg| {
-            handle_restricted_control(&sup, msg, &tx, &auth, None).await;
+            handle_restricted_control(&sup, msg, &tx, &auth).await;
             serde_json::from_slice::<ControlMsg>(&rx.recv().await.expect("create reply").body)
                 .expect("decode create reply")
         };
@@ -9452,8 +9105,7 @@ mod tests {
             let (client_side, server_side) = tokio::io::duplex(1 << 20);
             let server_sup = Arc::clone(&sup);
             tokio::spawn(async move {
-                let _ = super::super::connection::handle_connection(server_sup, server_side, None)
-                    .await;
+                let _ = super::super::connection::handle_connection(server_sup, server_side).await;
             });
             let (read_half, write_half) = tokio::io::split(client_side);
             let mut host = BusyHost {

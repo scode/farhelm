@@ -3,18 +3,6 @@
 
 use super::*;
 
-/// Attribute a Claude hook to the session's foreground by position: the
-/// process that ran the hook must be the owned pane process or its direct
-/// child. See [`claude_corridor`] for the rule and why it recognizes no
-/// executable.
-pub(crate) fn foreground_claude_emitter(
-    peer: ProcessIdentity,
-    pane_pid: u32,
-) -> Result<ProcessIdentity, String> {
-    let chain = walk_to_pane(peer, pane_pid)?;
-    claude_corridor(&chain)
-}
-
 /// Claude's corridor over an already-walked chain: a positional rule, not
 /// an image rule. The reporter (first link) must be the supported hook
 /// invocation; the links directly above it that are narrow
@@ -47,7 +35,7 @@ pub(crate) fn foreground_claude_emitter(
 /// Trampoline skipping is load-bearing, not tidiness: whether the hook's
 /// `sh -c` survives as a link or `exec`s the hook depends on the shell,
 /// and the position of the emitter must not depend on that.
-pub(super) fn claude_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
+pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
     let reporter = chain
         .first()
         .ok_or_else(|| "the hook ancestry is empty".to_string())?;

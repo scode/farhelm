@@ -1953,19 +1953,15 @@ pub struct AgentSession {
     pub stale: bool,
 }
 
-/// Control-channel messages. `req_id` correlates a response to its request
-/// so one connection can carry concurrent requests; unsolicited events —
-/// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
-/// version 7 `ReplayComplete` — carry no `req_id` and correlate by
-/// `channel` instead, so a demultiplexer must route them by channel
-/// rather than treating a missing `req_id` as an error.
+/// Which vendor adapter produced a conversation report.
 ///
-/// Which vendor adapter produced a [`ControlMsg::ReportConversation`].
-///
-/// This names the private entry point the report arrived through — the
-/// injected hook command, the Goose helper, or the shipped asset — so the
-/// supervisor can reject a report addressed to a session of another kind
-/// before spending any vendor I/O on it. It is an adapter identifier,
+/// Reports do not travel over this protocol: a hook drops them as files
+/// for its supervisor (see `farhelm_supervisor::hook_report`), and this enum
+/// lives here because both sides of that file name the vendor with it. It
+/// names the private entry point the report came through — the injected
+/// hook command, the Goose helper, or the shipped asset — so the supervisor
+/// can reject a report addressed to a session of another kind before
+/// spending any vendor I/O on it. It is an adapter identifier,
 /// not a secret and not an ownership proof: a shell child can copy argv
 /// as easily as it inherits environment, so admission still requires the
 /// per-kind foreground-runtime and root-conversation proofs. There is
@@ -2050,6 +2046,13 @@ impl DeleteGuard {
     }
 }
 
+/// Control-channel messages. `req_id` correlates a response to its request
+/// so one connection can carry concurrent requests; unsolicited events —
+/// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
+/// version 7 `ReplayComplete` — carry no `req_id` and correlate by
+/// `channel` instead, so a demultiplexer must route them by channel
+/// rather than treating a missing `req_id` as an error.
+///
 /// Compatibility posture: within one protocol version the set of messages
 /// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
 /// negotiating per-message.
@@ -2534,103 +2537,6 @@ pub enum ControlMsg {
     /// freshly recomputed `restart_offer`) so a caller does not have to
     /// re-list to see it.
     SessionRestarted { req_id: u64, session: SessionInfo },
-    /// A session's agent reporting its own conversation identity from
-    /// inside its process — sent by a configured vendor hook when a new or
-    /// resumed conversation id comes into being. Farhelm injects the hook
-    /// for vendors that support per-launch configuration; Grok uses the same
-    /// message from its manually installed callbacks. Accepted only on a
-    /// session-authenticated connection (`ControlMsg::Hello::auth`), and
-    /// only to report on the session that connection is authenticated AS —
-    /// a peer cannot report a conversation for any session but its own. A
-    /// full-authority (helm) connection has no session identity to report
-    /// and must not send this message at all: the supervisor's
-    /// full-authority dispatch refuses it explicitly, distinctly from its
-    /// catch-all, so a misbehaving helm gets an answer rather than waiting
-    /// forever for one. This vocabulary-level contract is what the
-    /// dispatch in `handle_control`/`handle_restricted_control` enforces;
-    /// this crate only states it.
-    ///
-    /// `conversation` is exactly the value the agent kind's resume
-    /// template substitutes for its `{conversation}` placeholder — the
-    /// literal argument a later `--resume`-shaped relaunch would pass, not
-    /// a display name or a value this crate derives.
-    ///
-    /// ## Trust boundary
-    ///
-    /// The credential identifies the Farhelm session, not necessarily its
-    /// foreground vendor conversation: tools and nested invocations can inherit
-    /// it. The supervisor applies the stored kind's attribution rules before
-    /// accepting a replacement. Codex and Grok additionally require a
-    /// kernel-attributed foreground process. Codex then checks root transcript
-    /// metadata; Grok checks the exact session record and summary. A persistent
-    /// child record alone is insufficient for either kind.
-    ///
-    /// This is not a security boundary against the same Unix user, who owns the
-    /// processes and vendor files. Shape validation and literal argv substitution
-    /// separately prevent reported identity text from becoming a shell command.
-    ///
-    /// ## Ordering and replacement
-    ///
-    /// A second report from the same launch REPLACES the first rather than
-    /// being refused as a conflict: Claude's `/clear` and Codex's `/new`
-    /// both start a genuinely new conversation, with a new id, inside the
-    /// SAME process — the hook fires again, and the new id is exactly what
-    /// a later resume should target. Overwriting the prior report is
-    /// therefore the correct outcome, not a duplicate request to reject.
-    /// Accepted reports replace earlier identities within the current launch.
-    /// Most vendors rely on hook delivery order because the wire has no shared
-    /// sequence field. Grok carries its RFC 3339 selection time inside the
-    /// opaque locator, so its adapter can reject a delayed callback. The durable
-    /// generation comparison rejects a report racing a relaunch. Lifecycle
-    /// teardown removes old reporters, while the foreground-attributed kinds
-    /// also require ancestry reaching the current owned pane.
-    ReportConversation {
-        req_id: u64,
-        /// Which vendor adapter produced this report (version 28; Grok was
-        /// added to the closed set in version 29). The
-        /// supervisor rejects a mismatch against the destination session's
-        /// durable kind before any vendor I/O: without it a plain id
-        /// addressed to any id-reporting kind is accepted on shape alone,
-        /// which is exactly the confusion a credential-holding child
-        /// exploits. Required, never defaulted — an untagged report is
-        /// refused rather than inferred, and old senders that predate the
-        /// field fail closed at decode. See [`ReportVendor`] for why this
-        /// is an adapter identifier rather than an ownership proof.
-        vendor: ReportVendor,
-        /// The conversation id as the agent's own hook reported it.
-        /// Treated as an opaque, untrusted string until the supervisor's
-        /// plausibility check accepts it — see this variant's own "Trust
-        /// boundary" section.
-        conversation: String,
-        /// The vendor's reason for the hook. Codex uses `clear` to identify an
-        /// explicit foreground switch even before the new record is persisted.
-        /// Other integrations retain this value for bounded diagnostics.
-        source: String,
-        /// Exact vendor record path, never a request to search a directory.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        transcript_path: Option<serde_json::Value>,
-        /// Codex requires a root `SessionStart`, not an internal-agent event.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        hook_event_name: Option<serde_json::Value>,
-        /// The vendor hook's own subagent identity, carried VERBATIM as
-        /// JSON (version 28). The hook never interprets it: a typed
-        /// subagent marker must reach the supervisor intact so admission
-        /// can reject it BEFORE diagnostic sanitation could normalize an
-        /// invalid value into an allowed word. Absent or null means the
-        /// payload named no subagent; any other shape is validated, not
-        /// coerced, downstream.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_id: Option<serde_json::Value>,
-    },
-    /// Acknowledges a durable foreground identity report. A pending Codex
-    /// conversation is recorded but is not resumable until its exact file is
-    /// verified. Refusal or persistence failure arrives as a correlated `Error`,
-    /// so the sender can distinguish refusal from transport loss. The hook that
-    /// sends the request cannot ACT on any of these — its own contract is
-    /// to run silently and exit successfully regardless — but it does wait
-    /// for the reply within its budget and records which one it got in its
-    /// per-session log, which is the only place a lost report is visible.
-    ConversationReported { req_id: u64 },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
     /// rename verb. The supervisor is the authority on accepted title text;
     /// clients carry it verbatim and render any refusal.
@@ -3217,7 +3123,6 @@ impl ControlMsg {
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
-            | ControlMsg::ConversationReported { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
             | ControlMsg::Attached { req_id, .. }
             | ControlMsg::TabOpened { req_id, .. }
@@ -3244,7 +3149,6 @@ impl ControlMsg {
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::RestartSession { .. }
-            | ControlMsg::ReportConversation { .. }
             | ControlMsg::RenameSession { .. }
             | ControlMsg::OpenTab { .. }
             | ControlMsg::CloseTab { .. }
@@ -3288,7 +3192,6 @@ impl ControlMsg {
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::RestartSession { req_id, .. }
-            | ControlMsg::ReportConversation { req_id, .. }
             | ControlMsg::RenameSession { req_id, .. }
             | ControlMsg::OpenTab { req_id, .. }
             | ControlMsg::CloseTab { req_id, .. }
@@ -3309,7 +3212,6 @@ impl ControlMsg {
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionRestarted { .. }
-            | ControlMsg::ConversationReported { .. }
             | ControlMsg::SessionRenamed { .. }
             | ControlMsg::Attached { .. }
             | ControlMsg::TabOpened { .. }
@@ -3371,8 +3273,6 @@ impl ControlMsg {
             ControlMsg::SessionDeleted { .. } => "SessionDeleted",
             ControlMsg::RestartSession { .. } => "RestartSession",
             ControlMsg::SessionRestarted { .. } => "SessionRestarted",
-            ControlMsg::ReportConversation { .. } => "ReportConversation",
-            ControlMsg::ConversationReported { .. } => "ConversationReported",
             ControlMsg::RenameSession { .. } => "RenameSession",
             ControlMsg::SessionRenamed { .. } => "SessionRenamed",
             ControlMsg::OpenTab { .. } => "OpenTab",
@@ -6092,121 +5992,6 @@ mod tests {
         );
     }
 
-    /// Golden JSON for `ReportConversation`/`ConversationReported`, pinned
-    /// the same way as `stop_and_delete_json_shapes_are_pinned`: a serde
-    /// attribute change here (dropping `rename_all`, renaming a field)
-    /// would compile and round-trip cleanly while quietly producing bytes
-    /// an unmodified peer cannot parse.
-    #[farhelm_testtrace::test]
-    fn report_conversation_json_shapes_are_pinned() {
-        let report = ControlMsg::ReportConversation {
-            vendor: ReportVendor::Claude,
-            transcript_path: None,
-            hook_event_name: None,
-            agent_id: None,
-            req_id: 21,
-            conversation: "abc123def456".to_string(),
-            source: "startup".to_string(),
-        };
-        assert_eq!(
-            serde_json::to_value(&report).unwrap(),
-            serde_json::json!({
-                "type": "report_conversation",
-                "vendor": "claude",
-                "req_id": 21,
-                "conversation": "abc123def456",
-                "source": "startup",
-            })
-        );
-
-        let reported = ControlMsg::ConversationReported { req_id: 21 };
-        assert_eq!(
-            serde_json::to_value(&reported).unwrap(),
-            serde_json::json!({
-                "type": "conversation_reported",
-                "req_id": 21,
-            })
-        );
-    }
-
-    /// A version-27 report — the exact shape this build's predecessors
-    /// sent, with no `vendor` field — must FAIL to decode rather than be
-    /// accepted as an untagged report. That is the upgrade fail-closed
-    /// rule: an old long-running hook or asset keeps its credential after
-    /// an upgrade, and silently inferring its vendor would let it keep
-    /// setting capture under the new contract without ever passing the
-    /// new gate. `agent_id` stays optional for the opposite reason: it is
-    /// purely additive evidence, and its absence means "no subagent named"
-    /// rather than a different protocol.
-    #[farhelm_testtrace::test]
-    fn report_conversation_without_vendor_fails_decode() {
-        let untagged = serde_json::json!({
-            "type": "report_conversation",
-            "req_id": 21,
-            "conversation": "abc123def456",
-            "source": "startup",
-        });
-        assert!(
-            serde_json::from_value::<ControlMsg>(untagged).is_err(),
-            "a vendorless v27 report decoded under v28"
-        );
-        let unknown_vendor = serde_json::json!({
-            "type": "report_conversation",
-            "vendor": "fax",
-            "req_id": 21,
-            "conversation": "abc123def456",
-            "source": "startup",
-        });
-        assert!(
-            serde_json::from_value::<ControlMsg>(unknown_vendor).is_err(),
-            "an unknown vendor decoded under a closed enum"
-        );
-        for vendor in ["claude", "codex", "goose", "pi", "omp", "grok"] {
-            let tagged = serde_json::json!({
-                "type": "report_conversation",
-                "vendor": vendor,
-                "req_id": 21,
-                "conversation": "abc123def456",
-                "source": "startup",
-            });
-            assert!(
-                serde_json::from_value::<ControlMsg>(tagged).is_ok(),
-                "the {vendor} discriminator must decode"
-            );
-        }
-    }
-
-    /// `ReportConversation`/`ConversationReported` round-tripped through the
-    /// real encode/decode path, matching `stop_and_delete_roundtrip_through_frames`'s
-    /// treatment of the M2 additions — this is what would catch a drift
-    /// between the codec's framing and serde's JSON shape for the version
-    /// 12 vocabulary this bump adds, which the JSON-only golden test above
-    /// cannot see.
-    #[farhelm_testtrace::test]
-    fn report_conversation_roundtrip_through_frames() {
-        for msg in [
-            ControlMsg::ReportConversation {
-                vendor: ReportVendor::Codex,
-                transcript_path: None,
-                hook_event_name: None,
-                agent_id: None,
-                req_id: 1,
-                conversation: "abc123def456".to_string(),
-                source: "resume".to_string(),
-            },
-            ControlMsg::ConversationReported { req_id: 1 },
-        ] {
-            let mut wire = Vec::new();
-            Frame::control(&msg).encode(&mut wire).unwrap();
-            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
-            assert_eq!(used, wire.len());
-            assert_eq!(
-                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
-                msg
-            );
-        }
-    }
-
     /// Version 5's additive rule for FIELDS (see `PROTOCOL_VERSION`'s
     /// docs): the future-extra-field tolerance direction, mirroring
     /// `pause_and_resume_with_future_extra_fields_decode_through_parse_control`.
@@ -6764,34 +6549,6 @@ mod tests {
         );
     }
 
-    /// The version-12 pair must sit in the RIGHT arms of both accessors,
-    /// not merely in some arm: the exhaustive matches force a placement but
-    /// cannot tell a misplacement from a correct one, and each direction
-    /// of error is silent. `ReportConversation` classified as a reply would
-    /// let a peer's echo of the request be delivered as its own answer and
-    /// lose the correlated `Unauthorized`/`InvalidRequest` that the hook
-    /// records in its log; `ConversationReported` classified as a request
-    /// would leave the hook waiting on a reply that the demultiplexer
-    /// never routes to it.
-    #[farhelm_testtrace::test]
-    fn report_conversation_pair_is_classified_as_request_and_reply() {
-        let request = ControlMsg::ReportConversation {
-            vendor: ReportVendor::Omp,
-            transcript_path: None,
-            hook_event_name: None,
-            agent_id: None,
-            req_id: 21,
-            conversation: "abc123def456".to_string(),
-            source: "startup".to_string(),
-        };
-        assert_eq!(request.request_req_id(), Some(21));
-        assert_eq!(request.reply_req_id(), None);
-
-        let reply = ControlMsg::ConversationReported { req_id: 21 };
-        assert_eq!(reply.reply_req_id(), Some(21));
-        assert_eq!(reply.request_req_id(), None);
-    }
-
     /// [`ControlMsg::reply_req_id`] is what every demultiplexer routes
     /// replies by, and getting its answer wrong has two failure modes that
     /// are both silent at the call site: a reply variant it forgot returns
@@ -6875,8 +6632,8 @@ mod tests {
     }
 
     /// The version-13 relay pair must sit in the RIGHT arms of both
-    /// accessors, for `ReportConversation`'s reasons plus one this pair has
-    /// on its own: it is the first shape that travels in BOTH directions,
+    /// accessors, because a misplacement in either direction is silent, and
+    /// for one reason this pair has on its own: it is the first shape that travels in BOTH directions,
     /// so each side is simultaneously a requester (of the leg it sends) and
     /// a responder (of the leg it receives). A misclassified `AgentRequest`
     /// would let a peer's echo complete the supervisor's own pending upcall

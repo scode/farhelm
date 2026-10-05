@@ -3,21 +3,6 @@
 
 use super::*;
 
-/// Attribute a manual Grok hook to the one supported native runtime under
-/// the owned pane.
-///
-/// Grok reuses the same bounded ancestry walk and shell-trampoline corridor
-/// as Codex. Its extra proof is argv-specific: the native executable must
-/// carry `--no-leader` before any end-of-options boundary, so the hook runs
-/// inside the owned runtime rather than a shared backend.
-pub(crate) fn foreground_grok_emitter(
-    peer: ProcessIdentity,
-    pane_pid: u32,
-) -> Result<ProcessIdentity, String> {
-    let chain = walk_to_pane(peer, pane_pid)?;
-    grok_corridor(&chain)
-}
-
 /// Recognize the native Grok image from the already captured executable
 /// path. Linux appends ` (deleted)` after an in-place upgrade; that suffix
 /// does not change which executable the process is running.
@@ -42,7 +27,7 @@ pub(super) fn grok_has_owned_backend(argv: &[Vec<u8>]) -> bool {
 }
 
 /// Grok's restrictive corridor over the shared bounded ancestry walk.
-pub(super) fn grok_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
+pub(crate) fn grok_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
     let reporter = chain
         .first()
         .ok_or_else(|| "the hook ancestry is empty".to_string())?;

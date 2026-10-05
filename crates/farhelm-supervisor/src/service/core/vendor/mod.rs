@@ -5,7 +5,7 @@
 //! argv, hook injection decisions, record and locator parsing, screen
 //! reading) lives in `crate::agent_kind`, and the process-tree corridors in
 //! `crate::procs`. What lives here reads and writes the store, takes the
-//! capture claim, or walks the live process tree: admitting a kind's
+//! capture claim, or reads a report's process evidence: admitting a kind's
 //! conversation report, refreshing or verifying its captured identity, and
 //! recording launch details its admission proof checks later.
 //!
