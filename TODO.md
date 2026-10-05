@@ -55,12 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rename sends to another machine starting a second session is an accepted deficiency. Plan:
   `plans/queue/agent-retry-by-request.md`.
 
-- **Confirm the help menu fix on the Mac.** In the macOS app (0.22.0-rc.5), the `?` menu at the top of the sidebar
-  showed only its pointer and a few pixels of its panel. PR #1598 moved the panel out of the sidebar's sticky top bar,
-  into the same structure the `⋯` row menus use, which work on the Mac. The bug never reproduced on Linux, so nothing
-  has shown the fix working on a Mac yet. Open the menu once in a macOS build that includes the fix, and remove this
-  entry if it shows in full.
-
 - **Explain unavailable Restart in the user's terms.** While a session has no conversation Farhelm can resume yet,
   Restart and Restart with are greyed out, and their hover text says no conversation was captured, so replace starts it
   over. That reads as final and in Farhelm's own terms. Say instead what the user is waiting for with this agent, per
