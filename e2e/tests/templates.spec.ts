@@ -54,6 +54,9 @@ test("the Templates panel creates, edits and deletes a template", async ({ page,
     await page.getByRole("button", { name: "templates", exact: true }).click();
     const dialog = page.locator('.templates-dialog[role="dialog"]');
     await expect(dialog).toBeVisible();
+    // A new template is saved only once the template list has loaded (the
+    // panel refuses one while it cannot check the name is free).
+    await expect(dialog.getByText("loading templates")).toHaveCount(0);
     await dialog.locator(".templates-name").fill(name);
     await dialog.getByLabel("agent type").selectOption("codex");
     await dialog.getByLabel("effort").selectOption("high");
