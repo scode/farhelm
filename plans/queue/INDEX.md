@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 4f4b03] `triage-tooling-output-ownership.md` — Maintainer video recorder and screenshot publisher delete or drop only what they made.
 - [in-flight 6201b7] `triage-dialog-cancel-races.md` — Cancelled YOLO questions and a closing feedback dialog stop acting on queued answers (complexity-gated).
 - [in-flight 49d56a] `triage-install-uninstall-gaps.md` — Escape remote linger errors, exact uninstall identity check, installer refuses symlinked app folders.
-- [pending] `triage-template-gaps.md` — Templates refuse to overwrite on an unloaded list and refuse a replaced machine at dispatch.
+- [in-flight 27b6e7] `triage-template-gaps.md` — Templates refuse to overwrite on an unloaded list and refuse a replaced machine at dispatch.
