@@ -6849,6 +6849,28 @@ mod tests {
         }
     }
 
+    /// The text the degraded-linger log line carries for a remote host's
+    /// stderr has its terminal controls escaped: a screen clear, an OSC 52
+    /// clipboard write and an 8-bit CSI come out as visible escape text
+    /// rather than as bytes a terminal would act on. The log line writes
+    /// exactly this text (`linger_log_stderr`); the log itself is not
+    /// captured here.
+    ///
+    /// Why it matters: the remote host is untrusted, and its stderr is logged
+    /// through the Display formatter, which writes control bytes as they are.
+    #[farhelm_testtrace::test]
+    fn linger_stderr_is_logged_with_its_controls_escaped() {
+        let stderr = "  denied\x1b[2J\x1b]52;c;aGk=\x07\u{9b}2J\n";
+        let logged = linger_log_stderr(stderr);
+        assert!(
+            !logged.chars().any(|c| c.is_control()),
+            "no raw control character reaches the log: {logged:?}"
+        );
+        assert!(logged.contains("denied"), "{logged}");
+        assert!(logged.contains("\\u{1b}[2J"), "{logged}");
+        assert!(logged.contains("\\u{7}"), "{logged}");
+    }
+
     /// Remote absence has a dedicated exit while inspection failures retain
     /// stderr instead of being collapsed into `None`.
     #[farhelm_testtrace::test]

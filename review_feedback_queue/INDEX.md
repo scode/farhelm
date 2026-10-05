@@ -4,7 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `linger-control.md` — Remote linger failure writes terminal controls to helm logs.
 - `template-successor.md` — Template installation identity ignored at create dispatch.
 - `uninstall-missing-id.md` — Connected uninstall omits missing recorded identity comparison.
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.

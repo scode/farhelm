@@ -6921,7 +6921,9 @@
   product or spec judgement or new complexity to be recorded as `fix code`; this is one of them.
 - Completion criteria: the stderr goes through the existing control-escaping helper (or a Debug-escaped field) before it
   is logged; a focused test shows control bytes come out as escaped text. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
+- Execution: complete — change `wrqptmunwwnpzntounzxkrryrykolsur`, bookmark
+  `plan/triage-install-uninstall-gaps/01-linger-control`, PR
+  [#1654](https://github.com/scode/farhelm/pull/1654/changes).
 
 ## template-clobber.md
 
