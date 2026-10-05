@@ -79,3 +79,26 @@ working for any layout; and that the refusal should point to that. That is what 
 The PR was reviewed by Claude Opus 5.5 and gpt-6-astra, both at high effort, as you required. gpt-6-astra found nothing.
 Opus found no correctness problems and raised seven minor points, all applied; the one worth knowing is the
 sessions-first order described above, which now has a comment in the code.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as #1614 (the uninstall symlink fix), one squash commit on main.
+
+#### What else was on main
+
+Nothing that could interact. The change was rebased onto main right after the feature that asks the user before an
+agent's `farhelm` command acts landed, and between then and the landing main gained only the planning queue's own
+bookkeeping, which touches no code, spec or test. No other plan landed alongside it. A separate reviewer that had not
+seen the work checked this independently before the merge and reached the same conclusion. It also found nothing outside
+the PR that the change breaks. The browser tests and docs screenshots that walk through uninstall run against a stand-in
+for real hosts, which this change updated to report that the program directory is not a link, so the steps and messages
+they check are unchanged. The installer, local uninstall and CentOS provisioning tests never run remote uninstall, and
+the website quotes none of uninstall's refusals.
+
+#### Checks
+
+- Reused: the report's checks, on the reasoning the report gives for reusing its test runs across its rebase. The code
+  that landed is the rebased change the report describes: nothing but the queue's own files reached main after it.
+- Skipped: running anything again during the landing, since nothing that could interact landed in between.
+
+Nothing in the report above was made untrue by the landing.
