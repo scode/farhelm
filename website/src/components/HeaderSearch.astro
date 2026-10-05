@@ -1,0 +1,38 @@
+---
+/**
+ * Starlight's search box, followed by the install command (InstallCommand.astro).
+ *
+ * The header's middle column is all the free space between the site title and
+ * the theme menu; Starlight fills it with only the search button, capped at
+ * 22rem, which leaves most of it empty on a desktop window. Overriding Search
+ * rather than the whole Header keeps Starlight's header layout and its other
+ * parts as they are, and puts the command in that otherwise empty space.
+ */
+import Default from '@astrojs/starlight/components/Search.astro';
+import InstallCommand from './InstallCommand.astro';
+---
+
+<div class="farhelm-header-middle">
+  <Default />
+  <InstallCommand />
+</div>
+
+<style>
+  .farhelm-header-middle {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* The search button keeps its own 22rem cap. When the window narrows, it
+     shrinks before the command beside it does, down to a width that still
+     reads "Search", so the command stays readable as long as it can. The
+     rule names the button because Starlight's <site-search> wrapper is
+     display: contents, which makes the button itself the flex item here. */
+  .farhelm-header-middle :global(button[data-open-modal]) {
+    flex: 0 100 22rem;
+    min-width: 9rem;
+  }
+</style>
