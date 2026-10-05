@@ -513,21 +513,26 @@ jobs:
           # signing with a key those binaries do not know would produce a
           # release every helm refuses.
           "$RUNNER_TEMP/minisign" -R -s "$key" -p recovered.pub
-          expected=$(sed -n 's/^pub const MINISIGN_PUBKEY: &str = "\(.*\)";$/\1/p' \
+          # The ring is one line of quoted key strings; the signing key must
+          # be one of them, verbatim.
+          ring=$(sed -n 's/^pub const RELEASE_KEY_RING: &\[&str\] = &\[\(.*\)\];$/\1/p' \
             crates/farhelm-helm/src/provisioning/release_payloads.rs)
-          test -n "$expected" || {
-            echo "could not read MINISIGN_PUBKEY out of release_payloads.rs" >&2
+          test -n "$ring" || {
+            echo "could not read RELEASE_KEY_RING out of release_payloads.rs" >&2
             exit 1
           }
           # Line 1 of a minisign public key file is an untrusted comment; the
-          # key itself is line 2, and that is the form the constant holds.
+          # key itself is line 2, and that is the form the ring holds.
           recovered=$(sed -n '2p' recovered.pub)
-          if [ "$recovered" != "$expected" ]; then
-            echo "the signing key does not match MINISIGN_PUBKEY compiled into the binaries" >&2
-            echo "  compiled in: $expected" >&2
-            echo "  would sign with: $recovered" >&2
-            exit 1
-          fi
+          case "$ring" in
+            *"\"$recovered\""*) ;;
+            *)
+              echo "the signing key is not in RELEASE_KEY_RING compiled into the binaries" >&2
+              echo "  compiled in: $ring" >&2
+              echo "  would sign with: $recovered" >&2
+              exit 1
+              ;;
+          esac
 
           # `-t` is MANDATORY and its exact spelling is load-bearing. The
           # signature authenticates only the CONTENTS of SHA256SUMS, which

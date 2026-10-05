@@ -185,6 +185,12 @@ mod middleware;
 /// progress (PLAN_M7.md item 6).
 mod provisioning;
 pub use provisioning::{LocalSupervisorDiscovery, discover_local_supervisor};
+/// What installed Farhelm trusts a release by: the compiled-in release key
+/// ring and the one function that checks a release's signed checksums
+/// against it. Public because the desktop app's updater verifies the
+/// releases it installs with exactly the rules the helm applies to the
+/// payloads it downloads.
+pub use provisioning::{RELEASE_KEY_RING, verify_signed_sums};
 
 /// The optional precondition a session create may carry — which connection
 /// it was prepared against — so a create written for one install cannot
