@@ -6501,3 +6501,139 @@
 - Execution: complete: feedback file and index entry removed during the queue cleanup. No code change was needed. Change
   `qnulmtzkpxkkltutzlsswxwkronpltxt`, bookmark `pr/review-queue-resolved-findings`, PR
   [#1580](https://github.com/scode/farhelm/pull/1580/changes).
+
+## probe-pgid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. When a host probe fails before its handshake, the helm reaps the
+  `ssh` child and then sends SIGKILL to its process group by the saved number
+  (`crates/farhelm-helm/src/provisioning/backend.rs:1979–1991`). Once the child is reaped and no group member remains,
+  the number is no longer reserved. The window is the gap between two adjacent operations. Reuse inside it was not
+  demonstrated; on Linux, process numbers are allocated sequentially up to `pid_max` (4,194,304 on the development
+  host), so reuse here needs the whole range to cycle. Signaling a group right after reaping its leader is common Unix
+  practice. systemd plays no part in this path.
+- Decision: the user (2026-10-05) accepts process-ID reuse races of this "second or less" kind, judging reuse within
+  such a window vanishingly unlikely and within what modern Unix software reasonably relies on. The acceptance is
+  deliberate and interim: it is meant to stop review findings on this topic until the user decides the longer-term
+  approach, recorded as two maybe-later TODO items: (a) make a systemd user manager a hard requirement on Linux with no
+  fallback, so the process sweep can go there, and (b) assess exactly what Farhelm promises and does about process
+  cleanup on macOS. Background from the discussion: on systemd hosts Delete always runs both the scope kill and the
+  sweep; the sweep is the backstop for launches that ran unscoped, leftovers of earlier unscoped runs, and processes
+  that left the scope but keep the session marker. macOS offers no public containment equivalent to a cgroup scope.
+- Completion criteria: SPEC_impl.md (beside the process-tree ownership text that already says start-time revalidation
+  narrows reuse races without closing them) states the principle: races that need the operating system to reuse a
+  process or process-group number inside a short, bounded window (about a second, at most a few seconds) are accepted,
+  in shipped code and in the repository's tests and maintainer tooling alike, on the stated basis, and pending the TODO
+  assessment. The acceptance covers short windows only, not a bare process number carried across unbounded waits or
+  stored for later. TODO.md's `Maybe later` gains (a) and (b): the existing "Require a systemd user manager on Linux,
+  with no fallback" entry already records that decision, so (a) extends it with assessing removal of the Linux-only
+  reasons for the sweep (in particular the walk from tmux-reported terminal process numbers) rather than adding a
+  duplicate; (b) is a new entry. Remove this feedback file and its index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## pane-initial-identity.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`, not reproduced. Delete asks tmux for each live tab pane's process
+  number and then reads that process's start time from the kernel
+  (`crates/farhelm-supervisor/src/service/teardown.rs:170–182`); if the pane process exited, was reaped and its number
+  reused between those two reads, the sweep would accept the replacement as a root. The window is between two adjacent
+  observations. The walk runs on systemd hosts too: Delete runs the scope kill and then the sweep with these roots
+  (`service/sweep.rs:1270–1283`, `1316–1420`). Its stated reason is hosts without tab scopes (`teardown.rs:128–138`).
+- Decision: as recorded under `probe-pgid.md` (same date, same decision and rationale).
+- Completion criteria: covered by the spec principle and TODO items listed under `probe-pgid.md`. Remove this feedback
+  file and its index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## resize-historical-pid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. The resize-timeout test polls the recorded fixture number for up to
+  five seconds after the child may have been reaped and then sends SIGKILL
+  (`crates/farhelm-supervisor/src/tmux.rs:6080–6087`). Test-only; reuse in the window was not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## watcher-request-pid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. The plans watcher's `bounded` helper runs a watchdog subshell that
+  signals the request's number at the deadline, and the parent cancels the watchdog only after reaping the request
+  (`scripts/plans-watch.sh:185–204`), so a request finishing at the deadline leaves a sub-second overlap. Maintainer
+  tooling; reuse was not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## watchtest-watchdog-pid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`: the same watchdog pattern as `watcher-request-pid.md`, in the
+  watcher's test harness (`scripts/test-plans-watch.sh:105–123`). Test-only; reuse was not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## watchtest-postwait-pgid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. The stop test reaps the watcher, waits 0.3 s, then looks up the
+  recorded group number and kills that group on failure (`scripts/test-plans-watch.sh:449–461`). Test-only; reuse was
+  not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## smoke-stale-pgid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. Desktop smoke cleanup sends KILL to the supervisor's group number
+  even after its polling loop saw the group disappear (`scripts/desktop-smoke.sh:231–238`); the exposure is the gap
+  between that observation and the KILL. Test tooling; reuse was not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## preview-orphan-pid.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by inspection at `e2819257`. Taking the preview port from an orphaned Astro server signals a
+  process the script did not start, polls its number for up to five seconds, then sends KILL
+  (`website/scripts/preview.sh:139–149`). Maintainer tooling; reuse was not demonstrated.
+- Decision: as recorded under `probe-pgid.md`.
+- Completion criteria: covered by the principle and TODO items under `probe-pgid.md`. Remove this feedback file and its
+  index entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).
+
+## preview-lock-identity.md
+
+- Outcome: `other`.
+- Assessment: partly correct at `e2819257`, premise unverified. Before asking Astro to stop the background server a
+  checkout's lock names, `website/scripts/preview.sh` checks only that the process's working directory is that
+  checkout's website directory (`runs_in`, `stop_server_in`); it cannot tell two successive Astro servers in the same
+  checkout apart. Unlike the items under `probe-pgid.md`, this is not a short window: the lock can be stale for days.
+  The script's own comment says a foreground Astro writes the same lock, and the script ignores locks that are not
+  background ones, so a later foreground server may overwrite the stale lock and make the scenario unreachable. Astro is
+  not installed in the checkout, so that could not be confirmed. The worst case is stopping the maintainer's own docs
+  dev server; the script is maintainer tooling and does not ship.
+- Decision: the user (2026-10-05) chose to fix it later, since the fix is a few lines: a near-term TODO entry rather
+  than a plan now.
+- Completion criteria: TODO.md's `Near term` has an entry to also require that the locked process started no later than
+  the lock was last written, naming the two unverified Astro premises to check. Remove this feedback file and its index
+  entry.
+- Execution: complete — change `tklxsmskntqxqsmoosrvolyyorswulqr`, bookmark `pr/triage-pid-reuse-acceptance`, PR
+  [#1636](https://github.com/scode/farhelm/pull/1636/changes).

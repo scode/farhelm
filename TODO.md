@@ -44,6 +44,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Make the docs preview check that a lock's process is the one that wrote it.** Before asking Astro to stop the
+  background server named in a checkout's `.astro/dev.json`, `website/scripts/preview.sh` only checks that the process
+  runs from that checkout's website directory. A stale lock whose number now belongs to a later Astro server in the same
+  checkout, such as your own `bun run dev`, would pass, and the script would stop that server. Also require that the
+  process started no later than the lock file was last written (`ps -o etimes=` against the lock's mtime), and leave it
+  alone otherwise. Two premises are unverified, so check them against Astro's source when fixing: that Astro writes the
+  lock after its server process exists, and whether a foreground server rewrites the lock as non-background, which would
+  make the scenario unreachable. From review feedback `preview-lock-identity.md`, triaged 2026-10-05.
+
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
   as one choice, and ideally a color as well, so a session's host can be told apart at a glance.
@@ -460,6 +469,21 @@ are large mostly because of their tests.
     Delete can retry once the host is healthy.
 
   When executing, check that both cases are actually gone.
+
+  Once the fallback is gone, also assess what the process sweep still has to do on Linux (to look into, not decided,
+  2026-10-05). With every launch and tab in a scope, the walk from the process numbers tmux reports for a session's
+  terminals has no Linux reason left, since its stated purpose is hosts without tab scopes, and dropping it there
+  removes the short process-number reuse race SPEC_impl.md currently accepts as an interim measure. Whether the
+  environment-marker sweep should stay as a backstop, for processes that left the scope but kept the session marker (an
+  agent running `systemd-run --user --scope`, say), is part of the assessment.
+
+- **Decide what process cleanup promises on macOS.** macOS offers Farhelm no equivalent of a cgroup scope. launchd
+  tracks a job by its process group, which `setsid` escapes, and the kernel's coalitions, the closest analogue, are as
+  far as we know private API (not verified). So Stop and Delete there rely on the walk down from the terminal's process
+  and the environment marker, with the residuals SPEC.md's lifecycle section lists. Work out what Farhelm should promise
+  and do on macOS, and how much of that machinery earns its keep: for example whether the walk from the terminals'
+  process numbers is worth it, and whether the short process-number reuse races SPEC_impl.md accepted on 2026-10-05 as
+  an interim measure should stay accepted for good.
 
 - **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
   session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a

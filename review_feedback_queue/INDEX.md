@@ -5,13 +5,11 @@ One line per open item. This file must always match the feedback files in this d
 ## Highest priority: security or data loss
 
 - `linger-control.md` — Remote linger failure writes terminal controls to helm logs.
-- `probe-pgid.md` — Probe cleanup signals group after releasing its numeric identity.
 - `template-successor.md` — Template installation identity ignored at create dispatch.
 - `uninstall-missing-id.md` — Connected uninstall omits missing recorded identity comparison.
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
 - `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
 - `uninstall-newline.md` — Canonical uninstall paths lose embedded newline bytes.
-- `resize-historical-pid.md` — Resize test cleanup signals historical PID after child reaping.
 - `template-clobber.md` — A new template can overwrite saved choices while its catalog is unavailable.
 - `yolo-sidebar-cancel.md` — Sidebar YOLO replacement can run after cancellation.
 - `yolo-launcher-cancel.md` — Launcher YOLO answer can restore cancelled consent.
@@ -20,17 +18,10 @@ One line per open item. This file must always match the feedback files in this d
 - `installer-backup.md` — Preserving a foreign command can overwrite an occupied backup.
 - `installer-prune.md` — Old version cleanup can delete foreign user contents.
 - `installer-incomplete.md` — Repairing an incomplete app version can discard user files.
-- `pane-initial-identity.md` — Delete can bind a recycled pane PID to an unrelated process.
 - `installer-staging-glob.md` — Repairing a partial app removes unrelated staging-like files.
 - `installer-malformed-record.md` — Malformed app records may authorize foreign bundle replacement.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 - `installer-link-staging.md` — Terminal link staging removes a colliding user file.
-- `watcher-request-pid.md` — Plans watcher deadline can signal a recycled request PID.
-- `smoke-stale-pgid.md` — Desktop smoke cleanup sends KILL after its group disappears.
-- `preview-orphan-pid.md` — Docs preview takeover can kill an unrelated successor process.
-- `preview-lock-identity.md` — A stale preview lock may identify a later server in the same checkout.
-- `watchtest-watchdog-pid.md` — Watcher test deadline can signal a recycled fixture PID.
-- `watchtest-postwait-pgid.md` — Watcher stop test can kill a group created after its fixture ended.
 - `recorder-frames-owner.md` — Starting video recording can erase an unrelated sibling directory.
 - `recorder-stills-owner.md` — Finishing a video can erase unrelated files in its stills directory.
 - `publisher-main-pin.md` — Publishing from an older checkout may stop retaining main’s pinned images.

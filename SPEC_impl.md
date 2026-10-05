@@ -2068,6 +2068,19 @@ evidence, but cannot authorize another directory move.
   program's environment is unreadable the same way. The sweep treats an unreadable environment as unmarked, so once such
   a process has left the pane's tree nothing claims it. Only cgroup containment closes this; the session-id channel
   would not, because `setsid` gives the process a new session id.
+
+  **Process-number reuse inside a short window is accepted, for now.** Decided 2026-10-05. Code that signals or adopts a
+  process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated
+  process within a short, bounded window: between reading a number and checking it, between reaping a child and
+  signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few
+  seconds. That holds for the supervisor and the helm as much as for the repository's tests and maintainer scripts. The
+  basis is that reuse inside such a window is vanishingly unlikely (Linux hands numbers out in order up to `pid_max`,
+  millions on current systems, and macOS's range is about 100k), and that modern Unix software ordinarily relies on
+  exactly that; the start-time revalidation above narrows these windows without closing them. What is not accepted is
+  carrying a bare number across unbounded waits or asynchronous work, or storing it for later. The acceptance is
+  deliberately interim. It stops review findings about such windows until two questions in TODO.md are settled: whether
+  requiring a systemd user manager on Linux lets the number-based walk go there, and what process cleanup should promise
+  on macOS.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
   in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
   large file costs time rather than memory. A reported write or fsync failure before publication leaves nothing
