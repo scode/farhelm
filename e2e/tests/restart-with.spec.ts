@@ -355,6 +355,107 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
 });
 
 /**
+ * Cancel and an answer to Restart with's YOLO question delivered in one
+ * burst, before the render that removes the question, restart nothing. Why:
+ * an accepted answer restarts the agent with no approval prompts (and can
+ * stop a working agent first), and the session view used to forward the
+ * dialog's approval whatever the state of the question. Specifies, for each
+ * answer: after the burst no restart is sent and no host is marked, and a
+ * following plain restart is asked about again; a genuine answer afterwards
+ * still restarts with the override. Both endpoints are route-mocked.
+ */
+test("cancel and an answer to restart with's YOLO question in one burst restart nothing", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const restarts: any[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    const body = route.request().postDataJSON();
+    restarts.push(body);
+    if (!body.confirm_yolo) {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
+      });
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "codex --yolo",
+        launch: agentLaunchRow({ ...BASELINE, permissions: "yolo" }),
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  const marks: unknown[] = [];
+  await page.route("**/api/hosts/*/yolo-without-asking", async (route) => {
+    marks.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  const dialog = await openInjectedDialog(page);
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  const confirmation = dialog.locator(".yolo-confirmation");
+  const isRestart = (candidate: { request(): { method(): string }; url(): string }) =>
+    candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${SESSION_ID}/restart`);
+  await Promise.all([page.waitForResponse(isRestart), dialog.locator(".restart-with-submit").click()]);
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+
+  for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking"]) {
+    // Both buttons are captured, then clicked in one synchronous block:
+    // Cancel first, the answer second, before any render can remove the
+    // answer. The answer must still be connected and enabled when clicked,
+    // or the click would reach no handler and prove nothing.
+    const answerWasLive = await confirmation.evaluate((node, selector) => {
+      const cancel = node.querySelector<HTMLButtonElement>(".yolo-cancel")!;
+      const start = node.querySelector<HTMLButtonElement>(selector)!;
+      cancel.click();
+      const live = start.isConnected && !start.disabled;
+      start.click();
+      return live;
+    }, answer);
+    expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
+    await expect(confirmation).toHaveCount(0);
+    await expect(dialog, "cancelling the question keeps the dialog open").toBeVisible();
+
+    // A plain restart afterwards: a restart the stale answer had approved
+    // would show up below as a body carrying the override (and a 200 reply),
+    // and this one must be asked about again rather than ride on it.
+    const [again] = await Promise.all([
+      page.waitForResponse(isRestart),
+      dialog.locator(".restart-with-submit").click(),
+    ]);
+    expect(again.status(), `after cancel then ${answer}, the restart is not approved`).toBe(409);
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+  }
+  expect(
+    restarts.map((body) => body.confirm_yolo ?? false),
+    "no restart after a burst carries the override",
+  ).toEqual([false, false, false]);
+  expect(marks, "the host is never marked").toHaveLength(0);
+
+  // Positive control: a genuine answer restarts with the override.
+  await confirmation.locator(".yolo-confirm").click();
+  await expect(dialog).toHaveCount(0);
+  expect(restarts).toHaveLength(4);
+  expect(restarts[3]).toMatchObject({
+    with: { harness: "codex", permissions: "yolo" },
+    confirm_yolo: true,
+  });
+});
+
+/**
  * A legacy session has no structured selection to edit even if it can resume.
  * The inert button must remain visible and explain the missing prerequisite to
  * both a pointer user and assistive technology, while refusing activation.
