@@ -1487,3 +1487,32 @@ Class: budget
 
 Cause: established — the debug build's unoptimized SHA-256, run twice over a debug CLI since #1330, put a confirmed
 uninstall at the harness's 30-second per-child limit on the release job's macOS runner.
+
+## 2026-10-05 — `sidebar menu flyouts sit under no stacking context inside the sidebar` (e2e/tests/feedback.spec.ts)
+
+The test #1598 added fails intermittently, on either engine, at its first `await expect(helpFlyout).toHaveCount(0)`: the
+Escape it presses after opening the help menu does not close it. Seen on a Linux x86_64 development machine (kernel 6.8,
+Node 24.20, Playwright 1.62.0, recorder-pinned tmux 3.7c with executable SHA256 prefix `3590826b41cd0671`, locale
+`C.UTF-8`, no ambient `FARHELM_*`, one browser worker, retries 0) while validating the auto-update plan's stack rebased
+on main `84c10b3b`, with that stack's own changes to the sidebar bar's menus (not on main; the tree was otherwise
+clean): once in a run of the feedback, tooltip and tooltip-coverage specs (recorder run
+`4c88e5c5-64f6-4ece-a1f9-c5b77c15c0e7`, chromium; the other 33 cases passed, this one failed after the 5 s expect
+timeout), and then 1 of 3 focused attempts of this test alone on both engines (runs
+`2a894aca-f5e1-468a-8320-19188305e5bf` and `2ff5d950-1b58-4808-befd-8c04e9370f08` passed;
+`a959a160-1719-47e7-b0b9-d0afb068eb15` failed on webkit). Both failures' page snapshots show the selected session's
+`Terminal input` focused, not the menu. Cause: established by reading the code, not by a run of main's own build — the
+terminal takes focus when it reveals after connecting (`takesFocus` in `crates/farhelm-ui/assets/terminal.js` yields
+only to an editable field, another terminal or a dialog, not to an open menu), and the test opens the help menu right
+after `page.goto` and closes it with Escape, which only reaches the menu while focus is inside it; whenever the terminal
+connects after the menu has opened, it takes the focus and swallows the Escape. Main's version of the test has the same
+sequence and the same terminal rule, so the race is not introduced by the stack's menu changes, though the failures
+above were all seen with them. Fixed in the auto-update stack's PR #1604 by waiting for the terminal to take focus
+before the first menu opens; with that, 4 of 4 focused attempts on both engines passed (runs
+`79c0dd79-1678-4604-be21-9a8b9d9d06e0`, `f7e21223-c3bb-4653-a682-d4650b32b520`, `363c37b5-3f62-4d5c-96b2-50418753b070`,
+`5e56d6b7-987f-45b9-8ba3-0d6b64047c3d`). Whether the terminal stealing focus from an open sidebar menu is itself worth
+fixing in the product is left open.
+
+Class: readiness
+
+Cause: established by code reading — the selected terminal's reveal takes focus from the just-opened help menu, so the
+test's Escape lands in the terminal.

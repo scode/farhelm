@@ -78,6 +78,10 @@ pub(crate) enum Activity {
     /// The check or the install failed, for this reason (one plain
     /// sentence for the readout's hover).
     Failed(String),
+    /// Restart to update could not start the helper that reopens the app,
+    /// so the app stayed open. Not a check outcome, so it has words of its
+    /// own.
+    RestartFailed,
 }
 
 /// The updater's whole published state.
@@ -130,30 +134,147 @@ pub(super) fn active_bundle(current_exe: &Path, home: &Path, version: &str) -> O
     (contents == expected && contents.join("Versions").is_dir()).then_some(contents)
 }
 
-/// The component tree's handle on a running updater: what it publishes and
-/// the way to ask for a check. Present in the Dioxus context only when
-/// [`start`] started one, which is how every surface knows whether to offer
-/// anything update-related at all.
+/// The component tree's handle on a running updater: what it publishes,
+/// the way to ask for a check, the automatic-updates setting, and the
+/// restart into an installed update. Present in the Dioxus context only
+/// when [`start`] started one, which is how every surface knows whether to
+/// offer anything update-related at all.
 #[derive(Clone)]
-pub(crate) struct UpdaterHandle(Arc<Shared>);
+pub(crate) struct UpdaterHandle {
+    shared: Arc<Shared>,
+    /// The `Farhelm.app` bundle a restart opens.
+    bundle: PathBuf,
+    /// The desktop state file holding the automatic-updates setting.
+    state_path: PathBuf,
+}
 
 impl PartialEq for UpdaterHandle {
     /// One updater per process, so identity is the only equality there is.
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.shared, &other.shared)
     }
 }
 
 impl UpdaterHandle {
     /// Ask for a check now (see [`Shared::check_now`]).
     pub(crate) fn check_now(&self) {
-        self.0.check_now();
+        self.shared.check_now();
     }
 
     /// A new subscription to the published state.
     pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<UpdaterState> {
-        self.0.subscribe()
+        self.shared.subscribe()
     }
+
+    /// Whether automatic updates are on, as the settings dialog shows it.
+    pub(crate) fn automatic_updates(&self) -> bool {
+        automatic_updates_enabled(&self.state_path)
+    }
+
+    /// Turn automatic updates on or off. The worker reads the setting
+    /// before every automatic check and again before an automatic install,
+    /// so nothing else needs telling. A write that fails leaves the file as
+    /// it was and returns a short reason, so the dialog can keep showing the
+    /// choice that is actually in force rather than one that was not saved.
+    pub(crate) fn set_automatic_updates(&self, on: bool) -> Result<(), String> {
+        state::update_state(&self.state_path, |state| {
+            state.install_updates_automatically = Some(on);
+        })
+        .map(|_| ())
+        .map_err(|error| {
+            tracing::warn!("updater: saving the automatic-updates setting: {error:#}");
+            "the choice could not be saved; the app's log has the reason".to_string()
+        })
+    }
+
+    /// Start the helper that reopens the app once this process has exited,
+    /// for Restart to update. `true` means the caller should now quit; on
+    /// `false` the failure is already shown in the readout's hover, and the
+    /// app must stay open, since quitting would leave it closed.
+    pub(crate) fn start_relaunch(&self) -> bool {
+        match spawn_relaunch_helper(
+            std::process::id(),
+            &self.bundle,
+            Path::new(RELAUNCH_OPENER),
+            RELAUNCH_WAIT_TENTHS,
+            None,
+        ) {
+            // Never waited for: the app is about to exit, and the helper
+            // runs on in its own process group.
+            Ok(_helper) => true,
+            Err(error) => {
+                tracing::warn!("updater: starting the relaunch helper: {error}");
+                self.shared.show_outcome(Activity::RestartFailed);
+                false
+            }
+        }
+    }
+}
+
+// ===== Restart to update ====================================================
+
+/// The program that opens the bundle on macOS, the same way the Dock or
+/// Finder would.
+const RELAUNCH_OPENER: &str = "/usr/bin/open";
+
+/// How long the helper waits for this process to exit, in tenths of a
+/// second: about a minute, far longer than a quit takes, so only an app that
+/// is stuck makes the helper give up.
+const RELAUNCH_WAIT_TENTHS: u32 = 600;
+
+/// The helper's script: wait for the process `$1` to exit, bounded at `$4`
+/// tenths of a second, then run the opener `$3` on the bundle `$2` with
+/// `-n`, which asks for a new instance: macOS can briefly keep listing an
+/// app as running after its process has exited, and a plain `open` would
+/// then only try to bring that old instance forward. If the
+/// process is still there at the bound, give up without opening anything:
+/// opening a bundle whose app is still running only brings that app to the
+/// front, and an app that has not quit in a minute is not one to relaunch
+/// over.
+///
+/// `$5`, empty in the app, names a file the helper creates each time it has
+/// seen the process alive. It is the tests' readiness signal: they release
+/// their stand-in app only once the helper is provably waiting on it.
+const RELAUNCH_SCRIPT: &str = r#"pid="$1"; app="$2"; opener="$3"; tenths="$4"; seen="$5"; waited=0
+while kill -0 "$pid" 2>/dev/null; do
+  [ -n "$seen" ] && : > "$seen"
+  [ "$waited" -ge "$tenths" ] && exit 0
+  sleep 0.1
+  waited=$((waited + 1))
+done
+exec "$opener" -n "$app""#;
+
+/// Spawn the relaunch helper, detached in its own process group so the
+/// app's exit does not take it along, with every standard stream closed.
+///
+/// The app never waits for the returned child; tests do, to observe what
+/// the helper did.
+fn spawn_relaunch_helper(
+    pid: u32,
+    bundle: &Path,
+    opener: &Path,
+    wait_tenths: u32,
+    seen_alive: Option<&Path>,
+) -> io::Result<Child> {
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(RELAUNCH_SCRIPT)
+        .arg("farhelm-relaunch")
+        .arg(pid.to_string())
+        .arg(bundle)
+        .arg(opener)
+        .arg(wait_tenths.to_string())
+        .arg(seen_alive.unwrap_or(Path::new("")))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command.spawn()
 }
 
 /// Start the updater for this app, or return `None` when [`active_bundle`]
@@ -171,6 +292,7 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
     let home = std::env::var_os("HOME")?;
     let contents = active_bundle(&current_exe, Path::new(&home), running)?;
     let installed_record = contents.join("Versions").join("installed");
+    let handle_state_path = state_path.clone();
     let deps = Deps {
         probe: Box::new(probe_latest_release),
         install: Box::new(run_installer),
@@ -180,13 +302,18 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
     };
     let shared = Arc::new(Shared::new(running));
     let engine = Engine::new(deps, Arc::clone(&shared));
+    let bundle = contents.parent()?.to_path_buf();
     match std::thread::Builder::new()
         .name("farhelm-updater".to_string())
         .spawn(move || engine.run_forever())
     {
         Ok(_) => {
-            tracing::info!("updater: active for {}", contents.display());
-            Some(UpdaterHandle(shared))
+            tracing::info!("updater: active for {}", bundle.display());
+            Some(UpdaterHandle {
+                shared,
+                bundle,
+                state_path: handle_state_path,
+            })
         }
         Err(error) => {
             tracing::warn!("could not start the updater: {error}");
@@ -251,8 +378,9 @@ pub(super) struct Deps {
 pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
     let ready = state.update_ready();
     let installed = state.installed.as_deref().unwrap_or_default();
-    let ready_text =
-        format!("Farhelm {installed} is installed; restarting Farhelm finishes the update");
+    let ready_text = format!(
+        "Farhelm {installed} is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
+    );
     let tooltip = match &state.activity {
         Activity::Checking => "checking for a newer Farhelm…".to_string(),
         Activity::Installing(version) => {
@@ -262,6 +390,9 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
             format!("the update check failed: {reason}. {ready_text}")
         }
         Activity::Failed(reason) => format!("the update check failed: {reason}"),
+        Activity::RestartFailed => format!(
+            "Farhelm could not restart itself; quit and reopen it to finish updating to Farhelm {installed}"
+        ),
         _ if ready => ready_text,
         Activity::UpToDate(latest) => {
             format!("Farhelm is up to date ({latest} is the latest release)")
@@ -339,6 +470,14 @@ impl Shared {
     /// A new subscription to the published state.
     pub(super) fn subscribe(&self) -> tokio::sync::watch::Receiver<UpdaterState> {
         self.published.subscribe()
+    }
+
+    /// Show an outcome the user caused outside a check (a failed Restart to
+    /// update), until the next run starts.
+    fn show_outcome(&self, outcome: Activity) {
+        let mut status = self.status.lock().expect("updater status poisoned");
+        status.shown_outcome = Some(outcome);
+        self.publish(&status);
     }
 
     /// Send what `status` says the app bar should show, if it changed.
@@ -508,6 +647,19 @@ impl Engine {
         if !build_is_newer(&latest, &baseline) {
             tracing::info!("updater: {latest} is the latest release; {baseline} is installed");
             return Some(Activity::UpToDate(latest));
+        }
+        // Automatic updates may have been turned off while the probe was
+        // out. Off means no background install from then on, so a run no
+        // user has joined stops here; a run the user asked for goes on.
+        let user_waiting = self
+            .shared
+            .status
+            .lock()
+            .expect("updater status poisoned")
+            .user_waiting;
+        if !user_waiting && !(self.deps.automatic_enabled)() {
+            tracing::info!("updater: automatic updates were turned off during the check");
+            return Some(Activity::Idle);
         }
         tracing::info!("updater: installing {latest} (installed: {baseline})");
         self.set_current(Activity::Installing(latest.clone()));
@@ -845,6 +997,160 @@ mod tests {
         assert!(automatic_updates_enabled(&path));
         std::fs::write(&path, "not json").unwrap();
         assert!(automatic_updates_enabled(&path), "unreadable file");
+    }
+
+    // ---- Restart to update ----
+
+    /// A stand-in for `/usr/bin/open` that records the arguments it was
+    /// given, so a test can see whether and how the helper relaunched.
+    fn recording_opener(dir: &Path) -> (PathBuf, PathBuf) {
+        let marker = dir.join("opened");
+        let opener = dir.join("open");
+        std::fs::write(
+            &opener,
+            format!("#!/bin/sh\nprintf '%s' \"$*\" > '{}'\n", marker.display()),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (opener, marker)
+    }
+
+    /// Wait, bounded, until the helper reports having seen the app alive.
+    fn await_seen_alive(seen: &Path) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !seen.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the helper never checked the app"
+            );
+            std::thread::sleep(Duration::from_millis(20)); // sleep-ok: polling interval for the helper's readiness file, bounded by the deadline above
+        }
+    }
+
+    /// Spec: Restart to update's helper keeps waiting while the app's
+    /// process lives, and opens the bundle only once it has exited.
+    ///
+    /// Opening while the old app still runs would only bring it to the
+    /// front, so the wait is what makes the restart a restart. The stand-in
+    /// app is released only after the helper has provably seen it alive
+    /// (its readiness file), so a helper that checked once and gave up, or
+    /// opened at once, fails here. The test reaps its own child, since an
+    /// unreaped child would still answer the helper's liveness check.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn the_relaunch_helper_opens_the_bundle_after_the_app_exits() {
+        let dir = tempfile::tempdir().unwrap();
+        let (opener, marker) = recording_opener(dir.path());
+        let seen = dir.path().join("seen-alive");
+        let bundle = dir.path().join("Farhelm App.app");
+        let mut app = Command::new("/bin/sh")
+            .args(["-c", "read line"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut helper =
+            spawn_relaunch_helper(app.id(), &bundle, &opener, 600, Some(&seen)).unwrap();
+        await_seen_alive(&seen);
+        assert!(
+            helper.try_wait().unwrap().is_none(),
+            "the helper waits while the app lives"
+        );
+        assert!(!marker.exists(), "nothing opens while the app runs");
+        // Closing the app's stdin ends it, as quitting ends the real app.
+        drop(app.stdin.take());
+        app.wait().unwrap();
+        assert!(helper.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            format!("-n {}", bundle.display())
+        );
+    }
+
+    /// Spec: if the app is still alive when the bound runs out, the helper
+    /// gives up without opening anything.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn the_relaunch_helper_gives_up_on_an_app_that_does_not_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (opener, marker) = recording_opener(dir.path());
+        let seen = dir.path().join("seen-alive");
+        let mut app = Command::new("/bin/sh")
+            .args(["-c", "read line"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut helper =
+            spawn_relaunch_helper(app.id(), dir.path(), &opener, 2, Some(&seen)).unwrap();
+        await_seen_alive(&seen);
+        assert!(helper.wait().unwrap().success());
+        assert!(!marker.exists(), "an app that did not exit is not reopened");
+        assert!(
+            app.try_wait().unwrap().is_none(),
+            "the app was still alive at the bound"
+        );
+        drop(app.stdin.take());
+        app.wait().unwrap();
+    }
+
+    /// Spec: turning automatic updates off while a check is out stops that
+    /// check from installing, unless a user's request joined it.
+    ///
+    /// Off means no background install from then on, and the probe can take
+    /// tens of seconds, which is when someone opening the settings right
+    /// after launch would untick the box.
+    #[farhelm_testtrace::test]
+    fn turning_automatic_updates_off_during_a_check_stops_its_install() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        let automatic = Arc::clone(&rig.automatic);
+        rig.engine.deps.probe = Box::new(move || {
+            *automatic.lock().unwrap() = false;
+            Ok("1.1.0".to_string())
+        });
+        rig.engine.wake_once();
+        assert!(rig.installs.lock().unwrap().is_empty());
+        assert_eq!(rig.published().activity, Activity::Idle);
+
+        // The same, with the user asking for a check while the probe is out.
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        let automatic = Arc::clone(&rig.automatic);
+        let asked = Arc::clone(&rig.shared);
+        rig.engine.deps.probe = Box::new(move || {
+            *automatic.lock().unwrap() = false;
+            asked.check_now();
+            Ok("1.1.0".to_string())
+        });
+        rig.engine.wake_once();
+        assert_eq!(*rig.installs.lock().unwrap(), ["1.1.0"]);
+    }
+
+    /// Spec: a setting that cannot be saved reports the failure and leaves
+    /// the stored choice in force, so the dialog never shows an unsaved
+    /// choice as the one Farhelm follows.
+    #[farhelm_testtrace::test]
+    fn a_setting_that_cannot_be_saved_reports_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the state file should be: every write fails.
+        let state_path = dir.path().join(state::APP_STATE_FILE);
+        std::fs::create_dir(&state_path).unwrap();
+        let handle = UpdaterHandle {
+            shared: Arc::new(Shared::new("1.0.0")),
+            bundle: dir.path().join("Farhelm.app"),
+            state_path,
+        };
+        assert!(handle.set_automatic_updates(false).is_err());
+        assert!(handle.automatic_updates(), "the default, still in force");
+
+        let ok_path = dir.path().join("ok.json");
+        let handle = UpdaterHandle {
+            state_path: ok_path,
+            ..handle
+        };
+        assert!(handle.set_automatic_updates(false).is_ok());
+        assert!(!handle.automatic_updates());
     }
 
     // ---- the probe and the installer's environment ----
@@ -1313,7 +1619,7 @@ mod tests {
         assert!(ready.update_ready);
         assert_eq!(
             ready.tooltip,
-            "Farhelm 1.1.0 is installed; restarting Farhelm finishes the update"
+            "Farhelm 1.1.0 is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
         );
         assert_eq!(
             readout(&state(
@@ -1330,6 +1636,18 @@ mod tests {
             assert!(!plain.update_ready, "{installed:?}");
             assert_eq!(plain.tooltip, "this client was built as farhelm 1.0.0");
         }
+    }
+
+    /// Spec: a Restart to update that could not start says so in its own
+    /// words, not as a failed check, and tells the user the way that works.
+    #[farhelm_testtrace::test]
+    fn a_failed_restart_has_its_own_words() {
+        let failed = readout(&state(Some("1.1.0"), Activity::RestartFailed));
+        assert!(failed.update_ready);
+        assert_eq!(
+            failed.tooltip,
+            "Farhelm could not restart itself; quit and reopen it to finish updating to Farhelm 1.1.0"
+        );
     }
 
     /// Spec: a check the user started ends visibly in the hover: checking,
@@ -1368,7 +1686,7 @@ mod tests {
         assert!(failed_with_update.update_ready);
         assert_eq!(
             failed_with_update.tooltip,
-            "the update check failed: offline. Farhelm 1.1.0 is installed; restarting Farhelm finishes the update"
+            "the update check failed: offline. Farhelm 1.1.0 is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
         );
     }
 }

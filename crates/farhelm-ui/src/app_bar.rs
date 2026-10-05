@@ -53,40 +53,54 @@ fn displayed_version(skew: Option<&Skew>) -> &str {
 /// accessible name the bar's mark needs.
 const WORDMARK_SVG: &str = include_str!("../../../packaging/farhelm-desktop/wordmark-dark.svg");
 
-/// What the help menu offers, in the order it shows them.
+/// Every item a menu in the sidebar's bar can offer, in the order a menu
+/// shows the ones it offers. One list for both bar menus (the `?` menu and
+/// the update menu) so their toggle and flyout can be one pair of
+/// components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum HelpAction {
+enum BarMenuItem {
     SendFeedback,
     Documentation,
-    /// Offered only by a desktop app whose updater runs (SPEC.md
-    /// "Installation and updates").
+    /// The `?` menu's, offered only by a desktop app whose updater runs
+    /// (SPEC.md "Installation and updates").
     CheckForUpdates,
+    /// The update menu's, opened from the red version readout.
+    RestartToUpdate,
+    WhatsNew,
 }
 
-impl HelpAction {
-    /// The item's label, which is also its `data-help-action` marker.
+impl BarMenuItem {
+    /// The item's label, which is also its `data-bar-menu-item` marker.
     fn label(self) -> &'static str {
         match self {
-            HelpAction::SendFeedback => "send feedback",
-            HelpAction::Documentation => "documentation",
-            HelpAction::CheckForUpdates => "check for updates",
+            BarMenuItem::SendFeedback => "send feedback",
+            BarMenuItem::Documentation => "documentation",
+            BarMenuItem::CheckForUpdates => "check for updates",
+            BarMenuItem::RestartToUpdate => "restart to update",
+            BarMenuItem::WhatsNew => "what's new",
         }
     }
 
     /// The item's hover text. The maintainer's exemption from hover text
     /// covers described items in the session and host rows' `⋯` menus only,
-    /// so the help menu's items carry one, saying a little more than their
+    /// so the bar menus' items carry one, saying a little more than their
     /// description line.
     fn tooltip(self) -> &'static str {
         match self {
-            HelpAction::SendFeedback => {
+            BarMenuItem::SendFeedback => {
                 "send feedback: a private message to Farhelm's maintainer, not a public issue"
             }
-            HelpAction::Documentation => {
+            BarMenuItem::Documentation => {
                 "documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
             }
-            HelpAction::CheckForUpdates => {
+            BarMenuItem::CheckForUpdates => {
                 "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
+            }
+            BarMenuItem::RestartToUpdate => {
+                "restart to update: quit Farhelm and open it again on the version that is installed; your sessions keep running"
+            }
+            BarMenuItem::WhatsNew => {
+                "what's new: open Farhelm's releases on GitHub in your browser, each with what changed"
             }
         }
     }
@@ -94,40 +108,57 @@ impl HelpAction {
     /// The description line under the label.
     fn description(self) -> &'static str {
         match self {
-            HelpAction::SendFeedback => "privately, to Farhelm's maintainer",
-            HelpAction::Documentation => "opens farhelm.io/docs in your browser",
-            HelpAction::CheckForUpdates => "installs a newer Farhelm if there is one",
+            BarMenuItem::SendFeedback => "privately, to Farhelm's maintainer",
+            BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
+            BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
+            BarMenuItem::RestartToUpdate => "sessions keep running",
+            BarMenuItem::WhatsNew => "opens the releases on GitHub",
         }
-    }
-
-    /// Whether this menu offers the item: the update check only where an
-    /// updater runs, everything else always.
-    fn offered(self, has_updater: bool) -> bool {
-        self != HelpAction::CheckForUpdates || has_updater
     }
 }
 
-const HELP_ACTIONS: [HelpAction; 3] = [
-    HelpAction::SendFeedback,
-    HelpAction::Documentation,
-    HelpAction::CheckForUpdates,
+const BAR_MENU_ITEMS: [BarMenuItem; 5] = [
+    BarMenuItem::SendFeedback,
+    BarMenuItem::Documentation,
+    BarMenuItem::CheckForUpdates,
+    BarMenuItem::RestartToUpdate,
+    BarMenuItem::WhatsNew,
 ];
+
+/// A bar menu's item list, in [`BAR_MENU_ITEMS`] order.
+type BarMenuOrder = MenuOrder<BarMenuItem, { BAR_MENU_ITEMS.len() }>;
+
+/// What the `?` menu offers: the update check only where an updater runs.
+fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
+    let mut items = vec![BarMenuItem::SendFeedback, BarMenuItem::Documentation];
+    if has_updater {
+        items.push(BarMenuItem::CheckForUpdates);
+    }
+    items
+}
+
+/// What the update menu offers.
+const UPDATE_MENU_ITEMS: [BarMenuItem; 2] = [BarMenuItem::RestartToUpdate, BarMenuItem::WhatsNew];
 
 /// The docs site the Documentation item opens.
 const DOCS_URL: &str = "https://farhelm.io/docs/";
 
-/// Open the docs site through the page's shared link opener
+/// The release list the What's new item opens: every release with what
+/// changed in it.
+const RELEASES_URL: &str = "https://github.com/scode/farhelm/releases";
+
+/// Open one of Farhelm's own pages through the page's shared link opener
 /// (`terminal-links.js`), which knows how to reach the system browser from
-/// the desktop webview and opens a new tab elsewhere. The URL is a constant,
-/// so it needs none of the opener callers' validation.
+/// the desktop webview and opens a new tab elsewhere. Callers pass a
+/// constant, so it needs none of the opener callers' validation.
 ///
 /// That opener is its own script asset, loaded asynchronously, so a click
 /// right after the page loads can arrive before it exists. The fallback
 /// repeats the opener's two branches (navigate the `dioxus:` page, which the
 /// desktop shell turns into a system-browser open; otherwise a `noopener`
 /// tab) so the item never silently does nothing.
-fn open_documentation() {
-    let url = serde_json::to_string(DOCS_URL).expect("a string always serializes");
+fn open_external_page(url: &'static str) {
+    let url = serde_json::to_string(url).expect("a string always serializes");
     document::eval(&format!(
         "(() => {{
             const url = {url};
@@ -142,80 +173,85 @@ fn open_documentation() {
     ));
 }
 
-/// The sticky sidebar bar itself, ending in the help menu: a `?` toggle to
-/// the right of the settings gear, opening a small menu with Send feedback
-/// and Documentation (SPEC.md "Feedback"), plus Check for updates in a
-/// desktop app whose updater runs. `children` are the bar's other contents,
-/// rendered before the toggle.
-///
-/// This component renders the bar, rather than sitting inside it, because
-/// the menu's flyout must NOT be inside the bar. The bar is sticky, so it
-/// is a stacking context, and it lives inside `.app-sidebar`, the scroll
-/// container. WebKit clips a fixed-position element to an overflow ancestor
-/// whenever the element's stacking context sits inside that ancestor (WebKit
-/// bug 160953), so a flyout inside the bar was painted only up to the
-/// sidebar's right edge: in the macOS app the menu showed as its pointer and
-/// a few pixels, while layout, visibility and hit testing all stayed correct.
-/// The flyout is therefore the bar's next sibling, where, like the row
-/// menus' flyouts, no ancestor below the root forms a stacking context.
-/// Keeping the toggle and the flyout in one component keeps their open
-/// state local.
-///
-/// It reuses the row menus' machinery (`menu_panel`) so it behaves like
-/// them: arrow keys, Home/End, Escape and Tab inside the menu, focus back on
-/// the toggle when it closes, the same side flyout and pointer, and the
-/// shared outside-pointer dismissal, which reaches this menu through its own
-/// relay button keyed `help:bar`. Its elements carry the host row menu's
-/// panel and item classes for the shared look, plus `help-menu-*` classes of
-/// their own, which is what the dismissal and focus helpers look for. Both
-/// the toggle's wrapper and the flyout carry `data-help-menu="bar"`: the
-/// dismissal derives the relay key from whichever encloses the open panel,
-/// and the focus helper finds the toggle under the one that holds it.
-///
-/// Its open state is local: unlike the row menus, nothing else on the page
-/// needs to know or close it, beyond what the outside-pointer dismissal
-/// already does.
-#[component]
-fn BarWithHelpMenu(
-    layout_epoch: ReadSignal<u64>,
-    on_send_feedback: EventHandler<()>,
-    updater: Option<AppUpdater>,
-    children: Element,
-) -> Element {
-    let has_updater = updater.is_some();
-    let mut open = use_signal(|| false);
-    // The layout epoch the open menu was measured under. Its coordinates
-    // are a snapshot, so a later resize or scroll closes the menu, as it
-    // does the session and host menus, rather than leaving it detached
-    // from its toggle (the bar's controls move at the narrow-window
-    // breakpoint).
-    let mut opened_epoch = use_signal(|| *layout_epoch.peek());
-    let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
-    let placement = use_signal(|| PanelPlacement::Unmeasured);
-    let item_handles = use_signal(HashMap::new);
-    let mut menu_focus = use_signal(|| None::<usize>);
-    let mut menu_requested = use_signal(|| None::<usize>);
-    let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
-    let focus_queue = MenuFocusQueue {
-        target: use_signal(|| None::<Rc<MountedData>>),
-        draining: use_signal(|| false),
-    };
-    let open_generation = use_signal(|| 0_u64);
-    let order: MenuOrder<HelpAction, 3> =
-        MenuOrder::pack(HELP_ACTIONS, |action| action.offered(has_updater));
-    let close_menu = use_callback(move |()| open.set(false));
-    let wiring = MenuWiring {
-        order,
-        handles: item_handles,
-        focus: focus_queue,
-        focused: menu_focus,
-        requested: menu_requested,
-        open_intent,
-        close_menu,
-    };
-    let spawn_measurement = move || {
-        let mut placement = placement;
-        let generation = open_generation();
+// ===== The bar menus ========================================================
+//
+// Each menu in the sidebar's bar (the `?` menu, and the update menu opened
+// from the red version readout) is a toggle inside the bar and a flyout
+// that is the bar's next SIBLING, never inside it. The bar is sticky, so it
+// is a stacking context, and it lives inside `.app-sidebar`, the scroll
+// container. WebKit clips a fixed-position element to an overflow ancestor
+// whenever the element's stacking context sits inside that ancestor (WebKit
+// bug 160953), so a flyout inside the bar was painted only up to the
+// sidebar's right edge: in the macOS app the help menu showed as its
+// pointer and a few pixels. As a sibling, like the row menus' flyouts, no
+// ancestor below the root forms a stacking context.
+//
+// Because toggle and flyout are separate components in separate places,
+// their shared state ([`BarMenuState`]) is owned by `AppBar`, which renders
+// both. They reuse the row menus' machinery (`menu_panel`) so they behave
+// like them: arrow keys, Home/End, Escape and Tab inside the menu, focus
+// back on the toggle when it closes, the same side flyout and pointer, and
+// the shared outside-pointer dismissal, which reaches each menu through its
+// own relay button keyed `bar:<name>`. Their elements carry the host row
+// menu's panel and item classes for the shared look, plus `bar-menu-*`
+// classes. Both the toggle's wrapper and the flyout carry
+// `data-bar-menu="<name>"`: the dismissal derives the relay key from
+// whichever encloses the open panel, and the focus helper finds the toggle
+// under the one that holds it.
+
+/// One bar menu's state, shared by its toggle and its flyout. Besides its
+/// name, every field is a signal or callback created by [`use_bar_menu`] in
+/// `AppBar`, so the whole thing is `Copy` and stays the same across renders.
+#[derive(Clone, Copy)]
+struct BarMenuState {
+    /// The menu's name: its `data-bar-menu` marker and accessible name.
+    name: &'static str,
+    open: Signal<bool>,
+    /// The layout epoch the open menu was measured under. Its coordinates
+    /// are a snapshot, so a later resize or scroll closes the menu, as it
+    /// does the session and host menus, rather than leaving it detached
+    /// from its toggle (the bar's controls move at the narrow-window
+    /// breakpoint).
+    opened_epoch: Signal<u64>,
+    toggle_handle: Signal<Option<Rc<MountedData>>>,
+    placement: Signal<PanelPlacement>,
+    item_handles: Signal<HashMap<BarMenuItem, Rc<MountedData>>>,
+    menu_focus: Signal<Option<usize>>,
+    menu_requested: Signal<Option<usize>>,
+    open_intent: Signal<Option<MenuOpenIntent>>,
+    focus_queue: MenuFocusQueue,
+    open_generation: Signal<u64>,
+    close_menu: Callback<()>,
+}
+
+impl PartialEq for BarMenuState {
+    /// The signals are created once per menu, so identity is equality.
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.open == other.open
+    }
+}
+
+impl BarMenuState {
+    /// The menu wiring `menu_panel`'s key handling and focus helpers take.
+    fn wiring(self, order: BarMenuOrder) -> MenuWiring<BarMenuItem, (), { BAR_MENU_ITEMS.len() }> {
+        MenuWiring {
+            order,
+            handles: self.item_handles,
+            focus: self.focus_queue,
+            focused: self.menu_focus,
+            requested: self.menu_requested,
+            open_intent: self.open_intent,
+            close_menu: self.close_menu,
+        }
+    }
+
+    /// Measure the toggle for the flyout's placement, unless a newer open
+    /// has started since.
+    fn spawn_measurement(self) {
+        let mut placement = self.placement;
+        let generation = (self.open_generation)();
+        let toggle_handle = self.toggle_handle;
+        let open_generation = self.open_generation;
         spawn(async move {
             let measured = match toggle_handle.peek().clone() {
                 Some(handle) => handle.get_client_rect().await.ok(),
@@ -227,11 +263,22 @@ fn BarWithHelpMenu(
                 placement.set(outcome);
             }
         });
-    };
-    let mut begin_open = move |intent: MenuOpenIntent| {
-        let mut open_generation = open_generation;
-        let mut placement = placement;
-        let mut item_handles = item_handles;
+    }
+
+    /// Open the menu fresh, as the row menus do.
+    fn begin_open(self, intent: MenuOpenIntent, layout_epoch: ReadSignal<u64>) {
+        let Self {
+            mut open,
+            mut opened_epoch,
+            mut placement,
+            mut item_handles,
+            mut menu_focus,
+            mut menu_requested,
+            mut open_intent,
+            mut open_generation,
+            focus_queue,
+            ..
+        } = self;
         open_generation += 1;
         placement.set(PanelPlacement::Unmeasured);
         item_handles.write().clear();
@@ -242,7 +289,37 @@ fn BarWithHelpMenu(
         opened_epoch.set(*layout_epoch.peek());
         install_row_menu_outside_dismiss();
         open.set(true);
-        spawn_measurement();
+        self.spawn_measurement();
+    }
+}
+
+/// Create one bar menu's state, with the two effects every such menu needs:
+/// close when the layout moves, and on close forget the focus bookkeeping
+/// and hand focus back to the toggle if it was inside the menu.
+fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuState {
+    let mut open = use_signal(|| false);
+    let opened_epoch = use_signal(|| *layout_epoch.peek());
+    let mut menu_focus = use_signal(|| None::<usize>);
+    let mut menu_requested = use_signal(|| None::<usize>);
+    let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
+    let mut item_handles = use_signal(HashMap::new);
+    let focus_queue = MenuFocusQueue {
+        target: use_signal(|| None::<Rc<MountedData>>),
+        draining: use_signal(|| false),
+    };
+    let state = BarMenuState {
+        name,
+        open,
+        opened_epoch,
+        toggle_handle: use_signal(|| None),
+        placement: use_signal(|| PanelPlacement::Unmeasured),
+        item_handles,
+        menu_focus,
+        menu_requested,
+        open_intent,
+        focus_queue,
+        open_generation: use_signal(|| 0_u64),
+        close_menu: use_callback(move |()| open.set(false)),
     };
     use_effect(move || {
         let epoch = layout_epoch();
@@ -250,8 +327,6 @@ fn BarWithHelpMenu(
             open.set(false);
         }
     });
-    // The close teardown the row menus share: forget focus bookkeeping and,
-    // when focus was inside the menu, hand it back to the toggle.
     use_effect(move || {
         if open() {
             return;
@@ -261,116 +336,141 @@ fn BarWithHelpMenu(
         menu_focus.set(None);
         menu_requested.set(None);
         open_intent.set(None);
-        let mut item_handles = item_handles;
         item_handles.write().clear();
         if was_inside {
-            focus_menu_toggle("data-help-menu", "bar", ".app-help-toggle");
+            focus_menu_toggle("data-bar-menu", name, ".bar-menu-toggle");
         }
     });
+    state
+}
+
+/// A bar menu's toggle, inside the bar, with the hidden relay the
+/// outside-pointer dismissal clicks.
+#[component]
+fn BarMenuToggle(
+    layout_epoch: ReadSignal<u64>,
+    menu: BarMenuState,
+    /// What the menu offers; shown in [`BAR_MENU_ITEMS`] order.
+    items: Vec<BarMenuItem>,
+    /// The toggle's classes, besides the shared `bar-menu-toggle`.
+    toggle_class: &'static str,
+    toggle_label: String,
+    toggle_tooltip: String,
+    /// Hide the toggle (and so the whole menu) while it has nothing to
+    /// offer. Hidden rather than unmounted: focus moves into a menu through
+    /// tasks spawned by its toggle and flyout components, and unmounting
+    /// either would cancel such a task midway and leave the shared focus
+    /// queue marked busy for good.
+    #[props(default)]
+    hidden: bool,
+    /// The toggle's content.
+    children: Element,
+) -> Element {
+    let order = BarMenuOrder::pack(BAR_MENU_ITEMS, |item| items.contains(&item));
+    let wiring = menu.wiring(order);
+    let mut open = menu.open;
+    let mut toggle_handle = menu.toggle_handle;
+    rsx! {
+        span { class: "app-bar-menu", "data-bar-menu": menu.name, hidden,
+            button {
+                r#type: "button",
+                class: "{toggle_class} bar-menu-toggle",
+                aria_label: "{toggle_label}",
+                "data-tooltip": "{toggle_tooltip}",
+                aria_haspopup: "menu",
+                aria_expanded: open(),
+                onkeydown: move |evt| {
+                    if !open() {
+                        let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
+                            return;
+                        };
+                        evt.prevent_default();
+                        menu.begin_open(intent, layout_epoch);
+                        return;
+                    }
+                    handle_menu_key(&evt, None, wiring, &());
+                },
+                onfocusin: move |_| forget_menu_focus(wiring),
+                onmounted: move |element| {
+                    toggle_handle.set(Some(element.data()));
+                    if should_measure_on_mount(open(), *menu.placement.peek()) {
+                        menu.spawn_measurement();
+                    }
+                },
+                onclick: move |_| {
+                    if open() {
+                        open.set(false);
+                    } else {
+                        menu.begin_open(MenuOpenIntent::First, layout_epoch);
+                    }
+                },
+                {children}
+            }
+            button {
+                r#type: "button",
+                class: ROW_MENU_OUTSIDE_RELAY,
+                "data-row-menu": row_menu_relay_key("bar", menu.name),
+                hidden: true,
+                tabindex: "-1",
+                onclick: move |_| open.set(false),
+            }
+        }
+    }
+}
+
+/// A bar menu's flyout, the bar's next sibling (see the section note above
+/// for why it must not be inside the bar), shown while the menu is open.
+#[component]
+fn BarMenuFlyout(
+    menu: BarMenuState,
+    /// What the menu offers; the same list its toggle was given.
+    items: Vec<BarMenuItem>,
+    on_choose: EventHandler<BarMenuItem>,
+) -> Element {
+    let order = BarMenuOrder::pack(BAR_MENU_ITEMS, |item| items.contains(&item));
+    let wiring = menu.wiring(order);
+    let mut open = menu.open;
+    let mut menu_focus = menu.menu_focus;
     let tab_stop = menu_focus()
         .and_then(|position| order.get(position))
         .or_else(|| order.get(0));
-    // A `Callback` is `Copy`, so every item's click handler can hold it,
-    // where the updater handle itself is not.
-    let check_for_updates = use_callback(move |()| {
-        if let Some(updater) = &updater {
-            updater.check_now();
-        }
-    });
-    let mut choose = move |action: HelpAction| {
+    let mut choose = move |item: BarMenuItem| {
         open.set(false);
-        match action {
-            HelpAction::SendFeedback => on_send_feedback.call(()),
-            HelpAction::Documentation => open_documentation(),
-            HelpAction::CheckForUpdates => check_for_updates.call(()),
-        }
+        on_choose.call(item);
     };
-    let toggle_tooltip = if has_updater {
-        "help: send feedback, open the documentation, or check for updates"
-    } else {
-        "help: send feedback or open the documentation"
-    };
-
     rsx! {
-        div { class: "app-bar",
-            {children}
-            span { class: "app-help-menu", "data-help-menu": "bar",
-                button {
-                    r#type: "button",
-                    class: "btn btn-neutral app-help-toggle",
-                    aria_label: "help",
-                    "data-tooltip": toggle_tooltip,
-                    aria_haspopup: "menu",
-                    aria_expanded: open(),
-                    onkeydown: move |evt| {
-                        if !open() {
-                            let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
-                                return;
-                            };
-                            evt.prevent_default();
-                            begin_open(intent);
-                            return;
-                        }
-                        handle_menu_key(&evt, None, wiring, &());
-                    },
-                    onfocusin: move |_| forget_menu_focus(wiring),
-                    onmounted: move |element| {
-                        toggle_handle.set(Some(element.data()));
-                        if should_measure_on_mount(open(), *placement.peek()) {
-                            spawn_measurement();
-                        }
-                    },
-                    onclick: move |_| {
-                        if open() {
-                            open.set(false);
-                        } else {
-                            begin_open(MenuOpenIntent::First);
-                        }
-                    },
-                    crate::icons::HelpIcon {}
-                }
-                button {
-                    r#type: "button",
-                    class: ROW_MENU_OUTSIDE_RELAY,
-                    "data-row-menu": row_menu_relay_key("help", "bar"),
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| open.set(false),
-                }
-            }
-        }
         if open() {
             div {
-                class: "host-row-menu-flyout help-menu-flyout",
-                "data-help-menu": "bar",
-                style: session_menu_placement_style(placement()),
-                if let Some(pointer_style) = session_menu_pointer_style(placement()) {
+                class: "host-row-menu-flyout bar-menu-flyout",
+                "data-bar-menu": menu.name,
+                style: session_menu_placement_style((menu.placement)()),
+                if let Some(pointer_style) = session_menu_pointer_style((menu.placement)()) {
                     span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
                 }
-                div { class: "host-row-menu-panel help-menu-panel",
+                div { class: "host-row-menu-panel bar-menu-panel",
                     div {
                         class: "host-row-menu-items session-row-menu-items",
                         role: "menu",
-                        aria_label: "help",
+                        aria_label: menu.name,
                         // Rendered from the same list keyboard order is
                         // built from, so the two cannot drift apart.
-                        for action in order.actions() {
+                        for item in order.actions() {
                             button {
-                                key: "{action.label()}",
+                                key: "{item.label()}",
                                 r#type: "button",
-                                class: "btn session-row-menu-item host-row-menu-item help-menu-item",
-                                "data-help-action": action.label(),
-                                "data-tooltip": action.tooltip(),
+                                class: "btn session-row-menu-item host-row-menu-item bar-menu-item",
+                                "data-bar-menu-item": item.label(),
+                                "data-tooltip": item.tooltip(),
                                 role: "menuitem",
-                                tabindex: if tab_stop == Some(action) { "0" } else { "-1" },
-                                onmounted: move |element| remember_menu_item(wiring, action, element.data()),
-                                onfocusin: move |_| menu_focus.set(order.position(action)),
+                                tabindex: if tab_stop == Some(item) { "0" } else { "-1" },
+                                onmounted: move |element| remember_menu_item(wiring, item, element.data()),
+                                onfocusin: move |_| menu_focus.set(order.position(item)),
                                 onfocusout: move |_| menu_focus.set(None),
-                                onkeydown: move |evt| handle_menu_key(&evt, order.position(action), wiring, &()),
-                                onclick: move |_| choose(action),
+                                onkeydown: move |evt| handle_menu_key(&evt, order.position(item), wiring, &()),
+                                onclick: move |_| choose(item),
                                 span { class: "session-row-menu-copy",
-                                    span { class: "session-row-menu-label", "{action.label()}" }
-                                    span { class: "session-row-menu-description", "{action.description()}" }
+                                    span { class: "session-row-menu-label", "{item.label()}" }
+                                    span { class: "session-row-menu-description", "{item.description()}" }
                                 }
                             }
                         }
@@ -387,9 +487,11 @@ fn BarWithHelpMenu(
 const ANNOUNCE_AFTER_CLOSE_MS: u64 = 100;
 
 /// Render the sticky sidebar bar: the Farhelm wordmark at the window's top
-/// left, then the build identity, the helm-wide settings gear, and the help
-/// menu.
-/// The modal is a sibling so the sticky bar cannot cap its stacking order.
+/// left, then the build identity (the update menu's toggle while an update
+/// waits), the settings gear, and the help menu, followed by the bar menus'
+/// flyouts as the bar's siblings (see "The bar menus" above).
+/// The modals are siblings too, so the sticky bar cannot cap their stacking
+/// order.
 #[component]
 pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let mut settings_open = use_signal(|| false);
@@ -434,9 +536,10 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     // without showing; the stamp comes from the user's own helm.
     let sent_version = displayed_version(skew.as_ref()).to_string();
     // In a desktop app whose updater runs, the readout is also the update
-    // marker (SPEC.md "Installation and updates"): red with an up-arrow
-    // while a newer version is installed, and its hover carries the
-    // updater's state. Everywhere else it stays exactly as it was.
+    // marker (SPEC.md "Installation and updates"): red with an up-arrow, and
+    // the update menu's toggle, while a newer version is installed, and its
+    // hover carries the updater's state. Everywhere else it stays exactly as
+    // it was.
     let updater = use_app_updater();
     let readout = updater.as_ref().map(AppUpdater::readout);
     let update_ready = readout.as_ref().is_some_and(|readout| readout.update_ready);
@@ -445,35 +548,125 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
         |readout| readout.tooltip,
     );
 
+    let help_menu = use_bar_menu(layout_epoch, "help");
+    let update_menu = use_bar_menu(layout_epoch, "update");
+    // The update menu's toggle is the red readout, which goes away when no
+    // update waits any more (a newer check, a reinstall); an open update
+    // menu must not outlive it.
+    // The effect reads the updater's state itself (a signal), so it reruns
+    // whenever that changes; a value captured from this render would not.
+    let watched_updater = updater.clone();
+    use_effect(move || {
+        let ready = watched_updater
+            .as_ref()
+            .is_some_and(|updater| updater.readout().update_ready);
+        let mut open = update_menu.open;
+        if !ready && *open.peek() {
+            open.set(false);
+        }
+    });
+    let has_updater = updater.is_some();
+    let help_items = help_menu_items(has_updater);
+    let help_tooltip = if has_updater {
+        "help: send feedback, open the documentation, or check for updates"
+    } else {
+        "help: send feedback or open the documentation"
+    };
+    let help_updater = updater.clone();
+    let update_updater = updater.clone();
+
     rsx! {
-        BarWithHelpMenu {
-            layout_epoch,
-            updater: updater.clone(),
-            on_send_feedback: move |_| {
-                feedback_notice.set(String::new());
-                feedback_open.set(true);
-            },
+        div { class: "app-bar",
             // Trusted, compile-time markup from the repository's own brand
             // file, never peer data, which is what makes inner HTML safe here.
             span { class: "app-wordmark", dangerous_inner_html: WORDMARK_SVG }
             crate::window_chrome::WindowDragRegion {}
-            span {
-                class: if update_ready { "app-version app-version-update peer-value" } else { "app-version peer-value" },
-                dir: "ltr",
-                "data-tooltip": "{version_tooltip}",
-                if update_ready {
+            // Always mounted, hidden while no update waits (see
+            // `BarMenuToggle`'s `hidden`); the plain readout shows instead.
+            if updater.is_some() {
+                BarMenuToggle {
+                    layout_epoch,
+                    menu: update_menu,
+                    items: UPDATE_MENU_ITEMS.to_vec(),
+                    toggle_class: "btn app-version app-version-update app-version-toggle peer-value",
+                    // The visible text is the running version; the name
+                    // leads with it so a screen reader announces what a
+                    // sighted user sees.
+                    toggle_label: "Farhelm {version}, update ready: {version_tooltip}",
+                    toggle_tooltip: version_tooltip.clone(),
+                    hidden: !update_ready,
                     span { class: "app-version-arrow", "aria-hidden": "true", "↑" }
+                    span { dir: "ltr", "{version}" }
                 }
-                "{version}"
+            }
+            if !update_ready {
+                span {
+                    class: "app-version peer-value",
+                    dir: "ltr",
+                    "data-tooltip": "{version_tooltip}",
+                    "{version}"
+                }
             }
             button {
                 r#type: "button",
                 class: "btn btn-neutral app-settings-toggle",
                 aria_label: "settings",
-                "data-tooltip": "settings: choices that apply to every host on this helm",
+                "data-tooltip": if has_updater {
+                    "settings: choices that apply to every host on this helm, and this app's automatic updates"
+                } else {
+                    "settings: choices that apply to every host on this helm"
+                },
                 aria_haspopup: "dialog",
                 onclick: move |_| settings_open.set(true),
                 crate::icons::SettingsIcon {}
+            }
+            BarMenuToggle {
+                layout_epoch,
+                menu: help_menu,
+                items: help_items.clone(),
+                toggle_class: "btn btn-neutral app-help-toggle",
+                toggle_label: "help",
+                toggle_tooltip: help_tooltip,
+                crate::icons::HelpIcon {}
+            }
+        }
+        BarMenuFlyout {
+            menu: help_menu,
+            items: help_items,
+            on_choose: move |item| match item {
+                BarMenuItem::SendFeedback => {
+                    feedback_notice.set(String::new());
+                    feedback_open.set(true);
+                }
+                BarMenuItem::Documentation => open_external_page(DOCS_URL),
+                BarMenuItem::CheckForUpdates => {
+                    if let Some(updater) = &help_updater {
+                        updater.check_now();
+                    }
+                }
+                // The update menu's items; never in this menu's list.
+                BarMenuItem::RestartToUpdate | BarMenuItem::WhatsNew => {}
+            },
+        }
+        // Mounted whenever there is an updater, for the same reason as its
+        // toggle; it shows nothing unless open, and the effect above closes
+        // it once no update waits.
+        if updater.is_some() {
+            BarMenuFlyout {
+                menu: update_menu,
+                items: UPDATE_MENU_ITEMS.to_vec(),
+                on_choose: move |item| match item {
+                    BarMenuItem::RestartToUpdate => {
+                        if let Some(updater) = &update_updater {
+                            updater.restart_to_update();
+                        }
+                    }
+                    BarMenuItem::WhatsNew => open_external_page(RELEASES_URL),
+                    // The help menu's items; never in this menu's list.
+                    BarMenuItem::SendFeedback
+                    | BarMenuItem::Documentation
+                    | BarMenuItem::CheckForUpdates => {}
+                },
             }
         }
         if settings_open() {
