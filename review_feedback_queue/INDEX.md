@@ -5,7 +5,6 @@ One line per open item. This file must always match the feedback files in this d
 ## Highest priority: security or data loss
 
 - `template-successor.md` — Template installation identity ignored at create dispatch.
-- `uninstall-missing-id.md` — Connected uninstall omits missing recorded identity comparison.
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
 - `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
 - `template-clobber.md` — A new template can overwrite saved choices while its catalog is unavailable.

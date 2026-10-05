@@ -3997,6 +3997,69 @@ mod tests {
         );
     }
 
+    /// Why this matters: the helm serves supervisors that report no identity,
+    /// so a host can be connected with none on record. If the destination
+    /// then answers uninstall's fresh probe with an identity, the machine
+    /// answering may not be the one whose sessions were just checked, and
+    /// uninstall removes files.
+    ///
+    /// Spec (SPEC_impl.md): the probe must report exactly the recorded
+    /// identity, a missing one included. A connected identityless host whose
+    /// probe reports an identity is refused without acting on the host; the
+    /// same host whose probe also reports none plans as before.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_an_identity_reported_for_a_host_with_none_on_record() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "identityless.example",
+                HostScript {
+                    identity: None,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(host).await;
+        assert_eq!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .and_then(|row| row.host_identity),
+            None,
+            "fixture premise: the connected host has no identity on record"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.probe.lock().unwrap() = None;
+        *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
+            identity: Some("someone-else".to_string()),
+            dial_farhelm: root.path().join("lib/farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        });
+        let service = service(&harness, backend.clone(), root.path());
+
+        let refused = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(refused.contains("no identity on record"), "{refused}");
+        assert!(refused.contains("someone-else"), "{refused}");
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "the refusal comes before uninstall inspects or changes anything on the host"
+        );
+
+        if let Some(repeat) = backend.repeat_probe.lock().unwrap().as_mut() {
+            repeat.identity = None;
+        }
+        service
+            .plan_uninstall(host)
+            .await
+            .expect("a probe that also reports no identity matches the record");
+    }
+
     /// Why this matters: a run can remove the lib directory and still fail
     /// to forget the host (the helm exits, the last step fails, the ssh exit
     /// status is lost), and a user may have deleted the directory by hand as

@@ -6970,4 +6970,6 @@
 - Completion criteria: the check requires the reported and recorded identities to be equal as optional values, refusing
   when either side has one the other lacks; a focused test covers a connected identityless row and a probe that reports
   an identity. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-install-uninstall-gaps.md`.
+- Execution: complete — change `nulwwqxysyqquxytrvxtssznwzutyqzv`, bookmark
+  `plan/triage-install-uninstall-gaps/02-uninstall-missing-id`, PR
+  [#1655](https://github.com/scode/farhelm/pull/1655/changes).
