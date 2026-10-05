@@ -125,3 +125,65 @@ Declined, with reasons recorded in the plan log:
   its plan first.
 - **Rewording the shared YOLO question's comments**, to keep that shared code unchanged.
 - **Removing a harmless redundant state write on a stale launcher answer.**
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as six squash commits on main, in stack order: #1658 (the session list's YOLO question),
+#1659 (the launcher's), #1660 (Restart with's), #1661 (its browser test), #1662 (the feedback dialog) and #1663 (the two
+host setup questions the sweep found). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Nothing that could interact: between the commit the stack was built on and the landing, main gained only the planning
+queue's own bookkeeping.
+
+#### The sweep's two extra fixes
+
+The two sweep fixes in #1663 address review items that never went through triage. Your decision on the session list's
+YOLO question put a sweep "for other prompts that still guard by hand" in scope, under the same gate, and #1663 records
+the sweep under that decision's entry in the triage ledger rather than adding entries of its own. Only Add host's
+question was moved onto the shared confirmation mechanism; the host row's setup question was fixed by moving one write,
+as the report explains.
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan checked the stack before anything merged. It found nothing outside
+the six PRs that the changes break. In particular, the launcher's switch from submit buttons to submitting the form from
+the answer's own handler is safe: only one launcher form is ever on screen, Enter in a field always went through the
+Launch button and still does, the recent-launch Enter key uses the same path, and the tests that look for a submit
+button only ever find Launch. The YOLO answers keep their hover text, and none of the docs screenshot, README image or
+demo video scripts drives a surface the stack changed. The review-feedback queue's index matches its files, and each
+removed item goes with its own index line.
+
+It also found three things the landing did not change, which are yours to weigh:
+
+- **A small new gap in the launcher.** An answer to the launcher's YOLO question now takes the question first and then
+  submits the form. If another operation is already running on the page by then, the submit does nothing and the
+  question is already gone, so the user sees it vanish with nothing launched. The answer's consent is kept, so the next
+  Launch starts the YOLO session without asking again; a "don't ask again" answer is lost, though, so the host keeps
+  asking. Before this stack the question stayed up in that case. The window is narrow, because the answers are disabled
+  whenever the page was busy when they were last drawn. Reviewers fixed the same pattern for the session list's question
+  (an answer now checks it can start before taking the question); the launcher did not get that fix. A follow-up could
+  give it the same check.
+- **Not every YOLO question changed.** The question for Replace from the session header still stays up while "don't ask
+  again" saves, so #1660's commit message ("The other YOLO questions now behave the same way") and the report's SPEC.md
+  note overgeneralize. SPEC.md's "the confirmation stays up with the reason" is still accurate for the header's Replace;
+  the one-word edit the report recommends ("comes back with the reason") would be wrong for it unless the sentence
+  describes both.
+- **The shared confirmation helper's own documentation disagrees with some callers.** It says an event handler must
+  close only the question it was drawn for and must not use the reads meant for drawing the screen; a few handlers in
+  the launcher, the session view and the hosts panel close whatever question is open, or read it the way the screen
+  does, each with a comment saying why. Nothing misbehaves; either the documentation or those calls should change so the
+  two agree.
+
+#### Checks
+
+- Run now, on the final stack, through the test-run recorder: the session-list test that answers "don't ask again" to a
+  refused YOLO replace from the row menu, which drives the path #1658 changed and was not among the report's runs, on
+  Chromium and WebKit (run `f129da98`, 2 passed).
+- Reused: the report's checks. The code on main after the last merge is identical to the final stack they and the run
+  above used, and the only other commits since the stack was based are the planning queue's bookkeeping.
+- Skipped: further runs, for the same reason.
+
+The landing review found one thing in the report above to be wrong: its SPEC.md note and the one-word edit it
+recommends, as explained above.
