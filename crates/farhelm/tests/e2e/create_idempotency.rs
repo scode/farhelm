@@ -287,9 +287,12 @@ async fn a_key_reused_for_a_different_request_is_refused() {
         .find_map(|c| c.downcast_ref::<SupervisorError>())
         .expect("the refusal must carry a classified kind");
     assert_eq!(downcast.kind, ErrorKind::Conflict);
+    // The key is not echoed: an agent's key reaches the supervisor in a
+    // helm-scoped form it never typed, and every caller knows its own key.
     assert!(
-        downcast.message.contains("intent-2"),
-        "the refusal must name the key: {}",
+        downcast.message.contains("different create request")
+            && !downcast.message.contains("intent-2"),
+        "the refusal must say why without naming the key: {}",
         downcast.message
     );
 

@@ -1546,7 +1546,9 @@ fn classify_unallocated_checkout_conflict(
 ///
 /// ## Earlier encodings are retired
 ///
-/// Every create since protocol 39 fingerprints as `"session_launch_v1"`.
+/// Every create since protocol 39 fingerprints as `"session_launch_v1"`,
+/// except an agent's create, which since protocol 43 fingerprints by its
+/// request instead ([`agent_request_fingerprint`]).
 /// The raw, parented and structured tuples earlier builds wrote are no
 /// longer produced, so a reservation stored under one matches no request
 /// this build fingerprints: a retry crossing the upgrade with its old key
@@ -1588,6 +1590,39 @@ pub(crate) fn create_fingerprint(
     }
     serde_json::to_string(&("session_launch_v1", parent, cwd, title, launch))
         .expect("a fingerprint of strings and options always serializes")
+}
+
+/// The fingerprint of an agent's keyed create: the helm's digest of the
+/// request as the agent sent it, in place of [`create_fingerprint`]'s
+/// resolved fields (protocol 43).
+///
+/// The resolved fields are deliberately absent. A retry re-resolves the
+/// request, and a template it names, or a clone's source, may have been
+/// edited since the first attempt; comparing the resolution would refuse
+/// such a retry as key reuse even though the agent repeated its request
+/// exactly (SPEC.md, Agent-spawned sessions). What the digest leaves out is
+/// covered elsewhere: the key's scope names the asking session, and the
+/// reservation lives on the host the first attempt reached.
+///
+/// ## The encoding is frozen
+///
+/// `("agent_request_v1", digest)` as a JSON tuple, stored in reservations
+/// that outlive builds. Changing it would turn every outstanding key into a
+/// key-reuse refusal, so a new shape gets a new discriminant rather than an
+/// edit to this one; the same holds for the helm's digest input.
+pub(crate) fn agent_request_fingerprint(digest: &str) -> String {
+    serde_json::to_string(&(AGENT_REQUEST_TAG, digest))
+        .expect("a fingerprint of two strings always serializes")
+}
+
+/// The discriminant [`agent_request_fingerprint`] writes first.
+const AGENT_REQUEST_TAG: &str = "agent_request_v1";
+
+/// Whether a stored fingerprint is an agent's request fingerprint, whose
+/// retry may resolve to another launch than the attempt it matches.
+fn is_agent_request_fingerprint(fingerprint: &str) -> bool {
+    serde_json::from_str::<(String, String)>(fingerprint)
+        .is_ok_and(|(tag, _)| tag == AGENT_REQUEST_TAG)
 }
 
 /// Serializes creates that share an intent key, so concurrent retries of
@@ -6935,9 +6970,11 @@ impl Supervisor {
         // from the row's already-expanded cwd (`validate_retry`), and a
         // refused expansion is a validation refusal recorded against the
         // intent key like any other. The intent-key FINGERPRINT is
-        // computed by the handler from the client's literal string: a
-        // client retrying "~" produces the same fingerprint both times,
-        // which is all idempotency needs.
+        // computed by the handler from the request as sent, never from
+        // what validation expands it to: a client retrying "~" produces the
+        // same fingerprint both times, which is all idempotency needs. (An
+        // agent's create goes further and is fingerprinted by the helm's
+        // digest of the agent's request, before any resolution at all.)
         let fresh = inputs.github_checkout.is_some();
         let Some(claim) = claim else {
             let request = self
@@ -7618,14 +7655,49 @@ impl Supervisor {
             }
             return self.validate_create(inputs).await;
         };
+        // An agent's create is matched by its request, not its launch, so its
+        // retry can resolve to something other than what the interrupted
+        // attempt recorded (a template edited in between). The helm showed
+        // the user, and checked against the host's YOLO rule, THIS retry's
+        // launch, folder and title; relaunching the recorded ones would run
+        // something nobody approved this time, possibly a YOLO launch the
+        // host no longer allows, or a command in another project. The folder
+        // is compared after `~` expansion, as the row stores it; one that no
+        // longer expands, or expands elsewhere, counts as different. A title
+        // the retry leaves to the supervisor is not compared, having nothing
+        // to compare. A retry that resolves to the same launch, folder and
+        // title relaunches as any other. The refusal is recorded against a
+        // permanent key; a spawn's session-lifetime key is freed instead
+        // (`record_refused_create`), so its next retry creates afresh.
+        if is_agent_request_fingerprint(&reservation.fingerprint) {
+            let same_cwd = expand_tilde_cwd(inputs.cwd, self.user_home.as_deref())
+                .is_ok_and(|cwd| *cwd == row.cwd);
+            let same_title = inputs
+                .title
+                .as_ref()
+                .is_none_or(|title| *title == row.title);
+            if row.launch != inputs.launch || !same_cwd || !same_title {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this intent key's interrupted first attempt recorded a different launch, \
+                     folder or title than this retry resolves to (a template or source session \
+                     changed in between), so it is not relaunched; send a new key to create from \
+                     the request as it resolves now"
+                        .to_string(),
+                )
+                .into());
+            }
+        }
         // The row's stored cwd IS the first attempt's resolution — already
         // expanded if the request said `~` — so the checks run against it,
         // never against the request's literal string. Re-expanding the
         // request here would let a `HOME` change between the crash and the
         // retry reject (or worse, re-aim) an already-accepted create; the
-        // fingerprint has already proven the request is the same literal
-        // string the first attempt resolved, which is all the request's
-        // own cwd is good for.
+        // fingerprint has already proven the retry is the same request as
+        // the first attempt, and for an agent's create, whose fingerprint
+        // is the request as the agent sent it, the retry's own resolution
+        // may even differ (a template edited in between). Either way the
+        // row, not the retry, is what the interrupted attempt was.
         //
         // A FRESH checkout's crashed attempt left a registry row (Design
         // C). Before anything else, its stage decides this retry's fate:
@@ -7888,12 +7960,14 @@ impl Supervisor {
         if !same_request {
             return Resolution::Answer(Box::new(Err(RequestError::new(
                 ErrorKind::Conflict,
-                format!(
-                    "intent key {} was already used for a different create request; \
-                     a reused key is a client bug rather than a merge, so this request \
-                     is refused — send a new key for a new request",
-                    truncate_for_error(&claim.intent_key)
-                ),
+                // No key in the text, here or in any other create refusal:
+                // an agent's key reaches this host scoped and hashed by the
+                // helm, a form the agent never typed, and every caller
+                // already knows the key it sent.
+                "this intent key was already used for a different create request; a \
+                 reused key is a client bug rather than a merge, so this request is \
+                 refused — send a new key for a new request"
+                    .to_string(),
             )
             .into())));
         }
@@ -7934,11 +8008,11 @@ impl Supervisor {
                     // reload, once whatever failed is readable again — resolves
                     // it against evidence instead of a guess.
                     LaunchEvidence::Unresolved(why) => Resolution::Answer(Box::new(Err(why
-                        .context(format!(
-                            "cannot tell whether intent key {}'s create ever launched, so it is \
-                     neither replayed nor retried; try again once the cause is cleared",
-                            truncate_for_error(&claim.intent_key)
-                        ))))),
+                        .context(
+                            "cannot tell whether this intent key's create ever launched, so it \
+                             is neither replayed nor retried; try again once the cause is \
+                             cleared",
+                        )))),
                 }
             }
         }
@@ -8207,11 +8281,12 @@ impl Supervisor {
             }
             None => Err(RequestError::new(
                 ErrorKind::Conflict,
+                // The session, not the key: see `resolve_reservation`'s
+                // key-reuse refusal for why no create refusal quotes a key.
                 format!(
-                    "intent key {} already created session {}, which has since been deleted; \
-                     it will not be recreated under the same key — send a new key to create \
-                     a new session",
-                    truncate_for_error(&reservation.intent_key),
+                    "this intent key already created session {}, which has since been \
+                     deleted; it will not be recreated under the same key — send a new key \
+                     to create a new session",
                     truncate_for_error(&reservation.session_id)
                 ),
             )
@@ -9147,7 +9222,7 @@ impl Supervisor {
         // takeover, and either winner still owns the previous attempt's
         // files. Once acquired, cleanup is fail-closed before spawning on
         // the generation-scoped paths the replacement row now records.
-        if let Some(intent_key) = retry_intent_key
+        if retry_intent_key.is_some()
             && let Err(e) =
                 clear_launch_artifacts_fail_closed(&self.state_dir, &id, generation).await
         {
@@ -9162,9 +9237,8 @@ impl Supervisor {
             )
             .await;
             return Err(anyhow::anyhow!(
-                "not relaunching intent key {}: {e}; the intent stays pending, so a \
-                 retry can resolve it once the cause is cleared",
-                truncate_for_error(&intent_key)
+                "not relaunching this intent key's create: {e}; the intent stays pending, \
+                 so a retry can resolve it once the cause is cleared"
             ));
         }
         // (The AfterRecord seam fired earlier, before the fresh checkout's
@@ -13690,9 +13764,8 @@ impl Supervisor {
                 Err(RequestError::new(*kind, message.clone()).into())
             }
             ReservationOutcome::Pending => Err(anyhow::anyhow!(
-                "intent key {} is still pending after another create claimed it; \
-                 retry to reconcile it",
-                truncate_for_error(&reservation.intent_key)
+                "this intent key is still pending after another create claimed it; retry \
+                 to reconcile it"
             )),
         }
     }
@@ -23137,6 +23210,7 @@ exit 0
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -24306,6 +24380,7 @@ exit 0
             confirm_yolo: false,
             github_checkout: None,
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -24386,13 +24461,156 @@ exit 0
         };
         assert_eq!(kind, ErrorKind::Conflict);
         assert!(
-            message.contains("one-intent") && message.contains("different create request"),
-            "the refusal must name the key and say why: {message}"
+            !message.contains("one-intent") && message.contains("different create request"),
+            "the refusal must say why without echoing the key: {message}"
         );
 
         assert!(
             sup.sessions.lock().await.is_empty(),
             "none of the three attempts may have created a session"
+        );
+    }
+
+    /// Why this matters: an agent's keyed create is retried after a lost
+    /// reply, and between the attempts a template it names may have been
+    /// edited, so the retry resolves to a different launch. Comparing the
+    /// resolved launch refused that retry as key reuse even though the agent
+    /// repeated its request exactly; the helm now sends a digest of the
+    /// request, and the supervisor must compare that instead.
+    ///
+    /// Spec: with a request fingerprint, a retry carrying the same digest
+    /// gets the first attempt's recorded failure back, same kind and text,
+    /// even though its launch differs; the same key with a different digest
+    /// is refused as key reuse without echoing the key. A digest that is not
+    /// 64 lowercase hex characters, or one sent without an intent key, is
+    /// refused as an invalid request, ahead of the key's reservation (a
+    /// refusal from the reservation would be a `Conflict`).
+    ///
+    /// The first attempt fails on an unwritable `launch/`, as in
+    /// `a_failed_create_replays_its_error_and_a_changed_override_conflicts`,
+    /// and probe writes prove the directory refused writes then and accepts
+    /// them before the retries. A retry that created afresh instead of
+    /// replaying would get past the launch publication and answer
+    /// differently, or leave a session the last assertion would find.
+    #[farhelm_testtrace::test]
+    async fn an_agent_create_is_matched_by_its_request_fingerprint_not_its_launch() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let launch_dir = state.path().join("launch");
+        let probe = launch_dir.join("probe");
+        let first = "a".repeat(64);
+        let other = "b".repeat(64);
+        let request = |req_id: u64, command: &str, key: Option<&str>, digest: &str| {
+            ControlMsg::CreateSession {
+                req_id,
+                parent: None,
+                inherit_agent: false,
+                cwd: "/".to_string(),
+                launch: Some(SessionLaunch::plain_command(command)),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: key.map(str::to_string),
+                confirm_yolo: false,
+                github_checkout: None,
+                key_lives_with_session: false,
+                request_fingerprint: Some(digest.to_string()),
+            }
+        };
+        let keyed = |req_id: u64, command: &str, digest: &str| {
+            request(req_id, command, Some("agent-intent"), digest)
+        };
+        let mut send = async |msg: ControlMsg| {
+            handle_control(
+                &sup,
+                msg,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let frame = rx.try_recv().expect("a reply must have been sent");
+            serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
+        };
+
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o500))
+                .expect("removing write permission from launch/");
+        }
+        assert_eq!(
+            std::fs::write(&probe, b"x").map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::PermissionDenied),
+            "premise: launch/ refuses writes (not running with permission-bypass privileges)"
+        );
+        let ControlMsg::Error {
+            message: first_message,
+            kind: first_kind,
+            ..
+        } = send(keyed(1, "agent --from-first-template", &first)).await
+        else {
+            panic!("the create must fail while launch/ is unwritable");
+        };
+        assert_eq!(first_kind, ErrorKind::Internal, "{first_message}");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o700))
+                .expect("restoring launch/");
+        }
+        std::fs::write(&probe, b"x").expect("premise: launch/ accepts writes again");
+        std::fs::remove_file(&probe).expect("removing the probe");
+
+        // The template was edited: same request, different launch. Replayed.
+        let ControlMsg::Error { message, kind, .. } =
+            send(keyed(2, "agent --from-edited-template", &first)).await
+        else {
+            panic!("a replayed failure must still be an error");
+        };
+        assert_eq!(
+            message, first_message,
+            "the retry must get the first answer"
+        );
+        assert_eq!(kind, first_kind);
+
+        // Same key, a different request: refused, and the key is not echoed.
+        let ControlMsg::Error { message, kind, .. } =
+            send(keyed(3, "agent --from-first-template", &other)).await
+        else {
+            panic!("a key reused for a different request must be refused");
+        };
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            message.contains("different create request") && !message.contains("agent-intent"),
+            "{message}"
+        );
+
+        for digest in ["A".repeat(64), "a".repeat(63), "g".repeat(64)] {
+            let ControlMsg::Error { message, kind, .. } = send(keyed(4, "agent", &digest)).await
+            else {
+                panic!("a malformed request fingerprint must be refused");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest, "{digest}: {message}");
+            assert!(message.contains("request fingerprint"), "{message}");
+        }
+        let ControlMsg::Error { message, kind, .. } = send(request(5, "agent", None, &first)).await
+        else {
+            panic!("a request fingerprint without a key must be refused");
+        };
+        assert_eq!(kind, ErrorKind::InvalidRequest, "{message}");
+        assert!(message.contains("needs an intent key"), "{message}");
+
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "no attempt may have created a session"
         );
     }
 
@@ -24917,6 +25135,7 @@ exit 0
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
+                    request_fingerprint: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -24967,6 +25186,7 @@ exit 0
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -25028,6 +25248,7 @@ exit 0
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -25105,6 +25326,7 @@ exit 0
             confirm_yolo: false,
             github_checkout: None,
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -25180,8 +25402,8 @@ exit 0
             "correcting the title does not un-spend the key: {message}"
         );
         assert!(
-            message.contains("one-intent") && message.contains("different create request"),
-            "the refusal must name the key and say why: {message}"
+            !message.contains("one-intent") && message.contains("different create request"),
+            "the refusal must say why without echoing the key: {message}"
         );
 
         assert!(
@@ -25797,6 +26019,162 @@ exit 0
             "the replacement entry must read the same cell the pre-restart entry was written \
              through; a per-launch cell would report the build-time value instead"
         );
+    }
+
+    /// Why this matters: an agent's create is matched by its request, so a
+    /// retry after a template edit resolves to another launch, folder or
+    /// title than its interrupted first attempt recorded. The helm approved
+    /// and YOLO-checked the retry's; relaunching the recorded ones would run
+    /// something the user was not shown, possibly a YOLO launch the host
+    /// stopped allowing, or a command in another project.
+    ///
+    /// Spec: a pending reservation under an agent request fingerprint is
+    /// refused as a `Conflict`, with nothing launched, when only the retry's
+    /// launch, only its folder, or only its title differs from the recorded
+    /// one; the refusal settles the permanent key as that `Conflict` and
+    /// removes the stranded row. A retry that resolves to exactly what was
+    /// recorded is not refused by this check.
+    #[farhelm_testtrace::test]
+    async fn an_agent_retry_whose_launch_changed_is_not_relaunched_from_the_recorded_one() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let recorded = state.path().join("recorded");
+        let elsewhere = state.path().join("elsewhere");
+        std::fs::create_dir(&recorded).expect("the recorded folder");
+        std::fs::create_dir(&elsewhere).expect("the folder a template moved to");
+        let recorded = recorded.to_string_lossy().into_owned();
+        let elsewhere = elsewhere.to_string_lossy().into_owned();
+        let claim = |key: &str| IntentClaim {
+            intent_key: key.to_string(),
+            fingerprint: agent_request_fingerprint(&"e".repeat(64)),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let seed = async |key: &str| {
+            let id = format!("interrupted-{key}");
+            sup.store
+                .insert_session(
+                    StoredSession {
+                        conversation_source: None,
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
+                        id: id.clone(),
+                        parent: None,
+                        title: "recorded title".to_string(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: recorded.clone(),
+                        launch: SessionLaunch::plain_command("agent --as-first-resolved"),
+                        tmux_name: format!("fh-{id}"),
+                        pane: String::new(),
+                        outcome: LastOutcome::Launching,
+                        canonical_cwd: Some(
+                            std::fs::canonicalize(&recorded)
+                                .expect("canonicalize")
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
+                        captured_conversation: None,
+                        generation: 0,
+                        launch_scoped: false,
+                    },
+                    Some(claim(key)),
+                )
+                .await
+                .expect("seed the interrupted attempt");
+            let launch_spec = crate::launch::spec_path_for_launch(state.path(), &id, 0);
+            assert!(
+                !crate::launch::status_path_for_spec(&launch_spec).exists(),
+                "fixture premise: no sentinel, so the retry reaches relaunch validation"
+            );
+            id
+        };
+        const REFUSAL: &str = "different launch, folder or title than this retry";
+
+        // (key, the retry's folder, command and title): each case changes
+        // exactly one of the three.
+        let cases = [
+            (
+                "launch-changed",
+                recorded.as_str(),
+                "agent --as-edited-now",
+                "recorded title",
+            ),
+            (
+                "folder-changed",
+                elsewhere.as_str(),
+                "agent --as-first-resolved",
+                "recorded title",
+            ),
+            (
+                "title-changed",
+                recorded.as_str(),
+                "agent --as-first-resolved",
+                "edited title",
+            ),
+        ];
+        for (key, retry_cwd, retry_command, retry_title) in cases {
+            let id = seed(key).await;
+            let refusal = sup
+                .create_session_without_overrides(
+                    retry_cwd,
+                    retry_command,
+                    Some(retry_title.to_string()),
+                    80,
+                    24,
+                    Some(claim(key)),
+                )
+                .await
+                .expect_err("a changed retry must not be relaunched from the recorded attempt");
+            assert_eq!(error_kind(&refusal), ErrorKind::Conflict, "{key}");
+            assert!(
+                format!("{refusal:#}").contains(REFUSAL),
+                "{key}: {refusal:#}"
+            );
+            let settled = sup
+                .store
+                .reservation(key)
+                .await
+                .expect("read the reservation")
+                .expect("the permanent key keeps its reservation");
+            assert!(
+                matches!(
+                    settled.outcome,
+                    ReservationOutcome::Failed {
+                        kind: ErrorKind::Conflict,
+                        ..
+                    }
+                ),
+                "{key}: {:?}",
+                settled.outcome
+            );
+            assert!(
+                sup.store.session(&id).await.expect("read").is_none(),
+                "{key}: the stranded row goes with the settled key"
+            );
+        }
+        assert!(sup.sessions.lock().await.is_empty(), "nothing was launched");
+
+        // The control: a retry resolving to exactly what was recorded passes
+        // this check (whatever the relaunch then does with a dummy agent).
+        seed("unchanged").await;
+        let outcome = sup
+            .create_session_without_overrides(
+                &recorded,
+                "agent --as-first-resolved",
+                Some("recorded title".to_string()),
+                80,
+                24,
+                Some(claim("unchanged")),
+            )
+            .await;
+        if let Err(error) = outcome {
+            assert!(!format!("{error:#}").contains(REFUSAL), "{error:#}");
+        }
     }
 
     /// A retry whose working directory was REPOINTED between the attempts

@@ -1508,6 +1508,7 @@ pub(crate) async fn create_session(
                 settings_from_source: false,
                 parent: None,
                 spawned: false,
+                request_fingerprint: None,
             },
         )
         .await
@@ -1578,6 +1579,7 @@ pub(crate) async fn do_create_session(
         settings_from_source,
         parent,
         spawned,
+        request_fingerprint,
     } = spec;
     // Before any bookkeeping or dispatch: a YOLO launch on a host that asks before YOLO
     // launches is refused unless the caller confirmed it (see `yolo_guard`). An agent's
@@ -1618,6 +1620,7 @@ pub(crate) async fn do_create_session(
                 github_checkout: github_checkout.clone(),
                 parent,
                 key_lives_with_session: spawned,
+                request_fingerprint,
             },
         )
         .await?;
@@ -1788,6 +1791,11 @@ pub(crate) struct CreateSpec {
     /// key is spent only while the child exists, as a spawn's key is when the
     /// session's own supervisor answers it (SPEC.md, Agent-spawned sessions).
     pub(crate) spawned: bool,
+    /// The digest of an agent's request that a keyed retry is compared by on
+    /// the target, instead of the resolved launch; see
+    /// `ControlMsg::CreateSession::request_fingerprint`. `None` for every
+    /// create the user makes, which keeps the resolved-launch fingerprint.
+    pub(crate) request_fingerprint: Option<String>,
 }
 
 /// Whose successful create may shape the user's launch suggestions.
@@ -1943,6 +1951,7 @@ async fn create_fresh_session(
             settings_from_source: false,
             parent: None,
             spawned: false,
+            request_fingerprint: None,
         },
     )
     .await
@@ -3009,6 +3018,7 @@ pub(crate) async fn do_replace_session(
             settings_from_source,
             parent: None,
             spawned: false,
+            request_fingerprint: None,
         },
     )
     .await?;

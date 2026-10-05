@@ -1038,6 +1038,7 @@ async fn restricted_raw_data_is_refused() {
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             })
             .await;
         let ControlMsg::Error {

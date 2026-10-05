@@ -20,8 +20,9 @@ use super::connection::{
     set_attachment_paused, spawn_admitted,
 };
 use super::core::{
-    CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
+    CreateInputs, RequestError, SessionEntry, Supervisor, agent_request_fingerprint,
+    create_fingerprint, ensure_title_printable, error_kind, truncate_for_error,
+    unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
@@ -246,11 +247,13 @@ fn create_launch(
 
 /// One `CreateSession` request's fields as the wire carried them.
 ///
-/// Both dispatchers (full-authority and session-authenticated) build one of
-/// these and hand it to [`handle_create_session`] beside the facts only the
-/// dispatcher knows (admission, the authenticating credential, a resolved
-/// mode), instead of passing twenty positional arguments that two call sites
-/// had to keep in the same order.
+/// Only the full-authority dispatcher builds one, and hands it to
+/// [`handle_create_session`] beside the facts only the dispatcher knows
+/// (admission, a resolved mode) instead of passing twenty positional
+/// arguments. A session-authenticated create is refused before any of its
+/// fields is read (protocol 41), which is what lets `request_fingerprint`,
+/// a field that widens what replays, be honored here without an authority
+/// check of its own.
 struct CreateRequest {
     parent: Option<String>,
     cwd: String,
@@ -262,11 +265,26 @@ struct CreateRequest {
     cols: u16,
     rows: u16,
     intent_key: Option<String>,
+    /// The helm's digest of an agent's request, compared on a retry in place
+    /// of the resolved fields (protocol 43); see
+    /// `ControlMsg::CreateSession::request_fingerprint`.
+    request_fingerprint: Option<String>,
     /// The helm-resolved fresh-checkout intent (protocol 24). Passed through
     /// to the create path untouched: validation, fingerprinting, and
     /// allocation all happen in the create path (Design C), never in the
     /// dispatcher.
     github_checkout: Option<ResolvedGithubCheckout>,
+}
+
+/// Whether `digest` has the shape of the helm's request fingerprint: a
+/// SHA-256 written as 64 lowercase hexadecimal characters. Shape is the whole
+/// check: the supervisor cannot recompute the digest, and only bounds what a
+/// reservation stores for it.
+fn is_request_digest(digest: &str) -> bool {
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 async fn handle_create_session(
@@ -285,6 +303,7 @@ async fn handle_create_session(
         cols,
         rows,
         intent_key,
+        request_fingerprint,
         github_checkout,
     } = request;
     let checkout_bytes = match github_checkout
@@ -312,7 +331,25 @@ async fn handle_create_session(
             key.len()
         )),
         _ => None,
-    } {
+    }
+    .or_else(|| match request_fingerprint.as_deref() {
+        // Checked by shape rather than counted into the create-field cap
+        // below: the helm sends a SHA-256 in hex, and anything else is not
+        // one, so a fixed length bounds what the reservation stores.
+        Some(digest) if !is_request_digest(digest) => {
+            Some("request fingerprint must be 64 lowercase hexadecimal characters".to_string())
+        }
+        Some(_) if github_checkout.is_some() => Some(
+            "a create cannot carry both a request fingerprint and a fresh checkout".to_string(),
+        ),
+        // Without a key there is nothing to compare it with, and a helm that
+        // sent one had meant the create to be keyed: refusing says so,
+        // where ignoring it would quietly make the create unkeyed.
+        Some(_) if intent_key.is_none() => {
+            Some("a request fingerprint needs an intent key".to_string())
+        }
+        _ => None,
+    }) {
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
@@ -373,16 +410,21 @@ async fn handle_create_session(
     // launch something different changes the fingerprint instead of
     // replaying a launch shaped by stale data. A fresh-checkout create binds
     // the helm's resolved checkout intent beside it (R1.4's versioned
-    // discriminant, now `github_checkout_v4`).
+    // discriminant, now `github_checkout_v4`). An agent's create binds the
+    // request the agent sent instead (`agent_request_fingerprint`), so a
+    // retry of that request replays even when what it names was edited.
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
-        fingerprint: create_fingerprint(
-            github_checkout.as_ref(),
-            parent.as_deref(),
-            &cwd,
-            &mode,
-            title.as_deref(),
-        ),
+        fingerprint: match request_fingerprint.as_deref() {
+            Some(digest) => agent_request_fingerprint(digest),
+            None => create_fingerprint(
+                github_checkout.as_ref(),
+                parent.as_deref(),
+                &cwd,
+                &mode,
+                title.as_deref(),
+            ),
+        },
         dedup_scope: admission.dedup_scope(),
     });
     match sup
@@ -2382,6 +2424,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             confirm_yolo: _,
             github_checkout,
             key_lives_with_session,
+            request_fingerprint,
         } => {
             // The fresh-checkout payload flows straight through to the
             // create path (Design C): the supervisor validates the
@@ -2402,6 +2445,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 cols,
                 rows,
                 intent_key,
+                request_fingerprint,
                 github_checkout,
             };
             handle_create_session(
@@ -3875,6 +3919,7 @@ mod tests {
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
+                    request_fingerprint: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -5661,6 +5706,7 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             &tx,
             &auth,
@@ -5825,6 +5871,7 @@ mod tests {
                     },
                 }),
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             &tx,
             &auth,
@@ -5944,6 +5991,7 @@ mod tests {
                     },
                 }),
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7163,6 +7211,7 @@ mod tests {
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: marked,
+                    request_fingerprint: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -7417,6 +7466,61 @@ mod tests {
         );
     }
 
+    /// Why this matters: a request fingerprint replaces the resolved fields
+    /// as what a keyed retry is compared by, and a fresh checkout's
+    /// reconciliation decodes those fields from the stored fingerprint, so
+    /// the two must never meet in one reservation. Agent creates never carry
+    /// a checkout, so the combination can only be a malformed request.
+    ///
+    /// Spec: a keyed create carrying both a well-formed request fingerprint
+    /// and a fresh checkout is refused as an invalid request before anything
+    /// is reserved or allocated.
+    #[farhelm_testtrace::test]
+    async fn a_request_fingerprint_beside_a_fresh_checkout_is_refused() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 98,
+                parent: None,
+                inherit_agent: false,
+                cwd: String::new(),
+                launch: Some(farhelm_proto::SessionLaunch::plain_command("agent")),
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("checkout-and-fingerprint".into()),
+                confirm_yolo: false,
+                github_checkout: Some(checkout_size_fixture()),
+                key_lives_with_session: false,
+                request_fingerprint: Some("c".repeat(64)),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut HashMap::new(),
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tokio::task::JoinSet::new(),
+            },
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+        assert!(matches!(reply, ControlMsg::Error {
+            req_id: 98, kind: ErrorKind::InvalidRequest, message,
+        } if message.contains("request fingerprint and a fresh checkout")));
+        assert!(
+            sup.store
+                .reservation("checkout-and-fingerprint")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
     /// A checkout and a launch that each fit separately must still share one
     /// allowance. Drive admission with a real empty root and keyed create:
     /// refusal must precede reservation, allocation and session publication.
@@ -7458,6 +7562,7 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: Some(checkout),
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7519,6 +7624,7 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7606,6 +7712,7 @@ mod tests {
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
+                    request_fingerprint: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -7660,6 +7767,7 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7726,6 +7834,7 @@ mod tests {
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
+                    request_fingerprint: None,
                 },
                 ConnectionCtx {
                     tx: &tx,

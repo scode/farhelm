@@ -194,7 +194,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_42` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_43` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 42;
+pub const PROTOCOL_VERSION: u32 = 43;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2387,7 +2387,9 @@ pub enum ControlMsg {
     /// The resolved bundle joins the idempotency fingerprint (`intent_key`
     /// below), as does `parent`: a retry under the same key with different
     /// launch settings is refused as key reuse rather than replaying an
-    /// outcome under the old ones.
+    /// outcome under the old ones. The exception is an agent's create, which
+    /// the helm fingerprints by the request the agent sent instead
+    /// (`request_fingerprint`).
     CreateSession {
         req_id: u64,
         /// The spawning session, when this create came from `farhelm
@@ -2423,8 +2425,8 @@ pub enum ControlMsg {
         /// attachment, not the session) replays the original outcome
         /// instead of launching a second process. The resolved launch joins
         /// the fingerprint, and version 11 adds `parent`; a retry cannot
-        /// change any of them under cover of the same key. An explicit
-        /// inherited spawn is resolved before that fingerprint is built. `None` preserves
+        /// change any of them under cover of the same key, unless
+        /// `request_fingerprint` replaces them as what is compared. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
@@ -2444,6 +2446,25 @@ pub enum ControlMsg {
         /// it. Serialized only when true.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key_lives_with_session: bool,
+        /// What an agent's keyed create is compared by on a retry, in place of
+        /// the resolved fields (protocol 43): a digest the helm computes from
+        /// the request as the agent sent it (the templates and flags it named,
+        /// or the session it cloned, never what they resolved to). With it, a
+        /// retry repeating the request replays the first attempt's outcome even
+        /// when a template it names, or a clone's source, changed in between;
+        /// a different request under the same key is still refused as key
+        /// reuse (SPEC.md, Agent-spawned sessions).
+        ///
+        /// Exactly 64 lowercase hexadecimal characters, or the create is
+        /// refused. It widens what replays, so it is the helm's alone to send:
+        /// only a full-authority connection's create reaches the create path,
+        /// since a session-authenticated one is refused outright (protocol 41).
+        /// It never accompanies `github_checkout`, which agent creates do not
+        /// carry, and means nothing without `intent_key`; a create with both
+        /// fields, or with this one and no key, is refused. Serialized only
+        /// when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_fingerprint: Option<String>,
         /// An owned fresh GitHub checkout this create must perform before
         /// launching: which repository to clone, where, and what runs after
         /// the clone. Absent (`None`) is the entire pre-checkout behavior, and
@@ -4354,6 +4375,7 @@ mod tests {
             confirm_yolo: false,
             github_checkout: Some(resolved.clone()),
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let decoded: ControlMsg =
             serde_json::from_value(serde_json::to_value(&with_payload).unwrap()).unwrap();
@@ -4495,8 +4517,44 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_42() {
-        assert_eq!(PROTOCOL_VERSION, 42);
+    fn protocol_version_is_pinned_at_43() {
+        assert_eq!(PROTOCOL_VERSION, 43);
+    }
+
+    /// Why this matters: a create the user makes must keep its
+    /// resolved-launch fingerprint, so the field that switches an agent's
+    /// create to its request fingerprint must vanish from the wire when unset
+    /// and must never be invented on decode.
+    ///
+    /// Spec: `CreateSession::request_fingerprint` round-trips when present,
+    /// is omitted from the JSON when `None`, and a create without the key
+    /// decodes with it `None`.
+    #[farhelm_testtrace::test]
+    fn create_request_fingerprint_is_omitted_when_unset() {
+        let create = |request_fingerprint: Option<String>| ControlMsg::CreateSession {
+            req_id: 1,
+            parent: None,
+            cwd: "/work".to_string(),
+            launch: Some(SessionLaunch::plain_command("agent")),
+            inherit_agent: false,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("key".to_string()),
+            confirm_yolo: false,
+            key_lives_with_session: false,
+            request_fingerprint,
+            github_checkout: None,
+        };
+        let with = create(Some("d".repeat(64)));
+        let decoded: ControlMsg =
+            serde_json::from_value(serde_json::to_value(&with).unwrap()).unwrap();
+        assert_eq!(decoded, with);
+
+        let without = serde_json::to_value(create(None)).unwrap();
+        assert!(without.get("request_fingerprint").is_none(), "{without}");
+        let decoded: ControlMsg = serde_json::from_value(without).unwrap();
+        assert_eq!(decoded, create(None));
     }
 
     /// Spec: a listed template carries every field it sets except the text
@@ -5933,6 +5991,7 @@ mod tests {
             confirm_yolo: false,
             github_checkout: None,
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5989,6 +6048,7 @@ mod tests {
             confirm_yolo: false,
             github_checkout: None,
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -6039,6 +6099,7 @@ mod tests {
             confirm_yolo: false,
             github_checkout: None,
             key_lives_with_session: false,
+            request_fingerprint: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -6090,6 +6151,7 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: None,
                 key_lives_with_session: false,
+                request_fingerprint: None,
             };
             let json = serde_json::to_value(&msg).unwrap();
             let decoded: ControlMsg = serde_json::from_value(json)

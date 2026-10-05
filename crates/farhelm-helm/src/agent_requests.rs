@@ -1540,6 +1540,7 @@ async fn dispatch_agent_create(
                 settings_from_source: false,
                 parent: dispatch.parent,
                 spawned: dispatch.spawned,
+                request_fingerprint: None,
             },
         )
         .await,
@@ -2041,6 +2042,7 @@ async fn clone_for_agent(
                 settings_from_source: false,
                 parent: None,
                 spawned: false,
+                request_fingerprint: None,
             },
         )
         .await,
