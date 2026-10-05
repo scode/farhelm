@@ -17,8 +17,49 @@ pub(crate) struct Readout {
     /// A newer version is installed than the one running: the readout turns
     /// red with an up-arrow.
     pub(crate) update_ready: bool,
+    /// This app can no longer verify its updates and must be reinstalled:
+    /// the readout carries a warning mark, and the hover text says how.
+    pub(crate) needs_reinstall: bool,
     /// The readout's hover text.
     pub(crate) tooltip: String,
+}
+
+/// One glyph leading the version readout, with the class that styles it.
+/// Hidden from screen readers; the readout's label or hidden text says the
+/// same in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadoutMark {
+    pub(crate) glyph: &'static str,
+    pub(crate) class: &'static str,
+}
+
+/// The warning that this app can no longer verify its updates.
+pub(crate) const WARNING_MARK: ReadoutMark = ReadoutMark {
+    glyph: "⚠",
+    class: "app-version-warning",
+};
+
+/// The marker that a restart finishes an update.
+pub(crate) const UPDATE_MARK: ReadoutMark = ReadoutMark {
+    glyph: "↑",
+    class: "app-version-arrow",
+};
+
+/// The glyphs that lead the readout, in order, whichever element shows it
+/// (the plain readout, or the update menu's toggle while an update waits).
+///
+/// Both renderings take their marks from here so that neither can drop one:
+/// an update can wait while a newer release failed verification, and the
+/// warning must not vanish behind the update marker then.
+pub(crate) fn readout_marks(readout: &Readout) -> Vec<ReadoutMark> {
+    let mut marks = Vec::new();
+    if readout.needs_reinstall {
+        marks.push(WARNING_MARK);
+    }
+    if readout.update_ready {
+        marks.push(UPDATE_MARK);
+    }
+    marks
 }
 
 /// The version readout's hover when there is nothing about updates to say:
@@ -161,4 +202,32 @@ impl AppUpdater {
 #[cfg(not(native_desktop))]
 pub(crate) fn use_app_updater() -> Option<AppUpdater> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spec: the readout leads with the warning mark whenever the reinstall
+    /// notice is up, followed by the update arrow whenever an update waits,
+    /// so with both the update menu's toggle shows both.
+    ///
+    /// Why: the first version of the toggle drew only the arrow, so a
+    /// verification failure during a waiting update showed no warning at
+    /// all; both renderings now take their marks from this one function.
+    #[farhelm_testtrace::test]
+    fn the_warning_mark_survives_a_waiting_update() {
+        let readout = |update_ready, needs_reinstall| Readout {
+            update_ready,
+            needs_reinstall,
+            tooltip: String::new(),
+        };
+        assert_eq!(readout_marks(&readout(false, false)), vec![]);
+        assert_eq!(readout_marks(&readout(true, false)), vec![UPDATE_MARK]);
+        assert_eq!(readout_marks(&readout(false, true)), vec![WARNING_MARK]);
+        assert_eq!(
+            readout_marks(&readout(true, true)),
+            vec![WARNING_MARK, UPDATE_MARK]
+        );
+    }
 }

@@ -730,8 +730,19 @@ samp {
   color: var(--danger);
 }
 
-.app-version-arrow {
+/* The update arrow and the warning mark below each lead the readout. */
+.app-version-arrow,
+.app-version-warning {
   margin-right: 0.25em;
+}
+
+/* This app can no longer verify its updates and must be reinstalled: a
+   warning mark on the readout, whose hover says how, kept while the app
+   runs. Warning rather than danger: nothing is broken now, the app has only
+   stopped updating. The mark keeps that colour on the red update toggle. */
+.app-version.app-version-unverified,
+.app-version-warning {
+  color: var(--warn);
 }
 
 /* Why the automatic-updates choice could not be saved, under its help. */

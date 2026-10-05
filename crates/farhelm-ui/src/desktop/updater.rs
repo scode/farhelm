@@ -1,6 +1,7 @@
-//! The installed Mac app's updater: it checks GitHub for the latest stable
-//! release, runs the ordinary installer in the background when that release
-//! is newer, and publishes what it is doing for the app bar to show.
+//! The installed Mac app's updater: it asks get.farhelm.io for the latest
+//! stable release and, when that release is newer, verifies the release's
+//! signed checksums and its installer, then runs that installer in the
+//! background, and publishes what it is doing for the app bar to show.
 //!
 //! SPEC.md "Installation and updates" is the behavior; SPEC_impl.md "The
 //! desktop app's updater" is the design and its reasons. In short:
@@ -15,6 +16,12 @@
 //!   single-flight across the automatic schedule and every on-demand trigger.
 //! - Success is judged by the Installed record the installer writes, never by
 //!   the installer's exit status.
+//! - Nothing it runs is trusted on TLS alone: the installer runs only once
+//!   the release's signed `SHA256SUMS` verifies against the compiled-in key
+//!   ring and the script matches its entry there ([`install_release`]), and
+//!   the script is handed those verified checksums for every archive it
+//!   downloads. A release that fails that check leaves a notice that
+//!   this app must be reinstalled ([`UpdaterState::needs_reinstall`]).
 //!
 //! The network, the installer, the clock and the setting are all reached
 //! through [`Deps`], plain functions the worker is handed, so the decisions
@@ -27,15 +34,25 @@ use std::sync::Condvar;
 use std::time::SystemTime;
 
 use farhelm_helm::{build_is_newer, is_development_build};
+use sha2::Digest as _;
 
-/// Where GitHub answers which stable release is the latest: a redirect to
-/// that release's tag. The same URL `install.sh` asks; prereleases are never
-/// "latest", which is what keeps this updater on the stable channel.
-const RELEASES_LATEST_URL: &str = "https://github.com/scode/farhelm/releases/latest";
+/// The one origin every release is published on, in the layout SPEC_impl.md
+/// "Verification chain (D3)" fixes: `/latest`, and each release under
+/// `/v<version>/`.
+const SITE_URL: &str = "https://get.farhelm.io";
 
-/// The installer the README tells users to pipe to `sh`, from main.
-const INSTALLER_URL: &str =
-    "https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh";
+/// The command the reinstall notice tells the user to run: the installer
+/// over TLS, which needs no key, so it works however far behind this app is.
+const REINSTALL_COMMAND: &str = "curl -fsSL https://get.farhelm.io/install.sh | sh";
+
+/// The largest `/latest` answer accepted: one tag and a newline.
+const LATEST_MAX_BYTES: usize = 256;
+
+/// The largest `SHA256SUMS` accepted; the helm's own download allows the same.
+const SUMS_MAX_BYTES: usize = 64 * 1024;
+
+/// The largest signature accepted; a real one is a few hundred bytes.
+const SIGNATURE_MAX_BYTES: usize = 4 * 1024;
 
 /// How often the worker wakes when nothing asks it to: often enough that an
 /// update installed from a terminal shows up within about a minute, and
@@ -48,7 +65,8 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Bound on the latest-release probe, which is one small request.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Bound on downloading the installer script, which is tens of kilobytes.
+/// Bound on each of the install step's downloads (the checksums, their
+/// signature, the installer script), each a few kilobytes to tens.
 const INSTALLER_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The largest installer script accepted. The real one is far smaller; the
@@ -57,6 +75,13 @@ const INSTALLER_MAX_BYTES: usize = 1024 * 1024;
 
 /// The environment variable that pins the installer to one release.
 const VERSION_PIN_ENV: &str = "FARHELM_VERSION";
+
+/// The environment variable that hands the installer the verified
+/// `SHA256SUMS`, so it checks every archive against signed hashes and fetches
+/// no checksums of its own. With [`VERSION_PIN_ENV`] it is the installer's
+/// whole interface to this updater, a permanent contract with every future
+/// release's `install.sh` (SPEC_impl.md, "The desktop app's updater").
+const SUMS_FILE_ENV: &str = "FARHELM_INSTALL_SUMS_FILE";
 
 // ===== What the updater publishes ==========================================
 
@@ -93,6 +118,17 @@ pub(crate) struct UpdaterState {
     /// read.
     pub(crate) installed: Option<String>,
     pub(crate) activity: Activity,
+    /// A release this app tried to install failed verification (no key in
+    /// its ring verified the signature, the signature was for another
+    /// version, or the installer did not match its signed checksum), so the
+    /// app cannot update itself and must be reinstalled. Shown whether the
+    /// check was automatic or the user's, and kept while this app runs until
+    /// a later check verifies and installs or finds nothing newer, or a
+    /// newer Farhelm is installed some other way. It lives in memory only:
+    /// a relaunched app shows it again once its first check fails the same
+    /// way (at startup, with automatic updates on). Network and HTTP
+    /// failures never set it.
+    pub(crate) needs_reinstall: bool,
 }
 
 impl UpdaterState {
@@ -376,6 +412,28 @@ pub(super) struct Deps {
 /// "Installation and updates"); the hover text is where a check the user
 /// started ends visibly, and otherwise says what a restart would do.
 pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
+    let readout = activity_readout(state);
+    if !state.needs_reinstall {
+        return readout;
+    }
+    // Shown whatever the updater is doing: this app can no longer update
+    // itself, and nothing else on screen would say so.
+    crate::app_updater::Readout {
+        needs_reinstall: true,
+        // The notice leads, and the command goes last with nothing after
+        // it, because the user retypes it from a hover: trailing
+        // punctuation would read as part of it.
+        tooltip: format!(
+            "this Farhelm can no longer verify its updates, so it cannot update itself ({}); \
+             reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
+            readout.tooltip
+        ),
+        ..readout
+    }
+}
+
+/// The readout for what the updater is doing, before the reinstall notice.
+fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
     let ready = state.update_ready();
     let installed = state.installed.as_deref().unwrap_or_default();
     let ready_text = format!(
@@ -401,6 +459,7 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
     };
     crate::app_updater::Readout {
         update_ready: ready,
+        needs_reinstall: false,
         tooltip,
     }
 }
@@ -429,6 +488,25 @@ struct Status {
     user_waiting: bool,
     /// A user's request has not been picked up by the worker yet.
     requested: bool,
+    /// See [`UpdaterState::needs_reinstall`].
+    needs_reinstall: bool,
+}
+
+impl Status {
+    /// Record what the Installed record names now.
+    ///
+    /// A change to a version newer than the running one also drops the
+    /// reinstall notice: something installed a newer Farhelm since the
+    /// notice went up (most likely the user, following it), and a restart
+    /// into that app is the next step, which the update marker already
+    /// says. Automatic checks stop while an update waits, so otherwise the
+    /// notice would keep asking for a reinstall that already happened.
+    fn record_installed(&mut self, installed: Option<String>) {
+        if installed != self.installed && newer_installed(installed.as_deref(), &self.running) {
+            self.needs_reinstall = false;
+        }
+        self.installed = installed;
+    }
 }
 
 impl Shared {
@@ -437,6 +515,7 @@ impl Shared {
             running: running.to_string(),
             installed: None,
             activity: Activity::Idle,
+            needs_reinstall: false,
         });
         Self {
             status: Mutex::new(Status {
@@ -446,6 +525,7 @@ impl Shared {
                 shown_outcome: None,
                 user_waiting: false,
                 requested: false,
+                needs_reinstall: false,
             }),
             wake: Condvar::new(),
             published,
@@ -491,6 +571,7 @@ impl Shared {
             running: status.running.clone(),
             installed: status.installed.clone(),
             activity,
+            needs_reinstall: status.needs_reinstall,
         };
         self.published.send_if_modified(|state| {
             if *state == next {
@@ -540,7 +621,7 @@ impl Engine {
         let installed = (self.deps.read_installed)();
         let requested = {
             let mut status = self.shared.status.lock().expect("updater status poisoned");
-            status.installed = installed;
+            status.record_installed(installed);
             self.shared.publish(&status);
             status.requested
         };
@@ -574,6 +655,13 @@ impl Engine {
         newer_installed(status.installed.as_deref(), &status.running)
     }
 
+    /// Set or clear the reinstall notice and publish it.
+    fn set_needs_reinstall(&self, needs: bool) {
+        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        status.needs_reinstall = needs;
+        self.shared.publish(&status);
+    }
+
     /// Set what the worker is doing and publish it.
     fn set_current(&self, activity: Activity) {
         let mut status = self.shared.status.lock().expect("updater status poisoned");
@@ -594,7 +682,7 @@ impl Engine {
         let outcome = self.check_and_install();
         let installed = (self.deps.read_installed)();
         let mut status = self.shared.status.lock().expect("updater status poisoned");
-        status.installed = installed;
+        status.record_installed(installed);
         status.current = Activity::Idle;
         if status.user_waiting {
             status.user_waiting = false;
@@ -616,7 +704,7 @@ impl Engine {
             Err(error) => {
                 tracing::info!("updater: checking for the latest release failed: {error:#}");
                 return Some(Activity::Failed(
-                    "GitHub did not say which release is the latest".to_string(),
+                    "get.farhelm.io did not say which release is the latest".to_string(),
                 ));
             }
         };
@@ -629,7 +717,7 @@ impl Engine {
         let installed = (self.deps.read_installed)();
         let (baseline, automatic_should_wait) = {
             let mut status = self.shared.status.lock().expect("updater status poisoned");
-            status.installed = installed;
+            status.record_installed(installed);
             self.shared.publish(&status);
             let baseline = status
                 .installed
@@ -646,6 +734,8 @@ impl Engine {
         }
         if !build_is_newer(&latest, &baseline) {
             tracing::info!("updater: {latest} is the latest release; {baseline} is installed");
+            // Nothing newer to verify, so nothing this app cannot install.
+            self.set_needs_reinstall(false);
             return Some(Activity::UpToDate(latest));
         }
         // Automatic updates may have been turned off while the probe was
@@ -664,10 +754,22 @@ impl Engine {
         tracing::info!("updater: installing {latest} (installed: {baseline})");
         self.set_current(Activity::Installing(latest.clone()));
         if let Err(error) = (self.deps.install)(&latest) {
-            tracing::warn!("updater: the installer for {latest} reported: {error:#}");
+            if error.downcast_ref::<UnverifiableRelease>().is_some() {
+                // Nothing was run. Kept, and published whether or not a
+                // user is watching: an app that cannot verify its updates
+                // has stopped updating, and must say so (SPEC.md,
+                // "Installation and updates").
+                tracing::warn!("updater: refusing Farhelm {latest}: {error:#}");
+                self.set_needs_reinstall(true);
+                return Some(Activity::Failed(format!(
+                    "Farhelm {latest} could not be verified, so it was not installed"
+                )));
+            }
+            tracing::warn!("updater: installing {latest} failed: {error:#}");
         }
         if (self.deps.read_installed)().as_deref() == Some(latest.as_str()) {
             tracing::info!("updater: {latest} is installed; a restart finishes the update");
+            self.set_needs_reinstall(false);
             let running = self
                 .shared
                 .status
@@ -686,7 +788,7 @@ impl Engine {
             }
         } else {
             Some(Activity::Failed(format!(
-                "installing Farhelm {latest} did not finish (the app's log has the installer's output)"
+                "installing Farhelm {latest} did not finish (the app's log says why)"
             )))
         }
     }
@@ -694,66 +796,120 @@ impl Engine {
 
 // ===== The real probe and installer ========================================
 
-/// Ask GitHub which stable release is the latest, the way `install.sh`
-/// does: a HEAD request whose redirect names the tag, not followed.
+/// Ask get.farhelm.io which stable release is the latest: a plain GET of
+/// `/latest`, one line naming the tag.
 fn probe_latest_release() -> anyhow::Result<String> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("starting the updater's runtime")?;
-    runtime.block_on(async {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(PROBE_TIMEOUT)
-            .build()
-            .context("building the update check's HTTP client")?;
-        let response = client
-            .head(RELEASES_LATEST_URL)
-            .send()
-            .await
-            .context("asking GitHub for the latest release")?;
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
-        latest_from_redirect(response.status().as_u16(), location.as_deref())
-    })
+    let body = fetch_capped(
+        &format!("{SITE_URL}/latest"),
+        LATEST_MAX_BYTES,
+        PROBE_TIMEOUT,
+    )?;
+    latest_from_site(&body)
 }
 
-/// The latest release's version from the `releases/latest` answer: a
-/// redirect whose `Location` ends in the tag (`…/releases/tag/v1.2.3`).
+/// The latest release's version from `/latest`'s answer: exactly one line
+/// (a final newline allowed) holding `v` and a stable release version.
 ///
-/// Anything else is an error rather than a guess: another status (GitHub
-/// down, rate limited, no release yet), a missing `Location`, or a tag that
-/// is not a release version. The leading `v` is dropped, because the
-/// Installed record holds the bare version.
-fn latest_from_redirect(status: u16, location: Option<&str>) -> anyhow::Result<String> {
-    if !(300..400).contains(&status) {
-        bail!("GitHub answered the latest-release request with HTTP {status}");
-    }
-    let location = location.context("GitHub's latest-release redirect had no Location")?;
-    let tag = location
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("");
-    let version = tag.strip_prefix('v').unwrap_or(tag);
+/// Anything else is an error rather than a guess: a prerelease (`/latest`
+/// never names one, so one there is a broken or tampered answer), a second
+/// line, stray bytes, or text that is not a version. The leading `v` is
+/// dropped, because the Installed record holds the bare version.
+fn latest_from_site(body: &[u8]) -> anyhow::Result<String> {
+    let text = std::str::from_utf8(body).context("get.farhelm.io's /latest is not text")?;
+    let tag = text.strip_suffix('\n').unwrap_or(text);
+    let version = tag
+        .strip_prefix('v')
+        .with_context(|| format!("get.farhelm.io's /latest {tag:?} is not a release tag"))?;
     let parsed = semver::Version::parse(version)
-        .with_context(|| format!("GitHub's latest release {tag:?} is not a release version"))?;
-    if !parsed.pre.is_empty() {
-        bail!("GitHub's latest release {tag:?} is not a stable release");
+        .with_context(|| format!("get.farhelm.io's /latest {tag:?} is not a release version"))?;
+    if !parsed.pre.is_empty() || !parsed.build.is_empty() {
+        bail!("get.farhelm.io's /latest {tag:?} is not a stable release");
     }
     Ok(version.to_string())
 }
 
-/// Download the installer and run it pinned to `version`, logging its
-/// output.
+/// A release this updater refused to install because it did not verify: the
+/// signature, the version it was signed for, or the installer's checksum.
+/// Distinct from every other install failure because it is the one that
+/// will not go away on retry and that the user must hear about
+/// ([`UpdaterState::needs_reinstall`]).
+#[derive(Debug)]
+struct UnverifiableRelease(String);
+
+impl std::fmt::Display for UnverifiableRelease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UnverifiableRelease {}
+
+/// Verify release `version` and run its installer, in `dir`.
 ///
-/// Downloaded to a file and run with `/bin/sh`, rather than `curl | sh`,
-/// because a pipe exits 0 when the download fails (`sh` reads an empty
-/// script); here a failed download is an error before anything runs. The
-/// result is advisory: the caller judges success by the Installed record.
+/// The install step's whole trust decision, with the network and the
+/// process behind `fetch` (a file name under the release's directory on the
+/// site, and a size cap) and `run` (the verified script, then the verified
+/// checksums, both written in `dir`), so it is tested on real signed bytes
+/// without either. In order: the signed `SHA256SUMS` must verify against
+/// `ring` with trusted comment `farhelm v{version}`
+/// (`farhelm_helm::verify_signed_sums`, the rules the helm applies to its
+/// own downloads); it must list `install.sh`; the downloaded script must
+/// match that entry. Only then is `run` called. A failure of any of those is
+/// an [`UnverifiableRelease`]; a failed download is an ordinary error, and
+/// either way nothing has been run.
+fn install_release(
+    version: &str,
+    ring: &[&str],
+    dir: &Path,
+    fetch: &dyn Fn(&str, usize) -> anyhow::Result<Vec<u8>>,
+    run: &dyn Fn(&Path, &Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let sums = fetch("SHA256SUMS", SUMS_MAX_BYTES)?;
+    let signature = fetch("SHA256SUMS.minisig", SIGNATURE_MAX_BYTES)?;
+    let entries = farhelm_helm::verify_signed_sums(ring, version, &sums, &signature)
+        .map_err(|error| UnverifiableRelease(format!("{error:#}")))?;
+    let expected = entries.get("install.sh").ok_or_else(|| {
+        UnverifiableRelease(format!(
+            "Farhelm {version}'s signed SHA256SUMS lists no install.sh"
+        ))
+    })?;
+    // Compared before anything else is said about the body: an empty or
+    // truncated answer is a script that does not match its signed checksum,
+    // the same verification failure as any other altered one.
+    let script = fetch("install.sh", INSTALLER_MAX_BYTES)?;
+    let actual = hex_sha256(&script);
+    if actual != *expected {
+        return Err(UnverifiableRelease(format!(
+            "Farhelm {version}'s install.sh does not match its signed checksum (expected \
+             {expected}, got {actual})"
+        ))
+        .into());
+    }
+    let script_path = dir.join("install.sh");
+    let sums_path = dir.join("SHA256SUMS");
+    std::fs::write(&script_path, &script)
+        .with_context(|| format!("writing {}", script_path.display()))?;
+    std::fs::write(&sums_path, &sums)
+        .with_context(|| format!("writing {}", sums_path.display()))?;
+    run(&script_path, &sums_path)
+}
+
+/// Lowercase hex SHA-256, the form `SHA256SUMS` lists.
+fn hex_sha256(bytes: &[u8]) -> String {
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Verify release `version` and run its installer, logging its output.
+///
+/// The installer is downloaded to a file and run with `/bin/sh`, rather than
+/// `curl | sh`, so it can be verified first ([`install_release`]) and so a
+/// failed download is an error before anything runs. It runs pinned to
+/// `version` and handed the verified checksums; every other `FARHELM_*`
+/// variable is scrubbed. The result is advisory: the caller judges success
+/// by the Installed record.
 ///
 /// The installer must outlive the app: a quit mid-install is ordinary,
 /// since nothing on screen says an install is running. So it gets its own
@@ -762,56 +918,71 @@ fn latest_from_redirect(status: u16, location: Option<&str>) -> anyhow::Result<S
 /// break when the app exits, and `install.sh` dies of SIGPIPE without its
 /// cleanup, leaving its lock behind for every later install to refuse on.
 /// The file is copied into the app's log after the installer exits; if the
-/// app quits first, the directory holding the script and the file stays in
-/// the temporary directory, which the system clears.
+/// app quits first, the directory holding the script, the checksums and the
+/// log stays in the temporary directory, which the system clears.
 fn run_installer(version: &str) -> anyhow::Result<()> {
-    let script = download_installer()?;
     let dir = private_temp_dir()?;
-    let path = dir.join("install.sh");
-    let log_path = dir.join("install.log");
-    let outcome = (|| {
-        std::fs::write(&path, &script).with_context(|| format!("writing {}", path.display()))?;
-        let log =
-            File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
-        let log_for_stderr = log
-            .try_clone()
-            .context("sharing the installer's log file")?;
-        let mut command = Command::new("/bin/sh");
-        command
-            .arg(&path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(log))
-            .stderr(Stdio::from(log_for_stderr));
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        for name in farhelm_variables(std::env::vars_os().map(|(name, _)| name)) {
-            command.env_remove(name);
-        }
-        command.env(VERSION_PIN_ENV, version);
-        let status = command
-            .spawn()
-            .context("starting the installer")?
-            .wait()
-            .context("waiting for the installer")?;
-        let output = std::fs::read(&log_path).unwrap_or_default();
-        for line in String::from_utf8_lossy(&output).lines() {
-            tracing::info!("updater: installer: {line}");
-        }
-        if status.success() {
-            Ok(())
-        } else {
-            bail!("the installer exited with {status}")
-        }
-    })();
+    let fetch = |name: &str, cap: usize| {
+        fetch_capped(
+            &format!("{SITE_URL}/v{version}/{name}"),
+            cap,
+            INSTALLER_DOWNLOAD_TIMEOUT,
+        )
+    };
+    let run = |script: &Path, sums: &Path| spawn_installer(&dir, script, sums, version);
+    let outcome = install_release(version, farhelm_helm::RELEASE_KEY_RING, &dir, &fetch, &run);
     let _ = std::fs::remove_dir_all(&dir);
     outcome
 }
 
-/// The installer script's bytes, from main on GitHub over HTTPS.
-fn download_installer() -> anyhow::Result<Vec<u8>> {
+/// Run the verified `script` pinned to `version` with `sums` as its checksum
+/// file, its output in a log in `dir`, and wait for it.
+fn spawn_installer(dir: &Path, script: &Path, sums: &Path, version: &str) -> anyhow::Result<()> {
+    let log_path = dir.join("install.log");
+    let log =
+        File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
+    let log_for_stderr = log
+        .try_clone()
+        .context("sharing the installer's log file")?;
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_for_stderr));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    for name in farhelm_variables(std::env::vars_os().map(|(name, _)| name)) {
+        command.env_remove(name);
+    }
+    command.env(VERSION_PIN_ENV, version);
+    command.env(SUMS_FILE_ENV, sums);
+    let status = command
+        .spawn()
+        .context("starting the installer")?
+        .wait()
+        .context("waiting for the installer")?;
+    let output = std::fs::read(&log_path).unwrap_or_default();
+    for line in String::from_utf8_lossy(&output).lines() {
+        tracing::info!("updater: installer: {line}");
+    }
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("the installer exited with {status}")
+    }
+}
+
+/// GET `url` over https only, refusing a non-success status and anything
+/// over `cap` bytes while it downloads.
+///
+/// Redirects are followed (still https only), as the site may serve a file
+/// from elsewhere; integrity never rests on where it came from, since every
+/// byte this updater acts on is checked against the signature first.
+fn fetch_capped(url: &str, cap: usize, timeout: Duration) -> anyhow::Result<Vec<u8>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -819,33 +990,35 @@ fn download_installer() -> anyhow::Result<Vec<u8>> {
     runtime.block_on(async {
         let client = reqwest::Client::builder()
             .https_only(true)
-            .timeout(INSTALLER_DOWNLOAD_TIMEOUT)
+            .timeout(timeout)
             .build()
-            .context("building the installer download's HTTP client")?;
+            .context("building the updater's HTTP client")?;
         let mut response = client
-            .get(INSTALLER_URL)
+            .get(url)
             .send()
             .await
-            .context("downloading the installer")?
+            .with_context(|| format!("fetching {url}"))?
             .error_for_status()
-            .context("downloading the installer")?;
+            .with_context(|| format!("fetching {url}"))?;
         // Read chunk by chunk so the cap holds while downloading: a whole
         // body buffered first would already be in memory when checked.
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.context("downloading the installer")? {
-            if bytes.len() + chunk.len() > INSTALLER_MAX_BYTES {
-                bail!("the downloaded installer is over {INSTALLER_MAX_BYTES} bytes, which cannot be it");
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .with_context(|| format!("fetching {url}"))?
+        {
+            if bytes.len() + chunk.len() > cap {
+                bail!("{url} is over {cap} bytes, which cannot be it");
             }
             bytes.extend_from_slice(&chunk);
-        }
-        if bytes.is_empty() {
-            bail!("the downloaded installer is empty");
         }
         Ok(bytes)
     })
 }
 
-/// A fresh directory only this user can read, for the downloaded script.
+/// A fresh directory only this user can read, for the downloaded script, the
+/// verified checksums and the installer's log.
 fn private_temp_dir() -> anyhow::Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("farhelm-update-{}", uuid::Uuid::new_v4()));
     let mut builder = std::fs::DirBuilder::new();
@@ -867,7 +1040,8 @@ fn private_temp_dir() -> anyhow::Result<PathBuf> {
 /// `PATH`, proxies), so it runs as the user's own run would. A `FARHELM_*`
 /// variable is never something the user meant for this run, and one of them
 /// (`FARHELM_INSTALL_TEST_BASE_URL`) would redirect the download.
-/// `FARHELM_VERSION` is set afresh afterwards.
+/// `FARHELM_VERSION` and `FARHELM_INSTALL_SUMS_FILE` are set afresh
+/// afterwards, and are the only ones the installer gets.
 fn farhelm_variables(names: impl Iterator<Item = OsString>) -> Vec<OsString> {
     names
         .filter(|name| {
@@ -880,6 +1054,7 @@ fn farhelm_variables(names: impl Iterator<Item = OsString>) -> Vec<OsString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
 
     // ---- activation ----
@@ -1155,31 +1330,233 @@ mod tests {
 
     // ---- the probe and the installer's environment ----
 
-    /// Spec: the latest release is read from the redirect's tag, without
-    /// its `v`, and anything that is not a stable release version is a
-    /// failed check rather than a guess.
+    /// Spec: the latest release is read from get.farhelm.io's `/latest`, one
+    /// `v`-prefixed stable tag (a final newline allowed), returned without
+    /// its `v`; a prerelease, a second line, a missing `v` or anything that
+    /// is not a version is a failed check rather than a guess.
+    ///
+    /// Why: `/latest` is the only thing that decides what an automatic update
+    /// installs, and it is served over TLS alone. A prerelease there is a
+    /// broken or tampered answer; this app's channel is stable releases.
     #[farhelm_testtrace::test]
-    fn the_latest_release_comes_from_the_redirect_tag() {
-        let location = "https://github.com/scode/farhelm/releases/tag/v0.23.1";
-        assert_eq!(latest_from_redirect(302, Some(location)).unwrap(), "0.23.1");
-        assert_eq!(
-            latest_from_redirect(302, Some("/scode/farhelm/releases/tag/0.23.1")).unwrap(),
-            "0.23.1",
-            "a host-relative Location and a bare tag"
+    fn the_latest_release_comes_from_the_site() {
+        assert_eq!(latest_from_site(b"v0.23.1\n").unwrap(), "0.23.1");
+        assert_eq!(latest_from_site(b"v0.23.1").unwrap(), "0.23.1");
+        for refused in [
+            &b"v0.24.0-rc.1\n"[..],
+            b"0.23.1\n",
+            b"v0.23.1\nv0.23.2\n",
+            b"v0.23.1\r\n",
+            b"v0.23.1 \n",
+            b"",
+            b"<html>",
+            b"v0.23.1+build\n",
+        ] {
+            assert!(
+                latest_from_site(refused).is_err(),
+                "{:?} must be refused",
+                String::from_utf8_lossy(refused)
+            );
+        }
+    }
+
+    // ---- verifying a release before running its installer ----
+
+    /// The fixture release's version (its signature's trusted comment is
+    /// `farhelm v1.2.3`); see `tests/fixtures/updater-release/README.md`.
+    const FIXTURE_VERSION: &str = "1.2.3";
+
+    /// The bytes of one file of the fixture release.
+    fn fixture(relative: &str) -> Vec<u8> {
+        std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/updater-release")
+                .join(relative),
+        )
+        .unwrap()
+    }
+
+    /// The fixture release's key, as a one-key ring.
+    fn fixture_ring() -> Vec<String> {
+        let key = String::from_utf8(fixture("test-key.pub")).unwrap();
+        vec![
+            key.lines()
+                .nth(1)
+                .expect("a comment line then the key line")
+                .trim()
+                .to_string(),
+        ]
+    }
+
+    /// What the installer was handed, when it ran: the script, then the
+    /// checksum file.
+    type Ran = Option<(Vec<u8>, Vec<u8>)>;
+
+    /// Run [`install_release`] for the fixture version against `served`
+    /// (file name to bytes; anything else answers as a failed download),
+    /// returning its result and, when it ran the installer, the script and
+    /// checksum bytes it was handed. The ring is the fixture key's.
+    fn try_install(served: HashMap<&'static str, Vec<u8>>) -> (anyhow::Result<()>, Ran) {
+        let ring = fixture_ring();
+        let ring: Vec<&str> = ring.iter().map(String::as_str).collect();
+        try_install_with(&ring, served)
+    }
+
+    /// [`try_install`] with an explicit key ring.
+    fn try_install_with(
+        ring: &[&str],
+        served: HashMap<&'static str, Vec<u8>>,
+    ) -> (anyhow::Result<()>, Ran) {
+        let dir = tempfile::tempdir().unwrap();
+        let fetch = |name: &str, cap: usize| -> anyhow::Result<Vec<u8>> {
+            let bytes = served
+                .get(name)
+                .cloned()
+                .with_context(|| format!("404 for {name}"))?;
+            anyhow::ensure!(bytes.len() <= cap, "{name} over its cap");
+            Ok(bytes)
+        };
+        let ran = std::cell::RefCell::new(None);
+        let run = |script: &Path, sums: &Path| -> anyhow::Result<()> {
+            *ran.borrow_mut() = Some((std::fs::read(script)?, std::fs::read(sums)?));
+            Ok(())
+        };
+        let result = install_release(FIXTURE_VERSION, ring, dir.path(), &fetch, &run);
+        (result, ran.into_inner())
+    }
+
+    /// The fixture release as the site serves it.
+    fn good_release() -> HashMap<&'static str, Vec<u8>> {
+        HashMap::from([
+            ("SHA256SUMS", fixture("SHA256SUMS")),
+            ("SHA256SUMS.minisig", fixture("SHA256SUMS.minisig")),
+            ("install.sh", fixture("install.sh")),
+        ])
+    }
+
+    /// Spec: a release whose signed checksums verify against the ring with
+    /// this version's trusted comment, and whose `install.sh` matches its
+    /// signed entry, runs that exact script handed exactly those checksums
+    /// (which list more than the installer).
+    ///
+    /// Why: this is the one path by which the app runs code it downloaded;
+    /// the installer then checks every archive against the checksums it is
+    /// handed, so they must be the verified bytes, not a second fetch.
+    #[farhelm_testtrace::test]
+    fn a_verified_release_runs_its_installer_with_the_signed_checksums() {
+        assert!(
+            String::from_utf8(fixture("SHA256SUMS"))
+                .unwrap()
+                .lines()
+                .count()
+                > 1,
+            "fixture premise: the checksums list more than the installer"
+        );
+        let (result, ran) = try_install(good_release());
+        result.expect("the fixture release verifies");
+        let (script, sums) = ran.expect("the installer ran");
+        assert_eq!(script, fixture("install.sh"));
+        assert_eq!(sums, fixture("SHA256SUMS"));
+    }
+
+    /// Spec: a release is refused, with the installer never run and the
+    /// refusal an [`UnverifiableRelease`], when its `SHA256SUMS` does not
+    /// verify (tampered bytes, or a valid signature by a key outside this
+    /// app's ring), when its signature names another version,
+    /// when its signed checksums list no `install.sh`, or when the
+    /// downloaded `install.sh` does not match its signed entry (an empty one
+    /// included). A failed
+    /// download is refused too, as an ordinary error, not as unverifiable.
+    ///
+    /// Why: each of these is a way to make the app run bytes nobody signed
+    /// for this version, and the unverifiable ones must also leave the
+    /// reinstall notice, which a passing network failure must not.
+    #[farhelm_testtrace::test]
+    fn an_unverifiable_release_runs_nothing() {
+        let mut tampered = good_release();
+        let mut sums = fixture("SHA256SUMS");
+        sums[0] ^= 1;
+        tampered.insert("SHA256SUMS", sums);
+
+        let mut wrong_comment = good_release();
+        wrong_comment.insert(
+            "SHA256SUMS.minisig",
+            fixture("variants/wrong-comment/SHA256SUMS.minisig"),
+        );
+
+        let no_installer = HashMap::from([
+            ("SHA256SUMS", fixture("variants/no-installer/SHA256SUMS")),
+            (
+                "SHA256SUMS.minisig",
+                fixture("variants/no-installer/SHA256SUMS.minisig"),
+            ),
+            ("install.sh", fixture("install.sh")),
+        ]);
+
+        let mut other_script = good_release();
+        other_script.insert(
+            "install.sh",
+            b"#!/bin/sh\necho not the signed one\n".to_vec(),
+        );
+
+        let mut empty_script = good_release();
+        empty_script.insert("install.sh", Vec::new());
+
+        for (case, served, says) in [
+            ("tampered checksums", tampered, "does not verify"),
+            ("another version's signature", wrong_comment, "signed for"),
+            ("no install.sh entry", no_installer, "lists no install.sh"),
+            (
+                "a different install.sh",
+                other_script,
+                "does not match its signed checksum",
+            ),
+            (
+                "an empty install.sh",
+                empty_script,
+                "does not match its signed checksum",
+            ),
+        ] {
+            let (result, ran) = try_install(served);
+            let error = result.expect_err(case);
+            assert!(ran.is_none(), "{case}: nothing may run");
+            assert!(
+                error.downcast_ref::<UnverifiableRelease>().is_some(),
+                "{case}: {error:#}"
+            );
+            assert!(format!("{error:#}").contains(says), "{case}: {error:#}");
+        }
+
+        // The case the reinstall notice exists for: a release signed by a
+        // key this app was built without.
+        assert!(
+            !farhelm_helm::RELEASE_KEY_RING.contains(&fixture_ring()[0].as_str()),
+            "fixture premise: the production ring lacks the fixture key"
+        );
+        let (result, ran) = try_install_with(farhelm_helm::RELEASE_KEY_RING, good_release());
+        let error = result.expect_err("a key outside the ring");
+        assert!(ran.is_none(), "a key outside the ring: nothing may run");
+        assert!(
+            error.downcast_ref::<UnverifiableRelease>().is_some(),
+            "a key outside the ring: {error:#}"
         );
         assert!(
-            latest_from_redirect(200, Some(location)).is_err(),
-            "not a redirect"
+            format!("{error:#}").contains("does not verify"),
+            "a key outside the ring: {error:#}"
         );
-        assert!(latest_from_redirect(429, None).is_err(), "rate limited");
-        assert!(latest_from_redirect(302, None).is_err(), "no Location");
+
+        let mut missing = good_release();
+        missing.remove("SHA256SUMS.minisig");
+        let (result, ran) = try_install(missing);
+        let error = result.expect_err("a failed download");
+        assert!(ran.is_none());
         assert!(
-            latest_from_redirect(302, Some("https://github.com/scode/farhelm/releases")).is_err(),
-            "no tag"
+            error.downcast_ref::<UnverifiableRelease>().is_none(),
+            "a failed download is not a verification failure: {error:#}"
         );
         assert!(
-            latest_from_redirect(302, Some(".../tag/v0.24.0-rc.1")).is_err(),
-            "a prerelease"
+            format!("{error:#}").contains("404 for SHA256SUMS.minisig"),
+            "the cause survives: {error:#}"
         );
     }
 
@@ -1207,6 +1584,28 @@ mod tests {
                 OsString::from("FARHELM_VERSION")
             ]
         );
+    }
+
+    /// Spec: with the reinstall notice set, the readout carries it (and the
+    /// reinstall command in its hover) whatever else is true, including
+    /// while an installed update waits for a restart, which keeps its own
+    /// update-ready marker beside it.
+    ///
+    /// Why: an on-demand check can fail verification of a still newer
+    /// release while an earlier update waits; the warning must not vanish
+    /// behind the update marker.
+    #[farhelm_testtrace::test]
+    fn the_reinstall_notice_shows_beside_a_waiting_update() {
+        for installed in [Some("1.0.0"), Some("1.1.0")] {
+            let state = UpdaterState {
+                needs_reinstall: true,
+                ..state(installed, Activity::Idle)
+            };
+            let shown = readout(&state);
+            assert!(shown.needs_reinstall, "{installed:?}");
+            assert!(shown.tooltip.contains(REINSTALL_COMMAND), "{installed:?}");
+            assert_eq!(shown.update_ready, installed == Some("1.1.0"));
+        }
     }
 
     // ---- the worker ----
@@ -1339,6 +1738,118 @@ mod tests {
         assert_eq!(state.activity, Activity::Idle);
         assert_eq!(state.installed.as_deref(), Some("1.1.0"));
         assert!(state.update_ready());
+    }
+
+    /// Spec: an automatic check whose install is refused as unverifiable
+    /// publishes the reinstall notice even though no user is
+    /// watching; a later check that finds nothing newer clears it, and so
+    /// does one that verifies and installs. An ordinary install failure (a
+    /// failed download) neither sets nor clears it.
+    ///
+    /// Why: an app that cannot verify its updates has stopped updating, and
+    /// an automatic check's failures otherwise go only to the log, so this
+    /// is the one failure the user must see without asking (SPEC.md,
+    /// "Installation and updates"). A notice that never cleared would cry
+    /// wolf after a fixed release; one a network blip set would be wrong.
+    #[farhelm_testtrace::test]
+    fn an_unverifiable_release_leaves_a_lasting_reinstall_notice() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+        rig.engine.deps.install = Box::new(|_version| {
+            Err(UnverifiableRelease("no key in the ring verifies it".to_string()).into())
+        });
+        rig.engine.wake_once();
+        let state = rig.published();
+        assert!(state.needs_reinstall, "set by an automatic check");
+        assert_eq!(state.activity, Activity::Idle, "no user was watching");
+        assert!(readout(&state).needs_reinstall);
+        assert!(readout(&state).tooltip.contains(REINSTALL_COMMAND));
+
+        // A plain failure later leaves it as it was.
+        rig.engine.deps.install = Box::new(|_version| bail!("download failed"));
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert!(
+            rig.published().needs_reinstall,
+            "a failed download is not news"
+        );
+
+        // Nothing newer: nothing this app cannot install.
+        *rig.latest.lock().unwrap() = Some("1.0.0".to_string());
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert!(
+            !rig.published().needs_reinstall,
+            "cleared when nothing newer"
+        );
+
+        // Set again, then cleared by a verified install.
+        *rig.latest.lock().unwrap() = Some("1.1.0".to_string());
+        rig.engine.deps.install = Box::new(|_version| {
+            Err(UnverifiableRelease("signed for another version".to_string()).into())
+        });
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert!(rig.published().needs_reinstall);
+        let installed = Arc::clone(&rig.installed);
+        rig.engine.deps.install = Box::new(move |version| {
+            *installed.lock().unwrap() = Some(version.to_string());
+            Ok(())
+        });
+        rig.engine.shared.check_now();
+        rig.engine.wake_once();
+        assert!(
+            !rig.published().needs_reinstall,
+            "cleared by a verified install"
+        );
+
+        // A verified install that ends at the running version (Installed
+        // named an older version the user pinned) clears it too, which no
+        // change to a newer Installed version would.
+        let mut rig = make_rig("1.0.0", Some("0.9.0"), Some("1.0.0"), true);
+        let install = std::mem::replace(
+            &mut rig.engine.deps.install,
+            Box::new(|_version| {
+                Err(UnverifiableRelease("signed for another version".to_string()).into())
+            }),
+        );
+        rig.engine.wake_once();
+        assert!(rig.published().needs_reinstall);
+        rig.engine.deps.install = install;
+        rig.engine.shared.check_now();
+        rig.engine.wake_once();
+        let state = rig.published();
+        assert_eq!(state.installed.as_deref(), Some("1.0.0"));
+        assert!(!state.update_ready());
+        assert!(
+            !state.needs_reinstall,
+            "cleared by a verified install of the running version"
+        );
+    }
+
+    /// Spec: a check the user asked for sets the reinstall notice too, and a
+    /// newer Farhelm installed some other way (the user following the
+    /// notice) clears it at the next wake, without a check.
+    ///
+    /// Why: with an update waiting, automatic checks stop, so no check
+    /// would clear a notice that asks for a reinstall the user already did.
+    #[farhelm_testtrace::test]
+    fn a_reinstall_from_a_terminal_clears_the_notice() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+        *rig.automatic.lock().unwrap() = false;
+        rig.engine.deps.install = Box::new(|_version| {
+            Err(UnverifiableRelease("no key in the ring verifies it".to_string()).into())
+        });
+        rig.engine.shared.check_now();
+        rig.engine.wake_once();
+        assert!(rig.published().needs_reinstall, "set by the user's check");
+
+        let probes = rig.probes.load(Ordering::SeqCst);
+        *rig.installed.lock().unwrap() = Some("1.1.0".to_string());
+        rig.engine.wake_once();
+        let state = rig.published();
+        assert!(!state.needs_reinstall, "cleared by the newer install");
+        assert!(state.update_ready());
+        assert_eq!(rig.probes.load(Ordering::SeqCst), probes, "without a check");
     }
 
     /// Spec: a version installed from a terminal while the release check is
@@ -1602,6 +2113,7 @@ mod tests {
             running: "1.0.0".to_string(),
             installed: installed.map(str::to_string),
             activity,
+            needs_reinstall: false,
         }
     }
 

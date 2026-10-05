@@ -9,5 +9,4 @@ hover says which version is waiting. Select it and choose **restart to update** 
 or **what's new** to see the releases on GitHub. Your sessions keep running through the restart, and quitting and
 reopening Farhelm also finishes the update. To check right away, choose **check for updates** in the `?` menu, or
 **update** in the menu of the local (this machine) host. To stop the automatic checks, untick **install updates
-automatically** in the settings dialog. Updates come from GitHub and, like the installer, are not checked against a
-release signature.
+automatically** in the settings dialog.
