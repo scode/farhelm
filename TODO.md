@@ -104,17 +104,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
   terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
 
-- **Permission prompts for actions requested through the `farhelm` CLI.** Every action an agent or a user attempts
-  through the `farhelm` tool, against any host or session, should ask the user for permission first, with an "always
-  allow when coming from this host" option. Model it on the per-host setting for starting YOLO sessions without asking:
-  ask by default, and let the user turn asking off for a host. Related to the Maybe later entry on closing the
-  cross-host execution hole in agent-requested session creation and cloning. Two things are required parts of this work,
-  from the launch-kinds redesign (`plans/queue/launch-representation.md`): until it lands, a command launch's YOLO
-  assertion is trusted even from an agent, so an agent can start a YOLO command on a host that asks before YOLO launches
-  by asserting that it is not YOLO, and with this work an agent's command launch on such a host must ask whatever its
-  assertion says; and agents may apply launch templates but not create, edit or delete them, and this work is what
-  allows template writes from agents, behind the same prompt. Plan: `plans/queue/cli-permission-prompts.md`.
-
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
   for them over to the host. Choosing to copy credentials must come with a warning that it is the user's call, including
@@ -664,8 +653,8 @@ are large mostly because of their tests.
 - **Inject commands into agents.** Let something other than a person typing in the terminal send commands into a running
   agent session. Two motivating uses: a UI button such as "stop all work and restart", and automation, scripts, or an
   orchestrating agent driving workhorse agents that run as Farhelm sessions. The second overlaps with the cross-host
-  orchestration authority question in the earlier entry on closing the cross-host execution hole in agent-requested
-  session creation.
+  orchestration authority question that asking the user before agent actions answered for the `farhelm` command; see
+  SPEC.md, Agent-spawned sessions.
 
 - **Make copying work out of the box with Codex.** Since Codex 0.157 its fullscreen interface captures the mouse, so a
   plain drag in its prompt box highlights text without copying it; the drag-copy hint plan only explains this to the

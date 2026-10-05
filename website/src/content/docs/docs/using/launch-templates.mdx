@@ -72,8 +72,12 @@ farhelm agent create --template codex-deep --template api-repo
 ```
 
 Here `api-repo` supplies the host and directory, so the command needs neither `--host` nor `--cwd`. Other options such
-as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what
-each sets. Agents can apply templates but cannot create, edit, or delete them.
+as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what each
+sets. Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
+Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
+unless you have told Farhelm not to ask for that agent's host ([Approve what agents
+do](/docs/using/approve-agent-requests/)). An agent's edit cannot remove a choice from a template, so it never drops a
+command line the agent could not see.
 
 NOTE: Templates are not a place for secrets. Every host your helm manages can read every template, command lines
 included.
