@@ -2324,7 +2324,7 @@ impl ProvisioningBackend for SystemBackend {
                     // step only needs to say linger is off.
                     warn!(
                         code = ?output.code,
-                        stderr = %output.stderr.trim(),
+                        stderr = %linger_log_stderr(&output.stderr),
                         "enabling linger failed; the supervisor starts at login, not at boot"
                     );
                 }
@@ -2727,6 +2727,18 @@ pub(super) fn hex_sha256(bytes: &[u8]) -> String {
 pub(super) fn tmux_meets_floor(output: &str) -> bool {
     farhelm_supervisor::tmux::parse_tmux_version(output)
         .is_ok_and(|version| version >= farhelm_supervisor::tmux::TMUX_FLOOR)
+}
+
+/// The remote host's stderr from a degraded `loginctl enable-linger`, as the
+/// helm's log line carries it: escaped and bounded by [`peer_text`].
+///
+/// The host is untrusted (SPEC.md's trust model), and the field is written
+/// with the Display formatter, which would pass terminal control sequences
+/// straight into the operator's terminal; SPEC_impl.md requires peer error
+/// text to be escaped wherever it is logged. A function of its own so the
+/// escaping can be tested without capturing the log.
+pub(super) fn linger_log_stderr(stderr: &str) -> String {
+    peer_text(stderr.trim())
 }
 
 /// What a failed `loginctl enable-linger` means for the run.
