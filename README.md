@@ -37,7 +37,7 @@
 <!-- readme-hero-url -->
 
 ![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal
-open](https://raw.githubusercontent.com/scode/farhelm/1888c62d6e0a6868a5e626dfe5432ecfbc5da92c/readme-hero.png)
+open](https://raw.githubusercontent.com/scode/farhelm/a26c3a498eb7d0510da8379b8226b02021a9bc77/readme-hero.png)
 
 <!-- /readme-hero-url -->
 
