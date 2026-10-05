@@ -1099,6 +1099,21 @@
    */
   const OPEN_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
 
+  /**
+   * Whether something other than a terminal owns the keyboard: an open modal
+   * dialog (above), or focus on one of the agent approval cards (approvals.rs).
+   * The cards are not modal, so they are not covered by the selector above,
+   * but a user who has focused a card's answer button is about to answer it:
+   * a terminal taking focus on a replay finishing or a tab closing would turn
+   * the Enter meant for the card into agent input and leave the agent's
+   * request unanswered.
+   */
+  function keyboardHeldElsewhere() {
+    if (document.querySelector(OPEN_MODAL_SELECTOR)) return true;
+    const active = document.activeElement;
+    return !!(active && active.closest && active.closest(".approval-cards"));
+  }
+
   const islands = new Map();
 
   // `mountWhenReady()` calls still waiting for xterm's globals and their
@@ -2776,7 +2791,7 @@
       const active = document.activeElement;
       if (active && active.closest && active.closest(".terminal-text-size")) {
         const focused = focusedEl === null ? null : islands.get(focusedEl);
-        if (focused && !document.querySelector(OPEN_MODAL_SELECTOR)) focused.term.focus();
+        if (focused && !keyboardHeldElsewhere()) focused.term.focus();
       }
     },
 
@@ -2934,7 +2949,7 @@
       if (focusEl !== focusedEl) {
         focusedEl = focusEl;
         const island = focusEl === null ? null : islands.get(focusEl);
-        if (island && !document.querySelector(OPEN_MODAL_SELECTOR)) island.term.focus();
+        if (island && !keyboardHeldElsewhere()) island.term.focus();
       }
 
       for (const spec of specs) {
@@ -4296,7 +4311,7 @@
          */
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
-          if (document.querySelector(OPEN_MODAL_SELECTOR)) return false;
+          if (keyboardHeldElsewhere()) return false;
           const active = document.activeElement;
           if (!active || active === document.body) return true;
           if (el && el.contains(active)) return true;

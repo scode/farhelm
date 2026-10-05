@@ -3372,6 +3372,78 @@ pub(crate) async fn set_yolo_without_asking(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
+/// Set whether the helm carries out acting `farhelm` commands from a host's sessions
+/// without asking (`POST /api/hosts/{id}/commands-without-asking`).
+pub(crate) async fn set_commands_without_asking(
+    base: &str,
+    host: HostId,
+    commands_without_asking: bool,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/commands-without-asking");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "commands_without_asking": commands_without_asking })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+}
+
+/// Every agent request waiting for the user's approval (`GET /api/approvals`),
+/// oldest first.
+pub(crate) async fn fetch_approvals(
+    base: &str,
+) -> Result<Vec<farhelm_proto::approvals::PendingApproval>, String> {
+    let url = format!("{base}/api/approvals");
+    let resp = send_read(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<farhelm_proto::approvals::PendingApprovals>()
+        .await
+        .map(|body| body.approvals)
+        .map_err(|error| error.to_string())
+}
+
+/// What became of an answer the helm accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnswerOutcome {
+    /// The answer reached the waiting request.
+    Delivered,
+    /// The request had already stopped waiting (answered in another window,
+    /// expired, or withdrawn), which the helm says with 410 Gone. Nothing was
+    /// approved, and the next listing drops the card.
+    Gone,
+}
+
+/// Answer one waiting agent request (`POST /api/approvals/{id}`).
+///
+/// `Err` is a refusal the card shows while the request keeps waiting, such
+/// as an "always allow" whose setting could not be stored.
+pub(crate) async fn answer_approval(
+    base: &str,
+    id: &str,
+    answer: farhelm_proto::approvals::ApprovalAnswer,
+) -> Result<AnswerOutcome, String> {
+    let url = format!("{base}/api/approvals/{}", encode_path_segment(id));
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&farhelm_proto::approvals::ApprovalAnswerRequest { answer }),
+    )
+    .await?;
+    if resp.status() == reqwest::StatusCode::GONE {
+        return Ok(AnswerOutcome::Gone);
+    }
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(AnswerOutcome::Delivered)
+}
+
 /// Forget a registered host (`DELETE /api/hosts/{id}`).
 ///
 /// SPEC.md's remove-merely-forgets contract: the registry row and the

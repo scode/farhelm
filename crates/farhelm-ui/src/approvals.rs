@@ -1,0 +1,809 @@
+//! The cards that ask the user to approve an agent's `farhelm` command
+//! (SPEC.md, Agent-spawned sessions).
+//!
+//! The helm holds each acting request from inside a session until the user
+//! answers it here. This module only shows what the helm lists and sends the
+//! answer back: the decision, the per-host setting and the expiry are all the
+//! helm's (farhelm-helm's `approvals`), so nothing a card does can let a
+//! request through that the helm did not hold for it.
+//!
+//! ## Shape
+//!
+//! Non-modal cards stacked in a fixed corner of the window, one per waiting
+//! request, oldest first. The rest of the app stays usable, and a card stays
+//! until it is answered (here or in another window) or the helm expires it;
+//! either way the next listing drops it. The listing is re-read on every fleet
+//! invalidation notice, the same way every other surface learns of changes:
+//! the helm bumps the feed whenever a request starts or stops waiting.
+//!
+//! ## Whose words are whose
+//!
+//! Almost everything on a card was written by the agent asking: the session's
+//! title, the folder, the command text, the template's name. A card that read
+//! those values into a sentence would let an agent write its own approval
+//! prompt, so every value sits in a labelled row as escaped,
+//! direction-isolated peer text (`peer::display_peer`), and the only prose is
+//! this module's own labels and buttons. Host names are rendered the same way:
+//! they are user data the helm relays, not this UI's words.
+
+use std::collections::{HashMap, HashSet};
+
+use dioxus::prelude::*;
+use farhelm_proto::SessionLaunch;
+use farhelm_proto::approvals::{
+    ApprovalAction, ApprovalAnswer, ApprovalSession, LaunchVerb, PendingApproval,
+};
+use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
+
+use crate::ApiBase;
+use crate::api::AnswerOutcome;
+use crate::feed::{fallback_polls_now, fallback_sleep};
+use crate::peer::{PeerBlock, display_identity, display_peer};
+use crate::reader::{SurfaceReader, Trigger, request_read};
+
+/// Every waiting request's card, in a fixed corner of the window.
+///
+/// Mounted once, beside the fleet feed, so the cards survive selection
+/// changes the way the feed does. Renders nothing while nothing waits.
+///
+/// The listing is read through the page's shared reader discipline
+/// (`reader::request_read`): one read at a time, a failed read retried on its
+/// own, and the fallback poll while the feed is down. A card is the only way
+/// an agent's request can be answered, and its notice is announced exactly
+/// once, so a read lost to a blip must not leave the request invisible for the
+/// rest of its wait.
+#[component]
+pub(crate) fn ApprovalCards() -> Element {
+    let base = use_context::<ApiBase>().0;
+    let mut approvals = use_signal(Vec::<PendingApproval>::new);
+    // Answers in flight, so a double click cannot send two.
+    let answering = use_signal(HashSet::<String>::new);
+    // Cards answered from this window, hidden at once rather than left
+    // clickable until the next listing drops them; forgotten once a listing
+    // no longer has them.
+    let mut answered = use_signal(HashSet::<String>::new);
+    // The last refusal per card (an "always allow" whose setting could not
+    // be stored), shown on the card while its request keeps waiting.
+    let mut errors = use_signal(HashMap::<String, String>::new);
+    // Set when an answer arrived after its request had stopped waiting, so the
+    // user learns the answer did not take effect even though the card is gone:
+    // `Some(true)` when that answer was "always allow", whose setting the helm
+    // stores before it looks for the request.
+    let mut late = use_signal(|| None::<bool>);
+    // Answer buttons stay disabled for a moment whenever the set of visible
+    // cards changes (see `ARM_DELAY_MS`).
+    let mut armed = use_signal(|| true);
+    let mut shown = use_signal(Vec::<String>::new);
+
+    let read_base = base.clone();
+    let read = move || {
+        let base = read_base.clone();
+        async move {
+            match crate::api::fetch_approvals(&base).await {
+                Ok(list) => {
+                    let waiting: HashSet<String> =
+                        list.iter().map(|card| card.id.clone()).collect();
+                    errors.write().retain(|id, _| waiting.contains(id));
+                    answered.write().retain(|id| waiting.contains(id));
+                    approvals.set(list);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    };
+    let surface = use_signal(SurfaceReader::default);
+    let request = move |trigger: Trigger| request_read(surface, trigger, read.clone());
+    let mount = request.clone();
+    use_hook(move || mount(Trigger::Explicit));
+    let notice = request.clone();
+    crate::feed::use_feed_reader(move || notice(Trigger::Notice));
+    let poll = request.clone();
+    use_future(move || {
+        let poll = poll.clone();
+        async move {
+            loop {
+                fallback_sleep().await;
+                if fallback_polls_now() {
+                    poll(Trigger::Scheduled);
+                }
+            }
+        }
+    });
+
+    let cards: Vec<PendingApproval> = approvals
+        .read()
+        .iter()
+        .filter(|card| !answered.read().contains(&card.id))
+        .cloned()
+        .collect();
+    // A card set that changed under the pointer is when a click lands on a
+    // card the user never read: an answered card hides and the ones above it
+    // drop into its place, or a new card arrives and pushes the others up, so
+    // the second click of a double-click, or a click aimed at the card just
+    // read, would answer a different request. Disarming the buttons briefly on
+    // every change is how browsers protect their own permission prompts.
+    let ids: Vec<String> = cards.iter().map(|card| card.id.clone()).collect();
+    if *shown.peek() != ids {
+        shown.set(ids);
+        armed.set(false);
+        spawn(async move {
+            crate::reader::sleep_ms(ARM_DELAY_MS).await;
+            armed.set(true);
+        });
+    }
+    if cards.is_empty() && late().is_none() {
+        return rsx! {};
+    }
+    rsx! {
+        div {
+            class: "approval-cards",
+            role: "region",
+            aria_label: "requests waiting for your approval",
+            // Left live by `modal_isolation` while a dialog is open: an agent
+            // waiting on a card must not wait on the dialog too.
+            "data-modal-exempt": "true",
+            if let Some(always) = late() {
+                div { class: "approval-late", role: "status",
+                    p {
+                        "Your answer arrived after its request had stopped waiting, so it did not take effect."
+                        if always {
+                            " The host may still have been set to run farhelm commands without asking; its settings show whether it was."
+                        }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral approval-late-dismiss",
+                        "data-tooltip": "dismiss: hide this notice",
+                        onclick: move |_| late.set(None),
+                        "dismiss"
+                    }
+                }
+            }
+            for card in cards {
+                ApprovalCard {
+                    key: "{card.id}",
+                    card: card.clone(),
+                    busy: answering.read().contains(&card.id) || !armed(),
+                    error: errors.read().get(&card.id).cloned(),
+                    on_answer: {
+                        let base = base.clone();
+                        let request = request.clone();
+                        let mut answering = answering;
+                        move |(id, answer): (String, ApprovalAnswer)| {
+                            if !answering.write().insert(id.clone()) {
+                                return;
+                            }
+                            let base = base.clone();
+                            let request = request.clone();
+                            spawn(async move {
+                                let result = crate::api::answer_approval(&base, &id, answer).await;
+                                match result {
+                                    Ok(outcome) => {
+                                        errors.write().remove(&id);
+                                        answered.write().insert(id.clone());
+                                        if outcome == AnswerOutcome::Gone {
+                                            late.set(Some(answer == ApprovalAnswer::AlwaysAllow));
+                                        }
+                                    }
+                                    Err(error) => {
+                                        errors.write().insert(id.clone(), error);
+                                    }
+                                }
+                                answering.write().remove(&id);
+                                request(Trigger::Explicit);
+                            });
+                        }
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// How long the answer buttons stay disabled after the visible cards change.
+/// Long enough to absorb the second click of a double-click and a click
+/// already on its way, short enough not to be noticed when nothing moved.
+const ARM_DELAY_MS: u64 = 700;
+
+/// One waiting request.
+#[component]
+fn ApprovalCard(
+    card: PendingApproval,
+    /// An answer to this card is in flight.
+    busy: bool,
+    /// The last answer's refusal, if any.
+    error: Option<String>,
+    on_answer: EventHandler<(String, ApprovalAnswer)>,
+) -> Element {
+    let rows = action_rows(&card.action);
+    let id = card.id.clone();
+    let heading = format!("approval-{}-heading", card.id);
+    let answer = move |answer: ApprovalAnswer| {
+        let id = id.clone();
+        move |_| on_answer.call((id.clone(), answer))
+    };
+    let mut asking = Vec::new();
+    session_rows(
+        "asked by session",
+        "asking session id",
+        None,
+        &card.session,
+        &mut asking,
+    );
+    rsx! {
+        section {
+            class: "approval-card",
+            role: "group",
+            aria_labelledby: "{heading}",
+            "data-approval-id": "{card.id}",
+            "data-approval-kind": "{action_kind(&card.action)}",
+            h2 { id: "{heading}", class: "approval-card-heading", "an agent is asking to act" }
+            p { class: "approval-card-what", "{action_summary(&card.action)}" }
+            dl { class: "approval-card-rows",
+                Row { label: "requested from host", value: card.host_name.clone() }
+                for (index , row) in asking.into_iter().chain(rows).enumerate() {
+                    match row {
+                        CardRow::Value(label, value) => rsx! {
+                            Row { key: "{index}", label, value }
+                        },
+                        CardRow::Block(label, text) => rsx! {
+                            div { key: "{index}", class: "approval-card-row",
+                                dt { "{label}" }
+                                dd { PeerBlock { class: "approval-card-block", text } }
+                            }
+                        },
+                        CardRow::Note(label, words) => rsx! {
+                            div { key: "{index}", class: "approval-card-row",
+                                dt { "{label}" }
+                                dd { class: "approval-card-note", "{words}" }
+                            }
+                        },
+                        CardRow::Identity(label, identity) => rsx! {
+                            div { key: "{index}", class: "approval-card-row",
+                                dt { "{label}" }
+                                dd {
+                                    span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" }
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+            if let Some(error) = error {
+                p { class: "approval-card-error", role: "alert", "{display_peer(&error)}" }
+            }
+            div { class: "approval-card-actions",
+                button {
+                    r#type: "button",
+                    class: "btn btn-primary approval-allow",
+                    "data-tooltip": "allow: let this one request go ahead",
+                    disabled: busy,
+                    onclick: answer(ApprovalAnswer::Allow),
+                    "allow"
+                }
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral approval-always-allow",
+                    "data-tooltip": "always allow: let this request go ahead, and stop asking about farhelm commands from this host",
+                    disabled: busy,
+                    onclick: answer(ApprovalAnswer::AlwaysAllow),
+                    "always allow from "
+                    span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                }
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral approval-deny",
+                    "data-tooltip": "deny: refuse this request; the agent is told you declined",
+                    disabled: busy,
+                    onclick: answer(ApprovalAnswer::Deny),
+                    "deny"
+                }
+            }
+        }
+    }
+}
+
+/// One labelled value on a card: this UI's label, the peer's value.
+#[component]
+fn Row(label: &'static str, value: String) -> Element {
+    rsx! {
+        div { class: "approval-card-row",
+            dt { "{label}" }
+            dd {
+                span { class: "peer-value", dir: "ltr", "{display_peer(&value)}" }
+            }
+        }
+    }
+}
+
+/// What a card shows below its fixed rows.
+#[derive(Debug, Clone, PartialEq)]
+enum CardRow {
+    /// A peer value on one line.
+    Value(&'static str, String),
+    /// A peer value that may span lines (command text), kept in its shape.
+    Block(&'static str, String),
+    /// This UI's own words (yes, no, a default), not peer text.
+    Note(&'static str, &'static str),
+    /// An install identity, shown the way the hosts panel shows identities
+    /// (`peer::display_identity`), which is stricter than ordinary peer text.
+    Identity(&'static str, String),
+}
+
+/// The action's kind, for the card's data attribute (tests and styling).
+fn action_kind(action: &ApprovalAction) -> &'static str {
+    match action {
+        ApprovalAction::Launch { .. } => "launch",
+        ApprovalAction::Rename { .. } => "rename",
+        ApprovalAction::Stop { .. } => "stop",
+        ApprovalAction::Restart { .. } => "restart",
+        ApprovalAction::TemplateWrite { .. } => "template_write",
+        ApprovalAction::TemplateDelete { .. } => "template_delete",
+    }
+}
+
+/// One line in this UI's own words saying what approving would do.
+fn action_summary(action: &ApprovalAction) -> &'static str {
+    match action {
+        ApprovalAction::Launch {
+            verb: LaunchVerb::Spawn | LaunchVerb::Create,
+            ..
+        } => "start a new session",
+        ApprovalAction::Launch {
+            verb: LaunchVerb::SpawnInherited,
+            ..
+        } => "start a new session running the asking session's own launch",
+        ApprovalAction::Launch {
+            verb: LaunchVerb::Clone,
+            ..
+        } => "start a copy of a session",
+        ApprovalAction::Rename { .. } => "rename a session",
+        ApprovalAction::Stop { .. } => "stop a session's agent",
+        ApprovalAction::Restart { .. } => "restart a session, resuming its conversation",
+        ApprovalAction::TemplateWrite {
+            replaces_existing: false,
+            ..
+        } => "create a launch template",
+        ApprovalAction::TemplateWrite {
+            replaces_existing: true,
+            ..
+        } => "change a launch template",
+        ApprovalAction::TemplateDelete { .. } => "delete a launch template",
+    }
+}
+
+/// The rows that describe the action itself.
+fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
+    let mut rows = Vec::new();
+    match action {
+        ApprovalAction::Launch {
+            host_name,
+            cwd,
+            title,
+            launch,
+            source,
+            ..
+        } => {
+            if let Some(source) = source {
+                session_rows(
+                    "copying session",
+                    "copied session id",
+                    Some("copied session's host"),
+                    source,
+                    &mut rows,
+                );
+            }
+            rows.push(CardRow::Value("new session on host", host_name.clone()));
+            rows.push(CardRow::Value("folder", cwd.clone()));
+            match title {
+                Some(title) => rows.push(CardRow::Value("title", title.clone())),
+                None => rows.push(CardRow::Note("title", "generated")),
+            }
+            launch_rows(launch, Runs::Start, &mut rows);
+            // Farhelm's own verdict only where it has one: a command launch's
+            // YOLO is the agent's unchecked claim, already shown as "asserted
+            // YOLO", and restating it here in Farhelm's words would present
+            // the claim as a finding.
+            if !matches!(launch, SessionLaunch::Command(_)) {
+                rows.push(CardRow::Note("YOLO", yolo_words(launch.yolo())));
+            }
+        }
+        ApprovalAction::Rename { target, title } => {
+            session_rows(
+                "session",
+                "session id",
+                Some("session's host"),
+                target,
+                &mut rows,
+            );
+            rows.push(CardRow::Value("new title", title.clone()));
+        }
+        ApprovalAction::Stop { target } => {
+            session_rows(
+                "session",
+                "session id",
+                Some("session's host"),
+                target,
+                &mut rows,
+            );
+        }
+        ApprovalAction::Restart {
+            target,
+            stop_if_running,
+            launch,
+        } => {
+            session_rows(
+                "session",
+                "session id",
+                Some("session's host"),
+                target,
+                &mut rows,
+            );
+            rows.push(CardRow::Note(
+                "if it is working",
+                if *stop_if_running {
+                    "stop it first"
+                } else {
+                    "refuse"
+                },
+            ));
+            match launch {
+                Some(launch) => launch_rows(launch, Runs::Resume, &mut rows),
+                None => rows.push(CardRow::Note("resume command", "unknown to this helm")),
+            }
+        }
+        ApprovalAction::TemplateWrite {
+            name,
+            fields,
+            host_name,
+            ..
+        } => {
+            rows.push(CardRow::Value("template", name.clone()));
+            template_rows(fields, host_name.as_deref(), &mut rows);
+        }
+        ApprovalAction::TemplateDelete {
+            name,
+            fields,
+            host_name,
+        } => {
+            rows.push(CardRow::Value("template", name.clone()));
+            template_rows(fields, host_name.as_deref(), &mut rows);
+        }
+    }
+    rows
+}
+
+/// Which of a launch's commands the approved action runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Runs {
+    /// A new session: the start command now, the resume command at a later
+    /// restart.
+    Start,
+    /// A restart: only the resume command.
+    Resume,
+}
+
+/// A launch's choices and the full text of what it runs. A new session's card
+/// shows the start command and the resume command a later restart runs,
+/// because a plain restart is not checked against the YOLO rule again; a
+/// restart's card shows only the resume command, which is all a restart runs.
+fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
+    let start_label = "command";
+    let resume_text = |argv: &[String]| {
+        shell_words::join(argv.iter().filter(|element| {
+            element.as_str() != farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER
+        }))
+    };
+    match launch {
+        SessionLaunch::Agent {
+            selection, resume, ..
+        } => {
+            rows.push(CardRow::Value("agent", word(&selection.harness)));
+            rows.push(optional_value("model", selection.model.clone()));
+            rows.push(optional_value(
+                "effort",
+                selection.effort.as_ref().map(word),
+            ));
+            rows.push(optional_value(
+                "permissions",
+                selection.permissions.as_ref().map(word),
+            ));
+            if let Some(trust) = selection.workspace_trust {
+                rows.push(CardRow::Note(
+                    "workspace trust",
+                    if trust { "trusted" } else { "not trusted" },
+                ));
+            }
+            if runs == Runs::Start {
+                rows.push(CardRow::Block(start_label, launch.display_command()));
+            }
+            match resume {
+                Some(resume) => rows.push(CardRow::Block("resume command", resume_text(resume))),
+                None => rows.push(CardRow::Note("resume command", "none")),
+            }
+        }
+        SessionLaunch::Command(command) => {
+            if runs == Runs::Start {
+                rows.push(CardRow::Block(start_label, command.command.clone()));
+            }
+            match &command.resume {
+                Some(resume) => rows.push(CardRow::Block("resume command", resume.clone())),
+                None => rows.push(CardRow::Note("resume command", "none")),
+            }
+            if let Some(agent) = command.agent {
+                rows.push(CardRow::Value("declared agent", word(&agent)));
+            }
+            rows.push(CardRow::Note(
+                "asserted YOLO",
+                if command.yolo { "yes" } else { "no" },
+            ));
+        }
+        SessionLaunch::Legacy {
+            invocation,
+            resume_template,
+            ..
+        } => {
+            if runs == Runs::Start {
+                rows.push(CardRow::Block(start_label, invocation.clone()));
+            }
+            match resume_template {
+                Some(resume) => rows.push(CardRow::Block("resume command", resume_text(resume))),
+                None => rows.push(CardRow::Note("resume command", "none")),
+            }
+        }
+    }
+}
+
+/// Every field a template sets, command text included.
+fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Vec<CardRow>) {
+    if let Some(kind) = &fields.kind {
+        rows.push(CardRow::Value("launch kind", word(kind)));
+    }
+    if let Some(agent) = &fields.agent {
+        rows.push(CardRow::Value("agent", word(agent)));
+    }
+    if let Some(model) = &fields.model {
+        rows.push(optional_value("model", model.clone()));
+    }
+    if let Some(effort) = &fields.effort {
+        rows.push(optional_value("effort", effort.as_ref().map(word)));
+    }
+    if let Some(permissions) = &fields.permissions {
+        rows.push(optional_value(
+            "permissions",
+            permissions.as_ref().map(word),
+        ));
+    }
+    if let Some(trust) = &fields.workspace_trust {
+        rows.push(CardRow::Note(
+            "workspace trust",
+            match trust {
+                Some(true) => "trusted",
+                Some(false) => "not trusted",
+                None => "agent's default",
+            },
+        ));
+    }
+    if let Some(command) = &fields.command {
+        rows.push(CardRow::Block("command", command.clone()));
+    }
+    if let Some(resume) = &fields.resume_command {
+        match resume {
+            Some(resume) => rows.push(CardRow::Block("resume command", resume.clone())),
+            None => rows.push(CardRow::Note("resume command", "none")),
+        }
+    }
+    if let Some(yolo) = fields.yolo {
+        rows.push(CardRow::Note(
+            "asserted YOLO",
+            if yolo { "yes" } else { "no" },
+        ));
+    }
+    if let Some(identity) = &fields.host {
+        match host_name {
+            Some(name) => rows.push(CardRow::Value("host", name.to_string())),
+            // The install identity itself, when no registered host carries
+            // it now: the template still names it, and the card must not
+            // guess why there is no name for it.
+            None => rows.push(CardRow::Identity("host install", identity.clone())),
+        }
+    }
+    match &fields.destination {
+        Some(TemplateDestination::Folder(folder)) => {
+            rows.push(CardRow::Value("folder", folder.clone()))
+        }
+        Some(TemplateDestination::Github(repo)) => {
+            rows.push(CardRow::Value("fresh checkout of", repo.clone()))
+        }
+        None => {}
+    }
+    if let Some(name) = &fields.name {
+        rows.push(CardRow::Value("session title", name.clone()));
+    }
+}
+
+/// A launch choice that may be left to the agent's default.
+fn optional_value(label: &'static str, value: Option<String>) -> CardRow {
+    match value {
+        Some(value) => CardRow::Value(label, value),
+        None => CardRow::Note(label, "agent's default"),
+    }
+}
+
+/// The launch's YOLO verdict in this UI's words. Unknown (a launch from
+/// before launch kinds) says so rather than reading as "no": on a permission
+/// prompt, guessing the safe answer is the wrong way to be wrong.
+fn yolo_words(yolo: Option<bool>) -> &'static str {
+    match yolo {
+        Some(true) => "yes: the agent runs with no approval prompts",
+        Some(false) => "no",
+        None => "unknown: this launch predates YOLO classification",
+    }
+}
+
+/// A session as separate labelled rows: its title (when the helm knows it),
+/// its id, and its host. Kept apart, not joined into one value, because a
+/// title is agent text and could otherwise imitate the id or the host and make
+/// the card name a different session or machine than the one it acts on.
+///
+/// `host_label` names the host row; `None` leaves it out, for the asking
+/// session, whose host the card already names as the one the request came
+/// from.
+fn session_rows(
+    label: &'static str,
+    id_label: &'static str,
+    host_label: Option<&'static str>,
+    session: &ApprovalSession,
+    rows: &mut Vec<CardRow>,
+) {
+    match &session.title {
+        Some(title) => rows.push(CardRow::Value(label, title.clone())),
+        None => rows.push(CardRow::Note(label, "title unknown")),
+    }
+    rows.push(CardRow::Value(id_label, session.id.clone()));
+    if let Some(host_label) = host_label {
+        match &session.host_name {
+            Some(host) => rows.push(CardRow::Value(host_label, host.clone())),
+            None => rows.push(CardRow::Note(host_label, "unknown to this helm")),
+        }
+    }
+}
+
+/// A wire enum's own spelling, which is also the word the launcher and the
+/// CLI use for it.
+fn word<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use farhelm_proto::CommandLaunch;
+
+    /// Spec: a command launch's card shows the command and the resume
+    /// command in full, and says the YOLO assertion in this UI's own words.
+    ///
+    /// Why: SPEC.md lets a later plain restart run the resume command without
+    /// another YOLO check, on the grounds that the user approved it here; a
+    /// card that hid it would have the user approve something they never saw.
+    #[test]
+    fn a_command_launch_card_shows_both_commands() {
+        let action = ApprovalAction::Launch {
+            verb: LaunchVerb::Create,
+            host_name: "box".to_string(),
+            cwd: "/w".to_string(),
+            title: None,
+            launch: SessionLaunch::Command(CommandLaunch {
+                command: "agent --go".to_string(),
+                yolo: false,
+                agent: None,
+                resume: Some("agent --resume {conversation}".to_string()),
+            }),
+            source: None,
+        };
+        let rows = action_rows(&action);
+        assert!(rows.contains(&CardRow::Block("command", "agent --go".to_string())));
+        assert!(rows.contains(&CardRow::Block(
+            "resume command",
+            "agent --resume {conversation}".to_string()
+        )));
+        assert!(rows.contains(&CardRow::Note("asserted YOLO", "no")));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, CardRow::Note("YOLO", _))),
+            "a command launch's claim is not restated as Farhelm's verdict: {rows:?}"
+        );
+        assert!(rows.contains(&CardRow::Note("title", "generated")));
+    }
+
+    /// Spec: a restart card shows the resume command the restart runs, for a
+    /// legacy launch too, and not the start command it does not run.
+    ///
+    /// Why: a plain restart is allowed without the YOLO rule because it re-runs
+    /// what the user already approved, so the card is where the user sees what
+    /// that is; showing the start command instead would show the wrong thing.
+    #[test]
+    fn a_restart_card_shows_the_resume_command_only() {
+        let action = ApprovalAction::Restart {
+            target: ApprovalSession {
+                id: "s".to_string(),
+                title: None,
+                host_name: None,
+            },
+            stop_if_running: false,
+            launch: Some(SessionLaunch::Legacy {
+                invocation: "agent --start".to_string(),
+                agent_kind: farhelm_proto::AgentKind::Generic,
+                resume_template: Some(vec!["agent".to_string(), "--resume".to_string()]),
+            }),
+        };
+        let rows = action_rows(&action);
+        assert!(rows.contains(&CardRow::Block(
+            "resume command",
+            "agent --resume".to_string()
+        )));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, CardRow::Block("command", _))),
+            "{rows:?}"
+        );
+    }
+
+    /// Spec: a template delete's card shows the host the template names, by
+    /// name when the helm knows it and by install identity otherwise.
+    ///
+    /// Why: SPEC.md has the card show the template being deleted, and a
+    /// pinned host is part of it; claiming the install is unknown would be
+    /// false for a template pinned to a connected host.
+    #[test]
+    fn a_template_delete_card_shows_its_host() {
+        let fields = TemplateFields {
+            host: Some("install-1".to_string()),
+            ..TemplateFields::default()
+        };
+        let named = action_rows(&ApprovalAction::TemplateDelete {
+            name: "t".to_string(),
+            fields: fields.clone(),
+            host_name: Some("box".to_string()),
+        });
+        assert!(named.contains(&CardRow::Value("host", "box".to_string())));
+        let unnamed = action_rows(&ApprovalAction::TemplateDelete {
+            name: "t".to_string(),
+            fields,
+            host_name: None,
+        });
+        assert!(unnamed.contains(&CardRow::Identity("host install", "install-1".to_string())));
+    }
+
+    /// Spec: a template write's card lists every field the template will set,
+    /// including the command text the agent templates listing withholds.
+    ///
+    /// Why: SPEC.md has the card show the whole resulting template, because a
+    /// template's command line may later run on any host.
+    #[test]
+    fn a_template_card_shows_its_command_text() {
+        let fields = TemplateFields {
+            command: Some("run-me".to_string()),
+            resume_command: Some(None),
+            yolo: Some(true),
+            ..TemplateFields::default()
+        };
+        let action = ApprovalAction::TemplateWrite {
+            name: "t".to_string(),
+            replaces_existing: false,
+            fields,
+            host_name: None,
+        };
+        let rows = action_rows(&action);
+        assert!(rows.contains(&CardRow::Block("command", "run-me".to_string())));
+        assert!(rows.contains(&CardRow::Note("resume command", "none")));
+        assert!(rows.contains(&CardRow::Note("asserted YOLO", "yes")));
+        assert_eq!(action_summary(&action), "create a launch template");
+    }
+}

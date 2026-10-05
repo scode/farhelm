@@ -864,6 +864,7 @@ pub(super) mod tests {
             },
             incarnation: 3,
             yolo_without_asking: false,
+            commands_without_asking: false,
         }];
         let options = host_options(&catalog);
         assert_eq!(options[0].id, 7);
@@ -999,6 +1000,7 @@ pub(super) mod tests {
             },
             incarnation: 1,
             yolo_without_asking: false,
+            commands_without_asking: false,
         }
     }
 

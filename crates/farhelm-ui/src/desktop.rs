@@ -1379,6 +1379,7 @@ mod tests {
             state,
             incarnation: 1,
             yolo_without_asking: false,
+            commands_without_asking: false,
         };
         let skew = crate::HostPhase::VersionSkew {
             peer_protocol: 9,

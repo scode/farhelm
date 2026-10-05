@@ -1267,7 +1267,7 @@ test.describe("multi-host", () => {
       await row.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
       const toggle = dialog.locator(".host-yolo-without-asking-toggle");
-      const help = dialog.locator(".host-settings-help");
+      const help = dialog.locator(".host-settings-yolo .host-settings-help");
       await expect(help).toContainText("Farhelm asks you to confirm each YOLO launch on this host.");
       await expect(toggle).not.toBeChecked();
       await toggle.click();
@@ -1289,6 +1289,54 @@ test.describe("multi-host", () => {
       await expect(dialog).toHaveCount(0);
     } finally {
       await request.post(`/api/hosts/${local.id}/yolo-without-asking`, { data: { yolo_without_asking: false } });
+    }
+  });
+
+  // The "run farhelm commands from this host without asking" setting round-trips through
+  // the helm from the host's settings dialog, beside the YOLO setting and independent of
+  // it (SPEC.md, Agent-spawned sessions and Topology). Every host starts asking, so the
+  // checkbox starts clear; the local row is used because it always exists, and the
+  // setting is restored to asking whatever happens, since the stack is shared by the
+  // specs that follow.
+  test("host-settings-commands-without-asking: the toggle is stored by the helm", async ({ page, request }) => {
+    const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
+    expect(local.commands_without_asking).toBe(false);
+    try {
+      await page.goto("/");
+      const row = page.locator('[data-host-kind="local"]');
+      await openHostMenu(row);
+      await row.locator(".host-settings").click();
+      const dialog = page.locator(".host-settings-dialog");
+      const toggle = dialog.locator(".host-commands-without-asking-toggle");
+      const help = dialog.locator(".host-settings-commands .host-settings-help");
+      await expect(help).toContainText("Farhelm asks you first.");
+      await expect(toggle).not.toBeChecked();
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect
+        .poll(async () =>
+          (await apiHosts(request)).find((host: any) => host.id === local.id).commands_without_asking,
+        )
+        .toBe(true);
+      await expect(help).toContainText("without asking you.");
+      expect(
+        (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_without_asking,
+        "the YOLO setting is separate",
+      ).toBe(false);
+      await expect(dialog.locator(".host-yolo-without-asking-toggle")).not.toBeChecked();
+      await toggle.click();
+      await expect(toggle).not.toBeChecked();
+      await expect
+        .poll(async () =>
+          (await apiHosts(request)).find((host: any) => host.id === local.id).commands_without_asking,
+        )
+        .toBe(false);
+      await dialog.locator(".host-settings-close").click();
+      await expect(dialog).toHaveCount(0);
+    } finally {
+      await request.post(`/api/hosts/${local.id}/commands-without-asking`, {
+        data: { commands_without_asking: false },
+      });
     }
   });
 

@@ -130,6 +130,8 @@ use serde::Deserialize;
 mod activity;
 mod api;
 mod app_bar;
+/// The cards that ask the user to approve an agent's `farhelm` command.
+mod approvals;
 mod attachments;
 mod auth;
 #[cfg(native_desktop)]
@@ -599,6 +601,12 @@ pub struct Host {
     /// shows and flips it.
     #[serde(default)]
     pub yolo_without_asking: bool,
+    /// Whether the helm carries out acting `farhelm` commands from this host's sessions
+    /// without asking; `false` (ask first) until the user changes it, and for a helm that
+    /// predates the field. The host settings dialog shows and flips it, and an approval
+    /// card's "Always allow" turns it on.
+    #[serde(default)]
+    pub commands_without_asking: bool,
 }
 
 /// Which kind of registry row a host is (farhelm-helm's `HostKind`, as the
@@ -1357,6 +1365,11 @@ fn AppBody() -> Element {
                 // It renders nothing (PLAN_M6_75.md item 6); what it
                 // produces is the revision counter each page re-reads on.
                 feed::FleetFeed {}
+                // Beside the feed, for the feed's own reason: a request
+                // waiting for the user is a fact about the whole fleet, and a
+                // card owned by the keyed view would vanish on a selection
+                // switch while the agent kept waiting (see `approvals`).
+                approvals::ApprovalCards {}
                 // Beside the feed, and for the same reason: the coarse "now"
                 // every relative activity age is computed against belongs to
                 // the PAGE, not to whichever pane happens to print an age, and
