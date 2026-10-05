@@ -147,3 +147,54 @@ its own records or tmux are retried without a limit (warnings limited instead). 
 running pass, a race where a restart between checking a report's terminal and recording it could record the old launch's
 report into the new one, sub-agent reports overwriting the session's own, and the order of Grok's two kinds of report
 during a pass. PR3: astra three and Opus eleven, then four more, all applied.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as three squash commits on main, in order: #1585 (the process check split in two halves),
+#1594 (hooks save conversation reports as files the supervisor picks up) and #1595 (the website pages).
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, main gained four TODO.md entries, the new auto-update plan
+file (#1592), and the planning queue's own bookkeeping, and nothing else: no code, spec, test, website page or script.
+The four entries are "Explain unavailable Restart in the user's terms", "Pick an icon and color per host", "Auto-update
+the Mac app" and "Lock down the release and update trust chain". None of them refers to how hooks report a conversation.
+Auto-update will restart the Mac app, and with it the Mac's supervisor; with this plan, a conversation switch an agent
+makes while that restart has the supervisor down is kept and applied afterwards, not lost. The TODO entry this plan
+removes sits apart from the new ones, and the rebase applied without conflict. No other plan landed in the same round.
+An independent review by a fresh-context sub-agent, done before anything merged, reached the same conclusions.
+
+#### A fix made while landing
+
+That review also found a test outside the PRs' files that the change would have broken: the audit with a real Claude
+that checks a child process started by the agent cannot replace the session's conversation. It runs only on request,
+because it needs real Claude credentials and spends real turns, so nothing in ordinary validation would have caught it.
+To find the supervisor's verdict on the child's report, the audit reads the first line in the session's hook log that
+does not name the parent conversation. With this plan, the hook first writes its own `written` line for the child's
+report and the supervisor's refusal follows on its next pass, so the audit would have read the `written` line and
+failed. That was worked out from the code, not seen in a run. #1594 had already made the same correction in the version
+of this test that uses a stand-in agent, but missed the real-agent one.
+
+The fix skips `written` lines when looking for the child's verdict, and updates two comments in the same file that still
+said only the hook writes `acked` lines (the supervisor writes them now). It went into #1594's commit before anything
+merged, and touched only that test file.
+
+The review also found comments that still describe the hook reporting over the supervisor's socket, in the stand-in
+agent the tests use (its module documentation and three of its helpers) and in a browser-test helper that says the
+stand-in "exits when it cannot report". They are comments only, and were left as they are rather than rewritten during
+the landing. Nothing tracks this; ask for a follow-up if you want them corrected.
+
+#### Checks
+
+- Run now, on the final stack after the fix: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`
+  (which compiles the fixed audit), `cargo clippy -p farhelm --bins -- -D warnings`, `dprint check`, and
+  `python -B scripts/check-test-sleeps.py` (no unannotated delays).
+- Skipped: running the fixed real-Claude audit, because it needs real Claude credentials and spends real turns, which
+  this project only does on request. It was compiled but not executed.
+- Reused: the test runs in the report's Checks section. Main brought only TODO.md and queue changes, and the landing fix
+  touched only that audit and its comments, so their evidence still applies to what landed. Rebasing each PR onto main
+  after the one below it merged changed nothing outside the queue's own files.
+
+The landing made two things in the report above untrue. Its list of what the stack changes now also includes the
+real-Claude audit fix. And its Checks section says its test runs were on "the final code", but the final code now
+includes that fix, which those runs predate; only the checks listed here saw it.
