@@ -723,6 +723,17 @@ samp {
   font-size: 12px;
 }
 
+/* The installed desktop app's update marker (SPEC.md "Installation and
+   updates"): while a newer version is installed than the one running, the
+   whole readout turns red and a one-character up-arrow leads it. */
+.app-version.app-version-update {
+  color: var(--danger);
+}
+
+.app-version-arrow {
+  margin-right: 0.25em;
+}
+
 /* The gear owns fixed space; a long version gives way before either icon.
    It stays outside the macOS drag spacer and the bar retains one row. */
 .app-bar .app-settings-toggle,

@@ -85,6 +85,11 @@ mime_guess.workspace = true
 # compiled in under its real name. Transitively present already, but a
 # transitive crate cannot be imported.
 percent-encoding.workspace = true
+# The desktop updater (`desktop/updater.rs`) refuses a latest-release answer
+# or a compiled version that does not parse as a release. Version ORDER is
+# not computed here: it comes from `farhelm_helm::build_is_newer`, so there
+# is one rule for which build is newer.
+semver.workspace = true
 # Non-wasm half of the list-view and session-detail poll sleep (src/list.rs,
 # src/session_view.rs). Not a new runtime dependency in practice:
 # `dioxus-desktop` already constructs and drives a multi-thread tokio

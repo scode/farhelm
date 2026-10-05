@@ -386,8 +386,9 @@ impl<A: Copy + Eq, const N: usize> MenuOrder<A, N> {
 
     /// The visible actions in order, skipping the trailing `None` gaps
     /// [`pack`](Self::pack) leaves behind — the one iterator every other
-    /// method here is built from.
-    fn actions(self) -> impl Iterator<Item = A> {
+    /// method here is built from, and what a menu renders its items from so
+    /// the rendered list and the keyboard order are the same list.
+    pub(crate) fn actions(self) -> impl Iterator<Item = A> {
         self.0.into_iter().flatten()
     }
 }

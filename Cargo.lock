@@ -1928,6 +1928,7 @@ dependencies = [
  "percent-encoding",
  "raw-window-handle 0.6.2",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "shell-words",

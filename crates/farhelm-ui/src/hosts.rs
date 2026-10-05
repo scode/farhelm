@@ -62,6 +62,7 @@ use crate::api::{
     adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
     set_commands_without_asking, set_host_destination, set_yolo_without_asking, store_preference,
 };
+use crate::app_updater::use_app_updater;
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
@@ -308,20 +309,32 @@ struct UpdateMenuItem {
 }
 
 /// The Update item for a row of this kind, while the menu's provisioning
-/// state is or is not planning.
+/// state is or is not planning, and whether this row is the local machine of
+/// a desktop app whose updater runs (`app_updates`).
 ///
-/// A row the panel cannot update (the helm's own machine) still shows the
-/// item, greyed out, with the way it IS updated in its place: the helm
-/// refuses that update, and the refusal used to stick under the row with no
-/// way to dismiss it. The item appears whenever the menu offers Update,
-/// which includes a local row that is already up to date, so its description
-/// says how this machine is updated rather than implying an update waits.
-/// It names only the installer: Farhelm targets the Mac for now, and a
-/// Linux helm machine, which the installer refuses, is out of scope for this
-/// text. An unrecognized kind takes the same branch, but its menu offers no
-/// provisioning actions at all, so the item never renders for it.
-fn update_menu_item(kind: HostKind, planning: bool) -> UpdateMenuItem {
-    if kind.updates_from_panel() {
+/// That local row is the one exception to the rule below: there Update is
+/// the app's own on-demand update check (SPEC.md "Installation and
+/// updates"), always offered and never disabled, since it plans nothing and
+/// the updater serializes checks itself.
+///
+/// Any other row the panel cannot update (the helm's own machine) still
+/// shows the item, greyed out, with the way it IS updated in its place: the
+/// helm refuses that update, and the refusal used to stick under the row
+/// with no way to dismiss it. The item appears whenever the menu offers
+/// Update, which includes a local row that is already up to date, so its
+/// description says how this machine is updated rather than implying an
+/// update waits. It names only the installer: Farhelm targets the Mac for
+/// now, and a Linux helm machine, which the installer refuses, is out of
+/// scope for this text. An unrecognized kind takes the same branch, but its
+/// menu offers no provisioning actions at all, so the item never renders for
+/// it.
+fn update_menu_item(kind: HostKind, planning: bool, app_updates: bool) -> UpdateMenuItem {
+    if app_updates && kind == HostKind::Local {
+        UpdateMenuItem {
+            disabled: false,
+            description: "check for a newer Farhelm and install it",
+        }
+    } else if kind.updates_from_panel() {
         UpdateMenuItem {
             disabled: planning,
             description: "install the newer Farhelm version",
@@ -2623,6 +2636,20 @@ fn HostRow(
         error,
         warning,
     } = activity;
+    // In a desktop app whose updater runs, the local row's Update is the
+    // app's own update check, offered whatever provisioning says
+    // (`update_menu_item`). Folding it into the menu state here keeps every
+    // consumer of that state (item order, separators, rendering) in step.
+    let app_updater = use_app_updater();
+    let local_app_update = app_updater.is_some() && host.kind == HostKind::Local;
+    let provisioning_menu = if local_app_update {
+        ProvisioningMenuState {
+            update: true,
+            ..provisioning_menu
+        }
+    } else {
+        provisioning_menu
+    };
     #[cfg(test)]
     HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
@@ -2673,7 +2700,7 @@ fn HostRow(
     // while busy and only a live provisioning lifecycle disables it — or the
     // row being one the panel cannot update at all (`update_menu_item`).
     let setup_disabled = busy || provisioning_menu.planning;
-    let update_item = update_menu_item(host.kind, provisioning_menu.planning);
+    let update_item = update_menu_item(host.kind, provisioning_menu.planning, local_app_update);
     let update_disabled = update_item.disabled;
     // A failed UPDATE reruns down the automatic path, so it answers while
     // busy like a fresh update; a failed ADD keeps setup's lock discipline.
@@ -2682,7 +2709,10 @@ fn HostRow(
     let rerun_disabled = provisioning_menu
         .rerun
         .is_some_and(|operation| match operation {
-            ProvisioningOperation::Update => update_disabled,
+            // The app's own update check never makes the panel able to
+            // update the local machine, so a failed panel update there
+            // stays disabled whatever the Update item now offers.
+            ProvisioningOperation::Update => update_disabled || local_app_update,
             // A failed uninstall never offers a rerun (its own item
             // continues it); the arm keeps the match exhaustive.
             ProvisioningOperation::Add | ProvisioningOperation::Uninstall => setup_disabled,
@@ -3253,8 +3283,19 @@ fn HostRow(
                                         },
                                         onclick: {
                                             let binding = click_binding.clone();
+                                            let app_updater = app_updater.clone();
                                             move |_| {
                                                 if update_disabled {
+                                                    return;
+                                                }
+                                                if local_app_update {
+                                                    // The app's own check: its progress and
+                                                    // outcome show on the version readout,
+                                                    // so the menu just closes.
+                                                    if let Some(updater) = &app_updater {
+                                                        updater.check_now();
+                                                    }
+                                                    on_menu_toggle.call(id);
                                                     return;
                                                 }
                                                 on_provisioning.call((id, ActionRequest {
@@ -3265,7 +3306,7 @@ fn HostRow(
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Update }
                                         span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", if provisioning_menu.planning { "planning…" } else { "update" } }
+                                            span { class: "session-row-menu-label", if provisioning_menu.planning && !local_app_update { "planning…" } else { "update" } }
                                             span { id: "host-menu-update-description", class: "session-row-menu-description", "{update_item.description}" }
                                         }
                                     }
@@ -4883,7 +4924,9 @@ mod tests {
     /// The menu's Update item is disabled on the helm's own machine and says
     /// to run the installer again, whether or not provisioning is planning;
     /// on an ssh row it stays the live update item, disabled only while
-    /// planning.
+    /// planning. A desktop app whose updater runs is the exception for the
+    /// local row only: there Update is the app's own update check, enabled
+    /// whatever provisioning is doing, and an ssh row is unaffected.
     ///
     /// The helm refuses an update of its own machine, and that refusal used
     /// to stick under the local row with no way to dismiss it. The item stays
@@ -4895,7 +4938,7 @@ mod tests {
     fn update_menu_item_is_disabled_on_the_local_row_and_points_at_the_installer() {
         for planning in [false, true] {
             assert_eq!(
-                update_menu_item(HostKind::Local, planning),
+                update_menu_item(HostKind::Local, planning, false),
                 UpdateMenuItem {
                     disabled: true,
                     description: "run the installer again to update this machine",
@@ -4903,13 +4946,23 @@ mod tests {
                 "local, planning {planning}"
             );
             assert_eq!(
-                update_menu_item(HostKind::Ssh, planning),
+                update_menu_item(HostKind::Local, planning, true),
                 UpdateMenuItem {
-                    disabled: planning,
-                    description: "install the newer Farhelm version",
+                    disabled: false,
+                    description: "check for a newer Farhelm and install it",
                 },
-                "ssh, planning {planning}"
+                "local with the app's updater, planning {planning}"
             );
+            for app_updates in [false, true] {
+                assert_eq!(
+                    update_menu_item(HostKind::Ssh, planning, app_updates),
+                    UpdateMenuItem {
+                        disabled: planning,
+                        description: "install the newer Farhelm version",
+                    },
+                    "ssh, planning {planning}, app updates {app_updates}"
+                );
+            }
         }
     }
 

@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 
 use std::collections::HashMap;
 
+use crate::app_updater::{AppUpdater, use_app_updater};
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
@@ -57,6 +58,9 @@ const WORDMARK_SVG: &str = include_str!("../../../packaging/farhelm-desktop/word
 enum HelpAction {
     SendFeedback,
     Documentation,
+    /// Offered only by a desktop app whose updater runs (SPEC.md
+    /// "Installation and updates").
+    CheckForUpdates,
 }
 
 impl HelpAction {
@@ -65,6 +69,7 @@ impl HelpAction {
         match self {
             HelpAction::SendFeedback => "send feedback",
             HelpAction::Documentation => "documentation",
+            HelpAction::CheckForUpdates => "check for updates",
         }
     }
 
@@ -80,6 +85,9 @@ impl HelpAction {
             HelpAction::Documentation => {
                 "documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
             }
+            HelpAction::CheckForUpdates => {
+                "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
+            }
         }
     }
 
@@ -88,11 +96,22 @@ impl HelpAction {
         match self {
             HelpAction::SendFeedback => "privately, to Farhelm's maintainer",
             HelpAction::Documentation => "opens farhelm.io/docs in your browser",
+            HelpAction::CheckForUpdates => "installs a newer Farhelm if there is one",
         }
+    }
+
+    /// Whether this menu offers the item: the update check only where an
+    /// updater runs, everything else always.
+    fn offered(self, has_updater: bool) -> bool {
+        self != HelpAction::CheckForUpdates || has_updater
     }
 }
 
-const HELP_ACTIONS: [HelpAction; 2] = [HelpAction::SendFeedback, HelpAction::Documentation];
+const HELP_ACTIONS: [HelpAction; 3] = [
+    HelpAction::SendFeedback,
+    HelpAction::Documentation,
+    HelpAction::CheckForUpdates,
+];
 
 /// The docs site the Documentation item opens.
 const DOCS_URL: &str = "https://farhelm.io/docs/";
@@ -125,8 +144,9 @@ fn open_documentation() {
 
 /// The sticky sidebar bar itself, ending in the help menu: a `?` toggle to
 /// the right of the settings gear, opening a small menu with Send feedback
-/// and Documentation (SPEC.md "Feedback"). `children` are the bar's other
-/// contents, rendered before the toggle.
+/// and Documentation (SPEC.md "Feedback"), plus Check for updates in a
+/// desktop app whose updater runs. `children` are the bar's other contents,
+/// rendered before the toggle.
 ///
 /// This component renders the bar, rather than sitting inside it, because
 /// the menu's flyout must NOT be inside the bar. The bar is sticky, so it
@@ -159,8 +179,10 @@ fn open_documentation() {
 fn BarWithHelpMenu(
     layout_epoch: ReadSignal<u64>,
     on_send_feedback: EventHandler<()>,
+    updater: Option<AppUpdater>,
     children: Element,
 ) -> Element {
+    let has_updater = updater.is_some();
     let mut open = use_signal(|| false);
     // The layout epoch the open menu was measured under. Its coordinates
     // are a snapshot, so a later resize or scroll closes the menu, as it
@@ -179,7 +201,8 @@ fn BarWithHelpMenu(
         draining: use_signal(|| false),
     };
     let open_generation = use_signal(|| 0_u64);
-    let order: MenuOrder<HelpAction, 2> = MenuOrder::pack(HELP_ACTIONS, |_| true);
+    let order: MenuOrder<HelpAction, 3> =
+        MenuOrder::pack(HELP_ACTIONS, |action| action.offered(has_updater));
     let close_menu = use_callback(move |()| open.set(false));
     let wiring = MenuWiring {
         order,
@@ -247,12 +270,25 @@ fn BarWithHelpMenu(
     let tab_stop = menu_focus()
         .and_then(|position| order.get(position))
         .or_else(|| order.get(0));
+    // A `Callback` is `Copy`, so every item's click handler can hold it,
+    // where the updater handle itself is not.
+    let check_for_updates = use_callback(move |()| {
+        if let Some(updater) = &updater {
+            updater.check_now();
+        }
+    });
     let mut choose = move |action: HelpAction| {
         open.set(false);
         match action {
             HelpAction::SendFeedback => on_send_feedback.call(()),
             HelpAction::Documentation => open_documentation(),
+            HelpAction::CheckForUpdates => check_for_updates.call(()),
         }
+    };
+    let toggle_tooltip = if has_updater {
+        "help: send feedback, open the documentation, or check for updates"
+    } else {
+        "help: send feedback or open the documentation"
     };
 
     rsx! {
@@ -263,7 +299,7 @@ fn BarWithHelpMenu(
                     r#type: "button",
                     class: "btn btn-neutral app-help-toggle",
                     aria_label: "help",
-                    "data-tooltip": "help: send feedback or open the documentation",
+                    "data-tooltip": toggle_tooltip,
                     aria_haspopup: "menu",
                     aria_expanded: open(),
                     onkeydown: move |evt| {
@@ -318,7 +354,7 @@ fn BarWithHelpMenu(
                         aria_label: "help",
                         // Rendered from the same list keyboard order is
                         // built from, so the two cannot drift apart.
-                        for action in HELP_ACTIONS {
+                        for action in order.actions() {
                             button {
                                 key: "{action.label()}",
                                 r#type: "button",
@@ -397,10 +433,22 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     // characters, if a build stamp ever held any, would therefore be sent
     // without showing; the stamp comes from the user's own helm.
     let sent_version = displayed_version(skew.as_ref()).to_string();
+    // In a desktop app whose updater runs, the readout is also the update
+    // marker (SPEC.md "Installation and updates"): red with an up-arrow
+    // while a newer version is installed, and its hover carries the
+    // updater's state. Everywhere else it stays exactly as it was.
+    let updater = use_app_updater();
+    let readout = updater.as_ref().map(AppUpdater::readout);
+    let update_ready = readout.as_ref().is_some_and(|readout| readout.update_ready);
+    let version_tooltip = readout.map_or_else(
+        || crate::app_updater::idle_tooltip(skew::CLIENT_BUILD),
+        |readout| readout.tooltip,
+    );
 
     rsx! {
         BarWithHelpMenu {
             layout_epoch,
+            updater: updater.clone(),
             on_send_feedback: move |_| {
                 feedback_notice.set(String::new());
                 feedback_open.set(true);
@@ -410,9 +458,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             span { class: "app-wordmark", dangerous_inner_html: WORDMARK_SVG }
             crate::window_chrome::WindowDragRegion {}
             span {
-                class: "app-version peer-value",
+                class: if update_ready { "app-version app-version-update peer-value" } else { "app-version peer-value" },
                 dir: "ltr",
-                "data-tooltip": "this client was built as farhelm {skew::CLIENT_BUILD}",
+                "data-tooltip": "{version_tooltip}",
+                if update_ready {
+                    span { class: "app-version-arrow", "aria-hidden": "true", "↑" }
+                }
                 "{version}"
             }
             button {

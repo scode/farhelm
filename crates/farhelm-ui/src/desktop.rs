@@ -20,7 +20,8 @@
 //! `window_state` saves and restores the window frame, `state` owns the
 //! credential file and the atomic write both state files share,
 //! `tmux_preflight` picks the supervisor's tmux and refuses an unusable
-//! one, and `bundle` finds the pieces installed beside the app.
+//! one, `bundle` finds the pieces installed beside the app, and `updater`
+//! keeps an installed app up to date.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,7 @@ mod assets;
 mod bundle;
 mod state;
 mod tmux_preflight;
+mod updater;
 mod window_state;
 
 pub(crate) use assets::use_embedded_asset_handler;
@@ -49,6 +51,7 @@ use state::{APP_STATE_FILE, update_state};
 use tmux_preflight::{
     is_executable_file, macos_tmux_prefixes, resolve_supervisor_tmux, run_tmux_preflight_or_exit,
 };
+pub(crate) use updater::{UpdaterHandle, UpdaterState, readout};
 use window_state::{WINDOW_STATE_FILE, WindowTracker};
 
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -114,6 +117,13 @@ pub fn run() -> anyhow::Result<()> {
     let builder = dioxus::LaunchBuilder::new()
         .with_context(crate::ApiBase(desktop.api_base().to_string()))
         .with_context(desktop.webview_bootstrap());
+    // Only an app that can update itself gets a handle in the context; its
+    // absence is how every update surface knows to stay as it was
+    // (`crate::app_updater`).
+    let builder = match updater::start(desktop.state_dir.join(APP_STATE_FILE)) {
+        Some(handle) => builder.with_context(handle),
+        None => builder,
+    };
 
     // Desktop windows need an explicit WindowBuilder, and not only for the
     // title: dioxus-desktop's `Config::new()` marks debug-build windows

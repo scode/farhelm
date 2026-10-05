@@ -19,6 +19,13 @@ pub(super) struct PersistedState {
     /// gate can tell a new launch's readiness from an earlier one's.
     #[serde(default)]
     pub(super) webview_auth_generation: u64,
+    /// Whether the updater installs new releases on its own
+    /// (`super::updater`). Absent means on, which is the default for every
+    /// installation, including files written before the setting existed. A
+    /// setting of this app installation, not a helm preference: SPEC.md
+    /// "Session list" keeps it out of the helm's shared preferences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) install_updates_automatically: Option<bool>,
 }
 /// Atomically replace the destination while retaining the old record on
 /// failure. Windows needs its replace-capable move API because
@@ -74,9 +81,9 @@ pub(super) fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
 /// Serialize every read-modify-replace of the desktop state file.
 ///
 /// Locking the whole merge is what prevents two writers from reinstalling a
-/// snapshot that silently drops a field the other just committed. Only the
-/// webview readiness record writes here today; the lock costs nothing and
-/// keeps that true if a second field returns.
+/// snapshot that silently drops a field the other just committed: the
+/// webview readiness record and the automatic-updates setting share the
+/// file.
 pub(super) fn update_state(
     path: &Path,
     mutate: impl FnOnce(&mut PersistedState),
@@ -166,6 +173,7 @@ mod tests {
         std::fs::create_dir(&path).expect("occupy the destination");
         let state = PersistedState {
             webview_auth_generation: 3,
+            ..PersistedState::default()
         };
         assert!(atomic_write_json(&path, &state).is_err());
         assert!(path.is_dir(), "the occupied destination must be untouched");
@@ -187,6 +195,7 @@ mod tests {
         let path = dir.path().join(APP_STATE_FILE);
         let first = PersistedState {
             webview_auth_generation: 5,
+            ..PersistedState::default()
         };
         atomic_write_json(&path, &first).unwrap();
         let second = PersistedState::default();
@@ -254,5 +263,31 @@ mod tests {
                 "the retired field {retired} must not survive a rewrite: {rewritten}"
             );
         }
+    }
+
+    /// Spec: the automatic-updates setting survives the readiness record's
+    /// rewrite, and a file that never had it gains no field.
+    ///
+    /// Both records share this file through one locked read-modify-write;
+    /// a rewrite for readiness must not reset the user's choice, and an
+    /// absent field must keep meaning "on" rather than being written out
+    /// as an explicit value the default can no longer change.
+    #[farhelm_testtrace::test]
+    fn the_automatic_updates_setting_survives_other_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(APP_STATE_FILE);
+        update_state(&path, |state| state.webview_auth_generation += 1).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(raw.get("install_updates_automatically").is_none(), "{raw}");
+
+        update_state(&path, |state| {
+            state.install_updates_automatically = Some(false)
+        })
+        .unwrap();
+        update_state(&path, |state| state.webview_auth_generation += 1).unwrap();
+        let state = read_state(&path).unwrap();
+        assert_eq!(state.install_updates_automatically, Some(false));
+        assert_eq!(state.webview_auth_generation, 2);
     }
 }
