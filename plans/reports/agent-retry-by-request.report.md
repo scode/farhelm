@@ -98,3 +98,62 @@ two: gpt-6-astra found that the check on restarting a cut-short attempt ignored 
 SPEC_impl paragraph about clones and asked for the title to be compared too. All of it was applied. The one deliberate
 exception is an internal error message deep in the host's database code, which still includes the key because it only
 appears if the database breaks an invariant.
+
+### Landing
+
+Landed on 2026-10-05 (UTC) as two squash commits on main: #1617 (the host compares a retry by the request the agent
+sent) and then #1627 (the helm side: the stored resolutions removed, `--host` required with a key, the specs). Nothing
+else reached main while they merged.
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, the session notifications plan landed (the bell on the
+sidebar row). It changes several of the same files, including the helm's database, and that is where the landing had to
+step in.
+
+#### A fix made while landing: the helm database version
+
+Both plans added a step to the helm's database upgrade and both numbered it 41: session notifications to add its table,
+this plan to drop the table of stored resolutions. Session notifications landed first, so its step is 41 on main. Had
+this plan landed with its own step also at 41, a helm whose database had already reached 41 through session
+notifications would have skipped the drop and kept the table of stored resolutions forever, and the code that checks a
+new database against the expected layout would have disagreed with an upgraded one. The landing renumbered this plan's
+step to 42, after the notifications step, and made a new database at 42 carry the notifications table and not the
+dropped one. It updated the step's test (renamed, and rewound to 41 rather than 40 so it exercises the drop step on its
+own), the comments that name the version, and the sentence in SPEC_impl.md that said schema 41 drops the table. It also
+corrected the test's explanation of why the table can still exist: the stable v0.22.0 release shipped it, not only a
+release candidate. The protocol version needed no change: session notifications did not change it, so this plan's 43
+stands, and the report's caution that the landing might have to renumber it did not apply.
+
+The renumbering went into #1627, the PR that adds the step, before anything merged. A separate reviewer that had not
+seen the work listed every place the version appears on both sides before the merge; the landing's changes cover that
+list. The same reviewer found no other interaction with session notifications: the fields each side added to shared
+records are filled in wherever the other side builds those records, the changes to the supervisor's create and relaunch
+handling are in different places, and the two sides' SPEC.md and SPEC_impl.md edits do not contradict each other. It
+also found nothing outside the two PRs that still uses the removed stored resolutions, expects a refusal that quotes the
+key, or runs a keyed `farhelm agent create` without `--host`.
+
+When the cli-permission-prompts plan landed on 2026-10-05 (UTC), shortly before this one, its landing notes said this
+plan contradicted it in three places and needed revising before it ran: its plan said `farhelm spawn --inherit-agent` is
+answered by the session's own supervisor and never the helm, it compared `--confirm-yolo` as part of a retry, and it
+assumed protocol version 40. The report above shows the executor worked against the design that landed: it describes
+retries as the approval cards and the agent YOLO rule now judge them, and the protocol is at 43. On the other two, the
+code settles `--confirm-yolo`, since that flag no longer exists anywhere and the stack compiles; the report says only
+that `--inherit-agent` keeps its old comparison on the host, and neither the report nor this landing says more about who
+answers it. In the code that landed, every `farhelm spawn` goes through the helm, as cli-permission-prompts made it.
+
+#### Checks
+
+- Run now, on the final stack after the renumbering, through the test-run recorder: the executor's own selection (the
+  protocol crate, the `farhelm` binary's unit tests and its `agent_cli` and `spawn_cli` tests, the end-to-end create
+  idempotency tests, and the supervisor's create, retry and reservation tests), widened with the helm's unit tests in
+  full, the end-to-end structured launch tests and the supervisor's notification tests: run `9a4cd7fc`, 1500 passed. The
+  helm's tests include its whole database upgrade ladder and the renumbered drop step.
+- Also run, after the last comment fix: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `dprint check`, `python -B scripts/check-test-sleeps.py` (no
+  unannotated delays), and `python3 releasing/check-changelog.py format`. All clean.
+- Reused: nothing; the run above covers every test selection in the report.
+- Skipped: the browser suite and desktop checks, for the report's reason (no UI change).
+
+The report's "the helm database's next schema version drops the table" now means schema 42; session notifications
+took 41.
