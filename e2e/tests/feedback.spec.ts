@@ -340,6 +340,75 @@ test("a failed send keeps the text and says it failed", async ({ page }) => {
 });
 
 /**
+ * A close queued right behind Send, before the render that disables Cancel,
+ * does not close the dialog while the send is unresolved. Why: closing then
+ * drops the send with no word on whether it arrived and loses the typed text,
+ * which SPEC.md promises a failed send keeps; Cancel used to close
+ * unconditionally, and Escape checked the sending flag of the render before
+ * Send. Specifies, for Cancel and for Escape (whose modal fallback clicks
+ * Cancel): with the send held, Send then the close in one synchronous block
+ * leaves the dialog open with its text; the held send then fails and the text
+ * is still there, and that same close then closes the dialog. (Cancel before
+ * any Send is covered by the blank-message test below.)
+ */
+test("a close queued behind send waits for the send", async ({ page }) => {
+  let release!: () => void;
+  const sent = await interceptFeedback(page, async (route) => {
+    await new Promise<void>((resolve) => (release = resolve));
+    await route.fulfill({
+      status: 502,
+      contentType: "text/plain",
+      body: "Couldn't send feedback: the feedback service could not be reached.",
+    });
+  });
+  await page.goto("/");
+
+  for (const [round, close] of ["cancel", "escape"].entries()) {
+    const dialog = await openFeedbackDialog(page);
+    const message = dialog.locator(".feedback-message");
+    await message.fill(`Keep this text (${close}).`);
+    // The DOM click below does not wait for Send to become enabled the way a
+    // locator click would; without this, a burst landing before that render
+    // would click a disabled Send and test nothing.
+    await expect(dialog.locator(".feedback-send")).toBeEnabled();
+    const closeWasLive = await dialog.evaluate((node, how) => {
+      const send = node.querySelector<HTMLButtonElement>(".feedback-send")!;
+      const cancel = node.querySelector<HTMLButtonElement>(".feedback-cancel")!;
+      send.click();
+      // Still enabled: the render that disables it has not happened, which
+      // is the window this test exists for. Focus inside the dialog, so the
+      // Escape reaches the dialog's own handler and not only the modal's
+      // fallback.
+      const live = cancel.isConnected && !cancel.disabled && node.contains(document.activeElement);
+      if (how === "cancel") {
+        cancel.click();
+      } else {
+        node.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      }
+      return live;
+    }, close);
+    expect(closeWasLive, `premise: the ${close} path was still live behind send`).toBe(true);
+    await expect.poll(() => sent.length, { message: "the send reached the route" }).toBe(round + 1);
+    await expect(dialog.getByRole("button", { name: "sending…", exact: true })).toBeVisible();
+    await expect(dialog, `${close} behind send leaves the dialog open`).toBeVisible();
+
+    release();
+    await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback");
+    await expect(message, "the failed send keeps the text").toHaveValue(`Keep this text (${close}).`);
+
+    // With no send in flight, the same close works.
+    if (close === "cancel") {
+      await dialog.locator(".feedback-cancel").click();
+    } else {
+      await message.focus();
+      await page.keyboard.press("Escape");
+    }
+    await expect(dialog).toHaveCount(0);
+  }
+  expect(sent).toHaveLength(2);
+});
+
+/**
  * The dialog refuses what the helm would refuse, before anything is sent: a
  * blank message keeps Send disabled, and a message over the shared cap says
  * why. Cancel closes without sending.
