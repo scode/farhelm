@@ -52,6 +52,29 @@ mod native {
             self.handle.check_now();
         }
 
+        /// Quit and reopen on the installed version (the update menu's
+        /// Restart to update). A helper that relaunches the app is started
+        /// first; only when it started does the window close, which quits
+        /// the app the way closing it always does. When it could not start,
+        /// the app stays open and the readout's hover says so.
+        pub(crate) fn restart_to_update(&self) {
+            if self.handle.start_relaunch() {
+                dioxus::desktop::window().close();
+            }
+        }
+
+        /// Whether automatic updates are on (the settings dialog's
+        /// checkbox).
+        pub(crate) fn automatic_updates(&self) -> bool {
+            self.handle.automatic_updates()
+        }
+
+        /// Turn automatic updates on or off; on failure, a short reason
+        /// for the dialog to show.
+        pub(crate) fn set_automatic_updates(&self, on: bool) -> Result<(), String> {
+            self.handle.set_automatic_updates(on)
+        }
+
         /// How the version readout looks right now. Reading it subscribes
         /// the calling component to changes, like any signal read.
         pub(crate) fn readout(&self) -> Readout {
@@ -118,6 +141,18 @@ impl AppUpdater {
     }
 
     pub(crate) fn readout(&self) -> Readout {
+        match *self {}
+    }
+
+    pub(crate) fn restart_to_update(&self) {
+        match *self {}
+    }
+
+    pub(crate) fn automatic_updates(&self) -> bool {
+        match *self {}
+    }
+
+    pub(crate) fn set_automatic_updates(&self, _on: bool) -> Result<(), String> {
         match *self {}
     }
 }

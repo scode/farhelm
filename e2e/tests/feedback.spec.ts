@@ -34,7 +34,7 @@ async function openHelpMenu(page: Page) {
 
 async function openFeedbackDialog(page: Page) {
   const { menu } = await openHelpMenu(page);
-  await menu.locator('[data-help-action="send feedback"]').click();
+  await menu.locator('[data-bar-menu-item="send feedback"]').click();
   const dialog = page.getByRole("dialog", { name: "send feedback", exact: true });
   await expect(dialog).toBeVisible();
   return dialog;
@@ -176,7 +176,14 @@ async function stackingContextsInsideScrollers(flyout: Locator): Promise<string[
  */
 test("sidebar menu flyouts sit under no stacking context inside the sidebar", async ({ page }) => {
   await page.goto("/");
-  const helpFlyout = page.locator(".help-menu-flyout");
+  // The selected session's terminal takes focus once it has connected,
+  // even from an open menu (its reveal only yields to an editable field or
+  // a dialog). Each menu below is closed with Escape, which reaches the
+  // menu only while focus is inside it, so a terminal that connects after
+  // the help menu opens would swallow the first Escape. Waiting for the
+  // terminal to take focus first removes that race.
+  await expect(page.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
+  const helpFlyout = page.locator('.bar-menu-flyout[data-bar-menu="help"]');
   await openHelpMenu(page);
   expect(await stackingContextsInsideScrollers(helpFlyout)).toEqual([]);
   await page.keyboard.press("Escape");
@@ -225,7 +232,7 @@ test("documentation opens the docs site through the shared link opener", async (
     };
   });
   const { menu } = await openHelpMenu(page);
-  await menu.locator('[data-help-action="documentation"]').click();
+  await menu.locator('[data-bar-menu-item="documentation"]').click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { openedLinks: string[] }).openedLinks))
     .toEqual([DOCS_URL]);
   await expect(menu).toHaveCount(0);

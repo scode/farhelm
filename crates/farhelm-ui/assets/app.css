@@ -734,6 +734,11 @@ samp {
   margin-right: 0.25em;
 }
 
+/* Why the automatic-updates choice could not be saved, under its help. */
+.app-settings-error {
+  color: var(--danger);
+}
+
 /* The gear owns fixed space; a long version gives way before either icon.
    It stays outside the macOS drag spacer and the bar retains one row. */
 .app-bar .app-settings-toggle,
@@ -745,16 +750,47 @@ samp {
   margin-left: 6px;
   padding: 2px;
 }
-/* The help menu's wrapper holds its toggle and a hidden relay button; its
-   flyout is the bar's next sibling, never inside the bar (see
-   `BarWithHelpMenu` in app_bar.rs: WebKit clips a fixed element whose
-   stacking context, here the sticky bar, sits inside the sidebar's scroller).
-   As an inline box the wrapper would add a text line's height around the
-   toggle and grow the bar, so it is a flex item sized by the toggle alone. */
-.app-bar .app-help-menu {
+/* A bar menu's wrapper (the help menu's, the update menu's) holds its
+   toggle and a hidden relay button; its flyout is the bar's next sibling,
+   never inside the bar (see `AppBar` in app_bar.rs: WebKit clips a fixed
+   element whose stacking context, here the sticky bar, sits inside the
+   sidebar's scroller). As an inline box the wrapper would add a text line's
+   height around the toggle and grow the bar, so it is a flex item sized by
+   the toggle alone. */
+.app-bar .app-bar-menu {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+}
+
+/* The update menu's toggle stays mounted while no update waits, hidden; the
+   flex display above would otherwise override the `hidden` attribute. */
+.app-bar .app-bar-menu[hidden] {
+  display: none;
+}
+
+/* The update menu's wrapper stands where the version readout stands: pushed
+   right, and allowed to shrink so a long version still ellipsizes before the
+   icons. */
+.app-bar .app-bar-menu[data-bar-menu="update"] {
+  margin-left: auto;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* The red readout is a button only to open the update menu; it keeps the
+   readout's look rather than a button's, hovered or not (the hover selector
+   matches the shared `.btn:hover:not(:disabled)` rule's specificity plus
+   the bar's, so it wins). */
+.app-bar .app-version-toggle,
+.app-bar .app-version-toggle:hover:not(:disabled) {
+  margin-left: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 /* The count remains its own element for the committed-list contract. Count,

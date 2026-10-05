@@ -39,11 +39,16 @@ Farhelm also keeps itself up to date. Shortly after it starts, and about once a 
 for the latest stable release (never a prerelease). When that release is newer than the installed version, the app runs
 this same installer in the background, pinned to that release; nothing on screen changes while it works. When a newer
 version is installed, whether the app installed it or you ran the installer yourself, the version number at the top of
-the sidebar turns red with an up-arrow in front of it, and its hover says which version is installed. Quit and reopen
-Farhelm to finish the update. To check right away, choose **check for updates** in the `?` menu, or **update** in the
-menu of the **local (this machine)** host; the version number's hover then says how the check went. A failed automatic
-check is only logged, in the app's log, and tried again the next day. This applies only to the app installed at
-`~/Applications/Farhelm.app`; a build from main never updates itself.
+the sidebar turns red with an up-arrow in front of it, and its hover says which version is installed. Select it and
+choose **restart to update** to quit Farhelm and open it again on the new version (your sessions keep running), or
+**what's new** to see the releases on GitHub; quitting and reopening Farhelm any other way finishes the update too. To
+check right away, choose **check for updates** in the `?` menu, or **update** in the menu of the **local (this
+machine)** host; the version number's hover then says how the check went. A failed automatic check is only logged, in
+the app's log, and tried again the next day. To stop the automatic checks and installs, untick **install updates
+automatically** in the settings dialog (the gear at the top of the sidebar); checking on demand and running the
+installer yourself keep working. With automatic updates on, a version you pinned with `FARHELM_VERSION` that is older
+than the latest stable release is replaced by it at the next automatic check, which includes the one at startup. This
+applies only to the app installed at `~/Applications/Farhelm.app`; a build from main never updates itself.
 
 You can update while Farhelm is open. The running Farhelm keeps working as it was, on the version it started with:
 sessions keep running, new sessions start, and agents' `farhelm` commands and conversation tracking keep working. Quit

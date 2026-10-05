@@ -55,9 +55,9 @@ const CONTROLS =
  */
 const EXEMPT: { selector: string; reason: string }[] = [
   {
-    // The help menu reuses the row menus' item classes but is not a row
-    // menu, so it is outside the exemption.
-    selector: ".session-row-menu-item:not(.help-menu-item):has(.session-row-menu-description)",
+    // The bar menus reuse the row menus' item classes but are not row
+    // menus, so they are outside the exemption.
+    selector: ".session-row-menu-item:not(.bar-menu-item):has(.session-row-menu-description)",
     reason: "a menu item whose description line already says what it does (the maintainer's exemption)",
   },
 ];
@@ -178,8 +178,8 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await page.locator(".app-help-toggle").click();
   const help = page.getByRole("menu", { name: "help", exact: true });
   await expect(help).toBeVisible();
-  await expectCovered(page, "help menu", '[data-help-menu="bar"] [role="menu"]', 2);
-  await help.locator('[data-help-action="send feedback"]').click();
+  await expectCovered(page, "help menu", '[data-bar-menu="help"] [role="menu"]', 2);
+  await help.locator('[data-bar-menu-item="send feedback"]').click();
   const feedback = page.getByRole("dialog", { name: "send feedback", exact: true });
   await expect(feedback).toBeVisible();
   await expectCovered(page, "feedback dialog", ".feedback-dialog", 2);
