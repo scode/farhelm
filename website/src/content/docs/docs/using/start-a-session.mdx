@@ -23,7 +23,8 @@ terminal opens, ready for your first prompt.
 />
 
 **cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **reset choices** clears the
-agent and its choices but keeps the host and directory.
+agent, model, and effort, and puts permissions and trust back to the ones the launcher remembers (see the note below);
+it keeps the host, directory, and name.
 
 ## Choose where it runs
 
@@ -57,8 +58,9 @@ each agent offers; workspace trust is explained on the [Codex](/docs/agents/code
 [Pi](/docs/agents/pi/) pages. To run something that is not one of these agents, switch the launcher to its **command**
 tab, covered in [Custom commands](/docs/agents/custom-commands/).
 
-NOTE: The launcher remembers the permissions of your last launch, wherever you launched it from. After one YOLO launch,
-the next launcher opens on **yolo** too.
+NOTE: The launcher remembers the permissions and trust of your last launch from its **agent** tab, in any Farhelm
+window. After one YOLO launch, the next launcher opens on **yolo** too. Launches your agents start, custom commands, and
+plain **replace** do not change what it remembers.
 
 ## Confirm a YOLO launch
 
@@ -69,10 +71,10 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
   alt="The YOLO confirmation, with its two start buttons explained."
 />
 
-It is not only the **yolo** choice that asks. Farhelm offers Pi only in YOLO mode, so every Pi launch asks, and so does
-a custom command you say runs without approval prompts. Farhelm goes by that answer alone and never reads the command to
-check it. An agent cannot give that answer or confirm a YOLO launch: on a host that asks, it cannot start a YOLO session
-or a custom command at all ([Approve what agents
+It is not only the **yolo** choice that asks. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
+either asks, and so does a custom command you say runs without approval prompts. Farhelm goes by that answer alone and
+never reads the command to check it. It does not take an agent's word for it, though, and an agent cannot confirm a YOLO
+launch: on a host that asks, an agent cannot start a YOLO session or a custom command at all ([Approve what agents
 do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 To change your mind about a host later, use its settings. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
@@ -95,7 +97,8 @@ them.
   alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, trust, and directory of a launch you made with the harness buttons.
+A setup is the agent, model, effort, permissions, trust, and directory of a launch you made on the launcher's **agent**
+tab, however you filled it in.
 Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
 
 To start another session like one you already have, choose **clone** from that session's menu instead. It opens the
@@ -117,12 +120,12 @@ Typing a path offers to use it as the directory or to browse it.
   alt="The search box with name: fix login bug typed, offering to set that as the session's name."
 />
 
-`gh:` and `tl:` are the other prefixes that do something no plain search does: `gh:` starts a
-[fresh GitHub checkout](#start-from-a-fresh-github-checkout), and `tl:` applies one of your
-[launch templates](/docs/using/launch-templates/), saved sets of launcher choices. The rest only narrow a search to one
-kind of thing:
-`host:`, `harness:`, `model:`, `effort:`, `perms:`, `trust:`, `folder:`, and `recent:`. `host:local` picks the machine
-you are using.
+A few other prefixes do something no plain search does: `gh:` starts a [fresh GitHub
+checkout](#start-from-a-fresh-github-checkout), `tl:` applies one of your [launch
+templates](/docs/using/launch-templates/), saved sets of launcher choices, `trust:` is the only way to set workspace
+trust from the search box, and `perms:` the only way to pick **default** permissions there. The rest only narrow a
+search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
+machine you are using.
 
 ## Start from a fresh GitHub checkout
 

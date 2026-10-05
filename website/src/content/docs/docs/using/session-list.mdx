@@ -16,7 +16,7 @@ needs you without opening any of them.
 />
 
 The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Select a row
-to open its terminal beside the list.
+to open its terminal beside the list. Hovering over the dot or the marks beside the title says what each one means.
 
 ## What the statuses mean
 
@@ -29,14 +29,20 @@ Waiting is the status worth watching for: the agent has stopped to ask you somet
 does nothing until you answer. Not every agent can tell Farhelm when it is waiting; [Supported agents](/docs/agents/)
 says which ones can.
 
-A session that has ended says how in words under its name, instead of a coloured dot:
+An agent can also be waiting on Farhelm itself, when it asks to start, stop, or change a session with the `farhelm`
+command. That request shows as a card in the corner of the window, not in the session list, and you answer it on the
+card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
+
+A session that has ended says how in words under its name, instead of a coloured dot (with **compact** ticked, as an
+icon you can hover over):
 
 - **exited**, with the agent's exit code. "stopped by user" is added when you stopped it.
 - **interrupted**: the host rebooted, which ended the agent. The session waits for you to start it again.
-- **error**: the agent could not start, or the session failed; the reason follows the word.
+- **error**: the agent could not start; the reason follows the word. An agent that starts and then quits shows exited.
 
-The terminal of an ended session stays readable, and [Stop, restart, and resume](/docs/using/stop-restart-resume/)
-covers starting it again.
+An exited session's terminal stays readable for as long as its host stays up. A reboot clears it, so an interrupted
+session has no terminal until you start it again. [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers
+starting either kind again.
 
 ## Find a session
 
@@ -45,8 +51,8 @@ covers starting it again.
   alt="The compact checkbox, the host filter, and the sort order above the session list, each explained."
 />
 
-The number beside **SESSIONS** counts the sessions the filter shows. There is no search box; with many sessions, filter
-by host and sort by title.
+The number beside **SESSIONS** counts every session; with a host filter on, it says how many of them match. There is no
+search box; with many sessions, filter by host and sort by title.
 
 ## Rename it, or mark it read
 
@@ -55,8 +61,8 @@ by host and sort by title.
   alt="A session's menu, opened from the row's three dots, with rename and mark read explained."
 />
 
-Clicking the blue dot does the same as **mark read**. The rest of the menu ends, restarts, or replaces the session, and
-is covered in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
+Clicking the blue dot does the same as **mark read**. The rest of the menu clones, replaces, stops, or deletes the
+session, and is covered in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
 ## Next
 

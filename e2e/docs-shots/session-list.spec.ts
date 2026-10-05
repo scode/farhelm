@@ -66,7 +66,7 @@ test("list controls", async ({ page, request }) => {
   // Pushed right past the list so no callout covers the other controls.
   await director.callout(compact, "One line per session, for a long list.", { side: "right", dx: 200, dy: -80 });
   await director.callout(filter, "Show only one host's sessions.", { side: "right", dx: 200, dy: 10 });
-  await director.callout(sort, "Order: recently active (working agents first), newest created, or by title.", {
+  await director.callout(sort, "Order: recently active (working and waiting agents first), newest created, or by title.", {
     side: "right",
     dx: 40,
     dy: 110,

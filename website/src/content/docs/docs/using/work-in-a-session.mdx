@@ -42,8 +42,9 @@ anything; hold Option while you drag to select anyway.
 To give the agent a screenshot or a file, paste it or drop it onto the terminal. Farhelm uploads it to the session's
 host and types its path at the prompt, so it works the same on a remote host as on your Mac.
 
-Links in the terminal open in your browser. Hovering over one shows where it really goes, and Farhelm warns you when
-that differs from the text it is attached to.
+Links in the terminal open in your browser. Some programs print a link under text of their own; hovering over one of
+those shows where it really goes, and Farhelm warns you when the text is itself a web address that names a different
+place.
 
 The terminal keeps at least the last 10,000 lines for scrolling back. How much of that history survives a restart is in
 [What survives what](/docs/how-it-works/what-survives-what/).
@@ -54,8 +55,9 @@ If Farhelm loses its connection to the session, a banner over the terminal says 
 now** tries again straight away. The agent keeps running on its host the whole time; you only lose the view of it until
 the connection is back.
 
-A session's terminal can be open in more than one window at a time, say the desktop app and a browser tab, but only one
-of them types to it. When another window takes over, this one says so and offers to take control back.
+A session's terminal is live in one window at a time. Open it in another, say a browser tab while the desktop app has
+it, and the new window takes over: the first one keeps a still picture of the terminal, says so, and offers to take
+control back.
 
 ## Next
 

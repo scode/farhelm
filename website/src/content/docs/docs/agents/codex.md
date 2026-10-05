@@ -5,9 +5,9 @@ sidebar:
   order: 10
 ---
 
-Farhelm tracks the foreground Codex conversation and offers Resume when its exact transcript verifies the reported
-identity. A launch credential alone does not authorize a child process to replace that identity. Codex capture requires
-both an attributable reporting process and matching root-conversation metadata in the reported transcript.
+Farhelm tracks the foreground Codex conversation, and a restart resumes it once its exact transcript verifies the
+reported identity. A launch credential alone does not authorize a child process to replace that identity. Codex capture
+requires both an attributable reporting process and matching root-conversation metadata in the reported transcript.
 
 ## Workspace trust
 
@@ -49,15 +49,15 @@ pane: shell script
 ```
 
 Declaring Codex as a [custom command](/docs/agents/custom-commands/)'s agent turns on the integration but does not
-bypass these checks. Prefer launchers that forward the injected arguments and replace themselves with the next program
-using `exec`; replaced processes do not add ancestry links. A package-manager installation is not automatically
-supported or refused: the surviving process chain decides. Renaming the native Codex executable also prevents
-attribution. See [agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
+bypass these checks. For a restart, give such a command a resume command in the shape Farhelm's own Codex launch uses,
+`codex resume {conversation} {farhelm_args}`. Prefer launchers that forward the injected arguments and replace
+themselves with the next program using `exec`; replaced processes do not add ancestry links. A package-manager
+installation is not automatically supported or refused: the surviving process chain decides. Renaming the native Codex
+executable also prevents attribution. See [agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
 [hook injection](/docs/agents/agent-hook-injection/) for how the integration is turned on.
 
-A rejected report leaves the saved conversation and Resume offer unchanged. On a new session with no accepted report,
-Resume remains unavailable. Farhelm does not scan for a different Codex conversation to compensate for an unsupported
-launcher.
+A rejected report leaves the saved conversation unchanged. On a new session with no accepted report, **restart** stays
+greyed out. Farhelm does not scan for a different Codex conversation to compensate for an unsupported launcher.
 
 ## Identity changes and resume
 
@@ -66,7 +66,8 @@ new transcript can make the replacement resumable. Nested native Codex processes
 refused; root transcript metadata also separates conversations that share a process.
 
 Historical valid `codex:` locators remain subject to exact-record verification. Historical bare IDs are retained but
-cannot be resumed automatically. Missing or changed evidence refuses Resume instead of silently starting fresh.
+cannot be resumed, so **restart** stays greyed out for those sessions and replace starts one over. Missing or changed
+evidence refuses the restart instead of silently starting fresh.
 
 These checks prevent accidental reporting through inherited credentials. They are not a security boundary against
 another process controlled by the same Unix user that deliberately imitates the permitted process and record shapes.

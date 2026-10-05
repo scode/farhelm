@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-04T23:14:10Z",
-  "captured_from": "13ae87f7713fa359bdbd9f9b4bf448e8555943be",
-  "commit": "978fc58075f6b6f3ea3f9dac318cf258f25487b5",
+  "captured_at": "2026-10-05T03:46:37Z",
+  "captured_from": "457897dadd9f6c57c7231dce3e5df0e0b78ef5ab",
+  "commit": "60177b4ae84c0748680d23df020265f7df791596",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -66,7 +66,7 @@
       "width": 1830
     },
     "manage-hosts/host-settings": {
-      "height": 810,
+      "height": 892,
       "width": 1594
     },
     "manage-hosts/remove-dialog": {
@@ -106,7 +106,7 @@
       "width": 1830
     },
     "start-a-session/host-yolo-setting": {
-      "height": 626,
+      "height": 876,
       "width": 1586
     },
     "start-a-session/launch-button": {

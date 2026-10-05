@@ -18,16 +18,17 @@ project you opened; it does not enable approval prompts for the agent's actions.
 
 The session launcher offers workspace trust separately from YOLO. Choosing true adds `--approve` for that launch;
 choosing false adds `--no-approve`. The last explicit choice from a successful user launch becomes the next new dialog's
-default. Farhelm does not write Pi's persistent trust settings.
+default; that remembered choice is shared with Codex and Muse, which offer workspace trust too. Farhelm does not write
+Pi's persistent trust settings.
 
-## Resume needs a saved conversation
+## Restart needs a saved conversation
 
 Pi saves conversations automatically; there is no separate Save step. A new conversation's file is written after the
-first assistant message. Send a prompt and let Pi respond; Farhelm can then offer Resume once Pi reports the saved
+first assistant message. Send a prompt and let Pi respond; **restart** becomes available once Pi reports the saved
 conversation.
 
-Typing `/new` in Pi starts a new conversation. Until that conversation is saved, Farhelm stops offering Resume for the
-old one: restarting should not take you back to a conversation you already left.
+Typing `/new` in Pi starts a new conversation. Until that conversation is saved, a restart no longer resumes the old
+one: restarting should not take you back to a conversation you already left.
 
 Farhelm checks the saved file before resuming. If it is missing or belongs to a different conversation, Farhelm refuses
 to restart the session; replace it to start over instead. This matters because Pi itself can silently start a new

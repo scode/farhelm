@@ -21,7 +21,8 @@ When an agent asks to change something, a card appears in the bottom-right corne
 the agent wants to do and shows the details that matter:
 
 - which session asked, and from which host;
-- the session it would act on, for a rename, stop, or restart;
+- the session it would act on, for a rename, stop, or restart, and the command a restart would run;
+- for a copy of a session, the session being copied;
 - for a new session, the host, the directory, the agent and its choices or the full command it would run, and whether it
   would run in [YOLO mode](/docs/using/start-a-session/#confirm-a-yolo-launch) (no approval prompts);
 - for a template change, the whole template as it would be saved, including any command line.
@@ -33,12 +34,14 @@ The card has three buttons:
 
 - **allow** lets this one request go ahead.
 - **always allow from** the host lets this request go ahead and turns on that host's **run farhelm commands from this
-  host without asking** setting, so agents there stop asking (see below).
+  host without asking** setting, so agents there stop asking (see below). Other cards from that host that are already
+  waiting stay up until you answer them.
 - **deny** refuses it, and the agent is told you declined.
 
-The rest of Farhelm stays usable while cards wait, and several can wait at once. Cards stay clickable even over an open
-dialog. When the cards move, because one was answered or a new one arrived, their buttons pause for a moment, so a
-double-click cannot answer a card you have not read.
+The rest of Farhelm stays usable while cards wait, and several can wait at once, up to four from one host. While four
+are waiting, that host's agents are turned away until you answer one. Cards stay clickable even over an open dialog.
+When the cards move, because one was answered or a new one arrived, their buttons pause for a moment, so a double-click
+cannot answer a card you have not read.
 
 ## When nobody answers
 
