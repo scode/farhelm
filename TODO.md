@@ -125,13 +125,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
   once Farhelm's own installation there is complete.
 
-- **Notification system.** A way for Farhelm to tell the user about things that need their attention, instead of writing
-  them only to a log nobody reads. The first thing to go into it is the session-tracking warnings, starting with the
-  supervisor's warning that a session launched with Farhelm's conversation hook (Claude, Codex) has had input for a
-  while and no identity report has arrived, which today is only a supervisor log line; the user finds out only later,
-  when restart offers a fresh launch instead of Resume. Design settled 2026-10-03 in the plan:
-  `plans/queue/session-notifications.md`.
-
 - **Pick up hook report files immediately.** Once conversation hooks write their reports as files
   (`plans/queue/hook-report-files.md`), the supervisor reads them on its periodic reconciliation pass, every two
   seconds. Make pickup immediate with an inotify-style watch (or the macOS equivalent) on the report directories, so a

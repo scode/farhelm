@@ -3,7 +3,7 @@
 //! `ListView` owns the fleet-wide state; row rendering and creation stay in
 //! child modules so their narrower contracts remain visible.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -770,6 +770,18 @@ pub(crate) fn ListView(
     // one is: this is the only component both the session list and the
     // hosts panel are mounted underneath.
     let mut host_menu_open = use_signal(|| None::<HostId>);
+    // The one open notification list, if any (SPEC.md, Status): the
+    // session's id, and its read mark as it stood when the list opened,
+    // which keeps the entries that were new at that moment marked new while
+    // the list stays open. Owned here for `menu_open`'s reasons: every
+    // layout change that detaches a row's floating menu detaches this list
+    // too, and closing is where its entries become read, which the
+    // read-on-close effect below does for every way it can close.
+    let mut bell_open = use_signal(|| None::<OpenBell>);
+    // The read mark each list this page closed sent, by session id, so a
+    // list reopened before the next listing arrives does not show the same
+    // entries as new again.
+    let bell_read_sent = use_hook(|| Rc::new(RefCell::new(HashMap::<String, u64>::new())));
     // Both menus close on a pointer-down outside them; the relay button that
     // listener clicks is rendered at the top of this view (see there).
     use_hook(crate::menu_panel::install_row_menu_outside_dismiss);
@@ -933,6 +945,9 @@ pub(crate) fn ListView(
         if host_menu_open.peek().is_some() {
             host_menu_open.set(None);
         }
+        if bell_open.peek().is_some() {
+            bell_open.set(None);
+        }
     });
     // The create dialog's explicit host choice names the installation used
     // for creation idempotency.
@@ -996,28 +1011,36 @@ pub(crate) fn ListView(
     use_effect(move || {
         let now = errors.read().clone();
         let before = error_rows.replace(now.clone());
-        let Some(open_id) = menu_open.peek().clone() else {
-            return;
-        };
-        let changed = before
-            .iter()
-            .filter(|(id, message)| now.get(*id) != Some(*message))
-            .chain(now.iter().filter(|(id, _)| !before.contains_key(*id)))
-            .map(|(id, _)| id.as_str());
-        let moved = {
+        // The open notification list floats beside its row exactly like a
+        // menu, so a refusal line appearing above it moves it the same way.
+        let moved = |open_id: &str| {
+            let changed = before
+                .iter()
+                .filter(|(id, message)| now.get(*id) != Some(*message))
+                .chain(now.iter().filter(|(id, _)| !before.contains_key(*id)))
+                .map(|(id, _)| id.as_str());
             let listing = listing.peek();
             let Some(Ok(listing)) = listing.as_ref() else {
-                return;
+                return false;
             };
             let held = order_hold.peek().clone().unwrap_or_default();
             rows::any_shown_above(
                 &rows::held_display_order(&held, &listing.sessions),
-                &open_id,
+                open_id,
                 changed,
             )
         };
-        if moved {
+        let open_menu = menu_open.peek().clone();
+        if let Some(open_id) = open_menu
+            && moved(&open_id)
+        {
             menu_open.set(None);
+        }
+        let open_bell = bell_open.peek().clone();
+        if let Some(open) = open_bell
+            && moved(&open.id)
+        {
+            bell_open.set(None);
         }
     });
     // The hold's pointer facts, read by `rows::hold_should_release`: when the
@@ -1177,6 +1200,19 @@ pub(crate) fn ListView(
             if menu_vanished {
                 menu_open.set(None);
             }
+            // The notification list closes on the same grounds, and also
+            // when its row is still listed but has no bell any more (another
+            // window cleared it): left open, the list would reappear by
+            // itself with the next notification.
+            let bell_vanished = bell_open.read().as_ref().is_some_and(|open| {
+                !listing
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == open.id && !s.notifications.is_empty())
+            });
+            if bell_vanished {
+                bell_open.set(None);
+            }
             // The row STAYING listed does not mean it stayed PUT: an
             // insert or removal above it shifts its index without ever
             // making `menu_vanished` true (`rows::menu_row_reordered`'s
@@ -1196,41 +1232,67 @@ pub(crate) fn ListView(
             // `listing.set(...)` at the end, or that write would panic
             // against a borrow still outstanding on the same signal.
             let still_open_id = menu_open.peek().clone();
-            if !menu_vanished && let Some(open_id) = still_open_id {
-                let reordered = {
-                    let previous = listing_signal.peek();
-                    let previous_sessions = match previous.as_ref() {
-                        Some(Ok(prev)) => Some(prev.sessions.as_slice()),
-                        _ => None,
-                    };
-                    // Compared as DISPLAYED, not as served: while the order
-                    // is held, a served reorder moves nothing on screen and
-                    // must not close a menu whose row stayed put. The two
-                    // sides are shown under different holds when this reply
-                    // answers a different query, which ends the hold below.
-                    let previous_held = order_hold.peek().clone().unwrap_or_default();
-                    let incoming_held = if answers_listing_query(&requested, ordered_by) {
-                        previous_held.clone()
-                    } else {
-                        Vec::new()
-                    };
-                    let previous_shown = previous_sessions
-                        .map(|previous| rows::held_display_order(&previous_held, previous));
-                    // Peeked live rather than taken from this render's
-                    // `compact`: the reply may land renders after the
-                    // closure was built, and a toggle in between decides
-                    // whether detail lines are on screen now.
-                    let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
-                    menu_row_reordered(
-                        previous_shown.as_deref(),
-                        &rows::held_display_order(&incoming_held, &listing.sessions),
-                        &open_id,
-                        detail_lines_shown,
-                    )
+            let still_open_bell = bell_open.peek().as_ref().map(|open| open.id.clone());
+            // Whether the row `open_id` moved on screen between the previous
+            // listing and this one, which detaches whatever floats beside it:
+            // its actions menu or its notification list.
+            let row_reordered = |open_id: &str| {
+                let previous = listing_signal.peek();
+                let previous_sessions = match previous.as_ref() {
+                    Some(Ok(prev)) => Some(prev.sessions.as_slice()),
+                    _ => None,
                 };
-                if reordered {
-                    menu_open.set(None);
-                }
+                // Compared as DISPLAYED, not as served: while the order
+                // is held, a served reorder moves nothing on screen and
+                // must not close a menu whose row stayed put. The two
+                // sides are shown under different holds when this reply
+                // answers a different query, which ends the hold below.
+                let previous_held = order_hold.peek().clone().unwrap_or_default();
+                let incoming_held = if answers_listing_query(&requested, ordered_by) {
+                    previous_held.clone()
+                } else {
+                    Vec::new()
+                };
+                let previous_shown = previous_sessions
+                    .map(|previous| rows::held_display_order(&previous_held, previous));
+                // Peeked live rather than taken from this render's
+                // `compact`: the reply may land renders after the
+                // closure was built, and a toggle in between decides
+                // whether detail lines are on screen now.
+                let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
+                menu_row_reordered(
+                    previous_shown.as_deref(),
+                    &rows::held_display_order(&incoming_held, &listing.sessions),
+                    open_id,
+                    detail_lines_shown,
+                )
+            };
+            if !menu_vanished
+                && let Some(open_id) = still_open_id
+                && row_reordered(&open_id)
+            {
+                menu_open.set(None);
+            }
+            if !bell_vanished
+                && let Some(open_id) = still_open_bell
+                && row_reordered(&open_id)
+            {
+                bell_open.set(None);
+            }
+            // Still open: this listing's entries are what the list shows next.
+            let still_shown = bell_open.peek().as_ref().and_then(|open| {
+                let newest = listing
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == open.id)
+                    .and_then(Session::newest_notification_seq)?;
+                (newest > open.shown).then(|| OpenBell {
+                    shown: newest,
+                    ..open.clone()
+                })
+            });
+            if let Some(raised) = still_shown {
+                bell_open.set(Some(raised));
             }
             // The right pane's placeholder may only claim an empty fleet on
             // a committed, uncut default listing. A user filter proves
@@ -2611,8 +2673,10 @@ pub(crate) fn ListView(
             if order_hold.peek().is_none() {
                 return;
             }
+            // An open notification list holds the order like a menu does:
+            // its rows must not move out from under it.
             if rows::hold_should_release(
-                menu_open.peek().is_some(),
+                menu_open.peek().is_some() || bell_open.peek().is_some(),
                 pointer_inside.get(),
                 hold_clock.get().elapsed().as_millis(),
                 ORDER_HOLD_STILL_MS,
@@ -2676,7 +2740,107 @@ pub(crate) fn ListView(
         // panels" doc.
         if !currently {
             host_menu_open.set(None);
+            bell_open.set(None);
         }
+    });
+    // The notification bell's click opens its session's list, closing any
+    // other floating surface in the sidebar, or closes it when it is already
+    // the open one (SPEC.md, Status).
+    let toggle_read_sent = bell_read_sent.clone();
+    let toggle_bell = use_callback(move |(id, read_through, newest): (String, u64, u64)| {
+        let currently = bell_open.peek().as_ref().is_some_and(|open| open.id == id);
+        if currently {
+            bell_open.set(None);
+            return;
+        }
+        menu_open.set(None);
+        host_menu_open.set(None);
+        let sent = toggle_read_sent.borrow().get(&id).copied().unwrap_or(0);
+        bell_open.set(Some(OpenBell {
+            id,
+            read_through: read_through.max(sent),
+            shown: newest,
+        }));
+    });
+    // A host row's menu opening closes the list, as a session menu opening
+    // does (`toggle_menu`). The hosts panel owns that transition and knows
+    // only the session menu, so this watches for it instead; a keyboard
+    // opening sends no pointer-down for the outside-click dismissal to see.
+    use_effect(move || {
+        if host_menu_open().is_some() && bell_open.peek().is_some() {
+            bell_open.set(None);
+        }
+    });
+    let close_bell = use_callback(move |id: String| {
+        if bell_open.peek().as_ref().is_some_and(|open| open.id == id) {
+            bell_open.set(None);
+        }
+    });
+    // Closing the list marks everything it showed read, whatever closed it:
+    // the bell, Escape, a click elsewhere, the row moving or leaving, or a
+    // clear. Watching the open state rather than writing at each close site
+    // is what keeps a newly added close path from forgetting the mark.
+    //
+    // "Everything it showed" is the closing list's own `OpenBell::shown`,
+    // from the last state this effect saw before the close, never the
+    // listing that closed it, which may have removed the row (a filter) or
+    // carry an entry the list never displayed. Nothing is sent when the list
+    // showed nothing unread. Best effort and silent on failure (SPEC.md,
+    // Errors and diagnostics): a lost mark leaves the bell loud until the
+    // list is next closed, which the user would only notice as a bell that
+    // stayed loud.
+    let read_base = base.clone();
+    let previous_bell = use_hook(|| Rc::new(RefCell::new(None::<OpenBell>)));
+    use_effect(move || {
+        let now_open = bell_open.read().clone();
+        let closed: Option<OpenBell> = previous_bell.replace(now_open.clone());
+        let Some(closed) =
+            closed.filter(|closed| now_open.as_ref().map(|open| &open.id) != Some(&closed.id))
+        else {
+            return;
+        };
+        if closed.shown <= closed.read_through {
+            return;
+        }
+        let (closed, through) = (closed.id, closed.shown);
+        bell_read_sent.borrow_mut().insert(closed.clone(), through);
+        let base = read_base.clone();
+        spawn(async move {
+            if let Err(error) = crate::api::mark_notifications(&base, &closed, through, false).await
+            {
+                dioxus::logger::tracing::warn!(
+                    session_id = closed.as_str(),
+                    error = error.as_str(),
+                    "could not mark the session's notifications read"
+                );
+            }
+        });
+    });
+    // The list's clear button: closes the list (which also marks it read,
+    // above) and clears through the newest entry it showed. Unlike the read
+    // mark, a failed clear is something the user asked for directly, so it
+    // surfaces on the row's error line like any other operation (SPEC.md,
+    // Errors and diagnostics).
+    let clear_base = base.clone();
+    let clear_bell = use_callback(move |(id, through): (String, u64)| {
+        if bell_open.peek().as_ref().is_some_and(|open| open.id == id) {
+            bell_open.set(None);
+        }
+        let base = clear_base.clone();
+        spawn(async move {
+            let result = crate::api::mark_notifications(&base, &id, through, true).await;
+            let Ok(mut errors) = errors.try_write() else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    errors.remove(&id);
+                }
+                Err(error) => {
+                    errors.insert(id, format!("clear notifications: {error}"));
+                }
+            }
+        });
     });
     let mark_seen_base = base.clone();
     // The row's read/unread toggle — the menu item and the dot both funnel
@@ -2861,6 +3025,20 @@ pub(crate) fn ListView(
                 },
             }
         }
+        // The open notification list's relay, keyed `bell:<id>` so a
+        // dismissal aimed at one list never closes another that a later
+        // click opened.
+        if let Some(OpenBell { id: bell_id, .. }) = bell_open() {
+            button {
+                key: "bell:{bell_id}",
+                r#type: "button",
+                class: crate::menu_panel::ROW_MENU_OUTSIDE_RELAY,
+                "data-row-menu": crate::menu_panel::row_menu_relay_key("bell", &bell_id),
+                hidden: true,
+                tabindex: "-1",
+                onclick: move |_| close_bell.call(bell_id.clone()),
+            }
+        }
         if let Some(host_id) = host_menu_open() {
             button {
                 key: "host:{host_id}",
@@ -2924,8 +3102,10 @@ pub(crate) fn ListView(
                         onchange: move |event| {
                             let next = event.checked();
                             // Removing metadata moves every row below it; an
-                            // open menu still holds its old anchor coordinates.
+                            // open menu, or notification list, still holds its
+                            // old anchor coordinates.
                             menu_open.set(None);
+                            bell_open.set(None);
                             remember_compact(&base, preferences, next);
                         },
                     }
@@ -3386,6 +3566,11 @@ pub(crate) fn ListView(
                                         now_secs,
                                         session.effective_activity(),
                                     ),
+                                    bell_open: bell_open
+                                        .read()
+                                        .as_ref()
+                                        .filter(|open| open.id == session.id)
+                                        .map(|open| open.read_through),
                                 },
                                 on_open: guarded_open,
                                 on_clone,
@@ -3400,6 +3585,9 @@ pub(crate) fn ListView(
                                 on_cancel_delete: cancel_delete,
                                 on_rename_start,
                                 on_menu_toggle: toggle_menu,
+                                on_bell_toggle: toggle_bell,
+                                on_bell_close: close_bell,
+                                on_bell_clear: clear_bell,
                                 session,
                             }
                         }
@@ -3459,6 +3647,21 @@ fn mirror_submitted_launch(
     {
         preferences.remembered_workspace_trust = Some(trust);
     }
+}
+
+/// The one open notification list (SPEC.md, Status), as `ListView` tracks it.
+#[derive(Debug, Clone, PartialEq)]
+struct OpenBell {
+    /// The session whose bell is open.
+    id: String,
+    /// The read mark as it stood when the list opened: entries above it stay
+    /// marked new for as long as the list is open, even if another window
+    /// moves the shared mark meanwhile.
+    read_through: u64,
+    /// The newest entry the list has displayed: what closing it marks read.
+    /// Set at the click and raised by every listing the list stays open
+    /// through.
+    shown: u64,
 }
 
 /// The manual read/unread toggle's report: the settled save's outcome on

@@ -1644,10 +1644,18 @@ samp {
      top-right beside the title (the interviewed placement). Wrapping
      here once let the toggle fall onto its own line below the row,
      detached from the session it controls, because the open button
-     claimed a full-width basis. */
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
+     claimed a full-width basis.
+
+     A grid rather than a flex row, with the menu toggle in the second
+     column: the notification bell (`.session-bell-overlay`) must sit over
+     the open button, in the same cell, because the button cannot contain
+     another button (see list/bell.rs). Grid items may share a cell; flex
+     items cannot. The open button's column takes everything the toggle
+     leaves, exactly as `flex: 1` + `min-width: 0` did. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 6px;
   /* No padding of its own: the open button's own bottom padding closes
      the row, and a second gap under it was a quarter of the height the
      density pass (the 2026-08 UI refresh) was trying to reclaim. The error
@@ -2953,6 +2961,142 @@ samp {
   grid-column: 5;
   min-width: 0;
   text-align: right;
+}
+
+/* ===== Notification bell (SPEC.md, Status; list/bell.rs) ============ */
+
+/* The open button and the bell share the first cell of `.session-row-main`;
+   the menu toggle keeps the second. Placed explicitly so the bell lands in
+   the button's cell rather than auto-placing into a new row. */
+.session-row-main > .session-row-open,
+.session-row-main > .session-bell-overlay {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.session-row-main > .session-row-menu {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* The open button's reserved space for the bell, at the start of the
+   activity column. Its width and trailing gap must equal the bell
+   button's below: the overlay is right-aligned to the same edge, so the two
+   coincide only while these numbers do. */
+.session-bell-slot {
+  display: inline-block;
+  width: 10px;
+  height: 12px;
+  margin-right: 4px;
+}
+
+/* Laid over the open button's first line, right-aligned to the button's
+   right edge (which is the identity grid's, the button having no right
+   padding). The top margin is the button's top padding, and the zero-width
+   strut below has the title's font, so the overlay's baseline is the
+   identity line's. Everything but the bell itself lets the pointer through
+   to the open button underneath, which keeps the visible activity time's
+   own hover text and click-to-open working. */
+.session-bell-overlay {
+  justify-self: end;
+  align-self: start;
+  display: flex;
+  align-items: baseline;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.session-bell-overlay::before {
+  content: "\200b";
+}
+
+/* An invisible copy of the activity time with the time's own metrics, so
+   the bell before it ends where the visible time begins. */
+.session-bell-time-spacer {
+  visibility: hidden;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.session-row-bell {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  width: 10px;
+  height: 12px;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  color: var(--fg-2);
+}
+
+.session-row-bell:hover,
+.session-row-bell[aria-expanded="true"] {
+  color: var(--fg-0);
+}
+
+/* Unread: filled (list/bell.rs draws it filled) and in the saturated red,
+   so the bell cannot be missed in a column of quiet rows. */
+.session-row-bell.loud,
+.session-row-bell.loud:hover {
+  color: var(--danger-strong);
+}
+
+/* The list floats beside the sidebar like the row menus, slightly wider
+   because its entries are sentences rather than command names. */
+.host-row-menu-flyout.session-bell-flyout {
+  width: 288px;
+}
+
+.session-bell-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* New entries carry a red edge and the word "new", so the distinction does
+   not rest on colour alone. */
+.session-bell-entry {
+  padding: 6px 11px 6px 8px;
+  border-left: 3px solid transparent;
+}
+
+.session-bell-entry + .session-bell-entry {
+  border-top: 1px solid var(--border-dim);
+}
+
+.session-bell-entry.new {
+  border-left-color: var(--danger-strong);
+}
+
+.session-bell-entry-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-1);
+}
+
+.session-bell-new {
+  color: var(--danger-strong);
+  font-weight: 600;
+}
+
+/* Supervisor-written sentences: wrap anywhere rather than widen the list. */
+.session-bell-text {
+  margin-top: 2px;
+  font-size: 13px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.session-bell-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 11px 2px;
+  border-top: 1px solid var(--border-dim);
 }
 
 /* The locality glyph (2026-09-03):

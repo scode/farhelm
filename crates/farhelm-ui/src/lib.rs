@@ -481,9 +481,56 @@ pub struct Session {
     /// renderer should read instead of this field directly.
     #[serde(default, deserialize_with = "double_option")]
     pub seen_activity_at: Option<Option<i64>>,
+    /// The session's notifications that no client of this helm has cleared,
+    /// newest first and at most 10 (SPEC.md, Status): what the row's bell
+    /// lists. The helm has already dropped cleared ones, so an empty list
+    /// means no bell at all.
+    ///
+    /// `#[serde(default)]` because an older helm or supervisor sends none,
+    /// which is the same as having none.
+    #[serde(default)]
+    pub notifications: Vec<SessionNotification>,
+    /// How far through [`Session::notifications`] every client has read: an
+    /// entry whose sequence number is above it is unread. Read through
+    /// [`Session::unread_notifications`].
+    #[serde(default)]
+    pub notifications_read_through: u64,
+}
+
+/// One session notification as the helm sends it: something Farhelm noticed
+/// about the session that the user can act on (SPEC.md, Status).
+///
+/// `text` is written by the session's supervisor and is peer text, so every
+/// renderer shows it through `peer::PeerLine` or `display_peer`.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct SessionNotification {
+    /// The supervisor's per-session sequence number: it only grows, and the
+    /// helm's read and cleared marks are expressed in it.
+    pub seq: u64,
+    /// When the supervisor recorded it, in Unix seconds.
+    pub at: i64,
+    pub text: String,
 }
 
 impl Session {
+    /// How many of this session's notifications are newer than the shared
+    /// read mark; the bell is loud exactly when this is nonzero.
+    pub(crate) fn unread_notifications(&self) -> usize {
+        self.notifications
+            .iter()
+            .filter(|notification| notification.seq > self.notifications_read_through)
+            .count()
+    }
+
+    /// The newest notification's sequence number, which is what reading or
+    /// clearing "everything shown" marks through.
+    pub(crate) fn newest_notification_seq(&self) -> Option<u64> {
+        self.notifications
+            .iter()
+            .map(|notification| notification.seq)
+            .max()
+    }
+
     /// The agent launch's selection, when this session is an agent launch:
     /// what Clone, Replace with, Restart with and the sidebar mark read for
     /// one. A command or legacy launch has none, and nothing guesses one
@@ -2410,6 +2457,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         };
 
         assert_eq!(
@@ -2473,6 +2522,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at,
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         };
 
         assert_eq!(

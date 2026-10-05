@@ -150,6 +150,10 @@ pub(super) struct RowState {
     /// place until the reply (see `ListView`'s `do_delete`); this is what
     /// tells the user it is on its way out rather than ignored.
     pub(super) deleting: bool,
+    /// Whether this row's notification list is open, carrying the read mark
+    /// as it stood when it opened (see `bell::NotificationBell`), from
+    /// `ListView`'s `bell_open`.
+    pub(super) bell_open: Option<u64>,
 }
 
 /// Whether a session sits on the helm's own machine, on another one, or

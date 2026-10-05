@@ -68,6 +68,15 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     assert_eq!(row.host_name.as_deref(), Some("buildbox"));
     assert!(row.stale);
     assert_eq!(row.seen_activity_at, Some(Some(1_700_000_090)));
+    assert_eq!(
+        row.notifications,
+        vec![crate::SessionNotification {
+            seq: 4,
+            at: 1_700_000_095,
+            text: "Farhelm could not add its conversation hook.".to_string(),
+        }]
+    );
+    assert_eq!(row.notifications_read_through, 3);
     let repo = row.github_repo.as_ref().expect("github_repo decodes");
     assert_eq!(
         (repo.owner.as_str(), repo.name.as_str()),

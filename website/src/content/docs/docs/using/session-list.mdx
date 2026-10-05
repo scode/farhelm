@@ -64,6 +64,20 @@ search box; with many sessions, filter by host and sort by title.
 Clicking the blue dot does the same as **mark read**. The rest of the menu clones, replaces, stops, or deletes the
 session, and is covered in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
+## When a row shows a bell
+
+A bell appears on a row, just left of its age, when Farhelm has noticed something about that session that you can act
+on. For now these are all about following the agent's conversation, which is what lets **restart** pick that
+conversation up again later. For example, the agent has been working for a while and never told Farhelm which
+conversation it is in, so **restart** cannot pick it up. Each notification says what happened and what you can do about
+it, such as starting the session over with **replace with**, or, when nothing can be done, what you lose.
+
+A red, filled bell means at least one notification is new. Click it to list them, newest first, with the ones you have
+not seen before marked **new**. Clicking the bell does not open the session. Closing the list, by clicking elsewhere,
+pressing Escape, or clicking the bell again, marks everything in it read, and the bell turns grey. **clear all** removes
+them, and the bell goes away until something new happens. Read and cleared notifications are the same in every window
+connected to the same [helm](/docs/how-it-works/the-pieces/), and a session keeps only its 10 most recent ones.
+
 ## Next
 
 [Work in a session](/docs/using/work-in-a-session/) covers what you can do once a session's terminal is open.

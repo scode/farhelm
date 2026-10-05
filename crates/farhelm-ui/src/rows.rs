@@ -684,6 +684,8 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            notifications: Vec::new(),
+            notifications_read_through: 0,
         }
     }
 
