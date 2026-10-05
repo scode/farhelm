@@ -75,7 +75,11 @@ fn session_list_body() -> SessionListBody {
             canonical_path: "/home/user/src/widgets".to_string(),
             origin_session_id: "fh-0123abcd".to_string(),
         }),
-        notifications: Vec::new(),
+        notifications: vec![farhelm_proto::SessionNotification {
+            seq: 4,
+            at: 1_700_000_095,
+            text: "Farhelm could not add its conversation hook.".to_string(),
+        }],
     };
     SessionListBody {
         sessions: vec![SessionRow {
@@ -85,6 +89,7 @@ fn session_list_body() -> SessionListBody {
             host_name: "buildbox".to_string(),
             stale: true,
             seen_activity_at: Some(1_700_000_090),
+            notifications_read_through: 3,
         }],
         total: 5,
         matching: Some(1),

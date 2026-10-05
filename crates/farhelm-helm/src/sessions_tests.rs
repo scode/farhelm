@@ -1271,8 +1271,9 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
     peer.await.unwrap();
 }
 
-/// A successful delete also drops the session's `session_seen` row
-/// (SPEC_impl.md's `session_seen` paragraph), not merely the session itself — a
+/// A successful delete also drops the session's `session_seen` and
+/// notification-mark rows (SPEC_impl.md's `session_seen` paragraph and its
+/// notification storage note), not merely the session itself — a
 /// stray row would sit in the table forever with nothing to ever read it
 /// back out, since the id it names is gone. Mirrors
 /// `delete_session_happy_path_returns_200_with_empty_object_body`'s
@@ -1281,7 +1282,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// REST reply carries no evidence either way (SPEC.md's "delete" leaves
 /// nothing behind to inspect through the API once the session is gone).
 #[farhelm_testtrace::test]
-async fn delete_session_drops_the_seen_row() {
+async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
@@ -1317,6 +1318,21 @@ async fn delete_session_drops_the_seen_row() {
         .mark_seen("sess-1", 1_700_000_000)
         .await
         .unwrap();
+    harness
+        .store
+        .raise_notification_marks("sess-1", 2, crate::store::NotificationMark::Cleared)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness
+            .store
+            .notification_marks(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .get("sess-1"),
+        Some(&(2, 2)),
+        "fixture premise: the marks exist before the delete"
+    );
 
     let app = harness.router();
     let request = axum::http::Request::builder()
@@ -1336,6 +1352,15 @@ async fn delete_session_drops_the_seen_row() {
             .unwrap()
             .is_empty(),
         "the seen-state row must not survive the session it names"
+    );
+    assert!(
+        harness
+            .store
+            .notification_marks(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "the notification marks must not survive the session they name"
     );
 
     peer.await.unwrap();
@@ -1588,6 +1613,216 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
             .unwrap()
             .is_empty(),
         "a clear must also land while the host is down"
+    );
+}
+
+/// A listed session carrying notifications 1 through `count`, as a
+/// supervisor reports them (newest first).
+fn session_with_notifications(id: &str, count: u64) -> farhelm_proto::SessionInfo {
+    let mut info = rest_harness::session(id, 1_700_000_000);
+    info.notifications = (1..=count)
+        .rev()
+        .map(|seq| farhelm_proto::SessionNotification {
+            seq,
+            at: 1_700_000_000 + seq as i64,
+            text: format!("notification {seq}"),
+        })
+        .collect();
+    info
+}
+
+/// The notification routes end to end through the listing: reading marks
+/// entries read without hiding them, clearing hides them from the row, the
+/// row reports the read mark the UI uses to tell unread from read, and the
+/// fleet-events revision moves only when a mark did (SPEC.md, Status;
+/// SPEC_impl.md's notification storage note). This is the round trip the
+/// bell's loud and quiet states depend on.
+#[farhelm_testtrace::test]
+async fn notification_routes_read_then_clear_through_the_listing() {
+    let harness = rest_harness::helm_listing(vec![session_with_notifications("sess-1", 3)]).await;
+    let seqs = |listing: &serde_json::Value| -> Vec<u64> {
+        listing["sessions"][0]["notifications"]
+            .as_array()
+            .map(|entries| entries.iter().map(|n| n["seq"].as_u64().unwrap()).collect())
+            .unwrap_or_default()
+    };
+
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(seqs(&listing), vec![3, 2, 1]);
+    assert_eq!(listing["sessions"][0]["notifications_read_through"], 0);
+
+    let before = harness.manager.events().revision();
+    let (status, body) = put_json(
+        &harness,
+        "/api/sessions/sess-1/notifications/read",
+        serde_json::json!({ "through": 3 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body, serde_json::json!({}));
+    assert!(
+        harness.manager.events().revision() > before,
+        "a moved mark bumps"
+    );
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(seqs(&listing), vec![3, 2, 1], "reading hides nothing");
+    assert_eq!(listing["sessions"][0]["notifications_read_through"], 3);
+
+    let before_repeat = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/notifications/read",
+        serde_json::json!({ "through": 2 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        harness.manager.events().revision(),
+        before_repeat,
+        "an older read mark moves nothing and must not bump"
+    );
+
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/notifications/cleared",
+        serde_json::json!({ "through": 2 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(seqs(&listing), vec![3], "cleared entries leave the row");
+    assert_eq!(listing["sessions"][0]["notifications_read_through"], 3);
+
+    let (_, single) = get_json(&harness, "/api/sessions/sess-1").await;
+    assert_eq!(
+        single["notifications"].as_array().map(Vec::len),
+        Some(1),
+        "the single-session read applies the same marks as the listing"
+    );
+}
+
+/// A mark is clamped to the newest notification the helm holds for the
+/// session: a client can only mean entries it was shown, and a mark past
+/// them would hide a notification the supervisor records later before any
+/// client saw it. A session with no notifications therefore cannot be
+/// marked at all, and that is not a change worth a bump.
+#[farhelm_testtrace::test]
+async fn notification_marks_are_clamped_to_the_newest_known_entry() {
+    let harness = rest_harness::helm_listing(vec![
+        session_with_notifications("sess-1", 3),
+        rest_harness::session("quiet", 1_700_000_000),
+    ])
+    .await;
+
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/sess-1/notifications/cleared",
+        serde_json::json!({ "through": 99 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        harness
+            .store
+            .notification_marks(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .get("sess-1"),
+        Some(&(3, 3))
+    );
+
+    let before = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/quiet/notifications/read",
+        serde_json::json!({ "through": 5 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(harness.manager.events().revision(), before);
+    assert!(
+        harness
+            .store
+            .notification_marks(&["quiet".to_string()])
+            .await
+            .unwrap()
+            .get("quiet")
+            .is_none_or(|marks| *marks == (0, 0)),
+        "nothing to mark leaves the session where it stood"
+    );
+}
+
+/// Both notification routes share the per-session routes' refusals: an id
+/// no host has reported is a 404 naming it, and a body without `through`
+/// is a 422 rather than an implicit mark of 0 that answered success.
+#[farhelm_testtrace::test]
+async fn notification_routes_refuse_unknown_ids_and_missing_marks() {
+    let harness = rest_harness::helm_listing(vec![session_with_notifications("sess-1", 1)]).await;
+    for route in ["read", "cleared"] {
+        let (status, body) = put_json(
+            &harness,
+            &format!("/api/sessions/sess-missing/notifications/{route}"),
+            serde_json::json!({ "through": 1 }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{route}");
+        assert_eq!(body, serde_json::json!("no such session: sess-missing"));
+
+        let (status, _) = put_json(
+            &harness,
+            &format!("/api/sessions/sess-1/notifications/{route}"),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "{route}"
+        );
+    }
+}
+
+/// Like the seen route, the notification routes are helm-local writes: a
+/// session on an unreachable host stays listed with its last-known bell, so
+/// reading or clearing it must still work, clamped against the cached row.
+#[farhelm_testtrace::test]
+async fn notification_marks_land_while_the_host_is_down() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@breaks",
+            rest_harness::HostScript {
+                identity: Some("identity-original".to_string()),
+                sessions: vec![session_with_notifications("owned", 2)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+
+    let before = harness.manager.events().revision();
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/owned/notifications/cleared",
+        serde_json::json!({ "through": 9 }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(harness.manager.events().revision() > before);
+    assert_eq!(
+        harness
+            .store
+            .notification_marks(&["owned".to_string()])
+            .await
+            .unwrap()
+            .get("owned"),
+        Some(&(2, 2)),
+        "the mark lands, clamped to the newest entry the cached row holds"
     );
 }
 
@@ -2262,6 +2497,21 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         Some(&1_700_000_000),
         "fixture premise: the source's seen-state row exists before the replace"
     );
+    harness
+        .store
+        .raise_notification_marks("sess-1", 2, crate::store::NotificationMark::Cleared)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness
+            .store
+            .notification_marks(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .get("sess-1"),
+        Some(&(2, 2)),
+        "fixture premise: the source's notification marks exist before the replace"
+    );
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/replace",
@@ -2277,6 +2527,15 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             .unwrap()
             .is_empty(),
         "the replaced source's seen-state row must not survive it"
+    );
+    assert!(
+        harness
+            .store
+            .notification_marks(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "the replaced source's notification marks must not survive it"
     );
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(session.id, "sess-2");

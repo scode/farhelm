@@ -2123,6 +2123,15 @@ pub(crate) async fn get_session(
         Ok(map) => map.get(&id).copied(),
         Err(e) => return http_error(e),
     };
+    // And the notification marks, for the same reason.
+    let marks = match state
+        .store
+        .notification_marks(std::slice::from_ref(&id))
+        .await
+    {
+        Ok(map) => map.get(&id).copied().unwrap_or_default(),
+        Err(e) => return http_error(e),
+    };
 
     // The client comes from the SAME status read that resolved the owner,
     // so "ask the host" and "say this row is live" cannot disagree.
@@ -2132,15 +2141,20 @@ pub(crate) async fn get_session(
             Err(e) => return http_error(e),
         };
         return match cached {
-            Some(info) => axum::Json(aggregate::SessionRow {
-                info,
-                host,
-                host_identity,
-                host_name,
-                seen_activity_at,
-                stale: true,
-            })
-            .into_response(),
+            Some(mut info) => {
+                let notifications_read_through =
+                    aggregate::apply_notification_marks(&mut info, marks);
+                axum::Json(aggregate::SessionRow {
+                    info,
+                    host,
+                    host_identity,
+                    host_name,
+                    seen_activity_at,
+                    notifications_read_through,
+                    stale: true,
+                })
+                .into_response()
+            }
             // The host is down and its cached copy is unreadable (or gone).
             // There is nothing to put behind the notice, and inventing a
             // placeholder would be worse than saying so.
@@ -2154,15 +2168,20 @@ pub(crate) async fn get_session(
     match manager::drain_sessions(&client).await {
         Ok(drained) => {
             match drained.sessions.into_iter().find(|s| s.id == id) {
-                Some(info) => axum::Json(aggregate::SessionRow {
-                    info,
-                    host,
-                    host_identity,
-                    host_name,
-                    seen_activity_at,
-                    stale: false,
-                })
-                .into_response(),
+                Some(mut info) => {
+                    let notifications_read_through =
+                        aggregate::apply_notification_marks(&mut info, marks);
+                    axum::Json(aggregate::SessionRow {
+                        info,
+                        host,
+                        host_identity,
+                        host_name,
+                        seen_activity_at,
+                        notifications_read_through,
+                        stale: false,
+                    })
+                    .into_response()
+                }
                 // The host is up and says this session is gone: it was deleted
                 // between the last cache refresh and now, so 404 is the truth
                 // rather than the stale row.
@@ -2396,8 +2415,9 @@ pub(crate) struct DeleteQuery {
 /// a delete followed immediately by a create shows both rows — which is
 /// what the browser suite's own shared-session reset does on every test.
 ///
-/// It also clears the session's `session_seen` row (SPEC_impl.md's
-/// `session_seen` paragraph).
+/// It also clears the session's `session_seen` and
+/// `session_notification_marks` rows (SPEC_impl.md's `session_seen`
+/// paragraph and its notification storage note).
 /// That table carries no foreign key to the session it names — it survives a
 /// retarget or an adoption on purpose (`store::SESSION_SEEN_SCHEMA`'s own
 /// comment) — so it does not disappear on its own the way the cache row
@@ -2442,6 +2462,13 @@ pub(crate) async fn delete_session(
                         session_id = manager::peer_text(&id).as_str(),
                         error = %error,
                         "could not clear the deleted session's seen state; a stray row may remain"
+                    );
+                }
+                if let Err(error) = state.store.clear_notification_marks(&id).await {
+                    warn!(
+                        session_id = manager::peer_text(&id).as_str(),
+                        error = %error,
+                        "could not clear the deleted session's notification marks; a stray row may remain"
                     );
                 }
                 forget_session(&state, &claim, &id).await;
@@ -2540,6 +2567,104 @@ pub(crate) async fn mark_seen(
             None => state.store.clear_seen(&id).await,
         };
         match changed {
+            Ok(changed) => {
+                if changed {
+                    state.manager.events().bump();
+                }
+                axum::Json(serde_json::json!({})).into_response()
+            }
+            Err(e) => http_error(e),
+        }
+    })
+    .await
+}
+
+/// The body of both notification-mark routes: "every notification up to
+/// and including sequence number `through`". A missing field is a 422 rather
+/// than a default of 0, so a truncated body cannot pass as a no-op that
+/// looked like success.
+#[derive(Deserialize)]
+pub(crate) struct NotificationMarkReq {
+    through: u64,
+}
+
+/// `PUT /api/sessions/{id}/notifications/read` — mark this session's
+/// notifications read through `through`, the write the UI issues when the
+/// bell's list closes (SPEC.md, Status).
+pub(crate) async fn mark_notifications_read(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<NotificationMarkReq>,
+) -> impl IntoResponse {
+    raise_notification_marks(state, id, req.through, store::NotificationMark::Read).await
+}
+
+/// `PUT /api/sessions/{id}/notifications/cleared` — clear this session's
+/// notifications through `through` (the list's clear button), which also
+/// marks them read: a cleared notification is never shown again, so it
+/// cannot stay unread.
+pub(crate) async fn clear_notifications(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<NotificationMarkReq>,
+) -> impl IntoResponse {
+    raise_notification_marks(state, id, req.through, store::NotificationMark::Cleared).await
+}
+
+/// The shared half of the two notification-mark routes: a helm-local write,
+/// shaped like [`mark_seen`] and for its reasons. It is not routed through a
+/// host, so a session on a down host can still have its bell read or
+/// cleared; the 404 comes from the same owner lookup; and the fleet-events
+/// revision is bumped only when a mark moved.
+///
+/// The mark is clamped to the newest sequence number in the helm's own copy
+/// of the session (the in-memory list for a host that serves from memory,
+/// the cache otherwise). A client can only mean entries it was shown, and a
+/// mark raised past them would silently swallow a notification the
+/// supervisor records later, before anyone saw it.
+///
+/// That copy is the one the listing is built from, which is where the UI's
+/// bell takes its entries. The single-session read (`get_session`) can
+/// answer a connected host with a fresher list it does not cache, so a
+/// client that marked through an entry only that read had shown would be
+/// clamped below it; no client does, since the open session's view never
+/// feeds the bell. A client that starts to must either read the listing or
+/// make that read publish what it drained.
+async fn raise_notification_marks(
+    state: Arc<AppState>,
+    id: String,
+    through: u64,
+    mark: store::NotificationMark,
+) -> axum::response::Response {
+    // Helm-owned for the reason `create_session` is: the store write is
+    // followed by the event that tells other open clients about it.
+    crate::run_owned(async move {
+        let (host, status) = match resolve_owner(&state, &id).await {
+            Ok(owner) => owner,
+            Err(e) => return http_error(e),
+        };
+        let live = status
+            .live_sessions
+            .as_ref()
+            .and_then(|live| live.iter().find(|info| info.id == id).cloned());
+        let known = match live {
+            Some(info) => Some(info),
+            None => match state.store.cached_session(host, &id).await {
+                Ok(cached) => cached,
+                Err(e) => return http_error(e),
+            },
+        };
+        let newest = known
+            .iter()
+            .flat_map(|info| info.notifications.iter().map(|n| n.seq))
+            .max()
+            .unwrap_or(0);
+        let through = through.min(newest);
+        match state
+            .store
+            .raise_notification_marks(&id, through, mark)
+            .await
+        {
             Ok(changed) => {
                 if changed {
                     state.manager.events().bump();
@@ -3034,15 +3159,22 @@ async fn finish_replacement(
             }));
         }
     };
-    // The deleted source's read/unread row goes with it, exactly as in
-    // `delete_session` (SPEC_impl.md: deleting a session drops its
-    // `session_seen` row explicitly). Best effort: a stray row is harmless
-    // and must not turn a finished replace into a failure.
+    // The deleted source's read/unread and notification-mark rows go with
+    // it, exactly as in `delete_session` (SPEC_impl.md's `session_seen`
+    // paragraph and its notification storage note). Best effort: a stray row
+    // is harmless and must not turn a finished replace into a failure.
     if let Err(error) = state.store.clear_seen(id).await {
         warn!(
             session_id = manager::peer_text(id).as_str(),
             error = %error,
             "could not clear the replaced session's seen state; a stray row may remain"
+        );
+    }
+    if let Err(error) = state.store.clear_notification_marks(id).await {
+        warn!(
+            session_id = manager::peer_text(id).as_str(),
+            error = %error,
+            "could not clear the replaced session's notification marks; a stray row may remain"
         );
     }
     forget_session(state, claim, id).await;

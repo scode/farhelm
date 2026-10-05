@@ -53,6 +53,14 @@
           "{farhelm_args}"
         ]
       },
+      "notifications": [
+        {
+          "at": 1700000095,
+          "seq": 4,
+          "text": "Farhelm could not add its conversation hook."
+        }
+      ],
+      "notifications_read_through": 3,
       "parent": "fh-89abcdef",
       "restart_offer": "resume",
       "seen_activity_at": 1700000090,

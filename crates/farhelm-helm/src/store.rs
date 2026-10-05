@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 40;
+const SCHEMA_VERSION: i64 = 41;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -428,6 +428,32 @@ const AGENT_CREATE_BINDING_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
                  session_id       TEXT NOT NULL PRIMARY KEY,
                  seen_activity_at INTEGER NOT NULL
+             ) STRICT;";
+
+/// Which of a session's two notification marks a write raises: the read
+/// mark alone, or both (a cleared notification is never shown again, so it
+/// cannot stay unread).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationMark {
+    Read,
+    Cleared,
+}
+
+/// The per-session notification marks (schema version 41): how far through a
+/// session's notifications every client has read, and how far they have
+/// cleared (SPEC.md, Status; SPEC_impl.md's notification storage note).
+///
+/// Sequence numbers, not times: the supervisor numbers a session's
+/// notifications with a sequence that only grows, so "everything up to N"
+/// needs no clock and a notification that ages out of the supervisor's cap
+/// never gets its number reused. Keyed by session id alone with no foreign
+/// key, for `session_seen`'s reasons (a retarget or adoption keeps the
+/// session), and removed explicitly when this helm deletes the session.
+/// Clearing implies reading, so a clear raises both marks.
+const SESSION_NOTIFICATION_MARKS_SCHEMA: &str = "CREATE TABLE session_notification_marks (
+                 session_id      TEXT NOT NULL PRIMARY KEY,
+                 read_through    INTEGER NOT NULL DEFAULT 0,
+                 cleared_through INTEGER NOT NULL DEFAULT 0
              ) STRICT;";
 
 /// Where fresh checkouts may be created and what runs after cloning
@@ -1775,6 +1801,9 @@ pub struct HelmStore {
 ///   every host asks the user before carrying out a `farhelm` command from
 ///   one of its sessions until the user turns that off (SPEC.md, Agent-spawned
 ///   sessions).
+/// - 41: `session_notification_marks`, every client's shared read and
+///   cleared marks over each session's notifications (see the table's own
+///   comment). Created empty.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2063,10 +2092,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {AGENT_CREATE_BINDINGS_SCHEMA}
+              {SESSION_NOTIFICATION_MARKS_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 40;",
+              PRAGMA user_version = 41;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2984,6 +3014,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 40;")
             .context("migrating helm.db to schema version 40")?;
         version = 40;
+    }
+    if version == 40 {
+        // `IF NOT EXISTS` for the reason the 37→38 step gives. Created empty:
+        // nothing before this version recorded reading a notification.
+        tx.execute_batch(&format!(
+            "{}
+             PRAGMA user_version = 41;",
+            SESSION_NOTIFICATION_MARKS_SCHEMA.replacen(
+                "CREATE TABLE",
+                "CREATE TABLE IF NOT EXISTS",
+                1
+            )
+        ))
+        .context("migrating helm.db to schema version 41")?;
+        version = 41;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4198,6 +4243,118 @@ impl HelmStore {
                         )
                         .context("clearing the seen stamp")?;
                     Ok(changed > 0)
+                },
+            )
+            .await
+    }
+
+    /// The notification marks (read through, cleared through) of each of
+    /// `ids` that has any, for the listing's row building; a session with no
+    /// row has read and cleared nothing.
+    pub async fn notification_marks(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<std::collections::HashMap<String, (u64, u64)>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let conn = self.conn.clone();
+        let ids = ids.to_vec();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<std::collections::HashMap<String, (u64, u64)>> {
+                let conn = conn.lock();
+                let placeholders = (1..=ids.len())
+                    .map(|index| format!("?{index}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT session_id, read_through, cleared_through \
+                         FROM session_notification_marks WHERE session_id IN ({placeholders})"
+                    ))
+                    .context("preparing the notification-marks query")?;
+                let rows: Vec<(String, (u64, u64))> = stmt
+                    .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+                        Ok((
+                            r.get(0)?,
+                            (
+                                r.get::<_, i64>(1)?.max(0) as u64,
+                                r.get::<_, i64>(2)?.max(0) as u64,
+                            ),
+                        ))
+                    })
+                    .context("querying notification marks")?
+                    .collect::<Result<_, _>>()
+                    .context("reading notification marks")?;
+                Ok(rows.into_iter().collect())
+            },
+        )
+        .await
+        .context("notification-marks read task panicked")?
+    }
+
+    /// Raise `session_id`'s read mark to `through`, and its cleared mark too
+    /// for [`NotificationMark::Cleared`] (clearing implies reading),
+    /// returning whether either mark moved. A mark never moves backwards, so
+    /// a stale or retried request is a no-op, which the caller must not bump
+    /// the fleet-events revision over (the same rule as [`Self::mark_seen`]).
+    /// A mark of 0 is where every session already stands and writes nothing.
+    pub async fn raise_notification_marks(
+        &self,
+        session_id: &str,
+        through: u64,
+        mark: NotificationMark,
+    ) -> anyhow::Result<bool> {
+        // The row builder drops sequence numbers SQLite cannot hold
+        // (`aggregate::apply_notification_marks`), so no mark needs to
+        // reach past this.
+        let Ok(through) = i64::try_from(through) else {
+            anyhow::bail!("notification mark {through} is out of range");
+        };
+        if through == 0 {
+            return Ok(false);
+        }
+        let session_id = session_id.to_string();
+        let cleared = match mark {
+            NotificationMark::Read => 0,
+            NotificationMark::Cleared => through,
+        };
+        self.conn
+            .call(
+                "notification-marks write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
+                        .execute(
+                            "INSERT INTO session_notification_marks \
+                             (session_id, read_through, cleared_through) VALUES (?1, ?2, ?3) \
+                             ON CONFLICT (session_id) DO UPDATE SET \
+                                 read_through = MAX(read_through, excluded.read_through), \
+                                 cleared_through = MAX(cleared_through, excluded.cleared_through) \
+                             WHERE session_notification_marks.read_through < excluded.read_through \
+                                OR session_notification_marks.cleared_through < excluded.cleared_through",
+                            rusqlite::params![session_id, through, cleared],
+                        )
+                        .context("writing notification marks")?;
+                    Ok(changed > 0)
+                },
+            )
+            .await
+    }
+
+    /// Delete `session_id`'s notification marks, when this helm deletes the
+    /// session (the [`Self::clear_seen`] counterpart for this table).
+    pub async fn clear_notification_marks(&self, session_id: &str) -> anyhow::Result<()> {
+        let session_id = session_id.to_string();
+        self.conn
+            .call(
+                "notification-marks clear task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "DELETE FROM session_notification_marks WHERE session_id = ?1",
+                        rusqlite::params![session_id],
+                    )
+                    .context("clearing notification marks")?;
+                    Ok(())
                 },
             )
             .await
@@ -9588,6 +9745,83 @@ mod tests {
             store.seen_activity(&["s-1".to_string()]).await.unwrap()["s-1"],
             300
         );
+    }
+
+    /// The notification marks are shared by every client of the helm, so a
+    /// stale or retried request must never move one backwards (a client
+    /// that read less would otherwise make every other client's bell loud
+    /// again), a clear must also count as read, and the change flag must be
+    /// exact, because the routes bump the fleet-events revision on it.
+    #[farhelm_testtrace::test]
+    async fn notification_marks_only_rise_and_a_clear_also_reads() {
+        let (_dir, store) = fresh_store().await;
+        let marks = |store: &HelmStore| {
+            let store = store.clone();
+            async move {
+                store
+                    .notification_marks(&["s-1".to_string()])
+                    .await
+                    .unwrap()
+                    .get("s-1")
+                    .copied()
+            }
+        };
+
+        assert!(
+            !store
+                .raise_notification_marks("s-1", 0, NotificationMark::Read)
+                .await
+                .unwrap(),
+            "a mark of 0 is where every session already stands"
+        );
+        assert!(
+            store
+                .raise_notification_marks("s-1", 3, NotificationMark::Read)
+                .await
+                .unwrap()
+        );
+        assert_eq!(marks(&store).await, Some((3, 0)));
+        assert!(
+            !store
+                .raise_notification_marks("s-1", 2, NotificationMark::Read)
+                .await
+                .unwrap(),
+            "an older read mark is a no-op"
+        );
+        assert!(
+            !store
+                .raise_notification_marks("s-1", 3, NotificationMark::Read)
+                .await
+                .unwrap(),
+            "a repeated read mark is a no-op"
+        );
+        assert_eq!(marks(&store).await, Some((3, 0)));
+
+        assert!(
+            store
+                .raise_notification_marks("s-1", 2, NotificationMark::Cleared)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            marks(&store).await,
+            Some((3, 2)),
+            "clearing through 2 leaves the higher read mark where it was"
+        );
+        assert!(
+            store
+                .raise_notification_marks("s-1", 5, NotificationMark::Cleared)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            marks(&store).await,
+            Some((5, 5)),
+            "a clear raises both marks"
+        );
+
+        store.clear_notification_marks("s-1").await.unwrap();
+        assert_eq!(marks(&store).await, None);
     }
 
     // ---- Schema and the version mechanism ----------------------------
