@@ -216,6 +216,46 @@ pub(crate) struct SessionRow {
     /// what they lose is only the toggle and the possibility of the blue
     /// variant, never a distinct legacy colour.
     pub(crate) seen_activity_at: Option<i64>,
+    /// How far through this session's notifications every client of this
+    /// helm has read (`store::HelmStore::notification_marks`): a
+    /// notification whose sequence number is above it is unread, which
+    /// decides whether the row's bell shouts and which entries its list sets
+    /// apart (SPEC.md, Status). Cleared notifications never reach the row at
+    /// all: [`row_of`] drops them from `info.notifications`, so a row with
+    /// none left shows no bell.
+    #[serde(default)]
+    pub(crate) notifications_read_through: u64,
+}
+
+/// A session's notification marks as the row builder needs them: read
+/// through, cleared through. `(0, 0)` for a session nobody has read or
+/// cleared anything of.
+pub(crate) type NotificationMarks = (u64, u64);
+
+/// Apply `marks` to a session's notifications: drop the cleared ones, keep
+/// at most the [`farhelm_proto::SESSION_NOTIFICATION_CAP`] newest, newest
+/// first, and return the read mark for the row. Shared by the listing and
+/// the single-session read so both answer with the same shape.
+///
+/// The cap is enforced here as well as in the supervisor because the list
+/// is peer data: a supervisor that sent more, or out of order, must not
+/// grow the UI's popover past what SPEC.md promises.
+pub(crate) fn apply_notification_marks(info: &mut SessionInfo, marks: NotificationMarks) -> u64 {
+    let (read_through, cleared_through) = marks;
+    // A sequence number SQLite cannot store could never be marked, which
+    // would leave its bell loud for good; a real supervisor cannot produce
+    // one, since its own numbers live in SQLite too.
+    info.notifications.retain(|notification| {
+        notification.seq > cleared_through && i64::try_from(notification.seq).is_ok()
+    });
+    info.notifications
+        .sort_by_key(|notification| std::cmp::Reverse(notification.seq));
+    // One entry per sequence number, for the same reason as the cap.
+    info.notifications
+        .dedup_by_key(|notification| notification.seq);
+    info.notifications
+        .truncate(farhelm_proto::SESSION_NOTIFICATION_CAP);
+    read_through
 }
 
 /// The whole merged list, in the JSON shape `GET /api/sessions` answers
@@ -266,11 +306,14 @@ pub(crate) struct SessionListBody {
 fn row_of(
     host: &HostSnapshot,
     identity: Option<&str>,
-    info: SessionInfo,
+    mut info: SessionInfo,
     seen_activity_at: Option<i64>,
+    marks: NotificationMarks,
 ) -> SessionRow {
+    let notifications_read_through = apply_notification_marks(&mut info, marks);
     SessionRow {
         info,
+        notifications_read_through,
         host: host.id,
         host_identity: identity.map(str::to_string),
         host_name: host_display_name(
@@ -521,6 +564,8 @@ async fn session_list_staged(
         }
     }
     let seen_activity = store.seen_activity(&seen_ids).await?;
+    // The notification marks, joined the same way and for the same reason.
+    let notification_marks = store.notification_marks(&seen_ids).await?;
     for cached in slice.rows {
         let Some(host) = by_id.get(&cached.host) else {
             // A host the registry knows but the manager has no actor for
@@ -528,11 +573,16 @@ async fn session_list_staged(
             continue;
         };
         let seen = seen_activity.get(&cached.info.id).copied();
+        let marks = notification_marks
+            .get(&cached.info.id)
+            .copied()
+            .unwrap_or_default();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
             cached.info,
             seen,
+            marks,
         ));
     }
     // A cache-serving host's cap flag comes from the CACHE (the same
@@ -578,7 +628,11 @@ async fn session_list_staged(
                 continue;
             }
             let seen = seen_activity.get(&info.id).copied();
-            view.push(row_of(snapshot, identity, info.clone(), seen));
+            let marks = notification_marks
+                .get(&info.id)
+                .copied()
+                .unwrap_or_default();
+            view.push(row_of(snapshot, identity, info.clone(), seen, marks));
         }
     }
     Ok(assemble(view, filter, sort, hosts_truncated))
@@ -618,6 +672,7 @@ mod tests {
             host_identity: None,
             host_name: "this machine".to_string(),
             seen_activity_at: None,
+            notifications_read_through: 0,
             stale: false,
         }
     }
@@ -1399,6 +1454,52 @@ mod tests {
             "a mid-request identity write must not be attributed to rows \
              sampled beside it — stale identity mismatches safely, a fresh \
              one would falsely match"
+        );
+    }
+
+    /// The row builder enforces SPEC.md's "at most 10, newest first", one per
+    /// sequence number, itself, because the list arrives from a supervisor as
+    /// peer data, and drops every entry at or below the cleared mark so a
+    /// cleared bell stays cleared on every client.
+    #[test]
+    fn notification_marks_drop_cleared_entries_and_cap_the_rest() {
+        let mut info = crate::rest_harness::session("s", 1);
+        // Out of order and over the cap, as a misbehaving supervisor might
+        // send them.
+        info.notifications = [3u64, 1, 14, 2, 9, 4, 13, 5, 12, 6, 11, 7, 10, 8]
+            .into_iter()
+            .map(|seq| farhelm_proto::SessionNotification {
+                seq,
+                at: 0,
+                text: format!("n{seq}"),
+            })
+            .collect();
+
+        let read_through = apply_notification_marks(&mut info, (9, 3));
+
+        assert_eq!(read_through, 9);
+        let seqs: Vec<u64> = info.notifications.iter().map(|n| n.seq).collect();
+        assert_eq!(seqs, vec![14, 13, 12, 11, 10, 9, 8, 7, 6, 5]);
+
+        // Duplicates and numbers SQLite cannot hold (which could never be
+        // marked) are dropped too.
+        let mut odd = crate::rest_harness::session("t", 1);
+        odd.notifications = [2u64, u64::MAX, 2, 1]
+            .into_iter()
+            .map(|seq| farhelm_proto::SessionNotification {
+                seq,
+                at: 0,
+                text: String::new(),
+            })
+            .collect();
+        apply_notification_marks(&mut odd, (0, 0));
+        let seqs: Vec<u64> = odd.notifications.iter().map(|n| n.seq).collect();
+        assert_eq!(seqs, vec![2, 1]);
+
+        apply_notification_marks(&mut info, (14, 14));
+        assert!(
+            info.notifications.is_empty(),
+            "clearing through the newest leaves nothing, so the row shows no bell"
         );
     }
 

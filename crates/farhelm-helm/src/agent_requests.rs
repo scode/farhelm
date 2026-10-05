@@ -2203,6 +2203,8 @@ fn agent_row_of_mutation(
         // reply carries no seen-state field at all, since that state is a
         // human-viewer fact (SPEC.md, Status) an agent verb has no use for.
         seen_activity_at: None,
+        // Likewise never read: notifications are a human-viewer surface.
+        notifications_read_through: 0,
         stale,
     };
     agent_session(&row, host_name, asking_host, asking_session)
@@ -2522,6 +2524,7 @@ mod tests {
             host_identity: None,
             host_name: host_name.to_string(),
             seen_activity_at: None,
+            notifications_read_through: 0,
             stale: false,
         }
     }

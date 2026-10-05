@@ -657,6 +657,14 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(sessions::mark_seen),
         )
         .route(
+            "/api/sessions/{id}/notifications/read",
+            axum::routing::put(sessions::mark_notifications_read),
+        )
+        .route(
+            "/api/sessions/{id}/notifications/cleared",
+            axum::routing::put(sessions::clear_notifications),
+        )
+        .route(
             "/api/sessions/{id}/tabs",
             axum::routing::post(sessions::open_tab),
         )
