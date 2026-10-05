@@ -1,0 +1,141 @@
+---
+/**
+ * The install command, shown in the site header beside the search box so a
+ * reader can copy it from any page without first finding Install Farhelm.
+ *
+ * Built like the pages' own code blocks, with the copy button on the right,
+ * but the button never shrinks: on a narrow window only the command text
+ * gives way, cut off with an ellipsis, so the one control a reader needs here
+ * stays visible. Below Starlight's desktop breakpoint (50rem) the header has
+ * no room beside the menu button, so the command is hidden there and the
+ * Install page carries it instead.
+ *
+ * The command must stay the same as the one on the Install page
+ * (src/content/docs/docs/get-started/install.md) and in the README.
+ */
+const command = 'curl -fsSL https://get.farhelm.io/install.sh | sh';
+---
+
+<div class="farhelm-install" data-farhelm-install>
+  <span class="farhelm-install-label">install</span>
+  <code class="farhelm-install-command" title={command}>{command}</code>
+  <button
+    type="button"
+    class="farhelm-install-copy"
+    data-command={command}
+    aria-label="Copy the install command"
+    title="Copy the install command"
+  >
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+      <rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"></rect>
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="1.8"></path>
+    </svg>
+    <span class="farhelm-install-copied" aria-live="polite"></span>
+  </button>
+</div>
+
+<script>
+  // One handler per button. "Copied" shows for a moment as confirmation, the
+  // way Starlight's own code-block button does; a failed clipboard write (an
+  // insecure context, a denied permission) shows nothing and leaves the
+  // command selectable by hand.
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.farhelm-install-copy')) {
+    const status = button.querySelector('.farhelm-install-copied');
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.command ?? '');
+      } catch {
+        return;
+      }
+      if (!status) return;
+      status.textContent = 'Copied';
+      setTimeout(() => {
+        status.textContent = '';
+      }, 1500);
+    });
+  }
+</script>
+
+<style>
+  .farhelm-install {
+    display: none;
+  }
+
+  @media (min-width: 50rem) {
+    .farhelm-install {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      min-width: 0;
+      /* Room for the label, the whole command, and the copy button. It has to
+         be stated: the command's inline size containment (below) leaves it out
+         of this block's natural width, so without a basis here the search box
+         beside it would never need to give way. */
+      flex: 0 1 37rem;
+    }
+  }
+
+  .farhelm-install-label {
+    flex: none;
+    color: var(--sl-color-gray-3);
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .farhelm-install-command {
+    /* The only part that gives way: everything else keeps its width. Inline
+       size containment stops the unwrapped command from counting toward the
+       header column's minimum width, which would otherwise push the copy
+       button and the theme menu off the right edge; the flex basis then
+       asks for the whole command (50 characters plus padding) when there is
+       room for it. */
+    contain: inline-size;
+    flex: 0 1 calc(50ch + 1.2rem);
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 0.4rem 0 0 0.4rem;
+    border-inline-end: none;
+    background: var(--sl-color-bg-inline-code);
+    color: var(--sl-color-white);
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-sm);
+    line-height: 1.4;
+  }
+
+  .farhelm-install-copy {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    margin-inline-start: -0.6rem;
+    padding: 0 0.55rem;
+    border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 0 0.4rem 0.4rem 0;
+    background: var(--sl-color-bg-inline-code);
+    color: var(--sl-color-gray-2);
+    cursor: pointer;
+  }
+
+  .farhelm-install-copy:hover {
+    color: var(--sl-color-white);
+  }
+
+  .farhelm-install-copied:not(:empty) {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.3rem;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-xs);
+    white-space: nowrap;
+  }
+</style>

@@ -52,6 +52,9 @@ export default defineConfig({
         root: { label: 'English', lang: 'en' },
       },
       customCss: ['./src/styles/farhelm.css'],
+      // The search box is wrapped so the install command can sit beside it in
+      // the header (src/components/HeaderSearch.astro says why there).
+      components: { Search: './src/components/HeaderSearch.astro' },
       // Every internal link, heading anchors included, is checked at build
       // time, so a moved page or a renamed heading fails `bun run build`
       // (and with it CI and the Vercel deploy) instead of shipping a dead
