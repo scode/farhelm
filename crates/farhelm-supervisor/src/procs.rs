@@ -245,6 +245,8 @@ pub(crate) const MAX_ATTRIBUTION_ANCESTORS: usize = 64;
 /// (`None`) rather than a truncated prefix a later proof could mistake
 /// for the whole command line; the walk itself continues, because the
 /// runtime decision for current kinds rests on the image, not the args.
+/// (A recorded chain read back from a file that carries such a link anyway
+/// is refused at anchoring; see [`anchor_chain`].)
 pub(crate) const MAX_ARGV_BYTES_PER_PROCESS: usize = 64 * 1024;
 
 /// Whole-walk command-line budget. Unlike the per-process bound this one
@@ -254,14 +256,18 @@ pub(crate) const MAX_ARGV_BYTES_PER_PROCESS: usize = 64 * 1024;
 /// exist to close.
 pub(crate) const MAX_ARGV_BYTES_PER_WALK: usize = 1024 * 1024;
 
-/// One live edge of an attribution walk: the process, its parent, the
-/// kernel start token distinguishing it from PID reuse, and the image
-/// and argv evidence captured while the edge was observed.
+/// One edge of an attribution chain: the process, its parent, the kernel
+/// start token distinguishing it from PID reuse, and the image, argv and
+/// working-directory evidence captured while the edge was observed.
 ///
-/// `exe` is REQUIRED — an unreadable image refuses the walk, the same
-/// way it always refused the emitter check — while `argv` is `None`
+/// `exe` is REQUIRED — an unreadable image ends collection at that link,
+/// so a chain never carries an edge without one — while `argv` is `None`
 /// whenever that process's command line was unreadable or exceeded its
 /// per-process bound (see the constants above for why those differ).
+/// `cwd` exists for OMP alone: a Bun runtime may name its entry point
+/// relative to its own working directory, and resolving that spelling must
+/// not need the process to still be alive. It is `None` wherever the
+/// platform offers no read (macOS) or the read failed.
 #[derive(Debug, Clone)]
 pub(crate) struct ChainLink {
     pub(crate) pid: u32,
@@ -269,6 +275,7 @@ pub(crate) struct ChainLink {
     pub(crate) start: u64,
     pub(crate) exe: Vec<u8>,
     pub(crate) argv: Option<Vec<Vec<u8>>>,
+    pub(crate) cwd: Option<Vec<u8>>,
 }
 
 /// The command-line evidence for one process, bounded per
@@ -282,86 +289,247 @@ pub(crate) fn read_process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
     imp::read_process_argv(pid)
 }
 
-/// Walk the live ancestry from a hook connection's process to the owned
-/// pane, capturing image and argv evidence per edge.
-///
-/// This is the shared mechanics every foreground-runtime proof builds
-/// on: at most [`MAX_ATTRIBUTION_ANCESTORS`] live `Running` edges, the
-/// peer's start token verified before anything else, loops and a missing
-/// pane refused, edges plus image observations re-read before return,
-/// and the whole walk repeatable by the repeat attribution before
-/// commit. It decides NOTHING about vendors — the per-kind step applies
-/// its own corridor and runtime recognition to the returned chain — so
-/// a new proof reuses the walk rather than re-arguing liveness, PID
-/// reuse, and budgets.
-/// Refuse a walked chain whose command-line evidence totals past
-/// [`MAX_ARGV_BYTES_PER_WALK`]. A separate pass over the captured chain
-/// rather than inline accounting, so the bound reads the same evidence
-/// the per-kind proofs will match against — not a parallel count kept
-/// beside it — and so later proofs reuse the check instead of
-/// re-arguing the budget.
+/// Refuse a chain whose command-line evidence totals past
+/// [`MAX_ARGV_BYTES_PER_WALK`]. Re-checked over the anchored slice rather
+/// than trusted from collection's own running count, because an anchored
+/// chain may come from a report file rather than from [`collect_ancestry`],
+/// and the bound must hold over the evidence the corridors actually read.
 fn check_walk_argv_budget(chain: &[ChainLink]) -> Result<(), String> {
-    let total: usize = chain
-        .iter()
-        .filter_map(|link| link.argv.as_ref())
-        .flatten()
-        .map(Vec::len)
-        .sum();
-    if total > MAX_ARGV_BYTES_PER_WALK {
-        return Err("the hook ancestry's command lines exceed the attribution budget".to_string());
+    if chain.iter().map(link_argv_bytes).sum::<usize>() > MAX_ARGV_BYTES_PER_WALK {
+        return Err(WALK_BUDGET_EXCEEDED.to_string());
     }
     Ok(())
 }
 
-pub(crate) fn walk_to_pane(peer: ProcessIdentity, pane_pid: u32) -> Result<Vec<ChainLink>, String> {
+/// The refusal for a chain that never reaches the session's pane.
+const NOT_ATTRIBUTABLE: &str = "the hook cannot be attributed to this session's foreground pane";
+
+/// The refusal both walk-budget checks give.
+const WALK_BUDGET_EXCEEDED: &str =
+    "the hook ancestry's command lines exceed the attribution budget";
+
+/// Command-line bytes one link carries, the unit both argv budgets are
+/// stated in.
+fn link_argv_bytes(link: &ChainLink) -> usize {
+    link.argv.iter().flatten().map(Vec::len).sum()
+}
+
+/// Where an attribution chain must end: the session's owned pane process.
+///
+/// `start` is the pane process's kernel start token while it is alive, and
+/// `None` once it has exited but tmux still lists the pane (`remain-on-exit`):
+/// a dead process has no start token left to read, so only its pid can be
+/// compared. Every launch runs a new pane process, which is what ties a chain
+/// to the launch it was collected under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PaneAnchor {
+    pub(crate) pid: u32,
+    pub(crate) start: Option<u64>,
+}
+
+/// A reporting process's collected ancestry, and why collection stopped
+/// where it did.
+///
+/// `ended` is the reason collection stopped before running out of parents
+/// (an exited or unreadable process, an image that could not be read, a
+/// process that changed while it was observed, the walk budget), or `None`
+/// when it simply reached the top. It matters only when the pane turns out
+/// not to be in `links`: then it, rather than a generic "not attributable",
+/// is the honest refusal, since it says why the chain never got that far.
+#[derive(Debug, Clone)]
+pub(crate) struct Ancestry {
+    pub(crate) links: Vec<ChainLink>,
+    pub(crate) ended: Option<String>,
+}
+
+/// Collect the ancestry of a reporting process, starting with the process
+/// itself, capturing image and argv evidence per edge (and the working
+/// directory of the interpreters whose entry point OMP attribution resolves).
+///
+/// This is the first half of attribution, and it decides NOTHING about
+/// sessions or vendors: it does not know which pane it should reach, so it
+/// climbs until the ancestry ends (a parent of 0, a loop), until a process is
+/// gone or its image unreadable, until [`MAX_ATTRIBUTION_ANCESTORS`] edges,
+/// or until the next edge's argv would push the chain past
+/// [`MAX_ARGV_BYTES_PER_WALK`]. Each of those ends the chain rather than
+/// failing it, because the pane may well lie below that point; [`anchor_chain`]
+/// is what refuses a chain that never reached the pane, citing
+/// [`Ancestry::ended`]. The one hard failure is the reporter itself: it must
+/// be live, readable, and still carry the start token the caller observed.
+///
+/// Collection reads every ancestor up to where it stops, including ones far
+/// above any pane (the tmux server, the service manager). Those reads cost a
+/// handful of `/proc` reads per hook; argv is read from each, and a process
+/// whose memory map is wedged could slow that read, which is accepted as
+/// the price of not needing to know the pane.
+///
+/// Before returning, every collected edge and image is re-read, and the chain
+/// is cut just below the first link that no longer matches. A process that
+/// exec'd or exited between its observation and the re-read is no longer the
+/// process the chain describes, so neither it nor anything above it is handed
+/// on as evidence. Cutting rather than failing keeps a change far above the
+/// pane from refusing a report whose own corridor is intact, while a change at
+/// or below the pane drops the pane from the chain, which [`anchor_chain`]
+/// refuses. A changed reporter fails outright. Argv and working directory are
+/// per-observation evidence, not identity, so they are not compared.
+pub(crate) fn collect_ancestry(reporter: ProcessIdentity) -> Result<Ancestry, String> {
     let mut chain: Vec<ChainLink> = Vec::with_capacity(8);
-    let mut pid = peer.pid;
+    let mut ended = None;
+    let mut pid = reporter.pid;
+    let mut argv_total = 0usize;
     for _ in 0..MAX_ATTRIBUTION_ANCESTORS {
-        let Some((parent, start, ProcessState::Running)) = read_process(pid)? else {
-            return Err("the hook ancestry is no longer live".to_string());
+        let (parent, start) = match read_process(pid) {
+            Ok(Some((parent, start, ProcessState::Running))) => (parent, start),
+            Err(error) if !chain.is_empty() => {
+                ended = Some(error);
+                break;
+            }
+            Err(error) => return Err(error),
+            Ok(_) if chain.is_empty() => {
+                return Err("the hook ancestry is no longer live".to_string());
+            }
+            Ok(_) => {
+                ended = Some("the hook ancestry is no longer live".to_string());
+                break;
+            }
         };
-        if chain.is_empty() && start != peer.start {
+        if chain.is_empty() && start != reporter.start {
             return Err("the hook connection's process identity changed".to_string());
         }
-        // The image comes from the same source the emitter check has
-        // always read; an unreadable one refuses the walk exactly as it
-        // always refused the report.
-        let exe = imp::process_exe(pid)?;
+        let exe = match imp::process_exe(pid) {
+            Ok(exe) => exe,
+            Err(error) if chain.is_empty() => return Err(error),
+            Err(error) => {
+                ended = Some(error);
+                break;
+            }
+        };
         let argv = read_process_argv(pid);
+        let link_argv: usize = argv.iter().flatten().map(Vec::len).sum();
+        if argv_total + link_argv > MAX_ARGV_BYTES_PER_WALK {
+            ended = Some(WALK_BUDGET_EXCEEDED.to_string());
+            break;
+        }
+        argv_total += link_argv;
+        // Only an interpreter's entry point is ever resolved against its
+        // working directory (OMP under Bun, and Node to name the unsupported
+        // shape), so only those links record one: a report file then carries
+        // no other process's directory.
+        let cwd = (omp::is_bun_image(&exe) || omp::is_node_image(&exe))
+            .then(|| imp::process_cwd(pid))
+            .flatten();
         chain.push(ChainLink {
             pid,
             ppid: parent,
             start,
             exe,
             argv,
+            cwd,
         });
-        if pid == pane_pid {
-            // Re-read every edge plus every image before returning: a
-            // process that exec'd between the walk and this check is no
-            // longer the process the walk observed, and the report must
-            // not be admitted on the earlier observation. Edges or image
-            // changed both refuse; argv is per-observation evidence the
-            // repeat attribution re-captures rather than an identity
-            // input, so it is not compared here.
-            for link in &chain {
-                if read_process(link.pid)? != Some((link.ppid, link.start, ProcessState::Running))
-                    || imp::process_exe(link.pid)
-                        .map_err(|_| ())
-                        .unwrap_or_default()
-                        != link.exe
-                {
-                    return Err("the hook ancestry changed during attribution".to_string());
-                }
-            }
-            check_walk_argv_budget(&chain)?;
-            return Ok(chain);
-        }
         if parent == 0 || chain.iter().any(|link| link.pid == parent) {
             break;
         }
         pid = parent;
     }
-    Err("the hook cannot be attributed to this session's foreground pane".to_string())
+    let unchanged = unchanged_prefix(&chain, |link| {
+        read_process(link.pid).ok().flatten()
+            == Some((link.ppid, link.start, ProcessState::Running))
+            && imp::process_exe(link.pid).ok().as_ref() == Some(&link.exe)
+    });
+    if unchanged == 0 {
+        return Err("the hook ancestry changed during attribution".to_string());
+    }
+    if unchanged < chain.len() {
+        chain.truncate(unchanged);
+        ended = Some("the hook ancestry changed during attribution".to_string());
+    }
+    Ok(Ancestry {
+        links: chain,
+        ended,
+    })
+}
+
+/// How many links, from the reporter up, still pass `still_same`: the
+/// length collection may keep. Separate from the live re-read so the cut is
+/// testable without processes that change on cue.
+fn unchanged_prefix(chain: &[ChainLink], still_same: impl Fn(&ChainLink) -> bool) -> usize {
+    chain.iter().take_while(|link| still_same(link)).count()
+}
+
+/// Cut a collected chain at the session's pane process: the second half of
+/// attribution, and the part that ties the chain to one launch.
+///
+/// The returned slice runs from the reporter up to and including the pane
+/// link, the shape every per-kind corridor reads (reporter first, pane anchor
+/// last). The pane must appear in the chain with the anchor's pid and, when
+/// the anchor carries one, its start token; a chain that never reached it —
+/// too deep, broken by an unreadable process, or collected under another
+/// launch's pane — refuses, naming `ended` as context when collection gave
+/// one.
+///
+/// The chain may come from a report file, so the kept slice is checked for
+/// the shape collection guarantees and the corridors rely on: each link the
+/// child of the one above it (Claude's corridor is positional), no pid twice,
+/// at most [`MAX_ATTRIBUTION_ANCESTORS`] links, no link over the per-process
+/// argv budget, and the walk budget over the whole slice. Evidence above the
+/// pane never counts against a report. A recorded link over the per-process
+/// budget refuses rather than counting as missing evidence: collection never
+/// produces one, so it can only come from a file this build did not write.
+pub(crate) fn anchor_chain<'c>(
+    chain: &'c [ChainLink],
+    ended: Option<&str>,
+    pane: PaneAnchor,
+) -> Result<&'c [ChainLink], String> {
+    let index = chain
+        .iter()
+        .take(MAX_ATTRIBUTION_ANCESTORS)
+        .position(|link| link.pid == pane.pid && pane.start.is_none_or(|start| link.start == start))
+        .ok_or_else(|| match ended {
+            // Collection rarely reaches the top on its own: it usually stops
+            // at an ancestor it may not read (pid 1, for one), so its reason
+            // is context for the refusal, never the refusal itself.
+            Some(ended) => format!("{NOT_ATTRIBUTABLE} (ancestry collection stopped: {ended})"),
+            None => NOT_ATTRIBUTABLE.to_string(),
+        })?;
+    let kept = &chain[..=index];
+    let contiguous = kept.windows(2).all(|pair| pair[0].ppid == pair[1].pid);
+    let distinct = kept
+        .iter()
+        .enumerate()
+        .all(|(i, link)| kept[..i].iter().all(|earlier| earlier.pid != link.pid));
+    if !contiguous || !distinct {
+        return Err("the hook ancestry is not one unbroken chain of parents".to_string());
+    }
+    if kept
+        .iter()
+        .any(|link| link_argv_bytes(link) > MAX_ARGV_BYTES_PER_PROCESS)
+    {
+        return Err(
+            "a command line in the hook ancestry exceeds the per-process evidence budget"
+                .to_string(),
+        );
+    }
+    check_walk_argv_budget(kept)?;
+    Ok(kept)
+}
+
+/// Walk the live ancestry from a hook connection's process to the owned
+/// pane: [`collect_ancestry`] followed by [`anchor_chain`] at the pane's pid.
+/// The pane is matched by pid alone, as the live walk always matched it;
+/// collection has already re-verified every link it kept. It decides
+/// NOTHING about vendors — the per-kind step applies its own corridor and
+/// runtime recognition to the returned chain.
+pub(crate) fn walk_to_pane(peer: ProcessIdentity, pane_pid: u32) -> Result<Vec<ChainLink>, String> {
+    let ancestry = collect_ancestry(peer)?;
+    anchor_chain(
+        &ancestry.links,
+        ancestry.ended.as_deref(),
+        PaneAnchor {
+            pid: pane_pid,
+            start: None,
+        },
+    )
+    .map(<[ChainLink]>::to_vec)
 }
 
 /// Whether raw argv spells the supported hook invocation: the installed
@@ -819,13 +987,23 @@ mod imp {
     /// The raw bytes of `/proc/<pid>/exe`: the same source the emitter
     /// check has always read, exposed so the shared walk can capture the
     /// image once per edge instead of every consumer re-reading it.
-    /// Failures (gone, foreign uid, non-dumpable) refuse the walk, as
-    /// they always refused the report.
+    /// Failures (gone, foreign uid, non-dumpable) end collection at that
+    /// process, which refuses the report when the pane lies above it.
     pub(super) fn process_exe(pid: u32) -> Result<Vec<u8>, String> {
         use std::os::unix::ffi::OsStrExt;
         std::fs::read_link(format!("/proc/{pid}/exe"))
             .map(|path| path.as_os_str().as_bytes().to_vec())
             .map_err(|error| format!("reading process {pid} executable: {error}"))
+    }
+
+    /// The process's current working directory, for resolving an entry
+    /// point the process was handed as a relative spelling. `None` on any
+    /// failure: the caller treats it as missing evidence.
+    pub(super) fn process_cwd(pid: u32) -> Option<Vec<u8>> {
+        use std::os::unix::ffi::OsStrExt;
+        std::fs::read_link(format!("/proc/{pid}/cwd"))
+            .ok()
+            .map(|path| path.as_os_str().as_bytes().to_vec())
     }
 
     /// Whether raw `exe` bytes name a native Codex image: the basename
@@ -1406,6 +1584,13 @@ mod imp {
     /// caller already captured.
     pub(super) fn is_codex_image(exe: &[u8]) -> bool {
         exe.rsplit(|byte| *byte == b'/').next() == Some(b"codex".as_slice())
+    }
+
+    /// No working-directory read on macOS: OMP's relative entry resolution
+    /// has never had one here (it read `/proc`), so a relative spelling
+    /// stays unresolved exactly as before.
+    pub(super) fn process_cwd(_pid: u32) -> Option<Vec<u8>> {
+        None
     }
 
     /// The bounded argv region of a fresh `KERN_PROCARGS2` buffer: the
@@ -2032,6 +2217,275 @@ mod tests {
         );
     }
 
+    /// Spec: collection starts at the reporter, which must still be the
+    /// process the caller observed, and climbs past it with evidence.
+    ///
+    /// Why: the hook collects its own ancestry with no pane to stop at, so
+    /// collection must carry the reporter's identity check on its own; a
+    /// recycled pid answering for the reporter would otherwise lend its
+    /// ancestry to a report it never made.
+    #[farhelm_testtrace::test]
+    fn collection_starts_at_the_live_reporter_and_climbs() {
+        let me = std::process::id();
+        let peer = ProcessIdentity::read(me).expect("this process is live");
+        let parent = read_process(me)
+            .expect("read this process")
+            .expect("this process is listed")
+            .0;
+        assert!(
+            ProcessIdentity::read(parent).is_some() && imp::process_exe(parent).is_ok(),
+            "fixture premise: the test runner's parent is live and its image readable"
+        );
+        let chain = collect_ancestry(peer)
+            .expect("a live process collects its ancestry")
+            .links;
+        assert_eq!(chain[0].pid, me);
+        assert_eq!(chain[0].start, peer.start);
+        assert_eq!(
+            chain[1].pid, parent,
+            "collection climbs to the reporter's parent"
+        );
+        let stale = ProcessIdentity {
+            pid: me,
+            start: peer.start.wrapping_add(1),
+        };
+        let error = collect_ancestry(stale).expect_err("a recycled reporter refuses");
+        assert!(error.contains("identity changed"), "{error}");
+    }
+
+    /// Spec: the live walk keeps the chain from the reporter up to the named
+    /// pane process, and refuses a pid that is not among its ancestors.
+    ///
+    /// Why: this is the composition the supervisor's live admission runs;
+    /// the split must reach the same pane the old single walk reached.
+    #[farhelm_testtrace::test]
+    fn the_live_walk_stops_at_the_pane_and_refuses_strangers() {
+        let me = std::process::id();
+        let peer = ProcessIdentity::read(me).expect("this process is live");
+        let parent = read_process(me).expect("read").expect("listed").0;
+        let chain = walk_to_pane(peer, parent).expect("the parent is in the ancestry");
+        assert_eq!(
+            chain.iter().map(|link| link.pid).collect::<Vec<_>>(),
+            [me, parent]
+        );
+        let mut stranger = crate::procs::sleeper::spawn(&[]);
+        let refused = walk_to_pane(peer, stranger.id());
+        let _ = stranger.kill();
+        let _ = stranger.wait();
+        let error = refused.expect_err("a process outside the ancestry is not its pane");
+        assert!(error.starts_with(NOT_ATTRIBUTABLE), "{error}");
+    }
+
+    /// A synthetic five-link ancestry, each link the child of the next:
+    /// reporter 12, trampoline 11, runtime 10 as the pane process, then the
+    /// tmux server 9 and its parent 8 above the pane, which collection
+    /// gathers because it cannot know where the pane is.
+    fn ancestry_above_a_pane() -> Vec<ChainLink> {
+        let mut chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(11, "/bin/sh", &["/bin/sh", "-c", "farhelm internal hook"]),
+            corridor_link(10, "/opt/agent/bin/agent", &["agent"]),
+            corridor_link(9, "/usr/bin/tmux", &["tmux"]),
+            corridor_link(8, "/usr/lib/systemd/systemd", &["systemd", "--user"]),
+        ];
+        for link in &mut chain {
+            link.ppid = link.pid - 1;
+        }
+        chain
+    }
+
+    /// The anchor of [`ancestry_above_a_pane`]'s pane process while alive.
+    const LIVE_PANE: PaneAnchor = PaneAnchor {
+        pid: 10,
+        start: Some(10_000),
+    };
+
+    /// Spec: anchoring keeps the chain from the reporter through the pane
+    /// process, matched by pid and start token while the pane process is
+    /// alive and by pid alone once it has exited.
+    ///
+    /// Why: the anchor is what ties recorded evidence to one launch. Every
+    /// launch runs a new pane process, so a chain collected under an
+    /// earlier launch names another pid (or the same pid with another
+    /// start token) and must not attribute to this one.
+    #[farhelm_testtrace::test]
+    fn anchoring_keeps_the_chain_up_to_the_launch_pane() {
+        let chain = ancestry_above_a_pane();
+        let kept = anchor_chain(&chain, None, LIVE_PANE).expect("the live pane anchors");
+        assert_eq!(
+            kept.iter().map(|link| link.pid).collect::<Vec<_>>(),
+            [12, 11, 10]
+        );
+        let dead = PaneAnchor {
+            pid: 10,
+            start: None,
+        };
+        let kept = anchor_chain(&chain, None, dead).expect("a dead pane anchors by pid");
+        assert_eq!(kept.len(), 3);
+        let recycled = PaneAnchor {
+            pid: 10,
+            start: Some(10_001),
+        };
+        let error = anchor_chain(&chain, None, recycled).expect_err("another launch's pane");
+        assert!(error.contains("cannot be attributed"), "{error}");
+        let elsewhere = PaneAnchor {
+            pid: 7,
+            start: None,
+        };
+        let error = anchor_chain(
+            &chain[..2],
+            Some("the hook ancestry is no longer live"),
+            elsewhere,
+        )
+        .expect_err("a chain that never reached the pane refuses");
+        assert!(error.starts_with(NOT_ATTRIBUTABLE), "{error}");
+        assert!(
+            error.contains("no longer live"),
+            "why collection stopped is kept as context: {error}"
+        );
+        let deep: Vec<ChainLink> = (0..=MAX_ATTRIBUTION_ANCESTORS as u32)
+            .map(|i| {
+                let mut link = corridor_link(1000 - i, "/bin/sh", &["sh"]);
+                link.ppid = 999 - i;
+                link
+            })
+            .collect();
+        let past_depth = PaneAnchor {
+            pid: deep[MAX_ATTRIBUTION_ANCESTORS].pid,
+            start: None,
+        };
+        let error = anchor_chain(&deep, None, past_depth).expect_err("a pane past the depth bound");
+        assert!(error.starts_with(NOT_ATTRIBUTABLE), "{error}");
+    }
+
+    /// Spec: an anchored chain must be one unbroken line of parents with no
+    /// pid twice.
+    ///
+    /// Why: Claude's corridor is positional ("the pane's direct child"), and
+    /// a chain read from a report file is input, not collection's own
+    /// output; a chain with a gap or a repeat would let position mean
+    /// something it does not.
+    #[farhelm_testtrace::test]
+    fn anchoring_refuses_a_broken_or_looping_chain() {
+        let mut gap = ancestry_above_a_pane();
+        gap[0].ppid = 99;
+        let error = anchor_chain(&gap, None, LIVE_PANE).expect_err("a gap refuses");
+        assert!(error.contains("unbroken chain"), "{error}");
+        let mut repeat = ancestry_above_a_pane();
+        repeat[1] = repeat[0].clone();
+        repeat[1].ppid = 10;
+        repeat[0].ppid = 12;
+        let error = anchor_chain(&repeat, None, LIVE_PANE).expect_err("a repeat refuses");
+        assert!(error.contains("unbroken chain"), "{error}");
+    }
+
+    /// Spec: the walk's command-line budget is judged over the anchored
+    /// slice only: evidence above the pane never refuses a report, while
+    /// evidence below it does, and so does one link over the per-process
+    /// budget.
+    ///
+    /// Why: collection gathers ancestors above the pane (the tmux server,
+    /// the service manager) whose command lines say nothing about the
+    /// report. Counting them would let an unrelated long command line
+    /// refuse a valid report, and not counting the reporter's side would
+    /// let a denial-of-observation through.
+    #[farhelm_testtrace::test]
+    fn the_argv_budget_covers_only_the_anchored_slice() {
+        let oversized = "x".repeat(MAX_ARGV_BYTES_PER_PROCESS);
+        let many: Vec<&str> = std::iter::repeat_n(oversized.as_str(), 17).collect();
+        let mut above = ancestry_above_a_pane();
+        above[4].argv = Some(many.iter().map(|arg| arg.as_bytes().to_vec()).collect());
+        assert!(anchor_chain(&above, None, LIVE_PANE).is_ok());
+        let mut one_long = ancestry_above_a_pane();
+        one_long[1].argv = Some(vec![oversized.as_bytes().to_vec(); 2]);
+        let error =
+            anchor_chain(&one_long, None, LIVE_PANE).expect_err("over the per-process budget");
+        assert!(error.contains("per-process evidence budget"), "{error}");
+        // Seventeen trampolines of exactly one per-process budget each sit
+        // below the pane: no single link is over, the slice as a whole is.
+        let mut many_links: Vec<ChainLink> = (0..17u32)
+            .map(|i| {
+                let mut link = corridor_link(100 - i, "/bin/sh", &[oversized.as_str()]);
+                link.ppid = 99 - i;
+                link
+            })
+            .collect();
+        many_links.push(corridor_link(83, "/opt/agent/bin/agent", &["agent"]));
+        let pane = PaneAnchor {
+            pid: 83,
+            start: None,
+        };
+        let error = anchor_chain(&many_links, None, pane).expect_err("over the walk budget");
+        assert!(error.contains("attribution budget"), "{error}");
+    }
+
+    /// Spec: collection keeps the links from the reporter up to the first
+    /// one that changed while it was observed, and nothing above it.
+    ///
+    /// Why: a process that exec'd or exited mid-collection no longer is the
+    /// process the chain describes. Cutting there keeps a change far above
+    /// the pane harmless while a change at or below the pane drops the pane,
+    /// which anchoring then refuses.
+    #[farhelm_testtrace::test]
+    fn a_link_that_changed_cuts_the_chain_below_it() {
+        let chain = ancestry_above_a_pane();
+        let above_pane = unchanged_prefix(&chain, |link| link.pid != 9);
+        assert_eq!(above_pane, 3);
+        assert!(anchor_chain(&chain[..above_pane], None, LIVE_PANE).is_ok());
+        let below_pane = unchanged_prefix(&chain, |link| link.pid != 11);
+        assert_eq!(below_pane, 1);
+        assert!(anchor_chain(&chain[..below_pane], None, LIVE_PANE).is_err());
+        assert_eq!(unchanged_prefix(&chain, |link| link.pid != 12), 0);
+    }
+
+    /// Spec: a relative OMP entry spelling resolves against the working
+    /// directory the chain recorded for that process.
+    ///
+    /// Why: a recorded chain is read after the process it describes may
+    /// have exited, so resolution cannot fall back to the live process's
+    /// working directory; without the recorded one, a launch that named its
+    /// entry relatively would stop attributing.
+    #[farhelm_testtrace::test]
+    fn a_relative_omp_entry_resolves_against_the_recorded_working_directory() {
+        let scratch = farhelm_teststate::tempdir().expect("fixture directory");
+        let relative = "node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
+        let entry = scratch.path().join(relative);
+        std::fs::create_dir_all(entry.parent().expect("bundle parent")).expect("bundle layout");
+        std::fs::write(&entry, b"fixture entry").expect("entry file");
+        let cwd = os_bytes(scratch.path());
+        let resolved = resolved_omp_entry(Some(&cwd), relative.as_bytes())
+            .expect("the relative spelling resolves");
+        assert!(is_omp_bundle_entry(&resolved), "{resolved:?}");
+        assert!(
+            resolved_omp_entry(None, b"./cli.js").is_none(),
+            "a relative spelling without a recorded directory resolves to nothing"
+        );
+    }
+
+    /// Spec: OMP's corridor resolves a Bun runtime's relative entry spelling
+    /// against the working directory recorded on that link.
+    ///
+    /// Why: the corridor reads a recorded chain, not live processes; this
+    /// pins that it uses the emitter link's own recorded directory.
+    #[farhelm_testtrace::test]
+    fn the_omp_corridor_reads_the_recorded_working_directory() {
+        let scratch = farhelm_teststate::tempdir().expect("fixture directory");
+        let relative = "node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
+        let entry = scratch.path().join(relative);
+        std::fs::create_dir_all(entry.parent().expect("bundle parent")).expect("bundle layout");
+        std::fs::write(&entry, b"fixture entry").expect("entry file");
+        let mut runtime = corridor_link(11, "/opt/bun/bin/bun", &["bun", relative]);
+        runtime.cwd = Some(os_bytes(scratch.path()));
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            runtime,
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("the relative entry admits through the recorded directory");
+        assert_eq!(emitter.pid, 11);
+    }
+
     /// One synthetic chain link: pid/start are distinct per link so an
     /// admitted emitter is identifiable as the intended process, and argv
     /// is spelled exactly as the kernel would capture it (argv[0] is the
@@ -2043,6 +2497,7 @@ mod tests {
             start: u64::from(pid) * 1_000,
             exe: exe.as_bytes().to_vec(),
             argv: Some(argv.iter().map(|arg| arg.as_bytes().to_vec()).collect()),
+            cwd: None,
         }
     }
 
@@ -2053,6 +2508,7 @@ mod tests {
             start: u64::from(pid) * 1_000,
             exe: exe.as_bytes().to_vec(),
             argv: None,
+            cwd: None,
         }
     }
 
@@ -3112,14 +3568,13 @@ mod tests {
         std::fs::write(&entry, b"fixture entry").expect("entry file");
         let shim = scratch.path().join("omp-shim");
         std::os::unix::fs::symlink(&entry, &shim).expect("entry symlink");
-        let me = std::process::id();
-        let resolved = resolved_omp_entry(me, &os_bytes(&shim)).expect("the shim resolves");
+        let resolved = resolved_omp_entry(None, &os_bytes(&shim)).expect("the shim resolves");
         assert!(
             is_omp_bundle_entry(&resolved),
             "the canonical path names the bundle: {resolved:?}"
         );
         assert!(
-            resolved_omp_entry(me, b"/nonexistent-omp-entry-xyz").is_none(),
+            resolved_omp_entry(None, b"/nonexistent-omp-entry-xyz").is_none(),
             "a dangling spelling resolves to nothing"
         );
         let shim_arg = shim.to_str().expect("UTF-8 fixture path").to_owned();

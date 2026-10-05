@@ -382,8 +382,7 @@ pub(super) fn omp_corridor(
         if is_node_image(&link.exe)
             && link.argv.as_deref().is_some_and(|argv| {
                 argv.len() >= 2
-                    && (is_omp_bundle_entry(&argv[1])
-                        || omp_resolved_entry_matches(link.pid, &argv[1]))
+                    && (is_omp_bundle_entry(&argv[1]) || omp_resolved_entry_matches(link, &argv[1]))
             })
         {
             return Err("Node-executed OMP is not a supported runtime".to_string());
@@ -428,31 +427,34 @@ pub(super) fn is_omp_runtime_link(link: &ChainLink) -> bool {
     link.argv.as_deref().is_some_and(|argv| {
         argv.len() >= 2
             && omp_image_basename(&argv[0]) == b"bun"
-            && (is_omp_bundle_entry(&argv[1]) || omp_resolved_entry_matches(link.pid, &argv[1]))
+            && (is_omp_bundle_entry(&argv[1]) || omp_resolved_entry_matches(link, &argv[1]))
     })
 }
 
 /// Whether the canonical path behind one entry spelling is the selected
 /// OMP bundle or source tree. `None` on any failure — undecodable bytes,
-/// an unreadable working directory, a dangling link — so callers treat
-/// unresolvable spellings as the raw bytes they already refused.
-pub(super) fn omp_resolved_entry_matches(pid: u32, entry: &[u8]) -> bool {
-    resolved_omp_entry(pid, entry).is_some_and(|resolved| is_omp_bundle_entry(&resolved))
+/// a relative spelling with no recorded working directory, a dangling
+/// link — so callers treat unresolvable spellings as the raw bytes they
+/// already refused.
+pub(super) fn omp_resolved_entry_matches(link: &ChainLink, entry: &[u8]) -> bool {
+    resolved_omp_entry(link.cwd.as_deref(), entry)
+        .is_some_and(|resolved| is_omp_bundle_entry(&resolved))
 }
 
 /// The canonical path behind one entry spelling, or `None` when it
-/// cannot be established. Blocking filesystem I/O: callers run on the
-/// attribution thread, never the report path's async context.
-pub(super) fn resolved_omp_entry(pid: u32, entry: &[u8]) -> Option<Vec<u8>> {
+/// cannot be established. A relative spelling resolves against `cwd`, the
+/// SUBJECT's working directory as the chain recorded it — never this
+/// process's, and never a live read, so a chain keeps its meaning after
+/// the process it describes has exited. Blocking filesystem I/O: callers
+/// run on the attribution thread, never an async context.
+pub(super) fn resolved_omp_entry(cwd: Option<&[u8]>, entry: &[u8]) -> Option<Vec<u8>> {
+    use std::os::unix::ffi::OsStrExt;
     let entry = std::str::from_utf8(entry).ok()?;
     let path = std::path::Path::new(entry);
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        // A relative spelling resolves against the SUBJECT's working
-        // directory, read from the kernel — never this process's.
-        let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
-        cwd.join(path)
+        std::path::Path::new(std::ffi::OsStr::from_bytes(cwd?)).join(path)
     };
     std::fs::canonicalize(absolute)
         .ok()
