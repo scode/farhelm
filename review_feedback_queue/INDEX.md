@@ -20,8 +20,6 @@ One line per open item. This file must always match the feedback files in this d
 - `feedback-cancel.md` — Feedback forwarding can be cancelled with its HTTP request.
 - `snapshot-root.md` — Writable snapshot may pass replacement checkout ownership.
 - `grok-trust.md` — Choosing Grok preserves incompatible workspace trust.
-- `setup-inline-cancel.md` — Cancelled host setup can turn off future setup questions.
-- `addhost-cancel.md` — Cancelled Add host can still accept a queued setup answer.
 - `font-focus.md` — Text-size buttons leave focus outside the terminal at the limits.
 - `installer-directory-target.md` — An update can report success while leaving the app unlaunchable.
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the

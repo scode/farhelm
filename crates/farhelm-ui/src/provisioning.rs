@@ -2515,7 +2515,12 @@ pub(crate) fn ProvisioningPanel(
     let submit_base = base.clone();
     let submit_progress = request_progress.clone();
     let notice_host_name = host.name.clone();
-    let confirm = use_callback(move |_| {
+    let preference_base = base.clone();
+    // `skip_future` is setup's permanent answer ("don't ask in the
+    // future"), remembered only once this confirmation has consumed the plan
+    // below: an answer queued behind Cancel finds no plan and must change no
+    // preference either. Every other confirmation passes `false`.
+    let confirm = use_callback(move |skip_future: bool| {
         let Some(plan) = pending.peek().clone() else {
             return;
         };
@@ -2552,6 +2557,13 @@ pub(crate) fn ProvisioningPanel(
         // of view too. A refusal or transport ambiguity cannot prove the
         // helm left this one-use id unconsumed.
         pending.set(None);
+        if skip_future {
+            preferences.0.write().skip_host_setup_confirmation = Some(true);
+            store_preference(
+                &preference_base,
+                PreferenceValue::HostSetupConfirmation(true),
+            );
+        }
         action_error.set(None);
         action_warning.set(None);
         if plan.binding.kind.sets_up_locally() && plan.operation == ProvisioningOperation::Add {
@@ -2592,7 +2604,7 @@ pub(crate) fn ProvisioningPanel(
     use_effect(move || {
         if auto_submit_add() && pending.peek().is_some() {
             auto_submit_add.set(false);
-            confirm.call(());
+            confirm.call(false);
         }
     });
 
@@ -2753,16 +2765,9 @@ pub(crate) fn ProvisioningPanel(
                             SetupPlanConfirmation {
                                 confirmation: plan.confirmation,
                                 busy: page_busy,
-                                on_confirm: move |skip_future| {
-                                    if skip_future {
-                                        preferences.0.write().skip_host_setup_confirmation = Some(true);
-                                        store_preference(
-                                            &base,
-                                            PreferenceValue::HostSetupConfirmation(true),
-                                        );
-                                    }
-                                    confirm.call(());
-                                },
+                                // The permanent answer is remembered inside
+                                // `confirm`, once it has consumed the plan.
+                                on_confirm: move |skip_future| confirm.call(skip_future),
                                 on_cancel: move |_| {
                                     settings_dialog::return_focus_to_row(host_id);
                                     pending.set(None);
@@ -2800,7 +2805,7 @@ pub(crate) fn ProvisioningPanel(
                             UninstallConfirmation {
                                 confirmation: plan.confirmation,
                                 busy: page_busy,
-                                on_confirm: move |_| confirm.call(()),
+                                on_confirm: move |_| confirm.call(false),
                                 on_cancel: move |_| {
                                     settings_dialog::return_focus_to_row(host_id);
                                     pending.set(None);
@@ -2815,7 +2820,7 @@ pub(crate) fn ProvisioningPanel(
                         confirmation: plan.confirmation,
                         busy: page_busy,
                         confirm_label: "confirm update",
-                        on_confirm: move |_| confirm.call(()),
+                        on_confirm: move |_| confirm.call(false),
                         on_cancel: move |_| {
                             if !ops.busy_now() {
                                 pending.set(None);
