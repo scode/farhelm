@@ -96,4 +96,16 @@
     { host: "local", cwd: "~/src/api", age: 172800 },
     { host: "local", cwd: "~/work/notes", age: 259200 },
   ],
+
+  // Launch templates, for the Launch templates page. Staging creates these on
+  // the helm through its real API (they are not rewritten in transit), in
+  // the helm's own template shape, except that `host` names one of the hosts
+  // above. Models and efforts must be ones the launcher's catalog offers for
+  // the agent, or applying the template is refused. Two of them are meant to
+  // be applied one after the other: one picks the agent, the other the place.
+  templates: [
+    { name: "codex-deep", fields: { kind: "agent", agent: "codex", model: "gpt-6.1-sol", effort: "high" } },
+    { name: "api-repo", fields: { host: "build-box", destination: { folder: "~/src/api" } } },
+    { name: "quick-claude", fields: { kind: "agent", agent: "claude", effort: "low" } },
+  ],
 }

@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-04T21:57:33Z",
-  "captured_from": "910a511362b8b4cfae6601a537157479fd9a0358",
-  "commit": "6c734dead6984c35926e4c7e8fb92d63f4a378df",
+  "captured_at": "2026-10-04T23:14:10Z",
+  "captured_from": "13ae87f7713fa359bdbd9f9b4bf448e8555943be",
+  "commit": "978fc58075f6b6f3ea3f9dac318cf258f25487b5",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -32,6 +32,26 @@
     "first-session/this-machine": {
       "height": 378,
       "width": 1332
+    },
+    "launch-templates/applied": {
+      "height": 558,
+      "width": 1860
+    },
+    "launch-templates/apply": {
+      "height": 562,
+      "width": 1800
+    },
+    "launch-templates/edit-form": {
+      "height": 1396,
+      "width": 1860
+    },
+    "launch-templates/panel": {
+      "height": 1396,
+      "width": 1860
+    },
+    "launch-templates/templates-button": {
+      "height": 294,
+      "width": 1020
     },
     "manage-hosts/app-settings": {
       "height": 1310,

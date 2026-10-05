@@ -57,6 +57,7 @@ interface HostRow {
   id: number;
   kind: string;
   destination: string | null;
+  identity: string | null;
 }
 
 /** The helm's host id for every scenario host key, matched the way staging matched them. */
@@ -73,6 +74,31 @@ async function hostIds(request: APIRequestContext, scenario: Scenario): Promise<
     ids.set(host.key, row.id);
   }
   return ids;
+}
+
+/**
+ * Create the scenario's launch templates on the staged helm, through the same
+ * API the templates panel uses, so they are real templates and not a rewrite.
+ * A template's `host` is a scenario host key until here, where it becomes
+ * that host's install identity.
+ */
+export async function stageTemplates(request: APIRequestContext, scenario: Scenario): Promise<void> {
+  const response = await request.get("/api/hosts");
+  expect(response.ok(), "GET /api/hosts").toBeTruthy();
+  const rows = ((await response.json()) as { hosts: HostRow[] }).hosts;
+  for (const template of scenario.templates ?? []) {
+    const fields: Record<string, unknown> = { ...template.fields };
+    if (template.fields.host !== undefined) {
+      const host = scenario.hosts.find((candidate) => candidate.key === template.fields.host);
+      const row = host?.kind === "local"
+        ? rows.find((candidate) => candidate.kind === "local")
+        : rows.find((candidate) => candidate.destination === host?.ssh);
+      if (!row?.identity) throw new Error(`template ${template.name}: host ${template.fields.host} has no identity yet`);
+      fields.host = row.identity;
+    }
+    const put = await request.put(`/api/templates/${encodeURIComponent(template.name)}`, { data: fields });
+    expect(put.ok(), `create template ${template.name}: ${await put.text()}`).toBeTruthy();
+  }
 }
 
 /** Fetch the real reply for a routed GET, minus the headers a rewritten body invalidates. */

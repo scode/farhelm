@@ -76,6 +76,19 @@ export interface ScenarioAddHost {
   needs_tmux?: boolean;
 }
 
+/**
+ * One launch template the helm holds (docs screenshots only). Unlike the
+ * launch history, templates are not rewritten in transit: staging creates
+ * them through the helm's real API, so the panel and the launcher read them
+ * back as they would any template. `fields` is the helm's own template shape,
+ * except that `host`, when present, names a scenario host key; staging swaps
+ * in that host's install identity, which is how a template names its host.
+ */
+export interface ScenarioTemplate {
+  name: string;
+  fields: Record<string, unknown> & { host?: string };
+}
+
 /** One remembered folder, offered under the launcher's folder field (docs screenshots only). */
 export interface ScenarioFolder {
   host: string;
@@ -114,6 +127,7 @@ export interface Scenario {
   launch_history?: ScenarioLaunch[];
   folders?: ScenarioFolder[];
   add_host?: ScenarioAddHost;
+  templates?: ScenarioTemplate[];
 }
 
 const STATUSES: TargetStatus[] = ["running", "waiting", "idle", "exited"];
@@ -231,7 +245,16 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
     if (addHost.needs_tmux !== undefined && typeof addHost.needs_tmux !== "boolean") fail("add_host.needs_tmux must be a boolean");
   }
 
-  return { viewport, hosts, sessions, launch_history: launchHistory, folders, add_host: addHost };
+  const templates = (raw.templates as ScenarioTemplate[] | undefined) ?? [];
+  const templateNames = new Set<string>();
+  for (const template of templates) {
+    if (!template.name || templateNames.has(template.name)) fail(`templates: names must be present and unique`);
+    templateNames.add(template.name);
+    if (typeof template.fields !== "object" || template.fields === null) fail(`template ${template.name}: fields must be an object`);
+    if (template.fields.host !== undefined && !keys.has(template.fields.host)) fail(`template ${template.name}: unknown host`);
+  }
+
+  return { viewport, hosts, sessions, launch_history: launchHistory, folders, add_host: addHost, templates };
 }
 
 /** The env var handing the add-host stand-in's configuration (JSON) to the stack script. */
