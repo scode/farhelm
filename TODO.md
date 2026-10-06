@@ -137,24 +137,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
-- **Make sense of the permission choices.** The template editor's permissions menu, with Claude as the agent type,
-  offers leave as is, reset to default, yolo, approve, smart approve and chat, when the expected choice was simply YOLO
-  or not. Per SPEC.md that is the shared permission vocabulary across agent types, and smart approve and chat are Goose
-  modes. The same form also has a separate "runs without approval prompts" field (the YOLO assertion a command launch
-  makes). Assess what each choice means for each agent type, whether a form should offer only what the selected agent
-  type supports, and whether the two fields should be one, then decide what the user should see. Plan:
-  `plans/queue/templates-dialog-overhaul.md`.
-
-- **Label the repository field in the template editor.** Choosing "fresh GitHub checkout" as a template's destination
-  makes a large, blank, unlabeled text box appear under the host field, and the user has to guess that it is for the
-  GitHub repository. Give it a label and placeholder like the form's other fields, and size it like them. Plan:
-  `plans/queue/templates-dialog-overhaul.md`.
-
-- **Templates seem impossible to edit once added.** Once a template was saved, there seemed to be no way to edit it.
-  SPEC.md says templates are edited in the Templates panel, and each saved template's row there has an "edit" button
-  that loads it into the form below. Find out whether that button is missing, broken, or just hard to find, and fix it
-  so editing a template is obvious. Plan: `plans/queue/templates-dialog-overhaul.md`.
-
 - **Plain hover text for the version readout.** Hovering the version at the top of the sidebar says "this client was
   built as farhelm 0.24.0", which is jargon. Say instead something like: "This is version 0.24.0 of Farhelm. When
   Farhelm detects there is a newer version available, this will turn red and you can click it to restart and upgrade."

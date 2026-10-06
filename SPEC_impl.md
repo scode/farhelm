@@ -3760,11 +3760,26 @@ actions (agent type, model, effort, permissions, trust, host, folder, repository
 no such action (the launch kind, the command fields and the command launch's declared agent type, the approve, smart
 approve and chat permissions, and a choice reset to its default). That replay is what makes remembered defaults, recent
 setups and a pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking
-for templates. The Templates panel is a modal dialog opened by a button beside New; its form offers every launcher
-field, each with a "leave as is" state and, where the field has a default, a "reset to default" state. A rename saves
-the new name before deleting the old one, so a failure in between leaves both; saving under a name another template
-already has is refused in the panel rather than overwriting that template. The launcher reads templates when it opens
-and again whenever the Templates dialog closes.
+for templates. The Templates dialog beside New has a bounded list column and a selected-template editor; at phone width
+only the list or editor is shown, with a back link. A draft holds the wire fields directly, so absence means no visible
+field, while explicit null resets and false approval assertions survive editing. Add/remove actions change presence;
+defaults are values inside the controls. The editor's agent/command/don't-switch selector writes the kind, with
+don't-switch offering only placement and name. A kindless stored template is inferred in the draft only, marked unsaved
+against its original baseline; saving explicitly stores that switch. Per-harness choices use the shared capability
+answers and release catalog, not another agent table. Model text is unrestricted and suggestions use the existing
+catalog filter; other incompatible choices stay visible and refuse save until corrected or removed. Fields need not form
+a complete launch, because another stacked template can supply what they omit.
+
+Opening another row, new, duplicate, mobile back, close and Escape share a pending departure and the same inline
+save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
+copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
+saving under a name another template already has is refused in the panel rather than overwriting that template. A
+pending or failed name-list read cannot prove a new name is free. Delete retains the stored template client-side for
+about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The notice and its timer
+belong to this mounted dialog, with a generation guarding against an earlier timer expiring a later deletion. Writes are
+serialized and disable navigation until their outcome is known. API last-write-wins semantics remain unchanged; name
+checks do not acquire an atomic cross-client reservation. The launcher reads templates when it opens and again whenever
+the Templates dialog closes, using the existing revision bump and focus return.
 
 ### Agent launches from the CLI
 

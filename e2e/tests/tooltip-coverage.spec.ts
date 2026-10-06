@@ -196,7 +196,21 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   const templates = page.locator('.templates-dialog[role="dialog"]');
   await expect(templates).toBeVisible();
   await expectCovered(page, "templates dialog", ".templates-dialog", 2);
+  await templates.locator(".templates-new").click();
+  await templates.locator(".templates-add").click();
+  await expect(templates.getByRole("group", { name: "add field", exact: true })).toBeVisible();
+  await expectCovered(page, "templates add-field menu", ".templates-add-menu", 3);
+  await templates.locator(".templates-add-menu").getByRole("button", { name: "agent type", exact: true }).click();
+  await templates.getByLabel("agent type", { exact: true }).selectOption("codex");
+  for (const name of ["model", "effort", "approvals", "workspace trust"]) {
+    await templates.locator(".templates-add").click();
+    await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
+  }
+  await expectCovered(page, "templates agent editor", ".templates-editor", 10);
   await templates.locator(".templates-close").click();
+  await expect(templates.locator(".templates-departure")).toBeVisible();
+  await expectCovered(page, "templates unsaved departure", ".templates-departure", 3);
+  await templates.locator(".templates-discard").click();
   await expect(templates).toHaveCount(0);
 
   await page.locator(".new-session-button").click();
