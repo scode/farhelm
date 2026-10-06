@@ -70,3 +70,44 @@ old-release signing-key selection and the sequencing of native override verifica
 confirmed that deferring unavailable native capabilities is the smallest coherent correction and needs no new release or
 test infrastructure. Optional style suggestions that added no material clarity were left alone. Commit/PR wording was
 cold-read independently; the final report receives a separate readability and public-hygiene cold read.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as two squash commits on main: #1682 (the release-test override for the Mac app's update
+check) and then #1683 (the Mac VM bring-up and per-release recipe). Nothing else reached main while they merged.
+
+#### What else was on main, and what lands with it
+
+Nothing that could interact: between the commit the stack was built on and the landing, main gained only the planning
+queue's own bookkeeping. The clone-into-fresh-checkout plan lands right after this one, in the same round. A separate
+reviewer that had not worked on either plan read both against each other before anything merged: they edit different
+paragraphs of SPEC_impl.md and remove different TODO entries, and they merge without conflict.
+
+#### Review before merging
+
+The same reviewer checked that the override cannot weaken how the Mac app verifies an update. It confirmed:
+
+- The override only replaces the answer to "which version is latest". The value goes through the same parser as the
+  site's answer, so it must be a stable version and cannot change where downloads come from; an update still has to be
+  newer than what is installed, so the override cannot downgrade the app.
+- Everything after that is unchanged: downloads come only from get.farhelm.io, the signed checksums must verify against
+  the app's built-in keys with the exact version in their signed comment, the installer must match its signed checksum,
+  and the installer still runs with every `FARHELM_*` variable removed.
+- Restart to update removes the variable before reopening the app, and a test checks that. An app opened from Finder or
+  the Dock never sees a variable exported in a shell anyway; the override reaches the app only when it is started from
+  that shell, opened with `open --env`, or set with `launchctl setenv` (which, unlike the others, survives a relaunch).
+  Its effect is then limited to holding updates at the named stable version, or failing every check if the value is
+  malformed. Anyone who can set the app's environment can already point it at a different `farhelm` program, so this
+  adds no new way in.
+
+One wording point, not changed: the new SPEC_impl.md sentence "The installer already strips every `FARHELM_*` variable"
+is imprecise; it is the updater that removes those variables from the installer's environment.
+
+#### Checks
+
+- Reused: the report's checks. The code on main after the last merge is identical to the final stack they ran on, and
+  nothing but the planning queue's bookkeeping reached main in between.
+- Skipped: running anything again during the landing, for the same reason; and the Mac VM runs, which the report says
+  still need the agent on the Mac host.
+
+Nothing in the report above was made untrue by the landing.
