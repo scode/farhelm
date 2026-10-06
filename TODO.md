@@ -124,7 +124,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   so someone who sends feedback more than once retypes it. When a contact is entered, show a "Re-use for future
   feedback" checkbox, on by default; when it is checked, a successful send remembers the contact and the next feedback
   dialog starts with it filled in. Decide where it is remembered (the helm, so the desktop app and the web UI share it,
-  or the browser) and say so in SPEC.md's Feedback section.
+  or the browser) and say so in SPEC.md's Feedback section. Plan: `plans/queue/remember-feedback-contact.md`.
 
 - **Release-gate coverage for sending feedback.** A Farhelm release has to be able to send feedback to the endpoint that
   is live at farhelm.io, but nothing in the release gate checks that. The endpoint handler's tests run only in the
@@ -185,7 +185,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   missing file, a directory, or a very large file are to be decided when this is picked up.
 
 - **Keyboard quick switcher.** A keyboard shortcut that opens a quick switcher, like Slack's: type to jump to an
-  existing session, or to start a new one. Details TBD.
+  existing session, or to start a new one. Details TBD. Plan: `plans/queue/quick-switcher.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
@@ -221,7 +221,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   late report arrives and Restart works. The bell then shows a stale warning, red and unread if the user has not opened
   it yet, about a problem that no longer exists. Make a notification go away, or visibly mark itself resolved, when its
   condition stops holding. Deciding which of the two, and whether "resolved" counts as read, is part of the work.
-  Deliberately left out of the session-notifications plan (its report lists it as a possible follow-up).
+  Deliberately left out of the session-notifications plan (its report lists it as a possible follow-up). Plan:
+  `plans/queue/resolve-stale-notifications.md`.
 
 - **Keep checking for a silent conversation hook after a supervisor restart.** A session notification tells the user
   when an agent launched with Farhelm's conversation hook still has not said which conversation it is in a minute after
