@@ -1342,6 +1342,12 @@ K1_EXPECTED="✅ Farhelm 1.2.3 is installed.
 
    Open Farhelm from Spotlight or ~/Applications.
 
+💬 I'd love to hear what you think, even a quick throwaway
+   comment. In Farhelm, click ? at the top of the sidebar and
+   choose Send feedback; it comes privately to me, the maintainer.
+   If you'd rather discuss it in the open, file a GitHub issue
+   at https://github.com/scode/farhelm/issues instead.
+
 ℹ️  ~/.local/bin/farhelm was not installed by this installer, so it was renamed
    to ~/.local/bin/${K1_KEPT##*/} - farhelm installation still
    proceeded.
@@ -1705,6 +1711,8 @@ done
 # Approved report text, including blank lines and order. Real updates start
 # from a verified installer-owned pair, so kept-file notices cannot hide a
 # wrong update classification. tmux fixtures isolate the launch prerequisite.
+# Exact update reports also rule out the fresh-install feedback invitation;
+# all three tmux variants must keep unattended update output unchanged.
 # ===========================================================================
 echo
 echo "== closing-message contract =="
@@ -1736,6 +1744,13 @@ assert_closing_message_contract() {
 
    Open Farhelm from Spotlight or ~/Applications.'
     fi
+    expected+="
+
+💬 I'd love to hear what you think, even a quick throwaway
+   comment. In Farhelm, click ? at the top of the sidebar and
+   choose Send feedback; it comes privately to me, the maintainer.
+   If you'd rather discuss it in the open, file a GitHub issue
+   at https://github.com/scode/farhelm/issues instead."
   fi
   expected+='
 
@@ -1883,6 +1898,11 @@ for out_tty, err_tty in ((True, True), (True, False), (False, True), (False, Fal
         plain = re.sub(rb"\x1b\[[0-9;]*m", b"", out)
         plain = re.sub(rb"\x1b\]8;;[^\x1b]*\x1b\\", b"", plain)
         expected = ("✅ Farhelm 1.2.3 is installed.\n\n"
+                    "💬 I'd love to hear what you think, even a quick throwaway\n"
+                    "   comment. In Farhelm, click ? at the top of the sidebar and\n"
+                    "   choose Send feedback; it comes privately to me, the maintainer.\n"
+                    "   If you'd rather discuss it in the open, file a GitHub issue\n"
+                    "   at https://github.com/scode/farhelm/issues instead.\n\n"
                     "   To uninstall later, run: ~/.local/bin/farhelm uninstall\n\n"
                     "⚠️  Farhelm needs tmux 3.7c or newer before it can start.\n"
                     "   This Mac has none. Install it with Homebrew: brew install tmux\n"

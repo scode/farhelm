@@ -1397,6 +1397,7 @@ EOF
     # tmux prerequisite. Fresh-install launch advice follows its remedy. An
     # update keeps the approved restart/session-survival line and also ends
     # with the prescribed reminder after tmux advice. Uninstall stays visible.
+    # Fresh installs invite feedback before the kept-file and uninstall notices.
     # Parse the whole tmux version output, not a matching line inside a banner.
     tmux_have="none"
     meets_floor=0
@@ -1439,6 +1440,13 @@ EOF
       if [ "$meets_floor" -eq 1 ]; then
         printf '\n   Open Farhelm from Spotlight or ~/Applications.\n'
       fi
+      # Updates also run unattended inside the app; invite feedback only when
+      # someone first installs it, before the kept-file and uninstall notices.
+      printf "\n💬 I'd love to hear what you think, even a quick throwaway\n"
+      printf '   comment. In Farhelm, click ? at the top of the sidebar and\n'
+      printf '   choose Send feedback; it comes privately to me, the maintainer.\n'
+      printf "   If you'd rather discuss it in the open, file a GitHub issue\n"
+      printf '   at %shttps://github.com/scode/farhelm/issues%s instead.\n' "$OUT_CYAN" "$OUT_RESET"
     fi
     if [ -n "$KEPT_NOTES" ]; then
       printf '\n%s' "$KEPT_NOTES"
