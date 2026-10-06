@@ -110,7 +110,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   is the existing machinery that can fetch a pinned released one), lets it register and run, then drives the panel's
   update action to the workspace build and asserts the supervisor comes back at the new version with its tmux sessions
   intact. The old half must be a real released artifact, not this tree's build — same-version update tests are exactly
-  what could never see this bug.
+  what could never see this bug. The overall plan, in priority order, is
+  `lore/2026-10-05-release-brick-protection-plan.md`.
 
 - **Remember the feedback contact.** Send feedback's optional field for how to reach the user starts empty every time,
   so someone who sends feedback more than once retypes it. When a contact is entered, show a "Re-use for future
@@ -224,6 +225,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   shortcut to that text in the Mac desktop app (for example "… on any host (⌘N)"), and only there: the web UI and the
   Linux desktop app have no such shortcut, since the browser keeps Cmd+N and Ctrl+N for a new window. Follow-up to the
   new-session-shortcut plan, at the maintainer's request while reviewing its report.
+
+- **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
+  installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
+  told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
+  release that starts a new epoch; once that release has been out long enough (a week, a month), the next epoch may rely
+  on it. Covers the desktop app, the helm, and supervisors. Until this lands, SPEC.md's "Upgrade compatibility and
+  client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
+  is `lore/2026-10-05-release-brick-protection-plan.md`.
 
 ## Doc todo
 
