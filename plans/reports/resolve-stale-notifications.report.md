@@ -101,3 +101,40 @@ ran, and no unresolved behavior or test findings remain.
 The executor implemented and validated the change. Only the required source reviews, resume check, wording cold reads
 and report cold read were delegated. Reviewers did not reproduce runtime results. Private orchestration evidence is
 retained; native reviewer and orchestrator usage counters were unavailable.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as #1690 (recovered session warnings are marked resolved), one squash commit on main.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, the remember-feedback-contact plan landed (#1689, the
+feedback dialog remembering its contact). The two edit different sections of SPEC.md and SPEC_impl.md, remove different
+TODO entries and share no code, and the rebase applied without conflict. Their database changes are in different
+databases: #1689 takes the helm's to version 43, this change takes the supervisor's to version 28. Otherwise main gained
+only the planning queue's own bookkeeping.
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan checked the change against #1689 and the rest of main before it
+merged and found nothing that breaks. It confirmed:
+
+- The helm's read and cleared marks work on sequence numbers only. A warning that comes back gets a sequence above any
+  earlier mark, so an earlier read or clear cannot hide it; resolving keeps the sequence and moves no mark.
+- `farhelm agent sessions` never shows notifications, so it is unaffected; the README image's staging passes the new
+  field through unchanged; and no other browser test reads notifications.
+- The compatibility claims hold: the new flag is left out when false, so an unresolved warning looks exactly as before
+  to an older helm or app, and no protocol version change is needed.
+- The repeated checks the report mentions are bounded and harmless. Only a session whose Restart can resume and that
+  still has an unresolved warning is checked, at a cost of two database updates that match nothing (no write to disk),
+  every two seconds and before each session listing, until the session is relaunched or the warning drops out.
+
+#### Checks
+
+- Run now, on the change after the rebase: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and
+  `dprint check` on SPEC.md, SPEC_impl.md and TODO.md, all clean.
+- Reused: the report's checks, including its browser run. The rebase brought in only #1689, which shares no code with
+  this change.
+- Skipped: running the Rust and browser tests again, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
