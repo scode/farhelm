@@ -124,3 +124,50 @@ reviews, scope reassessment and process cold reads were delegated. Reviewers ins
 ran and assessed the tests. Commit and PR wording passed separate cold reads. Private orchestration evidence is
 retained; native and orchestrator usage counters were unavailable, and resumed Opus counters have unknown overlap and
 are excluded from totals.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as three squash commits on main, in order: #1678 (new agent-created templates record which
+launcher tab they switch to), #1687 (the Templates dialog redesigned as a list beside a field editor) and #1688 (the
+website page and its screenshot scenarios). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Nothing that could interact: the executor had already rebased the stack over the Mac release-test and fresh-checkout
+Clone work and tested the combination, and since then main gained only the planning queue's own bookkeeping.
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan checked the stack before anything merged and found nothing that
+breaks. It confirmed:
+
+- #1678 adds no field to a template; it only fills in the existing launcher-tab field when an agent creates a template.
+  An older helm or client reads such a template fine, a new helm reads old stored templates unchanged, and what the
+  `farhelm` command sends is unchanged.
+- Outside the two browser specs #1687 updates, no test or capture script drives the Templates dialog: the README image,
+  the demo video and the other screenshot scenarios create templates through the helm's API or not at all, and the one
+  sidebar test that touches Templates only moves focus to its unchanged button.
+- The earlier template fixes still hold in the new dialog: a new or renamed template's save is still refused while the
+  list is loading, reloading or failed, with the retry button kept, and duplicate and undo go through the same name
+  check. A template still names its host by installation, so the helm's check that a template's host still reaches the
+  same installation is unaffected.
+
+Two things for later, neither changed during the landing:
+
+- The dialog infers an old template's launcher tab with the same rule the helm uses, but the rule exists in two places,
+  so the two could drift apart if one is changed without the other.
+- Until the next docs screenshot refresh, the live website page shows the old dialog's screenshots under the new text,
+  as the report says.
+
+The queued quick-switcher plan, which waited for this one, assumes only that the launcher applies templates as before,
+which #1687 does not change. It plans to reuse the dialog's template summary text, which still exists but is private to
+the dialog's code, so that plan will need to make it reachable.
+
+#### Checks
+
+- Reused: the report's checks, including its browser run on the combined revision after the executor's last functional
+  rebase. Since then main gained only the planning queue's bookkeeping, and the code on main after the last merge is
+  identical to the final stack.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
