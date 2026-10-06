@@ -47,3 +47,46 @@ Opus review identified an auto-repeat race, now fixed, and documentation/wording
 speculative non-Latin layout fallback was not added: it was unverified and would depart from the plan's deliberate
 character-based key matching. Both final review artifacts report no findings. The commit and PR title also passed a
 fresh-context wording cold read.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as #1675 (Cmd+N opens the session launcher in the Mac desktop app), one squash commit on
+main.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, two other plans landed: home-tab-trailing-slash (#1673, the
+supervisor's terminal start directory) and installer-feedback-prompt (#1674, the installer's closing message). Neither
+touches the app's interface or SPEC.md. Each removed its own TODO entry, and #1673's sat right next to this plan's, so
+the rebase met a conflict in TODO.md; the landing resolved it by removing both entries. No code changed.
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan checked the change before it merged and found nothing that breaks.
+It confirmed:
+
+- The shortcut exists only in the desktop app's build, and within that only on macOS; the web build never contains it
+  and the Linux desktop build installs nothing, as the report says. No browser test presses Cmd+N or Ctrl+N.
+- It runs before the terminal's own key handling and keeps Cmd+N from reaching the program in the terminal, the same way
+  the text-size shortcut does, and cannot collide with that shortcut, which needs Shift.
+- Every modal dialog in the app is recognised, so Cmd+N does nothing while one is open; it does open the launcher over
+  the notification list and the YOLO confirmation, which are not modal, just as clicking New would.
+- It adds no files to the desktop app's bundled assets and no new control.
+
+It also found one thing the landing did not change: after Cmd+N from a terminal, closing the launcher (cancel or Escape)
+puts the keyboard focus on the New button, not back in the terminal, because that is what closing the launcher always
+does. The next Enter or Space then reopens the launcher, and typing goes nowhere until the user clicks back into the
+terminal. It matches "exactly what clicking New does", so no agreed behavior is broken, but it may feel wrong with a
+shortcut, and the manual Mac checklist does not cover it. Worth trying on a Mac along with the rest of the checklist.
+
+#### Checks
+
+- Run now, on the change after the rebase: `cargo fmt --all -- --check`,
+  `cargo clippy -p farhelm-ui --features desktop --lib -- -D warnings` and
+  `cargo check -p farhelm-ui --features web --target wasm32-unknown-unknown`, all clean; `dprint check TODO.md` after
+  resolving the conflict, clean.
+- Reused: the report's other checks. The rebase brought in only the two plans above, which touch nothing this change
+  uses.
+- Skipped: the native Mac checks, which still need a Mac (the report and the manual Mac checklist list them).
+
+Nothing in the report above was made untrue by the landing.
