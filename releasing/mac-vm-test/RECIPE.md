@@ -1,9 +1,13 @@
 # Test a Mac release
 
+For the standard **`brick test release vX.Y.Z`** request, use [BRICK-TEST.md](BRICK-TEST.md) to discover the private
+machine profile, plan all required version pairs and record the checks below.
+
 Run this as an agent on the **macOS host**, controlling disposable Tart guests. It requires the two prepared base
 images, command and GUI access to the guests, readiness checks, a way to launch the app and capture logs, and lifecycle
-scripts established by [BRING-UP.md](BRING-UP.md). If any is missing, do that bring-up first. This document's VM
-mechanics are unverified until that work is done; it is an intended procedure, not a record of a successful Mac run.
+scripts established by [BRING-UP.md](BRING-UP.md) and documented in [OPERATIONS.md](OPERATIONS.md). If any prerequisite
+is missing, resolve it before testing. The script mechanics were exercised on real guests; this procedure still requires
+evidence for every check and every candidate.
 
 Each pass gets a fresh macOS clone and a fresh Linux clone. Install and update Farhelm only in the guests. Leave the
 host's live installation and prepared bases untouched. The bases and clones contain real credentials and must never be
@@ -29,9 +33,13 @@ previous stable; SPEC.md requires clean upgrades from **every** stable release f
 exist. A passing previous-stable pair does not prove that entire range. Name older-version risks and extra pairs in the
 addendum, and report the versions actually covered.
 
-Before each pass, use the bring-up scripts to clone and start both guests, establish Mac desktop and SSH readiness, and
-verify the Linux systemd user manager. Record guest OS/image versions privately. Confirm no Farhelm binaries or state
-exist in either fresh clone. A broken fixture is “could not run,” not a product pass.
+Record the genuine agent CLIs selected with the maintainer in the addendum; Codex is the bring-up baseline. Additional
+agents expand coverage and need their own authentication and conversation checks. Name omitted agents in the result.
+
+Before each pass, use BRICK-TEST's supervised `serve` sequence, or OPERATIONS.md's lower-level `control.py init`,
+`clone`, supervised `run`, `ready`, and `network.py` sequence. Establish Mac desktop and SSH readiness and verify the
+Linux systemd user manager. Record guest OS/image versions privately. Confirm no Farhelm binaries or state exist in
+either fresh clone. A broken fixture is “could not run,” not a product pass.
 
 ## Pass 1: fresh install
 
@@ -44,11 +52,12 @@ exist in either fresh clone. A broken fixture is “could not run,” not a prod
    the app version, usable session list and connected local host. Save a screenshot and the app log.
 3. Add the Linux guest as an SSH host through Farhelm. Confirm the candidate's helm provisions it from scratch and that
    the host becomes connected at the candidate supervisor version. Record the visible result and service evidence.
-4. Start a real authenticated Claude session and a real authenticated Codex session on the local host. Give each a small
-   conversation and require a meaningful reply, terminal input/output and a captured conversation. On Linux, start a
-   plain command session and prove its terminal responds. Mock agents or a CLI `--version` alone do not satisfy this.
+4. Start a real authenticated session for each selected agent on the local host. Give each a small conversation and
+   require a meaningful reply, terminal input/output and a captured conversation. On Linux, start a plain command
+   session and prove its terminal responds. Mock agents or a CLI `--version` alone do not satisfy this.
 5. Run applicable addendum checks. Capture a screenshot per GUI check and command output for command checks. Export
-   evidence, then stop/delete only this pass's owned clones with the bring-up scripts.
+   evidence with `control.py collect`, verify each exported archive, then `shutdown` and `delete` only this pass's owned
+   clones. Bases remain stopped and unchanged.
 
 ## Pass 2: upgrade on existing state
 
@@ -57,15 +66,17 @@ exist in either fresh clone. A broken fixture is “could not run,” not a prod
    an immediate update would destroy the old-state fixture. Launch it and verify its version and connected local host.
    If that mechanism isolates the guest's network, restore it first; then provision the Linux guest through the old app
    and establish the remote supervisor's old version before proceeding.
-2. Create realistic state: local Claude and Codex sessions with conversations, a saved template, and a changed setting
-   with an observable value. Save session and conversation identities and screenshots. Confirm automatic app updates
-   remain off while seeding state, so `/latest` cannot update the old app before the intended action. Check it is still
-   the old version with no candidate already installed. Choose settings/templates supported by that previous release.
+2. Create realistic state: local sessions for each selected agent with conversations, a saved template, and a changed
+   setting with an observable value. Save session and conversation identities and screenshots. Confirm automatic app
+   updates remain off while seeding state, so `/latest` cannot update the old app before the intended action. Check it
+   is still the old version with no candidate already installed. Choose settings/templates supported by that previous
+   release.
 3. Start a long-running plain command on Linux that emits an increasing counter and retains evidence of its original
    process identity/start time. Establish that it is alive and advancing before updating. Read its advancing output and
    process identity over SSH from outside Farhelm; a redisplayed terminal buffer is not proof of continued execution.
    Avoid a command that restarts itself and masks interruption. Settle the exact portable command and process oracle
-   during bring-up.
+   during bring-up. `continuity.py run <private-directory>` is the verified workload; call `observe` over independent
+   guest SSH and compare observations with `--before` or `require_progress`. Require actual advancement before updating.
 4. Select the update path using the next section, perform the install, wait for the old app's readout to show **Restart
    to update**, and use that action. Do not manually launch the new binary to bypass a failed relaunch. Capture the app
    log and readout. Record whether the trigger was automatic or manual for an in-app check; with automatic updates off,

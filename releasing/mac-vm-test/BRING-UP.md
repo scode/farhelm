@@ -1,13 +1,17 @@
 # Bring up the Mac release test
 
+For an already prepared machine, start with [BRICK-TEST.md](BRICK-TEST.md). It is the fresh-agent entry point for
+**`brick test release vX.Y.Z`**. This document prepares the private prerequisites that entry point discovers.
+
 Build a repeatable test of the shipped Mac app coming up on old state and updating the remote supervisors an older
 release installed. You are the agent on the **macOS host**: you control disposable Tart VMs from outside them, run
 commands in them, and use computer use on the macOS VM's display. The host may run the maintainer's own Farhelm; that
 installation, its state and its processes are off-limits. Every Farhelm install or update below happens inside a VM.
 
-NOTE: This first slice was written and source-reviewed on Linux. No Tart VM or native Mac flow has been run for these
-documents. Image choices and the mechanics below are recommendations or open bring-up work. Resolve them on the real
-host, ask the maintainer where a decision or credential is needed, and correct these documents from what you observe.
+The Tart command channel, private bases, guest-to-guest SSH, native app launch and evidence export have now been
+exercised on an Apple Silicon host. [OPERATIONS.md](OPERATIONS.md) gives the verified script interface and input
+limitations. Keep machine-specific configuration and raw evidence private. Each release still needs its own recipe run;
+the bring-up rehearsal cannot establish safety for later published bytes.
 
 Read [RECIPE.md](RECIPE.md), [the historical motivation](../../lore/2026-10-05-release-brick-protection-plan.md), and
 the repository's agent instructions. Where the history describes an agent inside the VM, this document's agent on the
@@ -37,17 +41,21 @@ when verified. Record the exact image identifiers and guest OS versions privatel
 portable recommendations in the repository.
 
 - macOS: pick a clean recent macOS image supported by the host and current Farhelm, for example a suitable Cirrus Labs
-  public Tart image. This image choice is unverified. Install the genuine Claude and Codex CLIs and the prerequisites
-  the public installer and recipe need. Put the CLIs on the guest user's shell PATH through its startup files. Recommend
-  Homebrew for tmux, in a prefix the app probes, at a version both releases accept; verify launches from the app, not
-  only a terminal. Have the maintainer sign into both agents inside the VM; do not guess credentials or copy the host's
-  authentication stores. Prove each agent can hold a real conversation. Stop the agents before saving the base.
+  public Tart image. A Cirrus Tahoe base was exercised with macOS 26.6.2. Install the genuine agent CLIs selected with
+  the maintainer in the run addendum (the bring-up uses Codex only) and the prerequisites the public installer and
+  recipe need. Put the CLIs on the guest user's shell PATH through its startup files. Recommend Homebrew for tmux, in a
+  prefix the app probes, at a version both releases accept; verify launches from the app, not only a terminal. Resolve
+  authentication with the maintainer. Guest sign-in or an explicitly authorized copy of the selected CLI's
+  authentication file can be used; never copy unrelated authentication stores or publish credentials. Verify file
+  permissions, CLI login status and a real conversation plus resume. Cloned credentials remain private, and logging out
+  a clone may revoke a shared login. Stop the agents before saving the base.
 - Linux: recommend an ARM64 Ubuntu 26.04 LTS Tart image, falling back to 24.04 LTS if a suitable 26.04 image is not
-  available. Availability and host support are unverified. Give it SSH access from the macOS guest by key, a working
-  systemd user manager and the privileges needed to arrange persistent user services. Farhelm provisions its remote
-  supervisor as a systemd user service; prove that user manager works before saving the base. No agent credentials are
-  needed on this guest: the remote session is a plain command. Recommend a base without tmux, so Farhelm provisions its
-  static tmux payload; record whether that path or a guest-provided tmux was exercised.
+  available. The official Cirrus Ubuntu 24.04 image was exercised with Ubuntu 24.04.5 LTS; a suitable official 26.04
+  image was not established during bring-up. Give it SSH access from the macOS guest by key, a working systemd user
+  manager and the privileges needed to arrange persistent user services. Farhelm provisions its remote supervisor as a
+  systemd user service; prove that user manager works before saving the base. No agent credentials are needed on this
+  guest: the remote session is a plain command. Recommend a base without tmux, so Farhelm provisions its static tmux
+  payload; record whether that path or a guest-provided tmux was exercised.
 
 The macOS base contains real agent credentials. Treat both bases and all clones as private: never push them to a
 registry, share them, commit files from them, or put credentials in a report. Resolve how cloned credentials behave with
@@ -56,7 +64,8 @@ macOS guests must be checked for the actual setup. This recipe needs only one ma
 
 ## Resolve the environment mechanics
 
-Settle these with experiments in owned disposable VMs. None is asserted to work by this document:
+Use the verified mechanics in OPERATIONS.md, then resolve any differences on the current host in owned disposable VMs.
+The staged-candidate override remains deferred until a carrying stable release is available:
 
 1. Install or confirm Tart on the host and choose the images. Establish clone, start, shutdown and deletion commands.
    Identify owned clones with a fresh run ID, keep an ownership manifest, and never delete a pre-existing VM or base.
@@ -107,11 +116,17 @@ Settle these with experiments in owned disposable VMs. None is asserted to work 
 
 ## Write the host-side scripts
 
-Add portable scripts under `releasing/mac-vm-test/` for cloning the two bases, starting them, waiting for readiness,
-discovering addresses, running guest commands, collecting evidence and deleting owned clones. Settle their filenames and
-interface here and update RECIPE.md to call them. This first slice deliberately supplies no guessed Tart commands or
-pretend-working scripts. Keep machine names, usernames, credentials and local absolute paths out of source; take local
-configuration as inputs and keep it private. The scripts must operate only on their recorded, run-owned clones.
+The stdlib Python scripts are now present: `control.py` owns lifecycle/readiness/export, `network.py` configures pinned
+guest SSH, `continuity.py` observes one original Linux process, and `verify_release.py` checks published installer
+inputs against the previous tag's key ring. OPERATIONS.md documents the interface. Keep machine names, usernames,
+credentials and local absolute paths out of source; take local configuration as inputs and keep it private. The
+controller refuses mutations of unrecorded clones or replacements with a different hardware identity.
+
+The public coordinator is `brick_test.py`; `machine_profile.py` validates the private interface. Record the frozen
+bases' names and MAC identities, Linux account, Tart storage, journal, evidence root, policy, budgets and explicit route
+choice in the private profile described in BRICK-TEST. A local control project may install that profile with its own
+adapter; neither its path nor credentials belong in Farhelm. Agree the conventional profile's host write during setup.
+Use the command-only smoke to prove discovery, readiness, guest SSH, export and owned cleanup before a release run.
 
 ## Prove the setup and open a PR
 
