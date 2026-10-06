@@ -3193,6 +3193,8 @@ pub(crate) fn ListView(
                 }
                 button {
                 r#type: "button",
+                // Focus restoration and the Mac Cmd+N shortcut select this
+                // live control by class, so both retain its ordinary guards.
                 class: "btn btn-primary new-session-button",
                 "data-tooltip": "new session: start an agent or a command on any host",
                 // The heading keeps the short visible word "new" while the

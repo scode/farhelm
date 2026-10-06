@@ -129,11 +129,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
-- **Cmd+N for a new session.** Cmd+N on macOS, and the equivalent elsewhere, does what clicking the new session button
-  does. Pick the non-Mac chord with care: Ctrl+N is next-history in readline and emacs inside the terminal, and browsers
-  keep Ctrl+N (and Cmd+N in the web UI on a Mac) for a new window. The terminal text-size shortcut in SPEC.md (Cmd+Shift
-  on macOS, Ctrl+Shift elsewhere) is the precedent to follow. Plan: `plans/queue/new-session-shortcut.md`.
-
 - **Make sense of the permission choices.** The template editor's permissions menu, with Claude as the agent type,
   offers leave as is, reset to default, yolo, approve, smart approve and chat, when the expected choice was simply YOLO
   or not. Per SPEC.md that is the shared permission vocabulary across agent types, and smart approve and chat are Goose
