@@ -493,7 +493,7 @@ pub struct Session {
     #[serde(default)]
     pub notifications: Vec<SessionNotification>,
     /// How far through [`Session::notifications`] every client has read: an
-    /// entry whose sequence number is above it is unread. Read through
+    /// unresolved entry whose sequence number is above it is unread. Read through
     /// [`Session::unread_notifications`].
     #[serde(default)]
     pub notifications_read_through: u64,
@@ -512,15 +512,28 @@ pub struct SessionNotification {
     /// When the supervisor recorded it, in Unix seconds.
     pub at: i64,
     pub text: String,
+    /// Resolved history counts as read even above the helm's read mark.
+    /// Missing on older supervisors/helms, which retain the old warning display.
+    #[serde(default)]
+    pub resolved: bool,
+}
+
+impl SessionNotification {
+    /// Whether this entry should be loud on the row and marked new in the
+    /// list. Resolution is read without moving the shared mark; reopening
+    /// gets a newer sequence and clears the flag at the supervisor.
+    pub(crate) fn is_unread_after(&self, read_through: u64) -> bool {
+        !self.resolved && self.seq > read_through
+    }
 }
 
 impl Session {
     /// How many of this session's notifications are newer than the shared
-    /// read mark; the bell is loud exactly when this is nonzero.
+    /// read mark and still unresolved; the bell is loud exactly when this is nonzero.
     pub(crate) fn unread_notifications(&self) -> usize {
         self.notifications
             .iter()
-            .filter(|notification| notification.seq > self.notifications_read_through)
+            .filter(|notification| notification.is_unread_after(self.notifications_read_through))
             .count()
     }
 

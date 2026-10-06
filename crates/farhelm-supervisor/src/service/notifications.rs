@@ -8,6 +8,9 @@
 //! ([`super::core::SessionCells::notifications`]) so every reply carries it,
 //! and announced to connected helms with the ordinary `SessionsChanged` hint.
 //! The helm keeps read and cleared state; nothing here knows about either.
+//! The two problems that cease when Resume returns are reconciled on each
+//! capture pass. Resolution keeps the history; recurrence reopens the same
+//! launch/kind row with a newer sequence rather than adding another entry.
 //!
 //! # Who records what
 //!
@@ -38,9 +41,10 @@ use tracing::warn;
 
 /// What kind of problem a notification reports.
 ///
-/// The unit of the once-per-launch rule (the store's `(session, generation,
+/// The unit of the one-row-per-launch rule (the store's `(session, generation,
 /// kind)` key) and the reason the record does not assume there is only one
-/// kind of notification. It never travels on the wire: only the text does
+/// kind of notification. Kind stays private to storage; peers receive the
+/// text and resolved flag without interpreting a kind enum
 /// (see [`farhelm_proto::SessionInfo::notifications`] for why).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NotificationKind {
@@ -58,6 +62,23 @@ pub(crate) enum NotificationKind {
 }
 
 impl NotificationKind {
+    const ALL: [Self; 4] = [
+        Self::HookSilent,
+        Self::HookNotAdded,
+        Self::ResumeWithdrawn,
+        Self::ReporterMismatch,
+    ];
+
+    /// Whether Resume becoming available ends this warning's condition.
+    /// Hook setup and reporter mismatch have no such resolving event: a
+    /// captured conversation does not prove either of those problems ended.
+    fn resolves_on_resume(self) -> bool {
+        match self {
+            Self::HookSilent | Self::ResumeWithdrawn => true,
+            Self::HookNotAdded | Self::ReporterMismatch => false,
+        }
+    }
+
     /// Whether this kind is only true while the session's row holds no
     /// captured conversation, which the store then checks in the same
     /// statement as the insert ([`crate::store::SessionStore::record_session_notification`]).
@@ -72,7 +93,7 @@ impl NotificationKind {
     }
 
     /// The value stored in the `kind` column. Stable: it is part of the
-    /// once-per-launch key of rows already on disk.
+    /// one-row-per-launch key of rows already on disk.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             NotificationKind::HookSilent => "hook_silent",
@@ -138,7 +159,7 @@ impl HookSkip {
 ///
 /// Past tense on purpose: a later check can find the record again and bring
 /// the resume offer back, and a notification is a record of what happened,
-/// never withdrawn, so it must stay true afterwards.
+/// retained after resolution, so its wording must stay true afterwards.
 pub(crate) fn resume_withdrawn_text(agent: &str) -> String {
     format!(
         "When Farhelm checked, {agent}'s own record of this conversation was missing or no longer \
@@ -187,13 +208,13 @@ pub(crate) fn reporter_mismatch_text(cause: ReporterMismatch, captured: bool) ->
 
 impl Supervisor {
     /// Record a notification of `kind` for launch `generation` of session
-    /// `id`, unless that launch already has one, and show it.
+    /// `id`, unless that launch already has an unresolved one, and show it.
     ///
     /// Best effort, like every diagnostic it replaces: a store failure is
-    /// logged and the session carries on. A notification that was added is
-    /// copied into the session's cell and announced with the
+    /// logged and the session carries on. A notification added or reopened
+    /// is copied into the session's cell and announced with the
     /// `SessionsChanged` hint; one the store turned away (already recorded
-    /// for this launch, or the session moved on to another launch or was
+    /// and unresolved for this launch, or the session moved on to another launch or was
     /// deleted) changes nothing.
     pub(crate) async fn notify_session(
         &self,
@@ -250,10 +271,77 @@ impl Supervisor {
         }
     }
 
+    /// Reconcile current-launch warnings against the same Resume promise
+    /// listing and Restart use, including identities restored during startup.
+    ///
+    /// This belongs to the capture pass rather than the admission transition:
+    /// an accepted startup report may precede publication, and a restored
+    /// vendor record can regain Resume without a new report. The store compares
+    /// the exact conversation before resolving, so a concurrent withdrawal
+    /// wins over an earlier Resume observation. Older launches stay history.
+    pub(crate) async fn resolve_resumable_notifications(
+        &self,
+        entries: &[std::sync::Arc<super::core::SessionEntry>],
+    ) {
+        if !self.may_record() {
+            return;
+        }
+        let kinds: Vec<&str> = NotificationKind::ALL
+            .into_iter()
+            .filter(|kind| kind.resolves_on_resume())
+            .map(NotificationKind::as_str)
+            .collect();
+        for entry in entries {
+            if !entry
+                .session
+                .notifications
+                .lock()
+                .expect("notification cell poisoned")
+                .iter()
+                .any(|notification| !notification.resolved)
+            {
+                continue;
+            }
+            let conversation = {
+                let capture = entry.run.capture.lock().expect("capture mutex poisoned");
+                if entry.snapshot.restart_offer(
+                    capture.committed_conversation(),
+                    capture.committed_ownership_version().unwrap_or(0),
+                ) != farhelm_proto::RestartOffer::Resume
+                {
+                    continue;
+                }
+                capture.committed_conversation().map(str::to_owned)
+            };
+            let Some(conversation) = conversation else {
+                continue;
+            };
+            match self
+                .store
+                .resolve_session_notifications_if_current(
+                    &entry.info.id,
+                    entry.generation,
+                    &conversation,
+                    &kinds,
+                )
+                .await
+            {
+                Ok(true) => {
+                    if self.reload_notification_cell(&entry.info.id).await {
+                        self.hint_sessions_changed();
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => warn!(session = %entry.info.id, error = %format!("{error:#}"),
+                    "could not resolve a session's notifications"),
+            }
+        }
+    }
+
     /// Replace the published entry's notification cell with what the store
     /// holds for session `id`, returning whether the cell changed.
     ///
-    /// Called after a recording, and once for every entry the supervisor
+    /// Called after a recording or resolution, and once for every entry the supervisor
     /// publishes from a stored row or a create, since a create's own spawn
     /// may have recorded before the entry existed. An entry that is not
     /// published, or a store that cannot be read, leaves things as they are.
@@ -283,18 +371,54 @@ impl Supervisor {
 }
 
 /// Whether `stored` is at least as recent as `current`, judged by their newest
-/// sequence numbers (the lists are newest first).
+/// sequence number, then their resolved count (the lists are newest first).
 ///
 /// Two reloads of one session can overlap (an OMP refusal and a tripwire
 /// firing in the same pass): each reads the store, then publishes, and the
-/// one that read first may publish last. The store only ever gains newer
-/// entries and drops the oldest, so the newest sequence number orders the
-/// snapshots, and an older one must not overwrite a newer one already in the
-/// cell.
+/// one that read first may publish last. Recording or reopening raises the
+/// newest sequence; with that sequence fixed, resolution only increases the
+/// resolved count. That second ordering prevents an older unresolved snapshot
+/// from undoing a resolution when neither reload added an entry.
 fn newer_or_equal(
     stored: &[farhelm_proto::SessionNotification],
     current: &[farhelm_proto::SessionNotification],
 ) -> bool {
-    let newest = |list: &[farhelm_proto::SessionNotification]| list.first().map(|n| n.seq);
-    newest(stored) >= newest(current)
+    let version = |list: &[farhelm_proto::SessionNotification]| {
+        (
+            list.first().map(|n| n.seq),
+            list.iter()
+                .filter(|notification| notification.resolved)
+                .count(),
+        )
+    };
+    version(stored) >= version(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An overlapping reload may read before a resolve and publish after it.
+    /// Equal sequence numbers must preserve resolution; recurrence is newer
+    /// even though its resolved count falls, because its sequence advances.
+    #[farhelm_testtrace::test]
+    fn notification_snapshots_order_resolution_and_recurrence() {
+        let unresolved = vec![farhelm_proto::SessionNotification {
+            seq: 2,
+            at: 100,
+            text: "warning".into(),
+            resolved: false,
+        }];
+        let mut resolved = unresolved.clone();
+        resolved[0].resolved = true;
+        assert!(newer_or_equal(&resolved, &unresolved));
+        assert!(!newer_or_equal(&unresolved, &resolved));
+        assert!(newer_or_equal(&resolved, &resolved));
+        let mut recurrence = unresolved.clone();
+        recurrence[0].seq = 3;
+        assert!(newer_or_equal(&recurrence, &resolved));
+        assert!(!newer_or_equal(&resolved, &recurrence));
+        assert!(newer_or_equal(&unresolved, &[]));
+        assert!(!newer_or_equal(&[], &resolved));
+    }
 }

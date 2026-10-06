@@ -1626,6 +1626,7 @@ fn session_with_notifications(id: &str, count: u64) -> farhelm_proto::SessionInf
             seq,
             at: 1_700_000_000 + seq as i64,
             text: format!("notification {seq}"),
+            resolved: false,
         })
         .collect();
     info

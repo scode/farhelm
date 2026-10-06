@@ -78,7 +78,8 @@ fn session_list_body() -> SessionListBody {
         notifications: vec![farhelm_proto::SessionNotification {
             seq: 4,
             at: 1_700_000_095,
-            text: "Farhelm could not add its conversation hook.".to_string(),
+            text: "Restart stopped offering to resume the conversation.".to_string(),
+            resolved: true,
         }],
     };
     SessionListBody {

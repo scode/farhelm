@@ -2653,33 +2653,45 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs
-  to, the time it was recorded, and its user-facing text. `(session, generation, kind)` is unique, which is the whole
-  once-per-launch rule and survives a supervisor restart with no separate latch; an insert beyond a session's 10th drops
-  its oldest, and deleting the session deletes its rows. The kinds are the hook that never reported (the 65-second
-  tripwire above, recorded by the capture pass that runs it, only for an agent whose report is due by its first prompt,
-  `RestartReadiness::due_by_first_prompt`, and not for a launch already told its OMP reporter does not match), a hook
-  that could not be added (recorded by the spawn that decided it, except when `FARHELM_AGENT_HOOKS` turned hooks off for
-  that agent, which is the user's own choice, and except for a kind that adds no hook at all), a Codex or Grok record
-  whose verification withdrew the resume offer (recorded only after the withdrawal is committed, and only on a clean
-  verdict, not a read error; the background refresh and Grok's final check before a Restart both record it), and an OMP
-  launch whose recorded reporter is older than this build's or whose installed reporter file is there with different
-  contents (a missing or unreadable file records nothing). The first two say Restart cannot resume, so they are refused
-  whenever the launch's row holds a captured conversation, checked in the same statement as the insert, which is also
-  what closes the race between a report's commit and the tripwire. The listing carries the last 10 on
-  `SessionInfo::notifications` as sequence number, time and text only: the kind and generation stay columns, because an
-  enum on `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm,
-  which drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell
-  and an older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list
-  lives in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
-  replaced after each recording, which then sends the `SessionsChanged` hint. The helm keeps read and cleared state as
-  two per-session sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside
-  `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  to, the time it was recorded, its user-facing text and a nullable `resolved_at`. `(session, generation, kind)` is
+  unique: resolution retains that row, and recurrence reopens it with a new sequence, time and text and clears
+  `resolved_at`. An unresolved duplicate stays ignored. This survives a supervisor restart with no separate latch; only
+  an insert beyond a session's 10th drops its oldest, and deleting the session deletes its rows. The kinds are the hook
+  that never reported (the 65-second tripwire above, recorded by the capture pass that runs it, only for an agent whose
+  report is due by its first prompt, `RestartReadiness::due_by_first_prompt`, and not for a launch already told its OMP
+  reporter does not match), a hook that could not be added (recorded by the spawn that decided it, except when
+  `FARHELM_AGENT_HOOKS` turned hooks off for that agent, which is the user's own choice, and except for a kind that adds
+  no hook at all), a Codex or Grok record whose verification withdrew the resume offer (recorded only after the
+  withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's final check
+  before a Restart both record it), and an OMP launch whose recorded reporter is older than this build's or whose
+  installed reporter file is there with different contents (a missing or unreadable file records nothing). The first two
+  say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation, checked in the
+  same statement as the insert, which is also what closes the race between a report's commit and the tripwire. The
+  listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an additive `resolved`
+  bool (false omitted and the decode default): the kind and generation stay columns, because an enum on `SessionInfo`
+  that a newer supervisor extended would make the whole record fail to decode in an older helm, which drops a session it
+  cannot decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor
+  sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a
+  session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and replaced
+  after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the
+  silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
+  captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
+  non-resolving kind or an earlier launch's warning still triggers a zero-row store call on each pass when the current
+  offer is Resume; clearing in the helm does not remove that stored history. Each call uses two indexed updates in one
+  transaction. No per-entry latch suppresses these calls. The resolve SQL compares the exact captured conversation and
+  generation on the session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads
+  order snapshots by newest sequence and then resolved count: with the newest sequence fixed, only resolution changes,
+  and it only grows; reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old
+  unresolved history; older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm
+  keeps read and cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
+  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
   `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
   `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
   holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
   moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
   cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
-  supervisor; the cap ages records out there. The UI renders each text as peer text.
+  supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
+  "resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by session id alone, not as a `session_cache` column: that cache is replaced WHOLESALE by
   each host's refresh, so a column there would need every refresh to carry forward a viewer fact the supervisor never

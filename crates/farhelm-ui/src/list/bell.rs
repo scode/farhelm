@@ -80,7 +80,7 @@ pub(super) fn BellSlot() -> Element {
 /// The bell control and, while `open` is `Some`, its notification list.
 ///
 /// `open` carries the read mark as it stood when the list opened: entries
-/// above it are the ones that arrived since the user last closed this list,
+/// above it and still unresolved arrived since the user last closed this list,
 /// and stay marked "new" for as long as the list stays open, even if
 /// another window closes its own list meanwhile and moves the shared mark.
 #[component]
@@ -269,10 +269,12 @@ fn NotificationList(
                 for notification in notifications.iter() {
                     li {
                         key: "{notification.seq}",
-                        class: if notification.seq > read_through { "session-bell-entry new" } else { "session-bell-entry" },
+                        class: if notification.resolved { "session-bell-entry resolved" } else if notification.is_unread_after(read_through) { "session-bell-entry new" } else { "session-bell-entry" },
                         "data-notification-seq": "{notification.seq}",
                         span { class: "session-bell-entry-meta",
-                            if notification.seq > read_through {
+                            if notification.resolved {
+                                span { class: "session-bell-resolved", "resolved" }
+                            } else if notification.is_unread_after(read_through) {
                                 // A word as well as the colour, so the
                                 // distinction survives without colour vision.
                                 span { class: "session-bell-new", "new" }

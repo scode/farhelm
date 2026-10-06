@@ -73,7 +73,8 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
         vec![crate::SessionNotification {
             seq: 4,
             at: 1_700_000_095,
-            text: "Farhelm could not add its conversation hook.".to_string(),
+            text: "Restart stopped offering to resume the conversation.".to_string(),
+            resolved: true,
         }]
     );
     assert_eq!(row.notifications_read_through, 3);

@@ -3215,6 +3215,12 @@ samp {
   border-left-color: var(--danger-strong);
 }
 
+/* Resolution is still history, but its warning must no longer look active.
+   The word beside its time carries the distinction without relying on colour. */
+.session-bell-entry.resolved {
+  color: var(--fg-1);
+}
+
 .session-bell-entry-meta {
   display: flex;
   gap: 6px;
@@ -3224,6 +3230,10 @@ samp {
 
 .session-bell-new {
   color: var(--danger-strong);
+  font-weight: 600;
+}
+
+.session-bell-resolved {
   font-weight: 600;
 }
 

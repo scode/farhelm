@@ -12,7 +12,7 @@ import { expect, test } from "./helpers/evidence";
 import { Locator, Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
 
-interface StubNotification { seq: number; at: number; text: string }
+interface StubNotification { seq: number; at: number; text: string; resolved?: boolean }
 
 /**
  * The helm's half of the feature, for one session: its notifications and the
@@ -80,6 +80,48 @@ test.describe("session notifications", () => {
   test.afterEach(async ({ request }) => {
     while (created.length) await cleanupSession(request, created.pop()!);
     await resetPreferences(request);
+  });
+
+  /** Recovery is read without opening the list or moving its shared marks.
+   * Keep resolved history visible, then simulate a recurrence above a clear
+   * mark to prove it reappears as new and unread rather than staying silent. */
+  test("resolved history is quiet and a cleared warning can recur as new", async ({ page, request }) => {
+    const session = await createSession(request, { title: `resolved-${Date.now()}` });
+    created.push(session.id);
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: "Restart stopped offering to resume" }]);
+    await serveNotifications(page, session.id, stub);
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await expect(bell).toHaveClass(/\bloud\b/, { timeout: 20_000 });
+    stub.notifications[0].resolved = true;
+    feed.notify(2);
+    await expect(bell).not.toHaveClass(/\bloud\b/, { timeout: 20_000 });
+    await expect(bell).toHaveAttribute("aria-label", `notifications for ${session.title}: none unread`);
+    expect(stub.readThrough).toBe(0);
+    expect(stub.writes).toEqual([]);
+    await bell.click();
+    const list = page.locator(".session-bell-flyout");
+    const entry = list.locator(".session-bell-entry");
+    await expect(entry).toHaveCount(1);
+    await expect(entry).toHaveClass(/\bresolved\b/);
+    await expect(entry).not.toHaveClass(/\bnew\b/);
+    await expect(entry.locator(".session-bell-resolved")).toHaveText("resolved");
+    await expect(entry.locator(".session-bell-new")).toHaveCount(0);
+    await list.locator(".session-bell-clear").click();
+    await expect.poll(() => stub.clearedThrough).toBe(1);
+    feed.notify(3);
+    await expect(bell).toHaveCount(0);
+    stub.notifications = [{ seq: 2, at: NOW, text: "Restart stopped offering to resume again", resolved: false }];
+    feed.notify(4);
+    await expect(bell).toHaveClass(/\bloud\b/, { timeout: 20_000 });
+    await bell.click();
+    await expect(entry).toHaveAttribute("data-notification-seq", "2");
+    await expect(entry).toHaveClass(/\bnew\b/);
+    await expect(entry.locator(".session-bell-new")).toHaveText("new");
+    await expect(entry.locator(".session-bell-resolved")).toHaveCount(0);
   });
 
   /**

@@ -1097,20 +1097,28 @@ refused report (from a subagent, from an agent process the session's agent start
 delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
 conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. Each notification
 says what happened and what the user can do about it, or, when nothing can be done, what they lose; it never points at a
-log. The same problem is reported at most once per launch of the session's agent, so a supervisor restart does not
-repeat one.
+log. There is at most one notification of each problem per launch of the session's agent. The warning that the agent
+never reported its conversation and the warning that Restart stopped offering to resume are marked resolved when Restart
+can resume that launch's conversation again, including after a supervisor restart. The other two kinds and notifications
+from earlier launches stay as they are. If a resolved problem returns in the same launch, its existing notification
+reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains unresolved do
+not repeat it.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
 says how many are unread. Clicking it opens the session's notifications in a list in the style of the row's actions
 menu, never clipped by the sidebar, and does not open the session. The list is newest first, each entry saying how long
 ago it happened, with the full time available on the entry the way the row's activity age has it, and the entries new
-since the list was last opened set apart. Closing the list, by clicking away, pressing Escape, or clicking the bell
-again, marks everything it showed as read; there is no mark unread. A clear button removes them all, and the bell
-disappears until a new one arrives. Notifications persist across supervisor and helm restarts and reloads; each session
-keeps its 10 most recent, with no time-based expiry, and deleting a session deletes them. Read and cleared state is kept
-by the helm and shared by every client, the same way seen state is. Desktop or operating-system notifications, and
-notifications about a host or the whole app, are not part of v1.
+since the list was last opened set apart. Resolved entries remain visible, greyed and marked "resolved", and count as
+read even if the user has never opened them; they never make the bell loud or appear as new. Closing the list, by
+clicking away, pressing Escape, or clicking the bell again, marks everything it showed as read; there is no mark unread.
+A clear button removes them all, and the bell disappears until a new one arrives. Notifications persist across
+supervisor and helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting
+a session deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state
+is. Desktop or operating-system notifications, and notifications about a host or the whole app, are not part of v1.
+
+An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
+supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.
 
 ## Terminal experience
 
