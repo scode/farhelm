@@ -1658,17 +1658,20 @@ absent, a different build, or one that takes different flags on another.
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
 helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd`, `--title`, `--host`
 and the launch flags other than `--template`; `--host` names a host by its display name, is resolved when the template
-is written, and is stored as that host's install. Edit, `farhelm agent template edit <name>`, takes the same flags and
-sets only the fields it is given, with no way to unset one: the templates listing withholds command text, so an agent
-cannot reproduce a template it did not write, and replacing the whole template would silently drop that text. To drop a
-field, delete the template with `farhelm agent template delete <name>` and create it again; the same goes for turning an
-agent-launch template into a command-launch one or back, which an edit refuses, since a template mixing the two could
-never apply. A command line given to a template write needs `--yolo` or `--no-yolo` with it, since a YOLO assertion is
-about one command line. A fresh GitHub checkout destination is refused, as it is when applying a template from the CLI.
-These writes go through the same path as the GUI's template editor, with one difference: an agent's write or delete
-lands only on the template its card showed, and is refused, with nothing written, if that template changed or appeared
-while the card waited. This is the one exception to last-write-wins for templates (Concepts), and it exists because an
-approval covers exactly what the card showed.
+is written, and is stored as that host's install. Create writes the agent launch kind when any agent-launch choice is
+given, including an agent type alone, and the command kind for command-launch choices. A template setting only host,
+destination and session name does not switch launch kind. Templates already stored without a kind keep applying as
+stored. Edit, `farhelm agent template edit <name>`, takes the same flags and sets only the fields it is given, with no
+way to unset one: the templates listing withholds command text, so an agent cannot reproduce a template it did not
+write, and replacing the whole template would silently drop that text. To drop a field, delete the template with
+`farhelm agent template delete <name>` and create it again; the same goes for turning an agent-launch template into a
+command-launch one or back, which an edit refuses, since a template mixing the two could never apply. A command line
+given to a template write needs `--yolo` or `--no-yolo` with it, since a YOLO assertion is about one command line. A
+fresh GitHub checkout destination is refused, as it is when applying a template from the CLI. These writes go through
+the same path as the GUI's template editor, with one difference: an agent's write or delete lands only on the template
+its card showed, and is refused, with nothing written, if that template changed or appeared while the card waited. This
+is the one exception to last-write-wins for templates (Concepts), and it exists because an approval covers exactly what
+the card showed.
 
 Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
 with their values except a command line or resume command, which are listed as set without their text. Discovery also

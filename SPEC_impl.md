@@ -2949,7 +2949,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
   parsed, hidden, only so it can be refused, since a template written from other templates would copy command text the
   agent never saw. `--host` names a host by the name `farhelm agent hosts` prints and is resolved to that host's install
-  when the template is written. An edit sends only the fields given. Each write is relayed to the helm and waits for the
+  when the template is written. Create records the agent launch kind for agent-launch choices, including an agent type
+  alone; command fields record the command kind. Placement and title alone leave the kind absent, and existing kindless
+  templates are not migrated. An edit sends only the fields given. Each write is relayed to the helm and waits for the
   user's approval (see "Permission prompts for agent actions"); stdout gets one confirmation line naming the template,
   as the lifecycle verbs confirm on stdout.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
@@ -3898,8 +3900,9 @@ included. The write then lands only on the template the card was built from: the
 is refused as "changed while this request waited". This is the agent path's exception to SPEC.md's last-write-wins; the
 GUI's own writes still carry no precondition. The helm also refuses, before any card, an edit with nothing to change, a
 `--command` without a YOLO assertion, and a write whose result would hold both agent-launch and command-launch choices,
-which `launcher::apply_template` could never apply; a create from agent-launch flags stores the agent launch kind
-explicitly, so the template means what the flags meant.
+which `launcher::apply_template` could never apply. A create stores the launch kind its choices imply: agent for
+agent-launch choices or an agent type alone, command for any command field. The template therefore means what the flags
+meant.
 
 The prompts are a check on agents that act through the `farhelm` CLI, not a sandbox. Any process running as the
 session's user, an agent included, can open the supervisor's socket with full authority and act on that host without
