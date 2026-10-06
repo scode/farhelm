@@ -20,16 +20,21 @@ directory of a project, and applying both sets up the whole launch.
 
 <Screenshot
   name="launch-templates/panel"
-  alt="The templates panel: the list of templates with what each sets, and the empty new template form."
+  alt="The Templates list: choose a template to edit it, or use + new template to start another."
 />
 
-The form offers every choice the launcher has, from the agent and model to the host, the directory, and the session's
-name. Most fields take a value straight from their menu; the model and resume command take **set to** and a text box.
-**reset to default**, offered for the model, effort, permissions, trust, and resume command, puts that choice back to
-the agent's own default when the template is applied (for the resume command, to none), which is different from leaving
-it as is. The destination can be a directory or a
-[fresh GitHub checkout](/docs/using/start-a-session/#start-from-a-fresh-github-checkout). Names must be unique; to
-change a template, edit it rather than saving a new one under its name.
+Choose **+ new template**, give it a unique name, then choose **switches launcher to**: **agent**, **command**, or
+**don't switch**. An agent or command template opens that tab when you apply it. **don't switch** keeps the current tab
+and offers only the host, destination, and session name.
+
+Use **+ add field** for each choice the template should make, then **save**. Only the fields shown under **sets** are
+applied; a field you remove with **✕** is left alone. A **default** value resets that choice to the agent's default,
+which is different from leaving it out. An empty model input means the default model; otherwise you can type any model,
+with suggestions when the template sets an **agent type**. Approvals and other offered choices follow that agent type.
+
+The destination can be a directory or a
+[fresh GitHub checkout](/docs/using/start-a-session/#start-from-a-fresh-github-checkout). A model or a destination can
+stand on its own: another template can supply the agent or host.
 
 Templates belong to the helm, the program that shows you every host's sessions
 ([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
@@ -39,8 +44,20 @@ a command still needs that command to exist on the host you launch on.
 
 <Screenshot
   name="launch-templates/edit-form"
-  alt="codex-deep open for editing: an agent launch with Codex, model gpt-6.1-sol, effort high, the rest left as is."
+  alt="codex-deep selected for editing, with its agent switch, Codex, model, effort, add and remove controls, and save button."
 />
+
+Choose a template's row to open its editor. **duplicate** opens an unsaved copy with a new name. Changes are saved only
+when you choose **save**; leaving an edited template asks whether to save, discard, or keep editing. At phone width, **‹
+templates** returns to the list.
+
+Changing **switches launcher to** or the **agent type** can make a field that is already set no longer fit. It stays
+visible with a message: change or remove it before saving. A stored template that sets agent or command choices
+but has no saved tab choice opens with that tab chosen and marked as **unsaved changes**; saving stores that choice,
+while discarding keeps the template applying as before.
+
+**delete** removes a template immediately. The **undo** notice lasts about ten seconds while the panel stays open;
+choose it to restore the template, provided another template has not taken its name.
 
 A session remembers the choices it was launched with, not which templates supplied them, so editing or deleting a
 template never changes a session that already started from it.
@@ -62,9 +79,9 @@ fills in what it holds, so anything the launch still needs, such as the agent wh
 by hand as usual.
 
 A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
-did not fit: a model the chosen agent does not offer, for example, or a model while the launcher is on its **command**
-tab. In **replace with**, where the host is fixed, a template that sets a host is refused the same way. **restart with**
-does not offer templates at all.
+did not fit: a model the chosen agent does not offer, for example, or an older template with a model and no saved tab
+choice while the launcher is on its **command** tab. In **replace with**, where the host is fixed, a template
+that sets a host is refused the same way. **restart with** does not offer templates at all.
 
 ## Templates and your agents
 

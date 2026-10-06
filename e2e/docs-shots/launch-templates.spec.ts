@@ -13,18 +13,23 @@ import { shot } from "./shot";
 
 const PAGE = "launch-templates";
 
-/** Open the templates panel from the session list's header. */
+/**
+ * Open the Templates dialog once its staged list has finished loading.
+ * Rows remain visible but disabled during a reload, so their presence alone
+ * cannot establish that the list is ready for the screenshot's interactions.
+ */
 async function openPanel(page: Page): Promise<Locator> {
   await page.locator(".templates-button").click();
   const dialog = page.locator(".templates-dialog");
+  await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
   await expect(dialog.locator(".templates-row").first()).toBeVisible();
   return dialog;
 }
 
-/** The panel's row for the template called `name`. */
+/** Match the staged template's exact visible name, independent of its summary. */
 function templateRow(dialog: Locator, name: string): Locator {
   return dialog.locator(".templates-row").filter({
-    has: dialog.page().locator(".templates-row-name", { hasText: new RegExp(`^${name}$`) }),
+    has: dialog.page().getByText(name, { exact: true }),
   });
 }
 
@@ -51,42 +56,48 @@ test("templates button", async ({ page, request }) => {
   await shot(page, `${PAGE}/templates-button`, [button, page.locator(".new-session-button")], { maxWidth: 930 });
 });
 
+/** The list stays beside the editor at this width, within the docs' column. */
 test("panel", async ({ page, request }) => {
+  await page.setViewportSize({ width: 930, height: 1100 });
   const { director } = await open(page, request);
   const dialog = await openPanel(page);
-  // Both callouts down the left margin, outside the dialog: the list and the
-  // form are what this shot is for, and the dialog leaves no room inside.
+  // The empty editor gives this callout space without hiding the template rows.
   await director.callout(
-    dialog.locator(".templates-list"),
-    "Your templates and what each sets. Editing or deleting one never changes a session started from it.",
-    { side: "left", dy: -30 },
-  );
-  await director.callout(
-    dialog.locator(".templates-form-title"),
-    "Name a new template and set only what it should change. A field left as is stays as the launcher has it.",
-    { side: "left", dy: 90 },
+    dialog.locator(".templates-new"),
+    "Start a new template here, or choose a row below to edit one.",
+    { side: "right", dy: 35 },
   );
   await shot(page, `${PAGE}/panel`, [dialog], { maxWidth: 930 });
 });
 
+/** Show saved values and presence controls without changing the staged template. */
 test("edit form", async ({ page, request }) => {
+  await page.setViewportSize({ width: 930, height: 1100 });
   const { director } = await open(page, request);
   const dialog = await openPanel(page);
-  await templateRow(dialog, "codex-deep").locator(".templates-edit").click();
-  await expect(dialog.locator(".templates-form-title")).toHaveText("edit template");
+  await templateRow(dialog, "codex-deep").click();
+  await expect(dialog.locator(".templates-editor-heading h3")).toHaveText("edit template");
+  await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
   await expect(dialog.locator(".templates-model")).toHaveValue("gpt-6.1-sol");
-  const fields = dialog.locator(".templates-field");
+  await expect(dialog.getByLabel("effort", { exact: true })).toHaveValue("high");
+  // Focus the dialog itself so the name field's help does not enter the crop.
+  await dialog.focus();
+  await expect(dialog).toBeFocused();
+  // Place callouts below the list's rows so the selected template remains
+  // visible alongside the editor's fields, removal buttons and footer.
   await director.callout(
-    fields.filter({ hasText: /^agent type/ }),
-    "codex-deep makes it an agent launch with Codex, its model, and its effort, and nothing else.",
-    { side: "left" },
+    dialog.getByRole("group", { name: "switches launcher to" }),
+    "Applying this template opens the agent tab, with Codex, this model, and this effort. Fields not shown stay as they are.",
+    { side: "left", dy: 220 },
   );
   await director.callout(
-    fields.filter({ hasText: /^destination/ }),
-    "Left as is: applying it keeps whatever host, directory, and name the launcher already has.",
-    { side: "left" },
+    dialog.locator(".templates-add"),
+    "Add only the choices this template should make. Fields not shown stay as they are.",
+    { side: "left", dy: 30 },
   );
-  await shot(page, `${PAGE}/edit-form`, [dialog], { maxWidth: 930 });
+  await shot(page, `${PAGE}/edit-form`, [templateRow(dialog, "codex-deep"), dialog.locator(".templates-editor")], {
+    maxWidth: 930,
+  });
 });
 
 test("apply in the launcher", async ({ page, request }) => {
