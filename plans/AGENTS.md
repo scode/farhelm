@@ -173,6 +173,37 @@ that starts with `@` from being read as the name of a local file to send. A mess
 names the plan's slug, and never report text, paths or log excerpts, because ntfy.sh is a third-party service. A send
 that fails is recorded in the agent's log and does not stop the flow.
 
+## Nobody is watching
+
+Executors and the monitor run unattended. The maintainer starts a flow and walks away, and from then on they hear from
+it only through notifications, Blocked questions and reports, never through the terminal the agent runs in. So once a
+flow is running, never use the harness's interactive question or confirmation prompt (a question picker, a
+multiple-choice menu, a "continue?"), and never end a turn waiting for an answer. Either one holds the agent's claim for
+as long as nobody happens to look, and notifies no one. That is worse than most wrong choices the question was meant to
+avoid: a wrong choice shows up in the report, a stalled claim shows up nowhere. This was observed on 2026-10-05, when an
+executor that had just claimed a large plan asked through its harness's question prompt whether to carry on with it.
+
+Anything an agent is unsure about while a flow runs goes one of three ways:
+
+- It can be settled within the agreed scope (the plan's, or for the monitor the rules in Landing): settle it, and record
+  the choice as a DECISION in the plan's working log, or in the monitor's landing notes.
+- Only the maintainer can settle it: block, which is step 10 of Executing one plan for an executor and the `queue block`
+  in Landing for the monitor. That is the one way a question reaches the maintainer mid-flow.
+- It stops the agent itself (an expired login, a full disk): give the claim back or stop, and notify, as the sections
+  describing those cases say.
+
+A plan's size, cost or expected duration is never a question. Claiming a plan is the go-ahead to finish it. If the work
+turns out to need much more than the plan describes, that is for the goal file's scope reassessment and unattended
+fallback, which may end in a block; it is not a reason to check in.
+
+The one exception is the start of a flow, in the same turn as the maintainer's request that started it. The maintainer
+is evidently there, so the few start-up questions and reports this file calls for (a missing ntfy topic file, a dirty
+working copy, a parent directory that cannot hold the logs) go to them directly. Every later start is unattended: a
+drain's next plan, a "drain again" under monitoring, the monitor's next round, or a resume after a compaction or crash
+with no new message from the maintainer. There, a condition that would have been asked about or reported stops the flow
+instead, records why in the agent's own log, and notifies (when the missing piece is the ntfy topic file itself, the log
+entry is all there is).
+
 ## Clean-main boundary
 
 Every planning-system flow starts from a clean working copy of the latest `main`. Run `jj status` first. If it reports
@@ -272,6 +303,10 @@ with these overrides on top of the skill's own rules:
 - The done criterion: every PR exists and has passed its review gate, and the latest `## Decisions` entry, if any, is
   satisfied. Delivering the report is the executor's closing step, not part of the goal.
 - The unattended fallback blocks per Executing one plan (Blocking).
+- The goal file says, near its top, that nobody watches the run (Nobody is watching above): the executing agent never
+  uses its harness's question or confirmation prompt, the plan's size is not something to ask about, and the unattended
+  fallback's block is the only way to put a question to the maintainer. Executors read this file too, but the goal file
+  is what they follow most closely.
 - If the plan depends on another plan's work being on main first, the goal file says which, and so does its `INDEX.md`
   line.
 
@@ -389,7 +424,7 @@ its open PRs. Record the pick and its reasoning in the executor log.
 8. Run the plan file as the goal. For a single plan, set the harness's goal to it if the harness lets the model set its
    own goal; otherwise, and always within a drain, behave exactly as if it were the harness-provided goal under the
    outer request. A drain does not register each plan as a harness goal, because a plan that blocks could not be cleared
-   to make room for the next one.
+   to make room for the next one. Nobody is watching (above) holds for the whole run, whatever the plan file says.
 9. Before every push of a plan bookmark, run `queue status` and confirm the line still carries your claim id. If it does
    not, stop pushing and treat the claim as released (step 1). After each push, record the pushed commits in the working
    log.
