@@ -92,3 +92,57 @@ initially found an unsnapshotted jj diff empty and used the equivalent diff agai
 without reviewer VCS writes. Private delegation evidence is retained under session 909fe8bc-c1a2-41fe-b106-57780c627c93.
 Claude terminal usage is recorded; native delegate and orchestrator usage is unavailable. This report has its own
 independent cold read before delivery.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as two squash commits on main: #1691 (the keyboard session switcher) and then #1692 (New and
+template drafts from the switcher). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Nothing that could interact: between the commit the stack was built on and the landing, main gained only the planning
+queue's own bookkeeping.
+
+#### A fix made while landing: the switcher covered approval cards
+
+A separate reviewer that had not worked on the plan found that the switcher's dimmed backdrop was layered above
+everything else on the page. The stylesheet keeps one list of these layers, and in it the approval cards (an agent's
+request waiting for your answer) sit above every dialog's backdrop, with hover text above them, so that an agent waiting
+on you is never hidden behind a dialog. The switcher's backdrop was set far above both. While the switcher was open, an
+approval card was dimmed and clicking it only closed the switcher, and the hover text on the switcher's own rows and
+buttons drew underneath it. The landing put the switcher's backdrop on the same layer as the other dialogs and added it
+to that list, in #1691 before anything merged. The switcher's browser tests passed on both engines with the change
+(below).
+
+#### Review before merging
+
+Otherwise the reviewer found nothing that breaks. It confirmed:
+
+- The new chord does not conflict with the Mac app's Cmd+N or the terminal text-size shortcut, and both shortcuts stand
+  down while a dialog is open. Programs in the terminal lose no input: the terminal sends nothing for Ctrl+Shift+K or
+  Cmd+K, and plain Ctrl+K still reaches them. On the Mac the only thing given up is the habit, from native terminals, of
+  Cmd+K clearing scrollback, which Farhelm never had.
+- #1692 only makes the Templates dialog's summary text reachable from the switcher; the dialog itself is unchanged. No
+  switcher choice leaks into a later Clone or Replace, and Clone's fresh-checkout naming applies only to a clone.
+- None of the screenshot, README image or demo video scripts presses the chord or depends on the sidebar's new hidden
+  control.
+
+It also found three smaller points the landing did not change:
+
+- The report says the hover-text coverage test covers the switcher; it does not. Every new control does carry hover text
+  in the source, but no test checks the switcher's.
+- With the switcher, New or Templates open, a second press of the chord goes to the browser instead. From general
+  knowledge, not tested: Firefox opens its Web Console on Ctrl+Shift+K and focuses web search on Cmd+K, and Edge
+  duplicates the tab on Ctrl+Shift+K. Ignoring the chord while the switcher is open would avoid this.
+- The chord matches the physical K key, not the letter the keyboard layout types (unlike Cmd+N, which matches the
+  letter). On a Dvorak layout the key labelled K does nothing and another key opens the switcher. The terminal text-size
+  shortcut documents the same choice; the switcher's code and SPEC_impl.md do not.
+
+#### Checks
+
+- Run now, on the final stack after the fix, through the test-run recorder: the quick switcher's browser spec on
+  Chromium and WebKit (run `ee236fe6`, 16 passed), with the app rebuilt.
+- Reused: the report's other checks. The fix changed one style value and a comment, and main brought nothing else.
+- Skipped: Firefox and the native Mac checks, for the report's reasons.
+
+The landing made one thing in the report above untrue: its claim that the hover-text coverage test covers the switcher.
