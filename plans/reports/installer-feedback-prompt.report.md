@@ -59,3 +59,33 @@ Independent Opus 5.5 high and gpt-6-astra high static reviews found no correctne
 optional comment clarification was applied. Both reviewers received the full test-authoring checklist. The commit and PR
 title passed a fresh-context wording read; the PR body is empty because the title and diff explain the change. Runtime
 evidence comes from the recorded fixture suite, not from the reviewers, who ran no runtime tests.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as #1674 (the installer invites feedback after a fresh install), one squash commit on main.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, the home-tab-trailing-slash plan landed (#1673, trailing
+slashes removed from the directory a terminal process starts in). It changes the supervisor's terminal start, not the
+installer; the only file both touch is TODO.md, where each removes a different entry, and the rebase onto it applied
+without conflict. Otherwise main gained only the planning queue's own bookkeeping.
+
+#### Review before merging
+
+A separate reviewer that had not worked on either plan checked both before anything merged and found nothing outside the
+PR that the change breaks. The new message is only in the fresh-install branch; the update branch is unchanged, and the
+Mac app's automatic updater decides success from the installation record the installer writes, not from its output,
+which it only copies into a log. The uninstall acceptance test only looks for specific phrases in the installer's
+output, never the whole closing message, and no documentation or website page quotes that message. The message's
+directions (the ? button at the top of the sidebar, then Send feedback) match the spec. The website's install page says
+the installer "finishes by telling you Farhelm is installed and how to uninstall it later"; that is still true, though
+it does not mention the invitation.
+
+#### Checks
+
+- Reused: the report's checks. The rebase brought in only #1673, which changes no file the installer or its test uses,
+  so the installer test run still applies to what landed.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
