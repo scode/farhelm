@@ -84,10 +84,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
 
 - **Fix the "drag copies nothing" notice.** PR #1499 added a terminal notice for drags that copy nothing because the
-  program in the terminal handles the mouse itself, as Codex does. In a Codex session it misfires both ways: it shows
-  when selecting text where copy and paste do work, and dragging over text in Codex's prompt box selects nothing and
-  shows no notice, which is exactly the case it was written for. Work out when the notice should show, make it show then
-  and only then, and check that the release note's description of it holds.
+  program in the terminal handles the mouse itself, as Codex does. It does show when drag-selecting in Codex's prompt
+  box, but it is so easy to miss that it looked like it never showed at all: it appears off in a corner, away from where
+  the user is looking. Show it at the mouse cursor, keep it up for a long time, and give it a quick dismiss button. It
+  was also seen showing when selecting text where copy and paste do work; make it show only when a drag really copies
+  nothing, and check that the release note's description of it holds. Discuss the details with the maintainer when
+  planning this for execution.
 
 - **Deep end-to-end upgrade tests before a release ships.** Catch a release that bricks an existing installation before
   it goes out: upgrade from real released artifacts (the previous release, and older ones users may still run) to the
