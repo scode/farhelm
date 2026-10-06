@@ -22,6 +22,10 @@ The initial implementation deliberately leaves these observations for the mainta
 - In the Mac desktop app, press Cmd+N with focus in the sidebar and in a terminal: the new-session form opens with the
   same prefill as New, and the terminal program receives no key. Repeat while the form or another dialog is open and
   while New is disabled by a busy list: nothing opens or closes. In a browser on a Mac, Cmd+N still opens a new window.
+- Press Cmd+K from the sidebar and from a focused terminal. Search and open another session, then type: input reaches
+  that session's terminal. Reopen and press Escape: focus returns to the previous control or terminal. Repeat with a
+  modal open and during sign-in/preferences loading: the switcher does not open and does not send the chord to the
+  terminal program. Check the same chord in a Mac browser; WebKit browser tests do not prove native shortcut handling.
 - Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
   authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
 

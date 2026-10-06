@@ -1127,6 +1127,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
 
 - Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here. The
   default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
+- The quick-switcher's Cmd+K on macOS or Ctrl+Shift+K elsewhere never reaches the terminal's program; plain Ctrl+K off
+  macOS keeps the terminal program's own behavior.
 - Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
   in every terminal tab alike, agent and shell. Single-write delivery is part of the promise, not an implementation
   detail: a lone ESC arriving in its own read is indistinguishable from the Escape key to line editors that disambiguate
@@ -1289,6 +1291,17 @@ content clear of native controls.
 
 Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
 New is disabled; the web UI has no such shortcut because browsers keep Cmd/Ctrl+N for a new window.
+
+Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
+terminal. It does nothing while another modal is open or before sign-in and preferences loading finish. Type a
+case-insensitive subsequence to find sessions across all hosts, independent of the sidebar's host selector: title
+matches come before matches only in host name or directory, with most recent activity first within each group. With
+nothing typed, sessions appear in most recent activity order. Every match is reachable by scrolling; if the helm's
+listing cap cut the snapshot, the switcher says only the most recently active sessions were searched. Rows show status,
+agent, host and directory, with matching characters marked. Arrow keys choose and Enter opens the selected session,
+using the same busy refusals as a sidebar row; the first match is initially selected. Opening a session hidden by the
+host selector resets that selector to ALL. Escape or a click outside closes and restores the previous focus. A loading
+list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
