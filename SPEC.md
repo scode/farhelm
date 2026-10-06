@@ -1258,6 +1258,9 @@ windows, the app-level row stays fixed above both scrolling panes so horizontal 
 controls underneath native window buttons. Startup, authentication errors, and build-mismatch notices also keep their
 content clear of native controls.
 
+Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
+New is disabled; the web UI has no such shortcut because browsers keep Cmd/Ctrl+N for a new window.
+
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
 centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a

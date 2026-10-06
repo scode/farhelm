@@ -1332,6 +1332,35 @@ fn install_window_activity_tracking() {
     );
 }
 
+/// Give the Mac desktop's Cmd+N the New button's current prefill and busy guard.
+///
+/// Capture runs before xterm's input handler so the chord cannot reach the
+/// terminal program. An open modal keeps ownership of the keyboard. The
+/// listener queries the live `.new-session-button` rather than retaining a
+/// component's state; every modal must carry `role="dialog"` and `aria-modal="true"`
+/// so it can yield to the same modal convention as terminal.js. Installation is
+/// idempotent across authenticated-tree remounts. Only the Mac desktop caller
+/// installs it: a browser owns this chord for new windows.
+#[cfg(native_desktop)]
+fn install_new_session_shortcut() {
+    document::eval(
+        r#"if (!window.__farhelmNewSessionShortcut) {
+            window.__farhelmNewSessionShortcut = true;
+            window.addEventListener('keydown', (event) => {
+                if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey
+                    || event.key.toLowerCase() !== 'n') return;
+                if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+                event.preventDefault();
+                event.stopPropagation();
+                // Desktop IPC can delay the form's DOM past an auto-repeat;
+                // another click in that gap would toggle the form closed.
+                if (event.repeat) return;
+                document.querySelector('.new-session-button')?.click();
+            }, true);
+        }"#,
+    );
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
@@ -1340,6 +1369,14 @@ fn AppBody() -> Element {
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
+    #[cfg(native_desktop)]
+    use_hook(|| {
+        // cfg! keeps the Mac branch type-checked by the Linux desktop build
+        // while leaving Linux terminal input alone.
+        if cfg!(target_os = "macos") {
+            install_new_session_shortcut();
+        }
+    });
     let mut current = use_signal(|| None::<Session>);
     // A single one-shot bridge lets the keyed session view request the list's
     // existing clone composer without introducing a registry or context.

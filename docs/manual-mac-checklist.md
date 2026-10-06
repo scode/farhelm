@@ -19,6 +19,9 @@ The initial implementation deliberately leaves these observations for the mainta
 - Exercise native close and minimize, the session header's actions, and terminal tab selection and creation. Confirm
   that no control disappeared or changed behavior, and that the window retains its normal corners and shadow.
 - Compare the browser and Linux desktop: neither should gain traffic-light padding or a window-drag area.
+- In the Mac desktop app, press Cmd+N with focus in the sidebar and in a terminal: the new-session form opens with the
+  same prefill as New, and the terminal program receives no key. Repeat while the form or another dialog is open and
+  while New is disabled by a busy list: nothing opens or closes. In a browser on a Mac, Cmd+N still opens a new window.
 - Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
   authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
 
