@@ -2434,17 +2434,16 @@ samp {
   color: var(--fg-0);
 }
 
-/* The Templates dialog (SPEC.md, Launch templates): the settings dialog's
-   frame, wider for a form that offers every launcher field. The list sits
-   above the form so a template can be picked for editing without
-   scrolling past it. */
+/* Templates keeps the list and draft in bounded columns. minmax(0, ...)
+   is deliberate: a long summary must ellipsize inside its row rather than
+   size the grid's implicit column and push editing out of the dialog. */
 .templates-dialog {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(640px, 100%);
+  width: min(960px, 100%);
   box-sizing: border-box;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   padding: 20px 24px;
   overflow: auto;
   background: var(--bg-2);
@@ -2452,60 +2451,193 @@ samp {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
 }
-
-.templates-dialog > .host-settings-help,
-.templates-form-title {
-  margin: 0;
+.templates-header,
+.templates-editor-heading,
+.templates-actions,
+.templates-undo-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-
+.templates-header { justify-content: space-between; }
+.templates-dialog h2,
+.templates-dialog h3,
+.templates-dialog h4,
+.templates-dialog p { margin: 0; }
+.templates-help { line-height: 1.5; }
+/* Let the dialog scroll the complete editor. Its explicit grid min-height
+   otherwise permits flex shrink, so tall fields can overlap following errors. */
+.templates-panes {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 24px;
+  min-height: 340px;
+}
+.templates-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-right: 18px;
+  border-right: 1px solid var(--border-dialog);
+}
 .templates-list {
   display: grid;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
+  min-width: 0;
 }
-
-/* Name, what it sets, then its two actions; the summary takes the slack and
-   ellipsizes, the name and buttons never do. */
+.templates-list li { min-width: 0; }
 .templates-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-0);
+  cursor: pointer;
 }
-
-.templates-row-name {
-  font-weight: 600;
-  white-space: nowrap;
+.templates-row:hover { background: var(--control-hover-bg); }
+.templates-row[aria-pressed="true"] {
+  background: var(--accent-fill);
+  border-color: var(--accent-edge);
+  box-shadow: inset 3px 0 var(--accent);
 }
-
+.templates-row-name,
 .templates-row-summary {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--fg-1);
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* Two columns of labelled fields, one per row at phone width. */
-.templates-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px 16px;
+.templates-row-name { font-weight: 600; }
+.templates-row-summary,
+.templates-count,
+.templates-hint {
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1.5;
 }
-
-.templates-field {
+.templates-count { margin-top: auto !important; }
+.templates-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.templates-editor-heading { justify-content: space-between; flex-wrap: wrap; }
+.templates-editor-heading h3 { font-size: 15px; }
+.templates-unsaved { color: var(--warn); font-size: 12px; }
+.templates-sets-heading { font-size: 13px; color: var(--fg-1); }
+.templates-field,
+.templates-field label {
   display: grid;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
 }
+.templates-field input,
+.templates-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
+  font-size: 13px;
+}
+.templates-code { font-family: var(--font-mono); }
+.templates-list-error { display: grid; gap: 8px; justify-items: start; }
+/* WebKit paints native select surfaces itself; keep its surface and our text
+   in the same dark color scheme rather than pairing pale text with white. */
+.templates-field select { color-scheme: dark; }
+.templates-set-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 8px;
+  align-items: start;
+}
+.templates-field-controls { display: grid; gap: 6px; min-width: 0; }
+.templates-remove {
+  margin-top: 22px;
+  width: 30px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+}
+.templates-remove:hover { color: var(--danger); background: var(--control-hover-bg); }
+.templates-incompatible { border-left: 2px solid var(--warn); padding-left: 10px; }
+.templates-segments { display: flex; flex-wrap: wrap; gap: 4px; }
+.templates-segments button,
+.templates-suggestion,
+.templates-back {
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  cursor: pointer;
+}
+.templates-segments button[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-edge); }
+.templates-segments button:hover,
+.templates-suggestion:hover { background: var(--control-hover-bg); }
+.templates-model-suggestions { display: flex; flex-wrap: wrap; gap: 4px; }
+.templates-suggestion { font-size: 12px; overflow-wrap: anywhere; text-align: left; }
+.templates-add-area { position: relative; }
+.templates-add-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+.templates-add-menu button {
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-0);
+  text-align: left;
+  cursor: pointer;
+}
+.templates-add-menu button:hover { background: var(--control-hover-bg); }
+.templates-editor-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-dialog); }
+.templates-actions { flex-wrap: wrap; }
+.templates-actions .templates-save { margin-left: auto; }
+.templates-departure { display: grid; gap: 10px; }
+.templates-error { color: var(--warn); font-size: 12px; overflow-wrap: anywhere; }
+.templates-empty { color: var(--fg-1); align-self: center; margin: auto !important; }
+.templates-undo-notice { padding: 10px; background: var(--accent-fill); border-radius: var(--radius-sm); flex-wrap: wrap; }
+.templates-back { display: none; }
 
-.templates-error {
-  margin: 0;
-  color: var(--warn);
-  font-size: 12px;
+/* At phone width list navigation and editor navigation occupy the same
+   space. Keeping the desktop panes shrunk side by side would make the
+   controls unusable; Back goes through the same unsaved-draft guard. */
+@media (max-width: 620px) {
+  .templates-dialog { padding: 16px; max-height: calc(100dvh - 24px); }
+  .templates-panes { grid-template-columns: minmax(0, 1fr); gap: 0; min-height: 240px; }
+  .templates-sidebar { padding-right: 0; border-right: 0; }
+  .templates-editor { display: none; }
+  .templates-editor-open .templates-sidebar { display: none; }
+  .templates-editor-open .templates-editor { display: flex; }
+  .templates-back { display: block; align-self: flex-start; }
+  .templates-help { font-size: 12px; }
 }
 .app-settings-choice {
   display: flex;

@@ -545,8 +545,17 @@ checkout; the agent choice is independent of that destination:
   the user's explicit selection, and a template that changes host, installation, destination, title, or agent
   invalidates a pending checkout preview as the equivalent hand edit does. Because a template pins only what it
   contains, a field the launch requires and no template set still has to be filled in by hand; that friction is
-  accepted. Templates are created, edited, and deleted in a Templates panel whose control sits beside New; its form
-  offers every launcher field, each optional. Template names are unique.
+  accepted. Templates are created, edited, duplicated, and deleted in the Templates dialog beside New. A list of names
+  and summaries sits beside the selected template's editor; at phone width, opening a template shows the editor with a
+  back link. The editor shows only fields the template sets, with labeled controls and explicit add/remove actions. Its
+  "switches launcher to" choice is agent, command, or don't switch; don't switch offers only host, destination and
+  session name. Agent and command choices store their matching launch kind, so applying the template switches tabs.
+  Existing kindless templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving
+  stores that switch. Choices follow the agent type when one is set, while model text may be arbitrary and other fields
+  need no agent type. Incompatible fields stay visible and prevent saving until corrected or removed. Saving is
+  explicit; leaving an unsaved draft asks save, discard, or keep editing. Template names are unique; duplicate opens an
+  unsaved copy with a free name. Delete takes effect immediately and offers undo inside the dialog for about ten
+  seconds; undo refuses if its old name has been taken. Closing the dialog ends its undo notice.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

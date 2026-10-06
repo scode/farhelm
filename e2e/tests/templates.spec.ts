@@ -39,47 +39,390 @@ async function applyTemplate(form: ReturnType<Page["locator"]>, name: string) {
 }
 
 /**
- * Spec: the Templates panel beside New creates a template from its form,
- * lists it with what it sets, loads it back for editing, saves the edit, and
- * deletes it.
- *
- * Why: the panel is the only place a person creates or changes templates
- * (agents can only apply them), so its round trip through the helm is the
- * feature's whole write path.
+ * Open within the current app lifetime and establish the name-list premise.
+ * Close/reopen tests need this path so navigation cannot erase the state whose
+ * ownership they are checking.
  */
-test("the Templates panel creates, edits and deletes a template", async ({ page, request }) => {
+async function openTemplatesInPlace(page: Page) {
+  await page.getByRole("button", { name: "templates", exact: true }).click();
+  const dialog = page.locator('.templates-dialog[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+  await expect(dialog.locator(".templates-retry")).toHaveCount(0);
+  await expect(dialog.locator(".templates-count")).toHaveText(/\d+ templates?/);
+  return dialog;
+}
+
+/** Start from the session list, then establish the editor's loaded-list premise. */
+async function openTemplates(page: Page) {
+  await page.goto("/");
+  return openTemplatesInPlace(page);
+}
+
+/** Adding is an explicit presence edit; no hidden field controls count. */
+async function addField(dialog: ReturnType<Page["locator"]>, name: string) {
+  await dialog.locator(".templates-add").click();
+  await dialog.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
+}
+
+/** Fetch the stored fields so assertions distinguish a draft from an API write. */
+async function storedTemplate(request: APIRequestContext, name: string) {
+  const response = await request.get("/api/templates");
+  expect(response.ok()).toBe(true);
+  const body = await response.json();
+  return body.templates.find((template: any) => template.name === name);
+}
+
+/**
+ * The selected row stays reachable, saves retain the editor, and rename writes
+ * the new name before removing the old. Delete/undo must restore the actual
+ * stored fields rather than an unsaved draft. This is the person's write path.
+ */
+test("the Templates dialog creates, edits, renames, deletes and undoes", async ({ page, request }) => {
   const name = `e2e-panel-${Date.now()}`;
+  const renamed = `${name}-renamed`;
   try {
-    await page.goto("/");
-    await page.getByRole("button", { name: "templates", exact: true }).click();
-    const dialog = page.locator('.templates-dialog[role="dialog"]');
-    await expect(dialog).toBeVisible();
-    // A new template is saved only once the template list has loaded (the
-    // panel refuses one while it cannot check the name is free).
-    await expect(dialog.getByText("loading templates")).toHaveCount(0);
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-new").click();
     await dialog.locator(".templates-name").fill(name);
-    await dialog.getByLabel("agent type").selectOption("codex");
-    await dialog.getByLabel("effort").selectOption("high");
+    await addField(dialog, "agent type");
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("codex");
+    await addField(dialog, "effort");
+    await dialog.getByLabel("effort", { exact: true }).selectOption("high");
     await dialog.locator(".templates-save").click();
     const row = dialog.locator(".templates-row", { hasText: name });
     await expect(row).toBeVisible();
-    await expect(row.locator(".templates-row-summary")).toHaveText("Codex · effort high");
-
-    await row.locator(".templates-edit").click();
-    await expect(dialog.getByLabel("agent type")).toHaveValue("codex");
-    await dialog.getByLabel("effort").selectOption("low");
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    // Leave the saved draft first: reselecting its current row is a no-op.
+    await dialog.locator(".templates-new").click();
+    await expect(row).toHaveAttribute("aria-pressed", "false");
+    await row.click();
+    await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
+    await expect(dialog.getByLabel("effort", { exact: true })).toHaveValue("high");
+    await dialog.getByLabel("effort", { exact: true }).selectOption("low");
+    await dialog.locator(".templates-name").fill(renamed);
     await dialog.locator(".templates-save").click();
-    await expect(row.locator(".templates-row-summary")).toHaveText("Codex · effort low");
-    const stored = await (await request.get("/api/templates")).json();
-    expect(stored.templates.find((template: any) => template.name === name)?.fields).toEqual({
-      agent: "codex",
-      effort: "low",
-    });
+    await expect(dialog.locator(".templates-row-name", { hasText: renamed })).toBeVisible();
+    expect(await storedTemplate(request, name)).toBeUndefined();
+    expect((await storedTemplate(request, renamed)).fields).toEqual({ kind: "agent", agent: "codex", effort: "low" });
+    await dialog.locator(".templates-delete").click();
+    await expect(dialog.locator(".templates-undo")).toBeVisible();
+    expect(await storedTemplate(request, renamed)).toBeUndefined();
+    await dialog.locator(".templates-undo").click();
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect((await storedTemplate(request, renamed)).fields).toEqual({ kind: "agent", agent: "codex", effort: "low" });
+  } finally {
+    for (const value of [name, renamed]) await deleteTemplate(request, value);
+  }
+});
 
-    await row.locator(".templates-delete").click();
-    await expect(row).toHaveCount(0);
+/**
+ * A long summary cannot size the list wider than the dialog. Editing that row
+ * must be reachable and collision refusals must preserve the other template,
+ * including when another client takes a deleted template's name before undo.
+ */
+test("long summaries stay reachable and taken names refuse save and undo", async ({ page, request }) => {
+  const name = `e2e-long-${Date.now()}`;
+  const taken = `${name}-taken`;
+  const fields = { kind: "agent", agent: "claude", model: "long-model-".repeat(70) };
+  try {
+    await putTemplate(request, name, fields);
+    await putTemplate(request, taken, { name: "untouched" });
+    const dialog = await openTemplates(page);
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toBeVisible();
+    const bounds = await row.evaluate((node) => {
+      const row = node.getBoundingClientRect();
+      const dialog = node.closest(".templates-dialog")!.getBoundingClientRect();
+      return { right: row.right, edge: dialog.right };
+    });
+    expect(bounds.right).toBeLessThanOrEqual(bounds.edge);
+    await row.click();
+    await expect(dialog.locator(".templates-model")).toHaveValue(fields.model);
+    await dialog.locator(".templates-name").fill(taken);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error")).toContainText("already exists");
+    expect((await storedTemplate(request, taken)).fields).toEqual({ name: "untouched" });
+    await dialog.locator(".templates-name").fill(name);
+    await dialog.locator(".templates-delete").click();
+    await expect(dialog.locator(".templates-undo")).toBeVisible();
+    expect(await storedTemplate(request, name)).toBeUndefined();
+    await putTemplate(request, name, { name: "replacement" });
+    await dialog.locator(".templates-undo").click();
+    await expect(dialog.locator(".templates-error")).toContainText("already exists");
+    expect((await storedTemplate(request, name)).fields).toEqual({ name: "replacement" });
+  } finally {
+    for (const value of [name, taken]) await deleteTemplate(request, value);
+  }
+});
+
+/**
+ * Every departure uses an inline guard. The pending target survives save, and
+ * discarding before duplicate copies the stored version rather than the edits
+ * the user just discarded. Escape also returns focus through the modal close.
+ */
+test("unsaved departures support keep editing, discard and save before leaving", async ({ page, request }) => {
+  const name = `e2e-departure-${Date.now()}`;
+  const other = `${name}-other`;
+  const copy = `${name} copy`;
+  try {
+    await putTemplate(request, name, { kind: "agent", name: "stored" });
+    await putTemplate(request, other, { kind: "command", yolo: false });
+    const dialog = await openTemplates(page);
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await row.click();
+    await dialog.locator(".templates-session-name").fill("edited");
+    await dialog.locator(".templates-new").click();
+    await expect(dialog.locator(".templates-departure")).toBeVisible();
+    await dialog.locator(".templates-keep-editing").click();
+    await expect(dialog.locator(".templates-session-name")).toHaveValue("edited");
+    await dialog.locator(".templates-duplicate").click();
+    await dialog.locator(".templates-discard").click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(copy);
+    await expect(dialog.locator(".templates-session-name")).toHaveValue("stored");
+    await expect(dialog.locator(".templates-unsaved")).toBeVisible();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    await dialog.locator(".templates-session-name").fill("saved-before-leaving");
+    await dialog.locator(".templates-row").filter({ has: page.getByText(other, { exact: true }) }).click();
+    await dialog.locator(".templates-save-leave").click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(other);
+    expect((await storedTemplate(request, copy)).fields.name).toBe("saved-before-leaving");
+    await dialog.getByLabel("approvals", { exact: true }).selectOption("true");
+    await dialog.locator(".templates-close").click();
+    await dialog.locator(".templates-keep-editing").click();
+    await expect(dialog.locator(".templates-departure")).toHaveCount(0);
+    await dialog.locator(".templates-name").focus();
+    await expect(dialog.locator(".templates-name")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog.locator(".templates-departure")).toBeVisible();
+    await dialog.locator(".templates-discard").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".templates-button")).toBeFocused();
+    expect((await storedTemplate(request, other)).fields.yolo).toBe(false);
+  } finally {
+    for (const value of [name, other, copy]) await deleteTemplate(request, value);
+  }
+});
+
+/**
+ * Legacy inference is an unsaved editor interpretation, not a migration on
+ * read. Unsupported approvals stay visible after agent changes, while custom
+ * model text remains saveable. Mobile Back must use the same draft guard.
+ */
+test("legacy switches and agent choices remain explicit at phone width", async ({ page, request }) => {
+  const name = `e2e-legacy-${Date.now()}`;
+  try {
+    await putTemplate(request, name, { agent: "goose", permissions: "smart_approve", model: "future custom model" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+    await expect(dialog.locator(".templates-sidebar")).toBeHidden();
+    await expect(dialog.locator(".templates-inferred")).toBeVisible();
+    await expect(dialog.locator(".templates-unsaved")).toBeVisible();
+    expect((await storedTemplate(request, name)).fields.kind).toBeUndefined();
+    // Opening an existing template must initialize each native select from
+    // its saved value, even when that value is not the first offered option.
+    await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("goose");
+    await expect(dialog.getByLabel("approvals", { exact: true })).toHaveValue("smart_approve");
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("claude");
+    await expect(dialog.locator('.templates-set-field[data-field="permissions"] .templates-error')).toContainText("does not offer");
+    await dialog.locator(".templates-save").click();
+    const refusal = dialog.locator('p.templates-error[role="status"]');
+    await expect(refusal).toContainText("approvals");
+    // A refusal belongs below the complete editor. A height-limited flex
+    // dialog must scroll its content, not shrink the editor and overlay it.
+    await expect.poll(async () => refusal.evaluate((element) => {
+      const footer = element.closest(".templates-dialog")!.querySelector(".templates-editor-footer")!;
+      return element.getBoundingClientRect().top >= footer.getBoundingClientRect().bottom;
+    })).toBe(true);
+    expect((await storedTemplate(request, name)).fields.agent).toBe("goose");
+    await dialog.getByLabel("approvals", { exact: true }).selectOption("default");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", permissions: null, model: "future custom model" });
+    await dialog.locator(".templates-model").fill("another model");
+    await dialog.locator(".templates-back").click();
+    await expect(dialog.locator(".templates-departure")).toBeVisible();
+    await dialog.locator(".templates-discard").click();
+    await expect(dialog.locator(".templates-sidebar")).toBeVisible();
+    await expect(dialog.locator(".templates-editor")).toBeHidden();
   } finally {
     await deleteTemplate(request, name);
+  }
+});
+
+/**
+ * Reselecting the open row is not a departure. Its list snapshot may predate
+ * the draft or a save, so reopening it could silently undo an edit or rename.
+ */
+test("reselecting the current template preserves edits and renames", async ({ page, request }) => {
+  const name = `e2e-reselect-${Date.now()}`;
+  const renamed = `${name}-renamed`;
+  try {
+    await putTemplate(request, name, { kind: "agent", name: "stored" });
+    const dialog = await openTemplates(page);
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await row.click();
+    await expect(dialog.locator(".templates-session-name")).toHaveValue("stored");
+    await dialog.locator(".templates-session-name").fill("first edit");
+    await row.click();
+    await expect(dialog.locator(".templates-departure")).toHaveCount(0);
+    await expect(dialog.locator(".templates-session-name")).toHaveValue("first edit");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.name).toBe("first edit");
+    await dialog.locator(".templates-name").fill(renamed);
+    await row.click();
+    await expect(dialog.locator(".templates-departure")).toHaveCount(0);
+    await expect(dialog.locator(".templates-name")).toHaveValue(renamed);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-row-name", { hasText: renamed })).toBeVisible();
+    expect(await storedTemplate(request, name)).toBeUndefined();
+    expect((await storedTemplate(request, renamed)).fields).toEqual({ kind: "agent", name: "first edit" });
+  } finally {
+    for (const value of [name, renamed]) await deleteTemplate(request, value);
+  }
+});
+
+/**
+ * A name-list failure must preserve a phone draft while the connection recovers.
+ * The hidden list cannot be the only place to retry: Back would require either
+ * a save with an unknown name premise or discarding the person's work.
+ */
+test("a phone draft can retry a failed template list without discarding", async ({ page, request }) => {
+  const name = `e2e-list-retry-${Date.now()}`;
+  let failReads = true;
+  let failedReads = 0;
+  await page.route("**/api/templates", async (route) => {
+    if (route.request().method() === "GET" && failReads) {
+      failedReads += 1;
+      await route.fulfill({ status: 503, body: "temporary template list failure" });
+    } else {
+      await route.continue();
+    }
+  });
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.locator(".templates-dialog");
+    await expect(dialog.locator(".templates-retry")).toBeVisible();
+    expect(failedReads).toBeGreaterThan(0);
+    await expect(dialog.locator(".templates-count")).toHaveCount(0);
+    await dialog.locator(".templates-new").click();
+    await expect(dialog.locator(".templates-sidebar")).toBeHidden();
+    await dialog.locator(".templates-name").fill(name);
+    await addField(dialog, "session name");
+    await dialog.locator(".templates-session-name").fill("kept draft");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error").last()).toContainText("template list could not be loaded");
+    failReads = false;
+    await expect(dialog.locator(".templates-retry")).toBeVisible();
+    await dialog.locator(".templates-retry").click();
+    await expect(dialog.locator(".templates-retry")).toHaveCount(0);
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await expect(dialog.locator(".templates-name")).toHaveValue(name);
+    await expect(dialog.locator(".templates-session-name")).toHaveValue("kept draft");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", name: "kept draft" });
+  } finally {
+    await page.unroute("**/api/templates");
+    await deleteTemplate(request, name);
+  }
+});
+
+/**
+ * Catalog choices remain available beside arbitrary model text. A tall phone
+ * editor must reveal and focus the unsaved prompt itself, without a test's
+ * scroll action masking an unreachable prompt. Escape first dismisses add-field.
+ */
+test("model suggestions and phone departure controls remain reachable", async ({ page, request }) => {
+  const name = `e2e-suggestions-${Date.now()}`;
+  try {
+    await putTemplate(request, name, { kind: "agent", agent: "claude", model: "custom model", effort: null, permissions: null });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+    await expect(dialog.locator(".templates-name")).toBeFocused();
+    await expect(dialog.locator(".templates-model")).toHaveValue("custom model");
+    const suggestion = dialog.locator(".templates-suggestion").first();
+    await expect(suggestion).toBeVisible();
+    const model = await suggestion.innerText();
+    expect(model.length).toBeGreaterThan(0);
+    await suggestion.click();
+    await expect(dialog.locator(".templates-model")).toHaveValue(model);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.model).toBe(model);
+    await dialog.locator(".templates-model").fill("another custom model");
+    await expect(dialog.locator(".templates-suggestion").first()).toBeVisible();
+    await dialog.locator(".templates-add").click();
+    await expect(dialog.locator(".templates-add-menu")).toBeVisible();
+    await expect(dialog.locator(".templates-add")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog.locator(".templates-add-menu")).toHaveCount(0);
+    await expect(dialog.locator(".templates-departure")).toHaveCount(0);
+    await dialog.locator(".templates-close").click();
+    const prompt = dialog.locator(".templates-departure");
+    await expect(prompt).toBeInViewport();
+    await expect(dialog.locator(".templates-save-leave")).toBeFocused();
+    await dialog.locator(".templates-keep-editing").click();
+    await expect(prompt).toHaveCount(0);
+    await expect(dialog.locator(".templates-name")).toBeFocused();
+    await expect(dialog.locator(".templates-model")).toHaveValue("another custom model");
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
+/**
+ * Undo belongs to the latest deletion and the mounted dialog. Advancing the
+ * browser's clock crosses the declared expiry boundaries without a real-time
+ * readiness sleep; each notice and completed list refresh is established first.
+ */
+test("undo expires independently of earlier deletions and ends on close", async ({ page, request }) => {
+  const first = `e2e-undo-window-${Date.now()}`;
+  const second = `${first}-second`;
+  try {
+    for (const name of [first, second]) await putTemplate(request, name, { kind: "agent", name });
+    let dialog = await openTemplates(page);
+    await page.clock.install();
+    // install alone still advances at wall-clock speed. Pause before deleting
+    // so close/reopen cannot pass merely because the ten-second window elapsed.
+    // This test advances expiry explicitly and does not assert focus/rAF work.
+    await page.clock.pauseAt(new Date(Date.now() + 5_000));
+    const remove = async (name: string) => {
+      await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+      await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+      await expect(dialog.locator(".templates-name")).toHaveValue(name);
+      await dialog.locator(".templates-delete").click();
+      await expect(dialog.locator(".templates-undo-notice")).toContainText(`Deleted ${name}.`);
+      expect(await storedTemplate(request, name)).toBeUndefined();
+    };
+    await remove(first);
+    await page.clock.fastForward(9_000);
+    await remove(second);
+    await page.clock.fastForward(1_001);
+    await expect(dialog.locator(".templates-undo-notice")).toContainText(`Deleted ${second}.`);
+    await page.clock.fastForward(9_000);
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    await dialog.locator(".templates-close").click();
+    await expect(dialog).toHaveCount(0);
+    await putTemplate(request, second, { kind: "agent", name: "another deletion" });
+    dialog = await openTemplatesInPlace(page);
+    await remove(second);
+    await dialog.locator(".templates-close").click();
+    await expect(dialog).toHaveCount(0);
+    // Reopen without navigation while this deletion's undo window is live:
+    // only the dialog's unmount may have cleared its notice.
+    dialog = await openTemplatesInPlace(page);
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect(await storedTemplate(request, second)).toBeUndefined();
+  } finally {
+    for (const name of [first, second]) await deleteTemplate(request, name);
   }
 });
 
