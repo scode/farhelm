@@ -83,12 +83,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
   learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
 
-- **Clone a session in a GitHub checkout into a fresh checkout.** Clone on a session that lives in a checkout made by a
-  `gh:` launch opens the launcher on the session's existing folder, but the maintainer keeps wanting another checkout of
-  the same repository. Clone should instead act as if the user had typed `gh:owner/repo` and picked a name, defaulting
-  the name to the session's name plus `-clone` (then `-clone-2`, `-clone-3`, ... when taken). Replace with, Replace and
-  `farhelm agent clone` keep the existing folder. Plan: `plans/queue/clone-into-fresh-checkout.md`.
-
 - **Make `gh:` launches less magical.** In the maintainer's words, "the gh: stuff is kinda magical right now". A session
   in a fresh GitHub checkout behaves differently from one in an ordinary folder: a `gh:` launch clones into a new
   directory under the working-copy root and names it after the session, deleting the last session using it archives the

@@ -456,12 +456,14 @@ pub struct Session {
     /// wrongly marked stale would hide its terminal.
     #[serde(default)]
     pub stale: bool,
-    /// Immutable fresh-create provenance. Borrowers and older senders leave
-    /// this absent; it never turns Clone or Replace into a fresh allocation.
+    /// Immutable fresh-create provenance. Clone uses this repository only
+    /// when current checkout membership is absent; borrowers can therefore
+    /// clone fresh too. Replace and Replace with keep the existing folder.
     #[serde(default)]
     pub(crate) github_repo: Option<github_checkout::GithubRepo>,
     /// Current managed checkout association, including existing-directory
-    /// borrowers. The registry owns its lifetime; the UI treats it as metadata.
+    /// borrowers. The registry owns its lifetime; Clone uses its repository
+    /// to seed a fresh checkout without changing this source association.
     #[serde(default)]
     pub(crate) working_copy: Option<github_checkout::WorkingCopyInfo>,
     /// The activity stamp that was current the last time some client had

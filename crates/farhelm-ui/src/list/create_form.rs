@@ -1256,11 +1256,13 @@ fn scroll_composer_search_result(index: usize) {
 /// of the click — a snapshot, not a live binding: a row that changes after
 /// the click must not reach back into an open, already-prefilled form.
 ///
-/// `title` and `cwd` travel verbatim, duplicate title included. SPEC.md's
-/// creation rule has nothing to say about uniqueness, an identical title is
-/// one rename away from being fixed, and inventing a "(copy)" suffix would
-/// be this UI's own opinion about a field the user never asked it to guess
-/// at.
+/// `title` and `cwd` retain the source's spelling for an existing-folder
+/// destination. Checkout membership separately seeds Clone onto a fresh
+/// checkout with an untouched `-clone` name; Replace with ignores that repo
+/// and starts from the existing folder. The raw folder remains available
+/// when the person chooses an existing-folder destination instead. Folder
+/// titles remain verbatim, duplicates allowed: selecting Clone does not
+/// request a title edit for work in an existing directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CreatePrefill {
     /// Bumped by every clone click, including a second clone of the SAME
@@ -1289,6 +1291,9 @@ pub(super) struct CreatePrefill {
     /// for the ordinary create default, reused here for the same question.
     pub(super) host_identity: Option<Option<String>>,
     pub(super) cwd: String,
+    /// Checkout membership wins over launch provenance; Clone uses this repo
+    /// for a fresh destination, while Replace with keeps the source folder.
+    pub(super) repo: Option<GithubRepo>,
     pub(super) title: String,
     /// The row's raw launch command: the seed for custom-command mode.
     pub(super) invocation: String,
@@ -1302,21 +1307,13 @@ pub(super) struct CreatePrefill {
     /// Absent for a legacy session, whose command alone (in `invocation`)
     /// is filled in (SPEC.md, the launch-kinds upgrade).
     pub(super) command: Option<CommandLaunch>,
-    /// `Some(source id)` for a "replace with" prefill, `None` for a plain
-    /// clone — the one field that distinguishes the two, everything else
-    /// about how a prefill seeds the form being identical between them
-    /// (SPEC.md's "clone, replace with, and New are one launcher"). Every
-    /// existing prefill rule above applies exactly the same way whether or
-    /// not this is set: host identity, the
-    /// remembered-permissions seed losing to a prefill, `prefill_applied`
-    /// generations. What DOES change downstream, all of it in
-    /// `CreateSessionForm`'s submit path rather than in reseeding: the
-    /// composer's launch button reads "replace" instead of "launch", a
-    /// selected host that drifts from [`host`](Self::host) is refused
-    /// before sending, and a successful submit calls
-    /// `api::replace_session_with` instead of `api::create_session` (see
-    /// [`IntentBinding::replace_source`], which carries this value from
-    /// submit through to that branch).
+    /// `Some(source id)` makes this a Replace-with prefill. Its initial
+    /// destination stays the source folder instead of Clone's fresh checkout.
+    /// Host reconciliation and launch settings still seed identically; submit
+    /// uses the replace endpoint and refuses a drift from the source host.
+    /// The launch button reads "replace"; [`IntentBinding::replace_source`]
+    /// carries the source through asynchronous submission. Prefill generations
+    /// and remembered permissions still follow the same reconciliation rules.
     pub(super) replace_source: Option<String>,
     /// The "replace with" source's status and terminal tab count when the
     /// launcher opened, `None` for a plain clone.
@@ -1349,6 +1346,11 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         host: session.host,
         host_identity: session.host_identity.clone(),
         cwd: session.cwd.clone(),
+        repo: session
+            .working_copy
+            .as_ref()
+            .map(|checkout| checkout.repo.clone())
+            .or_else(|| session.github_repo.clone()),
         title: session.title.clone(),
         invocation: session.invocation.clone(),
         launch: session.agent_selection().cloned(),
@@ -1624,6 +1626,61 @@ fn copied_title_ignored(edited: bool, seed: Option<&str>, fresh_checkout: bool) 
     fresh_checkout && !edited && seed.is_some()
 }
 
+/// A Clone's untouched checkout name, scoped to the current host and repository.
+///
+/// Only the UI's default may advance after an occupied-name refusal. Explicit
+/// edits, Replace with, and a different repository keep their existing rules.
+/// The bound prevents a peer from driving an unlimited sequence of previews.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CloneCheckoutNaming {
+    source_repo: Option<GithubRepo>,
+    target: Option<(Option<CreateTarget>, Option<GithubRepo>)>,
+    suffix: u32,
+}
+
+impl CloneCheckoutNaming {
+    /// Occupancy belongs to one host installation and repository. Returning
+    /// to a prior target starts its search over, rather than caching names.
+    fn retarget(&mut self, host: Option<CreateTarget>, repo: Option<GithubRepo>) {
+        let target = Some((host, repo));
+        if self.target != target {
+            self.target = target;
+            self.suffix = 0;
+        }
+    }
+
+    /// Preserve the source title's raw spelling until the person edits it.
+    /// An empty source title remains an unnamed checkout, as ordinary New does.
+    fn default_title(
+        &self,
+        edited: bool,
+        seed: Option<&str>,
+        repo: Option<&GithubRepo>,
+    ) -> Option<String> {
+        if edited || self.source_repo.is_none() || self.source_repo.as_ref() != repo {
+            return None;
+        }
+        let seed = seed.filter(|seed| !seed.is_empty())?;
+        Some(if self.suffix == 0 {
+            format!("{seed}-clone")
+        } else {
+            format!("{seed}-clone-{}", self.suffix)
+        })
+    }
+
+    /// Try the next suffix only after the current authoritative preview says
+    /// occupied. An unresolved create keeps its name for reconciliation: its
+    /// own accepted directory may be the collision. At the cap, retain the
+    /// visible conflict for a manual edit.
+    fn advance(&mut self, reconciling: bool) -> bool {
+        if reconciling || self.suffix >= 50 {
+            return false;
+        }
+        self.suffix = if self.suffix == 0 { 2 } else { self.suffix + 1 };
+        true
+    }
+}
+
 /// Hover text for one launcher search result.
 ///
 /// A result's visible line is its kind and value ("Model: …"); the tooltip
@@ -1673,24 +1730,26 @@ fn search_result_tooltip(
     }
 }
 
-/// The title a launch sends: [`submitted_field`]'s rule, except that a copied,
-/// unedited title is sent empty when the destination is a fresh checkout (see
-/// [`copied_title_ignored`]).
+/// One effective title for display, preview, retry bindings and submission.
 ///
-/// Every read of the title for a launch goes through this one function: the
-/// checkout preview, the retry and submit bindings, the draft snapshot and
-/// the request-key re-read. The preview's title must equal the create's or
-/// the launch is refused as stale, so a site that still read the copied
-/// title would turn this fix into a "wait for a current checkout preview"
-/// refusal instead. Deciding at read time, rather than clearing the field
-/// when a repository is picked, also means switching back to a folder
-/// restores the copied title with no extra bookkeeping.
-///
-/// The empty string is how an unnamed checkout is already requested
-/// (`checkout_basename` treats it like an absent title), so the helm and
-/// supervisor need no change.
-fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout: bool) -> String {
-    if copied_title_ignored(edited, seed, fresh_checkout) {
+/// Clone into its source repository uses the supplied untouched `-clone`
+/// default. Other fresh-checkout destinations ignore a copied title and
+/// allocate an unnamed `repo-N`; folders and explicit edits keep their raw
+/// spelling. Deciding on read preserves the source title when a folder is
+/// chosen again. All launch-time rechecks must use this same policy: a name
+/// that differs from the preview is refused as stale. An empty string already
+/// requests an unnamed checkout (`checkout_basename` treats it as absent), so
+/// this policy needs no helm or supervisor change.
+fn submitted_title(
+    text: &str,
+    edited: bool,
+    seed: Option<&str>,
+    fresh_checkout: bool,
+    clone_default: Option<&str>,
+) -> String {
+    if let Some(default) = clone_default {
+        default.to_string()
+    } else if copied_title_ignored(edited, seed, fresh_checkout) {
         String::new()
     } else {
         submitted_field(text, edited, seed)
@@ -1954,6 +2013,7 @@ pub(super) fn CreateSessionForm(
     let mut destination_draft = use_signal(move || DestinationDraft::Existing {
         cwd: destination_seed,
     });
+    let mut clone_checkout_naming = use_signal(CloneCheckoutNaming::default);
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
     // A Replace-with deletes its source, whose notice the session list shows.
     let delete_notice = use_context::<super::DeleteNotice>();
@@ -2348,6 +2408,22 @@ pub(super) fn CreateSessionForm(
                     &mut cwd_edited,
                     &prefill.cwd,
                 );
+                let source_repo = prefill
+                    .repo
+                    .clone()
+                    .filter(|_| prefill.replace_source.is_none());
+                clone_checkout_naming.set(CloneCheckoutNaming {
+                    source_repo: source_repo.clone(),
+                    ..Default::default()
+                });
+                if let Some(repo) = source_repo {
+                    // A second Clone of the same row still needs a new offer:
+                    // equal repository/name inputs must not reuse its old preview.
+                    destination_draft.set(DestinationDraft::github(repo));
+                    preview_revision.with_mut(|revision| {
+                        *revision = revision.checked_add(1).expect("preview revision exhausted")
+                    });
+                }
                 // Clone owns a separate installation-reconciliation contract;
                 // a new clone generation replaces any earlier history choice.
                 remembered_destination.set(None);
@@ -2552,6 +2628,31 @@ pub(super) fn CreateSessionForm(
     {
         observed_checkout_revision.set(history.checkout_config_revision);
     }
+    // Reset before constructing authority so the preview and every later
+    // submit see the same name on a host or repository change. Use the
+    // synchronous destination claim: create_target is reconciled by an effect
+    // and can still describe the prior host during this render.
+    let mut naming = clone_checkout_naming.peek().clone();
+    naming.retarget(destination_now.clone(), destination_draft().repo().cloned());
+    if naming != *clone_checkout_naming.peek() {
+        clone_checkout_naming.set(naming);
+    }
+    // Display, preview authority, retry binding, submit, draft snapshot and
+    // request-key re-read must share this policy. A stray raw-title read
+    // would make the create disagree with its preview and be refused as stale.
+    let title_for_launch = move || {
+        let destination = destination_draft();
+        let naming = clone_checkout_naming();
+        let seed = title_raw_seed();
+        let default = naming.default_title(title_edited(), seed.as_deref(), destination.repo());
+        submitted_title(
+            &title(),
+            title_edited(),
+            seed.as_deref(),
+            destination.repo().is_some(),
+            default.as_deref(),
+        )
+    };
     let mut proposed_authority = destination_draft().repo().cloned().and_then(|repo| {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
         Some(PreviewAuthority {
@@ -2562,12 +2663,7 @@ pub(super) fn CreateSessionForm(
             installation_identity: host.identity.clone()?,
             repo,
             // Only built while a repository is the destination, hence `true`.
-            title: Some(submitted_title(
-                &title(),
-                title_edited(),
-                title_raw_seed.peek().as_deref(),
-                true,
-            )),
+            title: Some(title_for_launch()),
             agent: preview_agent_now(),
         })
     });
@@ -2609,28 +2705,6 @@ pub(super) fn CreateSessionForm(
             )
             .await;
             Some((authority, result))
-        }
-    });
-    use_effect(move || {
-        let Some(Some((authority, result))) = preview_response.read().clone() else {
-            return;
-        };
-        let Some(live) = live_preview_authority.peek().clone() else {
-            return;
-        };
-        if authority != live {
-            return;
-        }
-        let preview_state = match result {
-            Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
-            Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
-            Err(message) => PreviewState::Failed { authority: authority.clone(), message },
-        };
-        if destination_draft.peek().repo() == Some(&authority.repo) {
-            destination_draft.set(DestinationDraft::Github {
-                repo: authority.repo,
-                preview_state: Box::new(preview_state),
-            });
         }
     });
 
@@ -2789,12 +2863,7 @@ pub(super) fn CreateSessionForm(
             &hosts,
             cwd(),
             launch,
-            submitted_title(
-                &title(),
-                title_edited(),
-                title_raw_seed.peek().as_deref(),
-                destination_draft().repo().is_some(),
-            ),
+            title_for_launch(),
             prefill_for_submit
                 .as_ref()
                 .and_then(|prefill| prefill.replace_source.clone()),
@@ -2810,6 +2879,40 @@ pub(super) fn CreateSessionForm(
             .filter(|(original, _)| same_fresh_intent(original, &draft, repo, installation))
             .map(|(binding, _)| binding)
     });
+    // A preview cannot prove that a lost create was refused: its occupied
+    // directory may belong to the request we are still reconciling. Derive
+    // this from the same intent match that preserves its body and key.
+    use_effect(use_reactive(&retry_binding, move |retry_binding| {
+        let Some(Some((authority, result))) = preview_response.read().clone() else {
+            return;
+        };
+        let Some(live) = live_preview_authority.peek().clone() else {
+            return;
+        };
+        if authority != live {
+            return;
+        }
+        let preview_state = match result {
+            Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
+            Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
+            Err(failure) => {
+                let mut naming = clone_checkout_naming.peek().clone();
+                let default = naming.default_title(*title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo());
+                if failure.occupied && default.as_ref() == authority.title.as_ref()
+                    && default.is_some() && naming.advance(retry_binding.is_some()) {
+                    clone_checkout_naming.set(naming);
+                    return;
+                }
+                PreviewState::Failed { authority: authority.clone(), message: failure.message }
+            },
+        };
+        if destination_draft.peek().repo() == Some(&authority.repo) {
+            destination_draft.set(DestinationDraft::Github {
+                repo: authority.repo,
+                preview_state: Box::new(preview_state),
+            });
+        }
+    }));
     let current_preview = match destination_draft() {
         DestinationDraft::Github { preview_state, .. } => match *preview_state {
             PreviewState::Ready { authority, preview }
@@ -2872,7 +2975,14 @@ pub(super) fn CreateSessionForm(
         title_raw_seed.peek().as_deref(),
         checkout_mode,
     );
-    let title_field_value = if title_ignored {
+    let clone_default = clone_checkout_naming().default_title(
+        title_edited(),
+        title_raw_seed.peek().as_deref(),
+        destination_draft().repo(),
+    );
+    let title_field_value = if let Some(default) = clone_default {
+        display_peer(&default)
+    } else if title_ignored {
         String::new()
     } else {
         title()
@@ -3641,12 +3751,7 @@ pub(super) fn CreateSessionForm(
                     &hosts,
                     submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
                     launch,
-                    submitted_title(
-                        &title(),
-                        title_edited(),
-                        title_raw_seed.peek().as_deref(),
-                        destination_draft.peek().repo().is_some(),
-                    ),
+                    title_for_launch(),
                     replace_source,
                 ) else {
                     error.set(Some(
@@ -3674,7 +3779,7 @@ pub(super) fn CreateSessionForm(
                     *structured_permissions.peek(),
                     submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
                     (*command_yolo.peek(), *command_agent.peek(), *command_resume_on.peek(), submitted_field(&command_resume.peek(), *command_resume_edited.peek(), command_resume_raw_seed.peek().as_deref())),
-                    submitted_title(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo().is_some()),
+                    title_for_launch(),
                     *chosen_host.peek(),
                 );
                 let fresh_snapshot = fresh_draft_snapshot();
@@ -3856,15 +3961,10 @@ pub(super) fn CreateSessionForm(
                             cwd: if binding.github_checkout.is_some() { binding.cwd.clone() } else {
                                 submitted_field(&cwd.peek(), *cwd_edited.peek(), cwd_raw_seed.peek().as_deref())
                             },
-                            // Same destination test as `cwd` above, so a
-                            // fresh checkout's re-read title still matches the
-                            // preview it was accepted against.
-                            title: submitted_title(
-                                &title.peek(),
-                                *title_edited.peek(),
-                                title_raw_seed.peek().as_deref(),
-                                binding.github_checkout.is_some(),
-                            ),
+                            // Re-read through the preview's effective-name
+                            // policy. The operation gate fixes the destination
+                            // during key minting; the snapshot check catches drift.
+                            title: title_for_launch(),
                             ..binding
                         };
                     };
@@ -4845,6 +4945,13 @@ pub(super) fn CreateSessionForm(
             }
             if let DestinationDraft::Github { repo, preview_state } = destination_draft() {
                 div { class: "launch-composer-checkout-preview", aria_live: "polite",
+                    // Completion must be observable even while reconciliation
+                    // hides a preview error behind the original accepted path.
+                    "data-preview-state": match preview_state.as_ref() {
+                        PreviewState::Pending => "pending",
+                        PreviewState::Ready { .. } => "ready",
+                        PreviewState::Failed { .. } => "failed",
+                    },
                     "fresh checkout of {repo.identifier()} on {selected_host_label}"
                     if let Some(preview) = &displayed_preview {
                         div { dir: "ltr", "{display_peer(&preview.cwd)}" }
@@ -4852,7 +4959,7 @@ pub(super) fn CreateSessionForm(
                     if retry_binding.is_some() {
                         div { "retry reconciles the original request at this path" }
                     } else {
-                        match *preview_state {
+                        match preview_state.as_ref() {
                             PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
                             PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
                             PreviewState::Ready { .. } => rsx! {},
@@ -6274,20 +6381,94 @@ mod tests {
         let copied = Some("bar-fix");
         // Fresh checkout, copied and untouched: unnamed.
         assert!(copied_title_ignored(false, copied, true));
-        assert_eq!(submitted_title("bar-fix", false, copied, true), "");
+        assert_eq!(submitted_title("bar-fix", false, copied, true, None), "");
         // The same field with a folder destination keeps the copied raw
         // title, including when its display spelling is escaped.
         assert!(!copied_title_ignored(false, copied, false));
-        assert_eq!(submitted_title("escaped", false, copied, false), "bar-fix");
+        assert_eq!(
+            submitted_title("escaped", false, copied, false, None),
+            "bar-fix"
+        );
         // Typing makes the title the person's own again, for either
         // destination, so a taken typed name still gets the conflict.
         assert!(!copied_title_ignored(true, copied, true));
-        assert_eq!(submitted_title("typed", true, copied, true), "typed");
-        assert_eq!(submitted_title("typed", true, copied, false), "typed");
+        assert_eq!(submitted_title("typed", true, copied, true, None), "typed");
+        assert_eq!(submitted_title("typed", true, copied, false, None), "typed");
         // An ordinary New form has no seed: whatever the field holds is sent.
         assert!(!copied_title_ignored(false, None, true));
-        assert_eq!(submitted_title("", false, None, true), "");
-        assert_eq!(submitted_title("named", false, None, true), "named");
+        assert_eq!(submitted_title("", false, None, true, None), "");
+        assert_eq!(submitted_title("named", false, None, true, None), "named");
+    }
+
+    /// Clone's default alone may search for a free checkout name. Switching
+    /// hosts or repositories restarts that search; explicit edits, unnamed
+    /// sources and Replace with must never acquire an automatic suffix.
+    #[test]
+    fn clone_checkout_names_are_defaults_scoped_to_the_destination() {
+        let repo = GithubRepo::parse("acme/bar").unwrap();
+        let other = GithubRepo::parse("acme/other").unwrap();
+        let host = Some(CreateTarget::new(1, "install-a".into()));
+        let mut naming = CloneCheckoutNaming {
+            source_repo: Some(repo.clone()),
+            ..Default::default()
+        };
+        naming.retarget(host.clone(), Some(repo.clone()));
+        let default = naming
+            .default_title(false, Some("bar-3"), Some(&repo))
+            .unwrap();
+        assert_eq!(default, "bar-3-clone");
+        assert_eq!(
+            submitted_title("bar-3", false, Some("bar-3"), true, Some(&default)),
+            default
+        );
+        assert!(
+            !naming.advance(true),
+            "a retained request must keep its original name"
+        );
+        assert_eq!(naming.suffix, 0);
+        assert!(naming.advance(false));
+        assert_eq!(
+            naming
+                .default_title(false, Some("bar-3"), Some(&repo))
+                .as_deref(),
+            Some("bar-3-clone-2")
+        );
+        naming.retarget(host.clone(), Some(repo.clone()));
+        assert_eq!(naming.suffix, 2, "same destination keeps its search");
+        naming.retarget(
+            Some(CreateTarget::new(2, "install-b".into())),
+            Some(repo.clone()),
+        );
+        assert_eq!(naming.suffix, 0, "new host searches from the base name");
+        assert!(
+            naming
+                .default_title(true, Some("bar-3"), Some(&repo))
+                .is_none()
+        );
+        assert!(naming.default_title(false, Some(""), Some(&repo)).is_none());
+        assert!(naming.default_title(false, Some("bar-3"), None).is_none());
+        assert!(
+            naming
+                .default_title(false, Some("bar-3"), Some(&other))
+                .is_none()
+        );
+        naming.advance(false);
+        naming.retarget(host, Some(other));
+        assert_eq!(naming.suffix, 0, "repository changes reset the counter");
+        naming.source_repo = None;
+        assert!(
+            naming
+                .default_title(false, Some("bar-3"), Some(&repo))
+                .is_none()
+        );
+        for _ in 0..49 {
+            assert!(naming.advance(false));
+        }
+        assert_eq!(naming.suffix, 50);
+        assert!(
+            !naming.advance(false),
+            "cap leaves a conflict for the person to fix"
+        );
     }
 
     /// Why this matters: "Replace with" opened the launcher straight from the
@@ -6362,9 +6543,9 @@ mod tests {
         );
     }
 
-    /// Repo metadata describes the source, not a fresh destination request.
-    /// Ordinary Clone (also used to seed Replace-with) must preserve the actual
-    /// cwd even for a borrower running below the managed checkout root.
+    /// Checkout association chooses Clone's new repository, including a
+    /// borrower below its root. Keep the source cwd too: Replace with and
+    /// switching back to a folder need the original subdirectory unchanged.
     #[farhelm_testtrace::test]
     fn prefill_from_checkout_metadata_keeps_existing_subdirectory() {
         let mut session = Session {
@@ -6377,9 +6558,16 @@ mod tests {
             }),
             ..row_specimen("borrower")
         };
-        assert_eq!(prefill_from(&session, 1).cwd, "/work/bar-1/subdir");
-        session.github_repo = Some(GithubRepo::parse("acme/bar").unwrap());
-        assert_eq!(prefill_from(&session, 2).cwd, "/work/bar-1/subdir");
+        let prefill = prefill_from(&session, 1);
+        assert_eq!(prefill.cwd, "/work/bar-1/subdir");
+        assert_eq!(prefill.repo, Some(GithubRepo::parse("acme/bar").unwrap()));
+        session.github_repo = Some(GithubRepo::parse("other/provenance").unwrap());
+        assert_eq!(
+            prefill_from(&session, 2).repo,
+            Some(GithubRepo::parse("acme/bar").unwrap())
+        );
+        session.working_copy = None;
+        assert_eq!(prefill_from(&session, 3).repo, session.github_repo);
     }
 
     // -------------------------------------------------------------

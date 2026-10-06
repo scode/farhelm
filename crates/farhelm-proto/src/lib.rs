@@ -1036,12 +1036,11 @@ pub struct SessionInfo {
     /// kind of session and for any sender predating protocol 24 (the field
     /// decodes absent as `None`).
     ///
-    /// Provenance, not a behavior switch: a session created from a fresh
-    /// checkout behaves exactly like any other session in the same
-    /// directory, and a later Replace or Clone that reuses the EXISTING
-    /// directory keeps every existing destination behavior — this field
-    /// describes where the directory came from, it never changes what a
-    /// create does. It is also deliberately not updated by later sessions
+    /// The UI uses this as Clone's repository fallback when `working_copy`
+    /// is absent. Current membership takes precedence so a borrower and the
+    /// original session clone the same way. Replace and Replace with keep
+    /// their existing-directory defaults; the metadata itself does not
+    /// allocate anything. It is deliberately not updated by later sessions
     /// that merely attach to the checkout; see
     /// [`WorkingCopyInfo::origin_session_id`]'s docs for the same decision
     /// on the registry side.
@@ -1053,11 +1052,11 @@ pub struct SessionInfo {
     /// `None` for sessions with no managed association and for senders
     /// predating protocol 24.
     ///
-    /// Like `github_repo`, this is association metadata rather than a
-    /// behavior switch: a plain Replace or Clone into an existing directory
-    /// keeps its destination behavior unchanged whether this field is set
-    /// or not. The supervisor recomputes it from its registry on every
-    /// reply; clients treat it as read-only.
+    /// The UI prefers this repository when seeding Clone onto a fresh
+    /// checkout, including for existing-directory borrowers. Replace and
+    /// Replace with retain the existing directory. The supervisor recomputes
+    /// the association from its registry on every reply; clients treat it
+    /// as read-only and request any new allocation separately.
     /// If managed ancestors nest, this singular display field names the
     /// innermost allocated checkout. Every ancestor membership still counts
     /// for lifetime; this projection is not the membership inventory.
