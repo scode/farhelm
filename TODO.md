@@ -149,6 +149,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   makes a large, blank, unlabeled text box appear under the host field, and the user has to guess that it is for the
   GitHub repository. Give it a label and placeholder like the form's other fields, and size it like them.
 
+- **Templates seem impossible to edit once added.** Once a template was saved, there seemed to be no way to edit it.
+  SPEC.md says templates are edited in the Templates panel, and each saved template's row there has an "edit" button
+  that loads it into the form below. Find out whether that button is missing, broken, or just hard to find, and fix it
+  so editing a template is obvious.
+
 - **Ask for feedback when the installer finishes.** The installer's closing message should directly encourage the user
   to send feedback through the `?` menu's Send feedback, say that it goes privately to the maintainer, and say that even
   a low-effort, throwaway comment is useful. The installer tests check its exact closing messages, so they change with
