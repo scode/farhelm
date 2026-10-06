@@ -131,12 +131,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Terminal tab next to an agent started in `~` opens in `~/`.** Opening a terminal tab beside an agent session whose
   folder is the home directory gives a shell whose prompt shows `~/` rather than `~`, so its working directory carries a
-  trailing slash. Find where the slash comes from and make the tab start in exactly the session's folder.
+  trailing slash. Find where the slash comes from and make the tab start in exactly the session's folder. Plan:
+  `plans/queue/home-tab-trailing-slash.md`.
 
 - **Cmd+N for a new session.** Cmd+N on macOS, and the equivalent elsewhere, does what clicking the new session button
   does. Pick the non-Mac chord with care: Ctrl+N is next-history in readline and emacs inside the terminal, and browsers
   keep Ctrl+N (and Cmd+N in the web UI on a Mac) for a new window. The terminal text-size shortcut in SPEC.md (Cmd+Shift
-  on macOS, Ctrl+Shift elsewhere) is the precedent to follow.
+  on macOS, Ctrl+Shift elsewhere) is the precedent to follow. Plan: `plans/queue/new-session-shortcut.md`.
 
 - **Make sense of the permission choices.** The template editor's permissions menu, with Claude as the agent type,
   offers leave as is, reset to default, yolo, approve, smart approve and chat, when the expected choice was simply YOLO
@@ -152,7 +153,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Ask for feedback when the installer finishes.** The installer's closing message should directly encourage the user
   to send feedback through the `?` menu's Send feedback, say that it goes privately to the maintainer, and say that even
   a low-effort, throwaway comment is useful. The installer tests check its exact closing messages, so they change with
-  it.
+  it. Plan: `plans/queue/installer-feedback-prompt.md`.
 
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
