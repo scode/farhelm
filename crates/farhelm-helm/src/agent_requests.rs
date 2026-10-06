@@ -1719,7 +1719,7 @@ async fn write_template_for_agent(
         (None, false) => return Err(no_such_template(&name)),
         (None, true) => farhelm_proto::launcher::LaunchTemplate {
             name,
-            fields: with_agent_kind(fields),
+            fields: with_launch_kind(fields),
         },
         (Some(existing), false) => {
             // The merge would let `--command`'s kind replace the stored one;
@@ -1813,24 +1813,32 @@ async fn delete_template_for_agent(
     Ok(AgentReply::TemplateDeleted {})
 }
 
-/// `fields` with the agent launch kind written in when it sets an
-/// agent-launch choice and no kind.
+/// Give a new template the launch kind its choices require, leaving placement-only
+/// templates usable under either kind. An agent type beside command fields is
+/// the command's declaration; without them it selects an agent launch.
 ///
-/// The CLI's flags mean an agent launch unless `--command` is given (which
-/// writes the command kind itself), but a stored template without a kind
-/// applies to whichever kind the launcher is on: on the command kind, its
-/// `--agent` would become the command's declared agent type and its model
-/// would be refused. Writing the kind keeps the template meaning what the
-/// flags it was written from meant.
-fn with_agent_kind(
+/// Explicit kinds stay explicit, and mixed choices are still refused by the
+/// caller. This inference runs only on create: an edit must keep the stored
+/// template's kind, and no existing template is migrated.
+fn with_launch_kind(
     mut fields: farhelm_proto::launcher::TemplateFields,
 ) -> farhelm_proto::launcher::TemplateFields {
-    let agent_choice = fields.model.is_some()
+    use farhelm_proto::launcher::LauncherKind;
+    let command_choice =
+        fields.command.is_some() || fields.yolo.is_some() || fields.resume_command.is_some();
+    let agent_choice = fields.agent.is_some()
+        || fields.model.is_some()
         || fields.effort.is_some()
         || fields.permissions.is_some()
         || fields.workspace_trust.is_some();
-    if fields.kind.is_none() && agent_choice {
-        fields.kind = Some(farhelm_proto::launcher::LauncherKind::Agent);
+    if fields.kind.is_none() {
+        fields.kind = if command_choice {
+            Some(LauncherKind::Command)
+        } else if agent_choice {
+            Some(LauncherKind::Agent)
+        } else {
+            None
+        };
     }
     fields
 }
@@ -1840,7 +1848,7 @@ fn with_agent_kind(
 ///
 /// Such a template can never apply (`launcher::apply_template` refuses the
 /// side that does not match the kind), and an agent cannot repair one: an
-/// edit cannot unset a field, and the flags never write the agent kind. Only
+/// edit cannot unset a field, and an edit's flags never write the agent kind. Only
 /// the agent verbs' own merge can produce one, so it is refused there; the
 /// GUI's editor stores shape only (SPEC.md).
 fn mixes_launch_kinds(fields: &farhelm_proto::launcher::TemplateFields) -> bool {
@@ -6742,11 +6750,74 @@ mod tests {
         }
     }
 
+    /// An agent type alone must keep its meaning when applied from the command
+    /// tab; beside command fields it instead declares the command's agent.
+    /// A command choice without an agent also pins the command tab, so a
+    /// YOLO- or resume-only template can switch away from the agent tab.
+    /// Explicit kinds stay authoritative; common placement edits remain
+    /// usable under either launch kind.
+    #[test]
+    fn template_create_infers_kind_without_reinterpreting_command_agents() {
+        use farhelm_proto::launcher::{LauncherKind, TemplateFields};
+        let agent = TemplateFields {
+            agent: Some(farhelm_proto::LaunchHarness::Claude),
+            ..Default::default()
+        };
+        assert_eq!(
+            with_launch_kind(agent.clone()).kind,
+            Some(LauncherKind::Agent)
+        );
+        let explicit = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            ..agent.clone()
+        };
+        assert_eq!(with_launch_kind(explicit.clone()), explicit);
+        for fields in [
+            TemplateFields {
+                command: Some("claude {farhelm_args}".into()),
+                ..agent.clone()
+            },
+            TemplateFields {
+                yolo: Some(false),
+                ..agent.clone()
+            },
+            TemplateFields {
+                resume_command: Some(None),
+                ..agent
+            },
+            TemplateFields {
+                yolo: Some(false),
+                ..Default::default()
+            },
+            TemplateFields {
+                resume_command: Some(Some("resume {conversation}".into())),
+                ..Default::default()
+            },
+        ] {
+            let inferred = with_launch_kind(fields.clone());
+            assert_eq!(inferred.kind, Some(LauncherKind::Command));
+            assert_eq!(
+                inferred,
+                TemplateFields {
+                    kind: Some(LauncherKind::Command),
+                    ..fields
+                }
+            );
+        }
+        let placement = TemplateFields {
+            name: Some("review".into()),
+            ..Default::default()
+        };
+        assert_eq!(with_launch_kind(placement.clone()), placement);
+    }
+
     /// Spec: `template create` stores the template with its host written as
     /// that host's install identity and refuses a taken name; `template edit`
     /// sets only the fields it is given, keeping the command text the agent
     /// never saw; `template delete` removes it; a template naming its host
-    /// directly, or a fresh-checkout destination, is refused.
+    /// directly, or a fresh-checkout destination, is refused. An agent-type-only
+    /// create pins the agent kind, so a later command edit is refused rather
+    /// than reinterpreting the template as a different launch.
     ///
     /// Why: these are SPEC.md's template verbs for agents. An edit that
     /// replaced the whole template would silently drop command text the
@@ -6818,17 +6889,33 @@ mod tests {
         assert_eq!(stored[0].fields.name.as_deref(), Some("titled"));
         assert_eq!(stored[0].fields.host.as_deref(), Some("identity-local"));
 
-        h.store
-            .put_launch_template(farhelm_proto::launcher::LaunchTemplate {
-                name: "agent-kind".to_string(),
-                fields: farhelm_proto::launcher::TemplateFields {
-                    kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
-                    agent: Some(farhelm_proto::LaunchHarness::Claude),
-                    ..Default::default()
-                },
-            })
+        // Use the real create path: its newly inferred kind must also make
+        // the existing edit refusal apply to an agent-type-only template.
+        let agent_created = ask(AgentVerb::TemplateCreate {
+            name: "agent-kind".into(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Claude),
+                ..Default::default()
+            },
+            host: None,
+        })
+        .await;
+        assert!(
+            matches!(agent_created, AgentOutcome::Ok { .. }),
+            "{agent_created:?}"
+        );
+        let agent_stored = h
+            .store
+            .launch_templates()
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .find(|template| template.name == "agent-kind")
+            .expect("the successful create stored its template");
+        assert_eq!(
+            agent_stored.fields.kind,
+            Some(farhelm_proto::launcher::LauncherKind::Agent)
+        );
         // Each refusal is told apart by its kind and its own wording, so a
         // case that is refused for some other reason fails here.
         let refusals: Vec<(AgentVerb, ErrorKind, &str)> = vec![
@@ -6922,10 +7009,17 @@ mod tests {
             }
         }
         assert_eq!(h.store.launch_templates().await.unwrap().len(), 2);
+        let after_refusal = h
+            .store
+            .launch_templates()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|template| template.name == "agent-kind")
+            .expect("the refused edit preserves the template");
         assert_eq!(
-            h.store.launch_templates().await.unwrap()[0].fields.kind,
-            Some(farhelm_proto::launcher::LauncherKind::Agent),
-            "the refused kind change wrote nothing"
+            after_refusal, agent_stored,
+            "the refused edit wrote nothing"
         );
 
         let deleted = ask(AgentVerb::TemplateDelete {
