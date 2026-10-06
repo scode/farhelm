@@ -1950,6 +1950,11 @@ pub(super) fn CreateSessionForm(
     /// effect is what turns a new
     /// generation into field values.
     prefill: Option<CreatePrefill>,
+    /// One accepted switcher action for an ordinary New draft. Applied once
+    /// after mount seeding (templates also wait for asynchronous inputs),
+    /// through the same search-accept path as a keyboard or mouse choice. This is not a clone
+    /// prefill: remembered permissions and New's destination still seed normally.
+    initial_action: Option<crate::launch_composer::ComposerSearchResult>,
     /// For "replace with", the source session's status and terminal tab
     /// count as the page currently knows them: its row in the live listing,
     /// else the last state a listing showed for it, else
@@ -2369,6 +2374,10 @@ pub(super) fn CreateSessionForm(
     // reseed on every unrelated rerun of that effect (a host reconnect, a
     // catalog refresh) for as long as a clone is on screen.
     let mut prefill_applied = use_signal(|| None::<u64>);
+    // Initial search acceptance follows this effect, so mount-time host and
+    // clone reconciliation cannot overwrite the action it applies.
+    let mut mount_seeded = use_signal(|| false);
+    let mut pending_initial_action = use_signal(move || initial_action);
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
     // the way the surrounding signals are), and the render body further
@@ -2377,6 +2386,12 @@ pub(super) fn CreateSessionForm(
     use_effect(use_reactive(
         (&prefill.as_ref().map(|prefill| prefill.generation),),
         move |_| {
+            // A new clone intent supersedes a still-waiting switcher pick.
+            // The form may stay mounted, so clearing the parent alone cannot
+            // revoke the child's mount-time copy.
+            if prefill.is_some() {
+                pending_initial_action.set(None);
+            }
             let hosts = &hosts_for_reseed;
             let target = create_target();
             let previous = bound_target.peek().clone();
@@ -2575,6 +2590,7 @@ pub(super) fn CreateSessionForm(
             // An unconfirmable clone host leaves the selector at its ordinary
             // default. The launch seeded above is deliberately unaffected.
 
+            mount_seeded.set(true);
             if previous != target {
                 bound_target.set(target.clone());
                 // Equality already compares the row and installation
@@ -3013,7 +3029,6 @@ pub(super) fn CreateSessionForm(
     .unwrap_or("default");
     let catalog_for_submit = catalog_answer.clone();
     let catalog_for_harness = catalog_answer.clone();
-    let catalog_for_search = catalog_answer.clone();
     // Pointer activation and Enter both apply exactly the same saved draft.
     // Enter deliberately submits only AFTER this callback returns: the form's
     // submit handler owns the intent key and operation lock, so it must remain
@@ -3325,8 +3340,6 @@ pub(super) fn CreateSessionForm(
     let catalog_models_for_search_input = catalog_models.clone();
     let composer_hosts_for_search_input = composer_hosts.clone();
     let template_names_for_search_input = template_names.clone();
-    let templates_for_search_key = templates_now.clone();
-    let templates_for_search_click = templates_now.clone();
     let template_targets = TemplateTargets {
         launch_tab,
         structured_harness,
@@ -3372,8 +3385,6 @@ pub(super) fn CreateSessionForm(
     // reply is checked against `browse_target`, which stays live while the
     // request is in flight.
     let browse_hosts = hosts.clone();
-    let action_hosts_for_search_key = hosts.clone();
-    let action_hosts_for_search_click = hosts.clone();
     let browse_target = create_target;
     let browse_cwd = cwd;
     let browse_cwd_raw_seed = cwd_raw_seed;
@@ -3381,6 +3392,122 @@ pub(super) fn CreateSessionForm(
     let browse_base_for_folder = browse_base.clone();
     let browse_hosts_for_folder = browse_hosts.clone();
     let hosts_for_destination_choice = hosts.clone();
+    // Every accepted search action owns its captured result. Promoting history
+    // may change later suggestions, never the result this action applies.
+    // Initial switcher choices use this same path, keeping template validation,
+    // browse invalidation and field ownership identical to ordinary search.
+    let action_hosts = hosts.clone();
+    let action_catalog = catalog_answer.clone();
+    let action_history_target = current_history_target.clone();
+    let action_browse_base = browse_base.clone();
+    let action_browse_hosts = browse_hosts.clone();
+    let accept_search = use_callback(
+        move |result: crate::launch_composer::ComposerSearchResult| {
+            if !draft_transition_allowed(ops) {
+                return false;
+            }
+            invalidate_directory_browse(
+                browse_generation,
+                browse_request,
+                browse_result,
+                browse_error,
+            );
+            promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+            let mut browse_path = None;
+            for edit in template_edits(
+                result,
+                &templates_now,
+                &action_hosts,
+                action_catalog.as_deref().unwrap_or_default(),
+                is_replace_with,
+                template_targets,
+            ) {
+                match edit {
+                    TemplateEdit::Set(set) => set(),
+                    TemplateEdit::Search(result) => {
+                        browse_path = apply_composer_search_result(
+                            result,
+                            title,
+                            title_edited,
+                            chosen_host,
+                            &action_hosts,
+                            clone_host_state,
+                            action_history_target.clone(),
+                            live_destination,
+                            remembered_destination,
+                            history_activation_attempts,
+                            destination_draft,
+                            preview_revision,
+                            cwd,
+                            cwd_raw_seed,
+                            cwd_edited,
+                            launch_tab,
+                            structured_harness,
+                            structured_model,
+                            structured_model_raw_seed,
+                            structured_model_edited,
+                            custom_model_harness,
+                            structured_effort,
+                            structured_permissions,
+                            structured_permissions_is_explicit,
+                            structured_workspace_trust,
+                            structured_workspace_trust_is_explicit,
+                            composer_reset_reason,
+                            action_catalog.as_deref(),
+                            intent_key,
+                        );
+                    }
+                }
+            }
+            if let Some(path) = browse_path {
+                request_directory_browse(
+                    action_browse_base.clone(),
+                    selected,
+                    &action_browse_hosts,
+                    browse_target,
+                    path,
+                    browse_generation,
+                    browse_request,
+                    browse_result,
+                    browse_error,
+                    browse_reply_completions,
+                    live_browse_connection,
+                    cwd,
+                    cwd_raw_seed,
+                    cwd_edited,
+                );
+            }
+            composer_search.set(String::new());
+            composer_search_open.set(false);
+            focus_composer_surface();
+            true
+        },
+    );
+    // Names need only mount seeding. Templates also need completed reads:
+    // validating against temporary empty inputs would reject a valid choice.
+    // While a template waits, the form presents a cancellable loading state
+    // rather than accepting edits that the late application would overwrite.
+    use_effect(use_reactive((&hosts_loaded,), move |(hosts_loaded,)| {
+        let action = pending_initial_action.peek().clone();
+        let Some(action) = action else {
+            return;
+        };
+        if !mount_seeded() {
+            return;
+        }
+        if matches!(
+            action,
+            crate::launch_composer::ComposerSearchResult::Template(_)
+        ) && (!hosts_loaded
+            || launch_templates.read().is_none()
+            || launch_catalog.read().is_none())
+        {
+            return;
+        }
+        if accept_search.call(action) {
+            pending_initial_action.set(None);
+        }
+    }));
     // The host selector and its reconciliation notes are built once for the
     // shared destination block. Command mode changes only launch controls, so
     // it has no second host path that could drift from this one.
@@ -3549,6 +3676,7 @@ pub(super) fn CreateSessionForm(
             // the live connection and activation count on the mounted form
             // gives browser tests a synchronous observation point for races
             // that deliberately keep the visible result unchanged.
+            "data-initial-templates-ready": launch_templates.read().is_some(),
             "data-history-fetched-revision": "{fetched_history_revision}",
             "data-composer-mode": if *launch_tab.read() == LaunchTab::Agent { "structured" } else { "command" },
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
@@ -4188,6 +4316,14 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
+            if pending_initial_action().is_some() {
+                p { role: "status", "loading session setup…" }
+                button {
+                    r#type: "button", class: "btn btn-neutral",
+                    "data-tooltip": "cancel: discard this session setup",
+                    onclick: move |_| on_cancel.call(()), "cancel"
+                }
+            } else {
             div { class: "launch-composer-topbar",
                 span { class: "launch-composer-section-label", "new session" }
             }
@@ -4500,11 +4636,6 @@ pub(super) fn CreateSessionForm(
                             );
                         },
                         onkeydown: {
-                            let catalog = catalog_for_search.clone();
-                            let browse_base = browse_base.clone();
-                            let browse_hosts = browse_hosts.clone();
-                            let action_hosts = action_hosts_for_search_key.clone();
-                            let history_target = current_history_target.clone();
                             move |evt| {
                             match evt.key() {
                                 // Escape belongs to search only while its
@@ -4578,80 +4709,7 @@ pub(super) fn CreateSessionForm(
                                     if composer_search_open() && let Some(result) =
                                         search_results_for_keys.get(composer_active_index).cloned()
                                     {
-                                        // Every selection invalidates an old directory listing
-                                        // before it changes the draft. BrowsePath installs its
-                                        // replacement request below, so a predecessor cannot
-                                        // win the race between these two UI transitions.
-                                        invalidate_directory_browse(
-                                            browse_generation, browse_request, browse_result, browse_error,
-                                        );
-                                        // Keep `result` as the action this key accepted. Promotion
-                                        // changes later suggestions only; it must not substitute a
-                                        // fresh matching result between key handling and draft apply.
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        let mut browse_path = None;
-                                        for edit in template_edits(
-                                            result,
-                                            &templates_for_search_key,
-                                            &action_hosts,
-                                            catalog.as_deref().unwrap_or_default(),
-                                            is_replace_with,
-                                            template_targets,
-                                        ) {
-                                            match edit {
-                                                TemplateEdit::Set(set) => set(),
-                                                TemplateEdit::Search(result) => {
-                                                    browse_path = apply_composer_search_result(
-                                                        result,
-                                            title,
-                                            title_edited,
-                                            chosen_host,
-                                            &action_hosts,
-                                            clone_host_state,
-                                            history_target.clone(),
-                                            live_destination,
-                                            remembered_destination,
-                                            history_activation_attempts,
-                                            destination_draft,
-                                            preview_revision,
-                                        cwd,
-                                        cwd_raw_seed,
-                                        cwd_edited,
-                                        launch_tab,
-                                            structured_harness,
-                                            structured_model,
-                                            structured_model_raw_seed,
-                                            structured_model_edited,
-                                            custom_model_harness,
-                                            structured_effort,
-                                            structured_permissions,
-                                            structured_permissions_is_explicit,
-                                            structured_workspace_trust,
-                                            structured_workspace_trust_is_explicit,
-                                            composer_reset_reason,
-                                            catalog.as_deref(),
-                                            intent_key,
-                                        );
-                                                }
-                                            }
-                                        }
-                                        if let Some(path) = browse_path {
-                                            request_directory_browse(
-                                                browse_base.clone(),
-                                                selected,
-                                                &browse_hosts,
-                                                browse_target,
-                                                path,
-                                                browse_generation,
-                                                browse_request, browse_result, browse_error, browse_reply_completions,
-                                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
-                                            );
-                                        }
-                                        composer_search.set(String::new());
-                                        composer_search_open.set(false);
-                                        focus_composer_surface();
+                                        accept_search.call(result);
                                     }
                                 }
                                 _ => {}
@@ -4701,66 +4759,8 @@ pub(super) fn CreateSessionForm(
                                                     },
                                                     onclick: {
                                                         let result = result.clone();
-                                                        let catalog = catalog_for_search.clone();
-                                                        let browse_base = browse_base.clone();
-                                                        let browse_hosts = browse_hosts.clone();
-                                                        let action_hosts = action_hosts_for_search_click.clone();
-                                                        let history_target = current_history_target.clone();
-                                                        let templates_for_search_click = templates_for_search_click.clone();
                                                         move |_| {
-                                                            if !draft_transition_allowed(ops) {
-                                                                return;
-                                                            }
-                                                            invalidate_directory_browse(
-                                                                browse_generation, browse_request, browse_result, browse_error,
-                                                            );
-                                                            // The click owns the captured result. A
-                                                            // newer history may refresh suggestions,
-                                                            // never the result this click applies.
-                                                            promote_fetched_history_snapshot(
-                                                                offered_history, create_target, fetched_history,
-                                                            );
-                                                            let mut browse_path = None;
-                                                            for edit in template_edits(
-                                                                result.clone(),
-                                                                &templates_for_search_click,
-                                                                &action_hosts,
-                                                                catalog.as_deref().unwrap_or_default(),
-                                                                is_replace_with,
-                                                                template_targets,
-                                                            ) {
-                                                                match edit {
-                                                                    TemplateEdit::Set(set) => set(),
-                                                                    TemplateEdit::Search(result) => {
-                                                                        browse_path = apply_composer_search_result(
-                                                                            result,  title, title_edited, chosen_host, &action_hosts, clone_host_state,
-                                                                history_target.clone(),
-                                                                live_destination, remembered_destination,
-                                                                history_activation_attempts, destination_draft, preview_revision, cwd, cwd_raw_seed, cwd_edited,
-                                                                launch_tab,
-                                                                structured_harness, structured_model,
-                                                                structured_model_raw_seed, structured_model_edited,
-                                                                custom_model_harness, structured_effort,
-                                                                structured_permissions, structured_permissions_is_explicit,
-                                                                structured_workspace_trust,
-                                                                structured_workspace_trust_is_explicit,
-                                                                composer_reset_reason,
-                                                                catalog.as_deref(), intent_key,
-                                                            );
-                                                                    }
-                                                                }
-                                                            }
-                                                            if let Some(path) = browse_path {
-                                                                request_directory_browse(
-                                                                    browse_base.clone(), selected, &browse_hosts,
-                                                                    browse_target, path, browse_generation,
-                                                                    browse_request, browse_result, browse_error, browse_reply_completions,
-                                                                    live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
-                                                                );
-                                                            }
-                                                            composer_search.set(String::new());
-                                                            composer_search_open.set(false);
-                                                            focus_composer_surface();
+                                                            accept_search.call(result.clone());
                                                         }
                                                     },
                                                     match &result {
@@ -5722,6 +5722,7 @@ pub(super) fn CreateSessionForm(
                     class: "create-session-error".to_string(),
                     parts: vec![DetailPart::Peer(err)],
                 }
+            }
             }
         }
         }

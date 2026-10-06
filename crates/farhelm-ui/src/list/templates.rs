@@ -454,7 +454,7 @@ fn save_name_refusal(previous: Option<&str>, name: &str, listed: &ListedNames) -
 /// A one-line description of what a template sets, for its row in the
 /// list: every field it sets, a reset shown as such. The command and resume
 /// text are left out (they can be long, and the edit form shows them).
-fn template_summary(fields: &TemplateFields) -> String {
+pub(super) fn template_summary(fields: &TemplateFields) -> String {
     let choice = |name: &str, value: Option<String>| match value {
         Some(value) => format!("{name} {value}"),
         None => format!("{name} default"),

@@ -26,6 +26,8 @@ The initial implementation deliberately leaves these observations for the mainta
   that session's terminal. Reopen and press Escape: focus returns to the previous control or terminal. Repeat with a
   modal open and during sign-in/preferences loading: the switcher does not open and does not send the chord to the
   terminal program. Check the same chord in a Mac browser; WebKit browser tests do not prove native shortcut handling.
+  Type a new name and choose the pinned New row: the launcher preserves ordinary host, directory and remembered
+  permissions. Type `tl:` and pick a template: its fields apply, and neither pick starts a session before Launch.
 - Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
   authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
 

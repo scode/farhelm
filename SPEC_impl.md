@@ -754,6 +754,16 @@ leaves focus free for its terminal. The trigger stays mounted but disabled throu
 chords without replacing the saved opener; terminal.js's modal focus veto must no longer see the switcher when the new
 selection arrives.
 
+The switcher also reads one template snapshot per open and delegates `tl:` parsing and matching to the launcher's own
+search helpers. It reuses the Templates panel's summary formatter. New/name and template choices close through the same
+DOM-removal handoff, then use the ordinary New-open callback with an optional `ComposerSearchResult`, not a clone
+prefill. The launcher keeps its normal remembered permissions and destination seeds. A one-shot pending action uses
+names after mount seeding; templates also wait for the templates and model-catalog resources to settle and the hosts
+read to succeed. While waiting, the launcher shows a cancellable loading state so late acceptance cannot overwrite user
+edits. Clone/Replace revokes any pending choice, and closing clears the parent opening intent. Both kinds use the same
+search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
+refusal behavior; resource refreshes do not reapply the initial choice. No switcher pick submits the form.
+
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
 the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)
