@@ -3,7 +3,7 @@ import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import {
   cleanupSession, createSession, listHosts, listSessions, localHostId,
-  pinAutoSelect, resetPreferences, stubFeed, openRowMenu,
+  pinAutoSelect, resetPreferences, stubFeed, openRowMenu, patchPreferences,
 } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
@@ -52,7 +52,7 @@ for (const mac of [false, true]) {
       await expect(terminal).toBeFocused();
       let dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(first.title);
-      await expect(dialog.getByRole("option")).toHaveCount(1);
+      await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(terminal).toBeFocused();
@@ -82,7 +82,7 @@ for (const mac of [false, true]) {
       await expect(page.locator(".filter-host")).toBeFocused();
       dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(second.title);
-      await expect(dialog.getByRole("option")).toHaveCount(1);
+      await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
       await waitForSessionReady(page, second.id);
@@ -96,7 +96,7 @@ for (const mac of [false, true]) {
       // Picking the current session remounts nothing; it still owes focus.
       dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(second.title);
-      await expect(dialog.getByRole("option")).toHaveCount(1);
+      await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
       await expect(terminal).toBeFocused();
@@ -129,7 +129,7 @@ test("a jump to a hidden host resets the selector to ALL", async ({ page, reques
     await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveCount(0);
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(other.title);
-    await expect(dialog.getByRole("option")).toHaveCount(1);
+    await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(page.locator(".filter-host")).toHaveValue("");
@@ -176,7 +176,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await expect(terminal).toBeFocused();
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(other.title);
-    await expect(dialog.getByRole("option")).toHaveCount(1);
+    await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(terminal).toBeFocused();
@@ -210,7 +210,7 @@ test("loading has no selection and a failed listing says so", async ({ page }) =
     const dialog = await openSwitcher(page);
     await expect.poll(() => requested).toBe(true);
     await expect(dialog.getByRole("status")).toHaveText("loading sessions…");
-    await expect(dialog.getByRole("option")).toHaveCount(0);
+    await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(0);
     await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("status")).toHaveText("loading sessions…");
@@ -223,8 +223,11 @@ test("loading has no selection and a failed listing says so", async ({ page }) =
     gate.release();
     await expect(reopened.getByRole("alert")).toContainText("Couldn't load sessions");
     await expect(reopened).not.toContainText("no sessions match");
-    await page.keyboard.press("Escape");
+    await reopened.getByRole("combobox").fill("name-after-failed-read");
+    await expect(reopened.locator(".quick-switcher-new")).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".create-session-form").getByLabel("name (optional)")).toHaveValue("name-after-failed-read");
   } finally { gate.release(); }
 });
 
@@ -254,7 +257,7 @@ test("ranking, highlighting and the listing-cap notice use one snapshot", async 
   });
   const dialog = await openSwitcher(page);
   await dialog.getByRole("combobox").fill("api");
-  const options = dialog.getByRole("option");
+  const options = dialog.locator(".quick-switcher-results").getByRole("option");
   await expect(options).toHaveCount(41);
   await expect(options.first()).toContainText("api-0");
   await expect(options.last()).toContainText("most recent");
@@ -277,6 +280,158 @@ test("ranking, highlighting and the listing-cap notice use one snapshot", async 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(dialog).toBeInViewport();
   await test.info().attach("switcher-phone", { body: await dialog.screenshot(), contentType: "image/png" });
+  await page.keyboard.press("ArrowDown");
+  await expect(dialog.locator(".quick-switcher-new")).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.locator(".quick-switcher-new")).toBeInViewport();
+
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
+});
+
+/**
+ * A name pick retains ordinary New defaults and never launches. Canceling it
+ * must also discard the opening intent so a later Clone keeps its source.
+ */
+test("the pinned name action opens ordinary New with remembered defaults", async ({ page, request }) => {
+  await platform(page, false);
+  await patchPreferences(request, { remembered_permissions: "yolo", remembered_workspace_trust: true });
+  const origin = await createSession(request, { title: `new-origin-${Date.now()}` });
+  const name = `new-draft-${Date.now()}`;
+  let creates = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
+  });
+  try {
+    await pinAutoSelect(page, origin.id);
+    await page.goto("/");
+    await attachSession(page, origin.id);
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    const ordinaryHost = await form.getByRole("combobox", { name: "host", exact: true }).inputValue();
+    const ordinaryCwd = await form.getByLabel("folder", { exact: true }).inputValue();
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+    const dialog = await openSwitcher(page);
+    await dialog.getByRole("combobox").fill(name);
+    const choice = dialog.locator(".quick-switcher-new");
+    await expect(choice).toHaveText(`new session named "${name}"`);
+    await expect(choice).toHaveAttribute("aria-selected", "true");
+    await expect(dialog.locator(".quick-switcher-template")).toHaveCount(0);
+    await page.keyboard.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(name);
+    await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveValue(ordinaryHost);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(ordinaryCwd);
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator('.launch-composer-search input[role="combobox"]')).toHaveValue("");
+    await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
+    expect(creates).toBe(0);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(page.locator(".new-session-button")).toBeFocused();
+    // A consumed name belongs to one New opening. Clone must retain its
+    // source title after its own resources and mount seeding complete.
+    const source = page.locator(`.session-row[data-session-id="${origin.id}"]`);
+    await expect(source).toBeVisible();
+    await openRowMenu(source);
+    await source.locator(".session-row-clone").click();
+    await expect(form.getByLabel("name (optional)")).toHaveValue(origin.title);
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    await expect(form.getByLabel("name (optional)")).toHaveValue(origin.title);
+  } finally { await cleanupSession(request, origin.id); }
+});
+
+/**
+ * Applying before either resource settles would report a missing template or
+ * validate against an empty catalog. Independent gates prove the initial
+ * acceptance waits for both, preserves template fields, and never launches.
+ * The loading form keeps user edits out of the delayed-application window.
+ */
+test("a template pick waits for launcher inputs before applying the template", async ({ page, request }) => {
+  await platform(page, false);
+  const name = `switch-template-${Date.now()}`;
+  const catalog = await request.get("/api/launch-catalog");
+  expect(catalog.ok()).toBe(true);
+  const model = (await catalog.json()).find((model: any) => model.harness === "codex" && model.efforts.length > 0);
+  expect(model, "the release catalog offers a Codex model and effort").toBeDefined();
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  expect(local?.identity, "the template host has a recorded installation").toBeTruthy();
+  const stored = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: {
+    kind: "agent", agent: "codex", model: model.id, effort: model.efforts[0],
+    permissions: null, workspace_trust: false, host: local!.identity,
+    destination: { folder: "/tmp" }, name: "template-owned-name",
+  } });
+  expect(stored.ok(), `template fixture: ${stored.status()} ${await stored.text()}`).toBe(true);
+  const templateGate = routeGate();
+  const catalogGate = routeGate();
+  let templateReads = 0;
+  let catalogRequested = false;
+  let templatesCompleted = false;
+  let creates = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
+  });
+  try {
+    await page.route("**/api/templates", async (route) => {
+      if (++templateReads > 1) {
+        await templateGate.wait();
+        await route.fulfill({ response: await route.fetch() });
+        templatesCompleted = true;
+      } else await route.continue();
+    });
+    await page.route("**/api/launch-catalog", async (route) => {
+      catalogRequested = true;
+      await catalogGate.wait();
+      await route.fulfill({ response: await route.fetch() });
+    });
+    await page.goto("/");
+    const dialog = await openSwitcher(page);
+    const search = dialog.getByRole("combobox");
+    await search.fill(name);
+    await expect(dialog.locator(".quick-switcher-new")).toBeVisible();
+    await expect(dialog.locator(".quick-switcher-template")).toHaveCount(0);
+    await search.fill("TL:");
+    await expect(dialog.locator(".quick-switcher-template").filter({ hasText: name })).toBeVisible();
+    await expect(dialog.locator(".quick-switcher-new")).toHaveCount(0);
+    await search.fill(`tl:${name}`);
+    const choice = dialog.getByRole("option");
+    await expect(choice).toHaveCount(1);
+    await expect(choice).toHaveAttribute("aria-selected", "true");
+    await expect(choice).toContainText("Codex");
+    await test.info().attach("switcher-template", { body: await dialog.screenshot(), contentType: "image/png" });
+    await page.keyboard.press("Enter");
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect.poll(() => templateReads).toBe(2);
+    await expect.poll(() => catalogRequested).toBe(true);
+    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    await expect(form.getByLabel("name (optional)")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
+    templateGate.release();
+    await expect.poll(() => templatesCompleted).toBe(true);
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    // The catalog gate is still held: a template reply alone cannot apply.
+    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    await expect(form.getByLabel("name (optional)")).toHaveCount(0);
+    catalogGate.release();
+    await expect(form.getByLabel("name (optional)")).toHaveValue("template-owned-name");
+    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: model.efforts[0], exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveValue(String(local!.id));
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-summary")).toContainText("trust: false");
+    await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
+    await form.getByLabel("name (optional)").fill("user-edited-name");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited");
+    await expect(form.getByLabel("name (optional)")).toHaveValue("user-edited-name");
+    expect(creates).toBe(0);
+    await test.info().attach("switcher-template-launcher", { body: await form.screenshot(), contentType: "image/png" });
+  } finally {
+    templateGate.release(); catalogGate.release();
+    await page.unrouteAll({ behavior: "wait" });
+    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+    expect(removed.ok()).toBe(true);
+  }
 });

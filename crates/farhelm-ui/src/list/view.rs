@@ -919,6 +919,9 @@ pub(crate) fn ListView(
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
+    // A switcher choice is an accepted search action, not a clone seed.
+    let mut initial_create_action =
+        use_signal(|| None::<crate::launch_composer::ComposerSearchResult>);
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
     // The switcher stays list-owned so picks use the ordinary navigation gate.
@@ -2338,6 +2341,7 @@ pub(crate) fn ListView(
             .peek()
             .as_ref()
             .map_or(0, |prefill| prefill.generation + 1);
+        initial_create_action.set(None);
         clone_prefill.set(Some(prefill_from(&session, generation)));
         show_create.set(true);
     };
@@ -2404,6 +2408,7 @@ pub(crate) fn ListView(
         // A new opening starts from its own snapshot, never from what an
         // earlier launcher on the same source last saw.
         replace_source_seen.set(None);
+        initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
         show_create.set(true);
     };
@@ -2444,6 +2449,7 @@ pub(crate) fn ListView(
             mark_replace_with(&mut prefill, &session);
             replace_source_seen.set(None);
         }
+        initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
         menu_open.set(None);
         show_create.set(true);
@@ -3077,8 +3083,36 @@ pub(crate) fn ListView(
         ids
     };
 
+    // Both entry points open the ordinary New draft. Keep destination and
+    // permission seeding here rather than manufacturing a clone prefill,
+    // which would suppress remembered permissions inside the launcher.
+    let new_hosts = host_options.clone();
+    let new_open_host = open_host.clone();
+    let new_open_destination = open_destination.clone();
+    let open_new = use_callback(
+        move |action: Option<crate::launch_composer::ComposerSearchResult>| {
+            if ops.busy_now() {
+                return false;
+            }
+            let current_hosts = new_hosts.clone();
+            let current_target =
+                effective_create_host(&current_hosts, *chosen_host.peek(), new_open_host.as_ref());
+            ordinary_new_cwd.set(new_open_destination.as_ref().and_then(|destination| {
+                // Confirm the entire inherited destination;
+                // a remote path cannot follow the host fallback
+                // onto this machine after an installation change.
+                matching_host_option(&destination.host, &current_hosts)
+                    .filter(|host| Some(host.id) == current_target)
+                    .map(|_| destination.cwd.clone())
+            }));
+            clone_prefill.set(None);
+            initial_create_action.set(action);
+            show_create.set(true);
+            true
+        },
+    );
     let switcher_listing = request_listing.clone();
-    let finish_switcher = use_callback(move |session: Option<Session>| {
+    let finish_switcher = use_callback(move |pick: Option<super::quick_switcher::SwitcherPick>| {
         if *quick_switcher_closing.peek() {
             return;
         }
@@ -3090,19 +3124,25 @@ pub(crate) fn ListView(
         spawn(async move {
             super::quick_switcher::finish_close().await;
             let mut restore = true;
-            if let Some(session) = session {
-                let same = selected.peek().as_deref() == Some(session.id.as_str());
-                let hidden = filter
-                    .peek()
-                    .host
-                    .is_some_and(|host| session.host != Some(host));
-                if guarded_open.call(session) {
-                    restore = same;
-                    if hidden {
-                        filter.write().host = None;
-                        switcher_listing(Trigger::Explicit);
+            match pick {
+                Some(super::quick_switcher::SwitcherPick::Session(session)) => {
+                    let same = selected.peek().as_deref() == Some(session.id.as_str());
+                    let hidden = filter
+                        .peek()
+                        .host
+                        .is_some_and(|host| session.host != Some(host));
+                    if guarded_open.call(*session) {
+                        restore = same;
+                        if hidden {
+                            filter.write().host = None;
+                            switcher_listing(Trigger::Explicit);
+                        }
                     }
                 }
+                Some(super::quick_switcher::SwitcherPick::New(action)) => {
+                    restore = !open_new.call(Some(action));
+                }
+                None => {}
             }
             super::quick_switcher::restore_focus(restore);
             quick_switcher_closing.set(false);
@@ -3120,7 +3160,7 @@ pub(crate) fn ListView(
         if quick_switcher_open() {
             super::quick_switcher::QuickSwitcher {
                 on_close: move |_| finish_switcher.call(None),
-                on_pick: move |session| finish_switcher.call(Some(session)),
+                on_pick: move |pick| finish_switcher.call(Some(pick)),
             }
         }
         // Targets of `menu_panel::install_row_menu_outside_dismiss`: a pointer
@@ -3274,24 +3314,10 @@ pub(crate) fn ListView(
                     }
                     let opening = !show_create();
                     if opening {
-                        let current_hosts = host_options.clone();
-                        let current_target = effective_create_host(
-                            &current_hosts,
-                            *chosen_host.peek(),
-                            open_host.as_ref(),
-                        );
-                        ordinary_new_cwd.set(
-                            open_destination.as_ref().and_then(|destination| {
-                                // Confirm the entire inherited destination;
-                                // a remote path cannot follow the host fallback
-                                // onto this machine after an installation change.
-                                matching_host_option(&destination.host, &current_hosts)
-                                    .filter(|host| Some(host.id) == current_target)
-                                    .map(|_| destination.cwd.clone())
-                            }),
-                        );
+                        open_new.call(None);
+                        return;
                     }
-                    if !opening {
+                    {
                         // Closing the dialog discards its host choice with
                         // every other draft it holds. The signal lives up here
                         // because target identity and idempotency are shared
@@ -3306,9 +3332,10 @@ pub(crate) fn ListView(
                         // silently reopen pre-filled from whatever row was
                         // last cloned.
                         clone_prefill.set(None);
+                        initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
                     }
-                    show_create.set(opening);
+                    show_create.set(false);
                 },
                     "new"
                 }
@@ -3346,6 +3373,9 @@ pub(crate) fn ListView(
                     ops,
                     initial_cwd: ordinary_new_cwd(),
                     prefill: clone_prefill(),
+                    // Clone/Replace owns its seed even if it supersedes a
+                    // switcher opening before the launcher unmounts.
+                    initial_action: if clone_prefill().is_none() { initial_create_action() } else { None },
                     // The "replace with" source as the sidebar currently
                     // lists it, so the launcher's warning follows a source
                     // that starts or stops while it is open. While the
@@ -3370,6 +3400,7 @@ pub(crate) fn ListView(
                         // or clone provenance into the next fresh launch.
                         chosen_host.set(None);
                         clone_prefill.set(None);
+                        initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
                         show_create.set(false);
                         focus_new_session_button();
@@ -3429,6 +3460,7 @@ pub(crate) fn ListView(
                         // explicit cancellation path does.
                         chosen_host.set(None);
                         clone_prefill.set(None);
+                        initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
                         on_open.call(session);
                         focus_new_session_button();

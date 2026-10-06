@@ -7,14 +7,24 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{ListSort, SessionFilter, fetch_sessions};
+use crate::api::{ListSort, SessionFilter, fetch_sessions, fetch_templates};
 use crate::hosts::settings_dialog::install_dialog_with_selector;
-use crate::launch_composer::harness_label;
+use crate::launch_composer::{
+    ComposerSearchResult, SearchScope, harness_label, scoped_query, template_search_results,
+};
 use crate::peer::display_peer;
 use crate::status::{StatusBadgeView, status_badge};
 use crate::{ApiBase, Session, SessionLaunch, modal_isolation};
 
 const DIALOG_SELECTOR: &str = ".quick-switcher-dialog";
+
+/// A choice closes the switcher before using the list's normal entry point.
+/// New carries an accepted search action; it never creates a session itself.
+#[derive(Clone)]
+pub(super) enum SwitcherPick {
+    Session(Box<Session>),
+    New(ComposerSearchResult),
+}
 
 /// Wait for the closing render before navigation lets a terminal take focus.
 ///
@@ -175,91 +185,151 @@ fn MatchedText(text: String, positions: Vec<usize>) -> Element {
     }
 }
 
-/// Search all hosts once per open; loading is distinct from an empty match.
+/// Keep one fleet snapshot and one template snapshot for this open dialog.
 ///
-/// The input retains focus while arrows change its active row, so subsequent
-/// typing always edits the search. Parent callbacks close before acting.
+/// Plain typing searches sessions and offers a pinned New action. Only `tl:`
+/// searches templates, through the launcher's own parser and matcher. The
+/// input retains focus while arrows change its active row; the parent closes
+/// and removes the modal before navigating or opening the launcher.
 #[component]
-pub(super) fn QuickSwitcher(on_close: EventHandler<()>, on_pick: EventHandler<Session>) -> Element {
+pub(super) fn QuickSwitcher(
+    on_close: EventHandler<()>,
+    on_pick: EventHandler<SwitcherPick>,
+) -> Element {
     let base = use_context::<ApiBase>().0;
+    let sessions_base = base.clone();
     let listing = use_resource(move || {
-        let base = base.clone();
+        let base = sessions_base.clone();
         async move { fetch_sessions(&base, &SessionFilter::default(), ListSort::Activity).await }
+    });
+    let templates = use_resource(move || {
+        let base = base.clone();
+        async move { fetch_templates(&base).await }
     });
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0_usize);
+    let text = query();
+    let template_mode = scoped_query(&text).0 == SearchScope::Template;
     let read = listing.read();
     let sessions = read.as_ref().and_then(|result| result.as_ref().ok());
     let matches = sessions
-        .map(|listing| session_matches(&listing.sessions, &query()))
+        .map(|listing| session_matches(&listing.sessions, &text))
         .unwrap_or_default();
-    let selected_index = selected().min(matches.len().saturating_sub(1));
-    let picked = sessions.and_then(|listing| {
-        matches
+    let template_read = templates.read();
+    let templates_now = template_read
+        .as_ref()
+        .and_then(|result| result.as_ref().ok());
+    let template_names = templates_now
+        .map(|templates| templates.iter().map(|t| t.name.clone()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let template_rows = template_search_results(&text, &template_names);
+    let show_new = !template_mode && !text.trim().is_empty();
+    // Loading has no active action, including New, so Enter cannot mistake
+    // an unfinished session read for an empty match. After a refusal, New
+    // remains usable; template mode has its own independent readiness.
+    let count = if template_mode {
+        template_rows.len()
+    } else if read.is_none() {
+        0
+    } else {
+        matches.len() + usize::from(show_new)
+    };
+    let selected_index = selected().min(count.saturating_sub(1));
+    let picked = if count == 0 {
+        None
+    } else if template_mode {
+        template_rows
             .get(selected_index)
-            .map(|row| listing.sessions[row.index].clone())
-    });
-    let count = matches.len();
-    let key_pick = picked.clone();
+            .cloned()
+            .map(SwitcherPick::New)
+    } else if selected_index == matches.len() && show_new {
+        Some(SwitcherPick::New(ComposerSearchResult::Name(
+            text.trim().to_string(),
+        )))
+    } else {
+        sessions.and_then(|listing| {
+            matches
+                .get(selected_index)
+                .map(|row| SwitcherPick::Session(Box::new(listing.sessions[row.index].clone())))
+        })
+    };
     let scroll_selection = move || {
         document::eval(
             "requestAnimationFrame(() => document.querySelector('.quick-switcher-row[aria-selected=\"true\"]')?.scrollIntoView({ block: 'nearest' }));",
         );
     };
-
     rsx! {
-        div { class: "quick-switcher-backdrop", role: "presentation",
-            onclick: move |_| on_close.call(()),
+        div { class: "quick-switcher-backdrop", role: "presentation", onclick: move |_| on_close.call(()),
             div {
-                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true",
-                aria_label: "quick switcher", tabindex: "-1",
+                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: "quick switcher", tabindex: "-1",
                 onclick: move |event| event.stop_propagation(),
-                onmounted: move |_| install_dialog_with_selector(
-                    DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close")
-                ),
+                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close")),
                 onkeydown: move |event: KeyboardEvent| {
-                    if !event.is_composing() && event.key() == Key::Escape {
-                        event.prevent_default(); on_close.call(());
-                    }
+                    if !event.is_composing() && event.key() == Key::Escape { event.prevent_default(); on_close.call(()); }
                 },
                 input {
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.is_composing() { return; }
-                    match event.key() {
-                        Key::ArrowDown if count > 0 => {
-                            event.prevent_default();
-                            selected.set((selected_index + 1).min(count - 1));
-                            scroll_selection();
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.is_composing() { return; }
+                        match event.key() {
+                            Key::ArrowDown if count > 0 => {
+                                event.prevent_default(); selected.set((selected_index + 1).min(count - 1)); scroll_selection();
+                            }
+                            Key::ArrowUp if count > 0 => {
+                                event.prevent_default(); selected.set(selected_index.saturating_sub(1)); scroll_selection();
+                            }
+                            Key::Enter => { event.prevent_default(); if let Some(pick) = picked.clone() { on_pick.call(pick); } }
+                            _ => {}
                         }
-                        Key::ArrowUp if count > 0 => {
-                            event.prevent_default();
-                            selected.set(selected_index.saturating_sub(1));
-                            scroll_selection();
-                        }
-                        Key::Enter => {
-                            event.prevent_default();
-                            if let Some(session) = key_pick.clone() { on_pick.call(session); }
-                        }
-                        _ => {}
-                    }
-                },
-                    class: "quick-switcher-search", aria_label: "search sessions",
-                    "data-tooltip": "search sessions across every host",
+                    },
+                    class: "quick-switcher-search", aria_label: "search sessions or templates",
+                    "data-tooltip": "search sessions across every host; tl: searches templates",
                     role: "combobox", aria_autocomplete: "list", aria_expanded: "true", aria_controls: "quick-switcher-results",
-                    aria_activedescendant: picked.as_ref().map(|_| format!("quick-switcher-result-{selected_index}")),
-                    placeholder: "jump to a session", value: query(),
+                    aria_activedescendant: (count > 0).then(|| format!("quick-switcher-result-{selected_index}")),
+                    placeholder: "jump to a session · tl: for templates", value: text.clone(),
                     oninput: move |event| { query.set(event.value()); selected.set(0); },
                 }
                 div { class: "quick-switcher-heading",
-                    if query().trim().is_empty() { "recent sessions" } else { "sessions" }
+                    if template_mode { "templates" } else if text.trim().is_empty() { "recent sessions" } else { "sessions" }
                 }
-                div { class: "quick-switcher-results", id: "quick-switcher-results", role: "listbox",
-                    aria_label: "sessions",
+                if template_mode {
+                    match template_read.as_ref() {
+                        None => rsx! { p { role: "status", "loading templates…" } },
+                        Some(Err(reason)) => rsx! { p { role: "alert", "Couldn't load templates: " bdi { "{display_peer(reason)}" } } },
+                        Some(Ok(_)) if template_rows.is_empty() => rsx! { p { role: "status", "no templates match" } },
+                        _ => rsx! {},
+                    }
+                } else {
                     match read.as_ref() {
                         None => rsx! { p { role: "status", "loading sessions…" } },
                         Some(Err(reason)) => rsx! { p { role: "alert", "Couldn't load sessions: " bdi { "{display_peer(reason)}" } } },
-                        Some(Ok(listing)) => rsx! {
-                            if matches.is_empty() { p { role: "status", "no sessions match" } }
+                        Some(Ok(_)) if matches.is_empty() => rsx! { p { role: "status", "no sessions match" } },
+                        _ => rsx! {},
+                    }
+                }
+                div { class: "quick-switcher-options", id: "quick-switcher-results", role: "listbox",
+                    aria_label: if template_mode { "templates" } else { "sessions and new session" },
+                    div { class: "quick-switcher-results", role: "presentation",
+                        if template_mode {
+                            for (position, action) in template_rows.iter().enumerate() {
+                                { if let ComposerSearchResult::Template(name) = action {
+                                  let template = templates_now.and_then(|templates| templates.iter().find(|t| &t.name == name));
+                                  let pick = action.clone();
+                                  rsx! {
+                                    button {
+                                        key: "{name}", class: "quick-switcher-row quick-switcher-template", r#type: "button", role: "option", tabindex: "-1",
+                                        id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
+                                        "data-tooltip": "open New with this template applied; nothing launches yet",
+                                        onclick: move |_| on_pick.call(SwitcherPick::New(pick.clone())),
+                                        span { class: "quick-switcher-template-name", bdi { "{display_peer(name)}" } }
+                                        if let Some(template) = template {
+                                            span { class: "quick-switcher-template-summary", bdi { "{super::templates::template_summary(&template.fields)}" } }
+                                        }
+                                    }
+                                  }
+                                } else { rsx! {} }
+                                }
+                            }
+                        } else if let Some(listing) = sessions {
                             for (position, matched) in matches.iter().enumerate() {
                                 { let session = listing.sessions[matched.index].clone();
                                   let badge = status_badge(&session.status, session.annotation.as_deref(), session.has_unseen_output());
@@ -269,7 +339,7 @@ pub(super) fn QuickSwitcher(on_close: EventHandler<()>, on_pick: EventHandler<Se
                                         key: "{session.id}", class: "quick-switcher-row", r#type: "button", role: "option", tabindex: "-1",
                                         id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
                                         "data-tooltip": "open this session",
-                                        onclick: move |_| on_pick.call(session.clone()),
+                                        onclick: move |_| on_pick.call(SwitcherPick::Session(Box::new(session.clone()))),
                                         if let Some(badge) = badge {
                                             span { class: if ended { "quick-switcher-status quick-switcher-ended" } else { "quick-switcher-status" },
                                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
@@ -283,16 +353,27 @@ pub(super) fn QuickSwitcher(on_close: EventHandler<()>, on_pick: EventHandler<Se
                                   }
                                 }
                             }
-                        },
+                        }
+                    }
+                    if show_new {
+                        button {
+                            class: "quick-switcher-row quick-switcher-new", r#type: "button", role: "option", tabindex: "-1",
+                            id: "quick-switcher-result-{matches.len()}", aria_selected: count > 0 && selected_index == matches.len(),
+                            "data-tooltip": "open New with this name; nothing launches yet",
+                            onclick: { let name = text.trim().to_string(); move |_| on_pick.call(SwitcherPick::New(ComposerSearchResult::Name(name.clone()))) },
+                            span { "new session named \"" bdi { "{display_peer(text.trim())}" } "\"" }
+                        }
                     }
                 }
-                if sessions.is_some_and(|listing| listing.truncated) {
+                if !template_mode && sessions.is_some_and(|listing| listing.truncated) {
                     p { class: "quick-switcher-cap", "Only the most recently active sessions were searched; the helm's listing limit was reached." }
                 }
-                footer { class: "quick-switcher-footer",
-                    span { "↑↓ choose · Enter open · Escape close" }
-                    button { class: "quick-switcher-close", r#type: "button", "data-tooltip": "close the quick switcher",
-                        onclick: move |_| on_close.call(()), "close" }
+                div { class: "quick-switcher-templates-hint",
+                    if template_mode { "Picking a template opens New with it applied; nothing launches yet." }
+                    else { span { "templates" } p { "Type tl: to search templates. Picking one opens New with it applied." } }
+                }
+                footer { class: "quick-switcher-footer", span { "↑↓ choose · Enter pick · Escape close" }
+                    button { class: "quick-switcher-close", r#type: "button", "data-tooltip": "close the quick switcher", onclick: move |_| on_close.call(()), "close" }
                 }
             }
         }

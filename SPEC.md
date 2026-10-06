@@ -1303,6 +1303,16 @@ using the same busy refusals as a sidebar row; the first match is initially sele
 host selector resets that selector to ALL. Escape or a click outside closes and restores the previous focus. A loading
 list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
 
+While text is typed, a pinned row below the scrolling session matches offers "new session named X". It follows the
+sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,
+when arrow keys cannot reach it. Picking it opens New with that name and the ordinary host, directory and remembered
+permission defaults. A pinned templates section normally shows only a `tl:` hint. With a leading `tl:`
+(case-insensitive), sessions and the New row are replaced by matching templates, using the session launcher's own
+template search; `tl:` alone lists every template. Picking one opens New with its edits applied, without using the query
+as the session name. New shows a cancellable loading state until the template inputs are ready, before allowing draft
+edits. Neither kind of pick launches a session: Launch remains the user's action. After a failed session read, New and
+template search remain usable.
+
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
 centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
