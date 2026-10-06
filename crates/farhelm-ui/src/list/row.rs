@@ -2961,11 +2961,14 @@ mod tests {
             .collect()
     }
 
+    /// Unresolved history for row-rendering tests; individual scenarios may
+    /// resolve it without changing the sequence, as the supervisor does.
     fn notification(seq: u64, text: &str) -> crate::SessionNotification {
         crate::SessionNotification {
             seq,
             at: 1_700_000_000,
             text: text.to_string(),
+            resolved: false,
         }
     }
 
@@ -3074,6 +3077,44 @@ mod tests {
         assert!(
             texts.iter().all(|text| !text.contains('\u{202E}')),
             "a raw direction control reached a text node: {texts:?}"
+        );
+    }
+
+    /// Resolved history stays visible but is read even above the opening
+    /// read mark. A newer recurrence must be loud and new again; otherwise
+    /// recovery would either hide the history or silence a later problem.
+    #[farhelm_testtrace::test]
+    fn resolved_notifications_are_quiet_and_never_new() {
+        let mut resolved = notification(3, "recovered");
+        resolved.resolved = true;
+        assert!(!resolved.is_unread_after(0));
+        let quiet = bell_row_edits(vec![resolved.clone()], 0, false);
+        assert!(
+            attribute_values(&quiet, "aria-label")
+                .contains(&"notifications for stable: none unread".into())
+        );
+        assert!(
+            !attribute_values(&quiet, "class")
+                .iter()
+                .any(|class| class.contains("loud"))
+        );
+        let open = bell_row_edits(vec![resolved, notification(2, "still a problem")], 0, true);
+        let classes = attribute_values(&open, "class");
+        assert!(classes.contains(&"session-bell-entry resolved".into()));
+        assert_eq!(
+            classes
+                .iter()
+                .filter(|class| class.as_str() == "session-bell-entry new")
+                .count(),
+            1
+        );
+        let recurrence = notification(4, "came back");
+        assert!(recurrence.is_unread_after(3));
+        let reopened = bell_row_edits(vec![recurrence], 3, true);
+        assert!(attribute_values(&reopened, "class").contains(&"session-bell-entry new".into()));
+        assert!(
+            attribute_values(&reopened, "aria-label")
+                .contains(&"notifications for stable: 1 unread".into())
         );
     }
 

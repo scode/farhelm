@@ -2865,7 +2865,8 @@ pub(crate) fn ListView(
     // from the last state this effect saw before the close, never the
     // listing that closed it, which may have removed the row (a filter) or
     // carry an entry the list never displayed. Nothing is sent when the list
-    // showed nothing unread. Best effort and silent on failure (SPEC.md,
+    // showed nothing above the read mark; resolved entries above it are covered
+    // too. Best effort and silent on failure (SPEC.md,
     // Errors and diagnostics): a lost mark leaves the bell loud until the
     // list is next closed, which the user would only notice as a bell that
     // stayed loud.

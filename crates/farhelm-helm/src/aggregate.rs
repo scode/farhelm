@@ -1472,6 +1472,7 @@ mod tests {
                 seq,
                 at: 0,
                 text: format!("n{seq}"),
+                resolved: false,
             })
             .collect();
 
@@ -1490,6 +1491,7 @@ mod tests {
                 seq,
                 at: 0,
                 text: String::new(),
+                resolved: false,
             })
             .collect();
         apply_notification_marks(&mut odd, (0, 0));

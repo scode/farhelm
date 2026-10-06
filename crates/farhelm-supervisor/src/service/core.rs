@@ -3924,7 +3924,7 @@ pub(crate) struct SessionCells {
     /// SESSION-scoped like the two stamps above, and for the same reason: a
     /// notification describes the session, a restart must not wipe the
     /// problem it was told about, and a rename certainly must not. The store
-    /// is the truth (`session_notifications`, capped and once per launch);
+    /// is the truth (`session_notifications`, capped, one row per kind per launch);
     /// this is its in-memory copy, because replies are built synchronously
     /// from immutable entries (`status::entry_info` overlays it on every
     /// reply). It is only ever REPLACED wholesale from the store
@@ -19562,7 +19562,9 @@ pub(crate) mod tests {
     /// A ready Grok report that lands before the in-memory entry is published
     /// must become visible through the ordinary list projection. Later loss
     /// of either exact file withdraws Resume while preserving the selected
-    /// UUID and its timestamp for reload-time ordering.
+    /// UUID and its timestamp for reload-time ordering. Restoring the record
+    /// across a supervisor restart resolves the original warning; losing it
+    /// again reopens that same row above old read/cleared marks.
     #[farhelm_testtrace::test]
     async fn grok_prepublication_binding_reconciles_and_file_loss_withdraws_resume() {
         let state = StateDir::new();
@@ -19687,6 +19689,122 @@ pub(crate) mod tests {
             texts,
             vec![crate::service::notifications::resume_withdrawn_text("Grok")]
         );
+        let warning = sup.store.session_notifications(&id).await.unwrap();
+        assert!(!warning[0].resolved);
+        std::fs::write(&summary, "{\"info\":{\"id\":\"grok-exact\"}}\n").unwrap();
+        drop(sup);
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let entry = sup.sessions.lock().await.get(&id).cloned().unwrap();
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::Resume,
+            "restored record must actually regain Resume after startup"
+        );
+        let resolved = sup.store.session_notifications(&id).await.unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].resolved);
+        assert_eq!(resolved[0].seq, warning[0].seq);
+        assert_eq!(*entry.session.notifications.lock().unwrap(), resolved);
+        std::fs::remove_file(&summary).unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::NotCaptured
+        );
+        let recurrence = sup.store.session_notifications(&id).await.unwrap();
+        assert_eq!(
+            recurrence.len(),
+            1,
+            "a recurrence reuses the launch/kind row"
+        );
+        assert!(!recurrence[0].resolved);
+        assert!(
+            recurrence[0].seq > warning[0].seq,
+            "old read/cleared marks must not cover the recurrence"
+        );
+        assert_eq!(*entry.session.notifications.lock().unwrap(), recurrence);
+    }
+
+    /// Codex's exact record can disappear and return without another report.
+    /// The capture pass must resolve its warning when Resume returns, then
+    /// reopen the same warning as unread if verification withdraws it again.
+    #[farhelm_testtrace::test]
+    async fn codex_record_restoration_resolves_and_reopens_its_notification() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let file = state.path().join("codex-notification.jsonl");
+        let record = "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\
+             \"payload\":{\"id\":\"codex-thread-9\",\"session_id\":\"codex-runtime-9\",\
+             \"source\":\"cli\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n";
+        std::fs::write(&file, record).unwrap();
+        let token = crate::agent_kind::codex::CodexLocator::reported(
+            "codex-runtime-9".into(),
+            Some(serde_json::json!(file.to_str().unwrap())),
+            Some(serde_json::json!("SessionStart")),
+        )
+        .unwrap()
+        .encode()
+        .unwrap();
+        seed_codex_row(&sup, &id, Some(&token), Some("hook"), 1).await;
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = program_snapshot("codex");
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::Resume,
+            "fixture must first verify the real exact record"
+        );
+        assert!(
+            sup.store
+                .session_notifications(&id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_file(&file).unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::NotCaptured
+        );
+        let warning = sup.store.session_notifications(&id).await.unwrap();
+        assert_eq!(warning.len(), 1);
+        assert!(!warning[0].resolved);
+        std::fs::write(&file, record).unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::Resume
+        );
+        let resolved = sup.store.session_notifications(&id).await.unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].resolved);
+        assert_eq!(resolved[0].seq, warning[0].seq);
+        assert_eq!(*entry.session.notifications.lock().unwrap(), resolved);
+        std::fs::remove_file(&file).unwrap();
+        sup.capture_now().await;
+        let recurrence = sup.store.session_notifications(&id).await.unwrap();
+        assert_eq!(recurrence.len(), 1);
+        assert!(!recurrence[0].resolved);
+        assert!(recurrence[0].seq > warning[0].seq);
+        assert_eq!(*entry.session.notifications.lock().unwrap(), recurrence);
     }
 
     /// A historical Codex row — a bare id admitted before the ownership

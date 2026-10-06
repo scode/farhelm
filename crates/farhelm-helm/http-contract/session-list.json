@@ -56,8 +56,9 @@
       "notifications": [
         {
           "at": 1700000095,
+          "resolved": true,
           "seq": 4,
-          "text": "Farhelm could not add its conversation hook."
+          "text": "Restart stopped offering to resume the conversation."
         }
       ],
       "notifications_read_through": 3,

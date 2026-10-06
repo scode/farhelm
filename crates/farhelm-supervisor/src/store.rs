@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 27;
+const SCHEMA_VERSION: i64 = 28;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1467,6 +1467,8 @@ pub struct SessionStore {
 ///   removed, and with them every session's snapshot of the profile it came
 ///   from (SPEC.md, the launch-kinds upgrade paragraph). Nothing else read
 ///   them; the session's own stored launch is unaffected.
+/// - 28: notification resolution. A nullable timestamp preserves unresolved
+///   history from older versions; reopening retains the unique launch/kind row.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1574,13 +1576,14 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  generation  INTEGER NOT NULL,
                  recorded_at INTEGER NOT NULL,
                  text        TEXT NOT NULL,
+                 resolved_at INTEGER,
                  PRIMARY KEY (session_id, seq),
                  UNIQUE (session_id, generation, kind)
              ) STRICT;
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 27;
+             PRAGMA user_version = 28;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2209,6 +2212,18 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 26 to 27")?;
         version = 27;
+    }
+    if version == 27 {
+        // Existing warnings remain unresolved until a capture pass proves
+        // Resume is available. The timestamp is storage only, not a wire clock.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE session_notifications ADD COLUMN resolved_at INTEGER;
+             PRAGMA user_version = 28;
+             COMMIT;",
+        )
+        .context("migrating schema from version 27 to 28")?;
+        version = 28;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -4863,15 +4878,15 @@ impl SessionStore {
             .await
     }
 
-    /// Record one session notification for the launch `generation` of
-    /// session `id`, unless that launch already has one of this `kind`.
+    /// Record or reopen this launch's one notification of `kind`.
     ///
-    /// Returns whether a notification was added. Nothing is added, and
+    /// Returns whether a notification was added or reopened. Nothing changes, and
     /// `false` returned, when the session is gone or has moved on to another
-    /// launch (a notification belongs to the launch that earned it), or when
-    /// the `(session, generation, kind)` key already exists, which is the
-    /// whole once-per-launch rule (SPEC.md: "the same problem is reported at
-    /// most once per launch"). The sequence number is one past the session's
+    /// launch, or when its existing warning is still unresolved. A resolved
+    /// warning reopens in place with a new sequence, time and text, so the
+    /// helm's old read/cleared marks cannot hide the recurrence. The unique
+    /// `(session, generation, kind)` key bounds repeated flips to one row.
+    /// The sequence number is one past the session's
     /// largest, so it never repeats even after older entries aged out. Adding
     /// one beyond [`farhelm_proto::SESSION_NOTIFICATION_CAP`] drops the
     /// oldest in the same transaction.
@@ -4898,6 +4913,21 @@ impl SessionStore {
                 "session notification record task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let tx = conn.transaction()?;
+                    let reopened = tx.execute(
+                        "UPDATE session_notifications SET \
+                         seq = (SELECT MAX(seq) + 1 FROM session_notifications WHERE session_id = ?1), \
+                         recorded_at = ?4, text = ?5, resolved_at = NULL \
+                         WHERE session_id = ?1 AND generation = ?2 AND kind = ?3 \
+                         AND resolved_at IS NOT NULL \
+                         AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
+                                     AND (?6 = 0 OR captured_conversation IS NULL))",
+                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
+                    ).context("reopening a session notification")?;
+                    // Reopening adds no row, so it must not trim history.
+                    if reopened > 0 {
+                        tx.commit()?;
+                        return Ok(true);
+                    }
                     let added = tx
                         .execute(
                             "INSERT OR IGNORE INTO session_notifications \
@@ -4931,6 +4961,49 @@ impl SessionStore {
                     }
                     tx.commit()?;
                     Ok(added > 0)
+                },
+            )
+            .await
+    }
+
+    /// Resolve only warnings justified by this exact current conversation.
+    ///
+    /// Verification can withdraw Resume without holding the capture claim.
+    /// Comparing the opaque conversation on the row prevents an earlier
+    /// Resume reading from resolving that newer withdrawal. Generation also
+    /// fences old launches; nonmatching kinds and already-resolved rows stay
+    /// untouched. Returns whether any row changed, for cell reload and hinting.
+    pub async fn resolve_session_notifications_if_current(
+        &self,
+        id: &str,
+        generation: i64,
+        conversation: &str,
+        kinds: &[&str],
+    ) -> anyhow::Result<bool> {
+        let id = id.to_owned();
+        let conversation = conversation.to_owned();
+        let kinds: Vec<String> = kinds.iter().map(|kind| (*kind).to_owned()).collect();
+        self.conn
+            .call(
+                "session notification resolve task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn.transaction()?;
+                    let at = now_unix();
+                    let mut changed = 0;
+                    for kind in kinds {
+                        changed += tx
+                            .execute(
+                                "UPDATE session_notifications SET resolved_at = ?5 \
+                         WHERE session_id = ?1 AND generation = ?2 AND kind = ?4 \
+                         AND resolved_at IS NULL \
+                         AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
+                                     AND captured_conversation = ?3)",
+                                rusqlite::params![id, generation, conversation, kind, at],
+                            )
+                            .context("resolving a session notification")?;
+                    }
+                    tx.commit()?;
+                    Ok(changed > 0)
                 },
             )
             .await
@@ -4974,7 +5047,7 @@ impl SessionStore {
                 "session notification read task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<Vec<farhelm_proto::SessionNotification>> {
                     let mut statement = conn.prepare(
-                        "SELECT seq, recorded_at, text FROM session_notifications \
+                        "SELECT seq, recorded_at, text, resolved_at IS NOT NULL FROM session_notifications \
                          WHERE session_id = ?1 ORDER BY seq DESC",
                     )?;
                     let rows = statement
@@ -4983,6 +5056,7 @@ impl SessionStore {
                                 seq: row.get::<_, i64>(0)?.max(0) as u64,
                                 at: row.get(1)?,
                                 text: row.get(2)?,
+                                resolved: row.get(3)?,
                             })
                         })?
                         .collect::<Result<Vec<_>, _>>()
@@ -8705,6 +8779,204 @@ mod tests {
         );
     }
 
+    /// Resolution must preserve old warnings across schema 27 -> 28 and a
+    /// second open. Adding a nullable field must not fabricate resolutions,
+    /// change ordering, or drop the launch/kind uniqueness constraint.
+    #[farhelm_testtrace::test]
+    async fn notification_resolution_migration_preserves_unresolved_history() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        assert!(
+            store
+                .record_session_notification("s1", 0, "resume_withdrawn", "old warning", 100, false)
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
+            assert!(
+                conn.prepare("SELECT resolved_at FROM session_notifications")
+                    .is_err(),
+                "fixture must actually lack the new column"
+            );
+        }
+        let migrated = SessionStore::open(&path, true).await.unwrap();
+        let original = migrated.session_notifications("s1").await.unwrap();
+        assert_eq!(original.len(), 1);
+        assert_eq!(
+            (
+                original[0].seq,
+                original[0].at,
+                original[0].text.as_str(),
+                original[0].resolved
+            ),
+            (1, 100, "old warning", false)
+        );
+        assert!(
+            !migrated
+                .record_session_notification("s1", 0, "resume_withdrawn", "duplicate", 101, false)
+                .await
+                .unwrap()
+        );
+        drop(migrated);
+        let reopened = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(
+            reopened.session_notifications("s1").await.unwrap(),
+            original
+        );
+        assert_eq!(
+            reopened
+                .conn
+                .lock()
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+    }
+
+    /// A returned Resume offer resolves only the current launch's eligible
+    /// warnings. A later withdrawal must beat a stale resolve, and recurring
+    /// warnings reopen the same row above every prior read/cleared mark.
+    #[farhelm_testtrace::test]
+    async fn notification_resolution_guards_recurrence_without_trimming_history() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        assert!(
+            store
+                .record_session_notification("s1", 0, "resume_withdrawn", "older launch", 90, false)
+                .await
+                .unwrap()
+        );
+        store.conn.call("advance fixture launch", |conn| {
+            conn.execute("UPDATE sessions SET generation = 1, captured_conversation = 'ready' WHERE id = 's1'", [])?;
+            Ok(())
+        }).await.unwrap();
+        assert!(
+            store
+                .record_session_notification(
+                    "s1",
+                    1,
+                    "resume_withdrawn",
+                    "current warning",
+                    100,
+                    false
+                )
+                .await
+                .unwrap()
+        );
+        for n in 0..8 {
+            assert!(
+                store
+                    .record_session_notification(
+                        "s1",
+                        1,
+                        &format!("other_{n}"),
+                        "unchanged",
+                        101 + n,
+                        false
+                    )
+                    .await
+                    .unwrap()
+            );
+        }
+        let before = store.session_notifications("s1").await.unwrap();
+        assert_eq!(before.len(), farhelm_proto::SESSION_NOTIFICATION_CAP);
+        let kinds = ["hook_silent", "resume_withdrawn"];
+        assert!(
+            !store
+                .resolve_session_notifications_if_current("s1", 1, "stale", &kinds)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .resolve_session_notifications_if_current("s1", 0, "ready", &kinds)
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.session_notifications("s1").await.unwrap(), before);
+        assert!(
+            store
+                .resolve_session_notifications_if_current("s1", 1, "ready", &kinds)
+                .await
+                .unwrap()
+        );
+        let resolved = store.session_notifications("s1").await.unwrap();
+        assert_eq!(
+            resolved
+                .iter()
+                .filter(|n| n.resolved)
+                .map(|n| n.seq)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert!(
+            !store
+                .resolve_session_notifications_if_current("s1", 1, "ready", &kinds)
+                .await
+                .unwrap()
+        );
+        store
+            .conn
+            .call("withdraw fixture conversation", |conn| {
+                conn.execute(
+                    "UPDATE sessions SET captured_conversation = 'withdrawn' WHERE id = 's1'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .record_session_notification("s1", 1, "resume_withdrawn", "came back", 200, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .resolve_session_notifications_if_current("s1", 1, "ready", &kinds)
+                .await
+                .unwrap(),
+            "earlier Resume cannot resolve the newer withdrawal"
+        );
+        let reopened = store.session_notifications("s1").await.unwrap();
+        assert_eq!(
+            reopened.len(),
+            before.len(),
+            "reopening adds no row and trims nothing"
+        );
+        assert_eq!(
+            (
+                reopened[0].seq,
+                reopened[0].at,
+                reopened[0].text.as_str(),
+                reopened[0].resolved
+            ),
+            (11, 200, "came back", false)
+        );
+        assert_eq!(
+            &reopened[1..],
+            before
+                .iter()
+                .filter(|n| n.seq != 2)
+                .cloned()
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
+        assert!(
+            !store
+                .record_session_notification("s1", 1, "resume_withdrawn", "duplicate", 201, false)
+                .await
+                .unwrap()
+        );
+        let count: i64 = store.conn.lock().query_row("SELECT COUNT(*) FROM session_notifications WHERE session_id = 's1' AND generation = 1 AND kind = 'resume_withdrawn'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1, "recurrence keeps the unique launch/kind row");
+    }
+
     /// `created_at` (PLAN_M6.md item 1: load-bearing as of this PR, no
     /// longer the write-only column `StoredSession`'s docs used to
     /// describe) is written VERBATIM from what the caller put on the row,
@@ -10839,6 +11111,11 @@ mod tests {
     /// launch's commands without `{farhelm_args}` beside its selection, a
     /// command launch's command, a legacy launch's fields as they were.
     fn restore_pre_v26_launch_columns(conn: &Connection) {
+        // These fixtures rewind a current database, unlike raw historical
+        // schemas. Remove the later resolution column so rung 27 -> 28 tests
+        // the same additive upgrade a real older database requires.
+        conn.execute_batch("ALTER TABLE session_notifications DROP COLUMN resolved_at;")
+            .expect("restore pre-resolution notifications");
         let rows: Vec<(String, String)> = conn
             .prepare("SELECT id, session_launch FROM sessions")
             .unwrap()

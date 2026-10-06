@@ -112,6 +112,7 @@ impl Supervisor {
         for entry in silent {
             self.notify_hook_silent(&entry).await;
         }
+        self.resolve_resumable_notifications(&entries).await;
     }
 
     /// Turn one tripwire firing into the session's notification (SPEC.md,
@@ -504,6 +505,8 @@ mod tests {
     /// Seed `id`'s stored row the way a hooked Claude launch leaves it,
     /// with or without a captured conversation, and publish a matching entry
     /// whose submitted-line clock started past the tripwire's budget.
+    /// Its published snapshot omits a resume command to isolate the tripwire;
+    /// tests of recovery must add one before claiming Resume is available.
     async fn silent_hook_session(sup: &Supervisor, id: &str, captured: Option<&str>) {
         silent_hook_session_of(sup, id, captured, AgentKind::Claude).await;
     }
@@ -629,6 +632,69 @@ mod tests {
                 .is_empty(),
             "a stored identity suppresses the notification"
         );
+    }
+
+    /// A late accepted identity must resolve the existing silent-hook warning,
+    /// including a warning read from storage by a later supervisor. The normal
+    /// capture pass must do this; relying only on the report transition misses
+    /// startup admission before the session entry exists.
+    #[farhelm_testtrace::test]
+    async fn a_late_report_resolves_silent_hook_history_across_supervisor_restart() {
+        for restart in [false, true] {
+            let state = StateDir::new();
+            let mut sup = Supervisor::new(state.path()).await.unwrap();
+            silent_hook_session(&sup, "late", None).await;
+            sup.capture_pass(true).await;
+            let before = sup.store.session_notifications("late").await.unwrap();
+            assert_eq!(before.len(), 1);
+            assert!(
+                !before[0].resolved,
+                "fixture must first record a real warning"
+            );
+            assert!(
+                sup.store
+                    .replace_reported_conversation_if_current("late", 0, None, "late-conversation")
+                    .await
+                    .unwrap()
+            );
+            if restart {
+                // Admission may persist before startup publishes an entry.
+                // The constructor must load the warning and reconcile it.
+                drop(sup);
+                sup = Supervisor::new(state.path()).await.unwrap();
+            } else {
+                // The tripwire fixture does not normally need a resume command;
+                // this scenario must carry one to prove Resume really returns.
+                let mut published = sup.sessions.lock().await.remove("late").unwrap();
+                Arc::get_mut(&mut published)
+                    .unwrap()
+                    .snapshot
+                    .resume_template = Some(vec![
+                    "claude".into(),
+                    "--resume".into(),
+                    "{conversation}".into(),
+                ]);
+                sup.sessions.lock().await.insert("late".into(), published);
+                sup.capture_pass(true).await;
+            }
+            let published = sup.sessions.lock().await.get("late").cloned().unwrap();
+            assert_eq!(
+                super::super::status::session_restart_offer(&published),
+                farhelm_proto::RestartOffer::Resume,
+                "the late identity must actually restore Resume, restart={restart}"
+            );
+            let resolved = sup.store.session_notifications("late").await.unwrap();
+            assert!(resolved[0].resolved, "restart={restart}");
+            assert_eq!(
+                (resolved[0].seq, resolved[0].at, &resolved[0].text),
+                (before[0].seq, before[0].at, &before[0].text)
+            );
+            assert_eq!(
+                *published.session.notifications.lock().unwrap(),
+                resolved,
+                "the listing cell must publish the resolution, restart={restart}"
+            );
+        }
     }
 
     /// Spec (SPEC.md, Status): an agent that reports only after its first

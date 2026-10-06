@@ -1069,8 +1069,8 @@ pub struct SessionInfo {
     ///
     /// Additive, so no protocol bump was needed: a record from an older
     /// supervisor decodes to an empty list, and an older helm ignores the
-    /// field and shows no bell. Only the sequence number,
-    /// time and text travel; what KIND of problem a notification is, and
+    /// field and shows no bell. The sequence number,
+    /// time, text and resolved flag travel; what KIND of problem a notification is, and
     /// which launch it belongs to, stay columns in the supervisor's store, so
     /// a newer supervisor that adds a kind can never make this record fail to
     /// decode in an older helm (which drops a session it cannot decode).
@@ -1097,6 +1097,11 @@ pub struct SessionNotification {
     /// What happened and what the user can do about it, written by the
     /// supervisor. Peer text: a client renders it escaped.
     pub text: String,
+    /// The problem no longer holds for this launch. Resolved entries remain
+    /// history but count as read; a recurrence gets a newer sequence number.
+    /// Older readers ignore this additive flag and keep their old display.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resolved: bool,
 }
 
 /// The activity stamp a reader should display and compare by: `last_activity_at`
@@ -3617,6 +3622,24 @@ impl ControlMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Resolution is additive across mixed versions: old notifications decode
+    /// unresolved, false preserves their wire shape, and true survives a newer
+    /// supervisor's round trip without changing the protocol version.
+    #[test]
+    fn notification_resolution_is_an_additive_wire_flag() {
+        let old = serde_json::json!({"seq": 4, "at": 100, "text": "warning"});
+        let mut notification: SessionNotification = serde_json::from_value(old.clone()).unwrap();
+        assert!(!notification.resolved);
+        assert_eq!(serde_json::to_value(&notification).unwrap(), old);
+        notification.resolved = true;
+        let wire = serde_json::to_value(&notification).unwrap();
+        assert_eq!(wire["resolved"], true);
+        assert_eq!(
+            serde_json::from_value::<SessionNotification>(wire).unwrap(),
+            notification
+        );
+    }
 
     /// Existing lookup requests must stay non-mutating when the new refusal
     /// field is absent. An explicit flag survives the wire round trip, so

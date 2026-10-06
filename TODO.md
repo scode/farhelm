@@ -188,18 +188,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source
   diff before signing, since the signature proves who published a release, not that its code is sound.
 
-- **Clear a session's notification once its problem goes away.** A session notification (the bell on the sidebar row) is
-  a record of something that happened, not a live state, so it stays until the user clears it even after the problem it
-  describes has resolved itself. Two cases where that happens today: a Codex or Grok session whose resume offer was
-  withdrawn because the agent's conversation record went missing or stopped matching gets a notification saying Restart
-  can no longer resume, and when the record comes back and Restart can resume again, the notification still says it
-  cannot; and a session told that its agent never reported which conversation it is in keeps that notification after a
-  late report arrives and Restart works. The bell then shows a stale warning, red and unread if the user has not opened
-  it yet, about a problem that no longer exists. Make a notification go away, or visibly mark itself resolved, when its
-  condition stops holding. Deciding which of the two, and whether "resolved" counts as read, is part of the work.
-  Deliberately left out of the session-notifications plan (its report lists it as a possible follow-up). Plan:
-  `plans/queue/resolve-stale-notifications.md`.
-
 - **Keep checking for a silent conversation hook after a supervisor restart.** A session notification tells the user
   when an agent launched with Farhelm's conversation hook still has not said which conversation it is in a minute after
   the first Enter, since Restart will then be unable to resume it. That check only covers launches the running

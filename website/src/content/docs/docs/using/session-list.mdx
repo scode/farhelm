@@ -78,6 +78,11 @@ pressing Escape, or clicking the bell again, marks everything in it read, and th
 them, and the bell goes away until something new happens. Read and cleared notifications are the same in every window
 connected to the same [helm](/docs/how-it-works/the-pieces/), and a session keeps only its 10 most recent ones.
 
+If the agent later tells Farhelm which conversation it is in, or its missing conversation record comes back, and
+**restart** can resume again, the warning stays in the list but is greyed and marked **resolved**. It counts as read even if you have never opened it. If
+the same problem returns before that agent is relaunched, the warning moves back to the top as **new** and makes the
+bell red again, even if you had cleared it.
+
 ## Next
 
 [Work in a session](/docs/using/work-in-a-session/) covers what you can do once a session's terminal is open.
