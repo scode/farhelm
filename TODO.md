@@ -83,6 +83,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
   learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
 
+- **Clone a session in a GitHub checkout into a fresh checkout.** Clone on a session that lives in a checkout made by a
+  `gh:` launch opens the launcher on the session's existing folder, but the maintainer keeps wanting another checkout of
+  the same repository. Clone should instead act as if the user had typed `gh:owner/repo` and picked a name, defaulting
+  the name to the session's name plus `-clone` (then `-clone-2`, `-clone-3`, ... when taken). Replace with, Replace and
+  `farhelm agent clone` keep the existing folder. Plan: `plans/queue/clone-into-fresh-checkout.md`.
+
+- **Make `gh:` launches less magical.** In the maintainer's words, "the gh: stuff is kinda magical right now". A session
+  in a fresh GitHub checkout behaves differently from one in an ordinary folder: a `gh:` launch clones into a new
+  directory under the working-copy root and names it after the session, deleting the last session using it archives the
+  checkout, and Clone is planned to make another checkout. Consider how the launcher and the session list could better
+  surface what is going on, such as that a session lives in a checkout and of which repository, and what a `gh:` launch
+  or an action on such a session is about to do. Related to the checkout archiving entry above.
+
 - **Fix the "drag copies nothing" notice.** PR #1499 added a terminal notice for drags that copy nothing because the
   program in the terminal handles the mouse itself, as Codex does. It does show when drag-selecting in Codex's prompt
   box, but it is so easy to miss that it looked like it never showed at all: it appears off in a corner, away from where
