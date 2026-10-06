@@ -6,3 +6,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`triage-install-uninstall-gaps`](reports/triage-install-uninstall-gaps.report.md) landed 2026-10-05 in #1654, #1655, #1656: Escape remote linger errors, exact uninstall identity check, installer refuses symlinked app folders.
 - [`triage-template-gaps`](reports/triage-template-gaps.report.md) landed 2026-10-05 in #1652, #1653: Templates refuse to overwrite on an unloaded list and refuse a replaced machine at dispatch.
 - [`triage-dialog-cancel-races`](reports/triage-dialog-cancel-races.report.md) landed 2026-10-05 in #1658, #1659, #1660, #1661, #1662, #1663: Cancelled YOLO questions and a closing feedback dialog stop acting on queued answers (complexity-gated).
+- [`home-tab-trailing-slash`](reports/home-tab-trailing-slash.report.md) landed 2026-10-06 in #1673: A terminal tab beside a session in ~ starts in ~, not ~/ (strip the trailing slash handed to tmux).

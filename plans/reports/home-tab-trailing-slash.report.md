@@ -53,3 +53,33 @@ in mismatch diagnostics and spelling out the test's expanded contract; both sugg
 received the complete test-authoring checklist. Commit and PR wording passed a separate fresh-context cold read. The
 separate report cold read found this account sufficient for approval or follow-up, with no public-repository hygiene
 issues.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as #1673 (trailing slashes removed from the directory a terminal process starts in), one
+squash commit on main.
+
+#### What else was on main
+
+Nothing that could interact: between the commit the change was built on and the landing, main gained only the planning
+queue's own bookkeeping. In the same round, the installer-feedback-prompt plan lands right after this one; the two touch
+different code (this one the supervisor's terminal start, that one the installer's closing message) and remove different
+TODO entries, which merge without conflict.
+
+#### Review before merging
+
+A separate reviewer that had not worked on either plan checked both before anything merged and found nothing outside the
+PR that the change breaks. The changed code is the only place the supervisor hands tmux a start directory, covering a
+new session, a restart of its agent and a new terminal tab. No test anywhere uses a folder with a trailing slash, so
+none sees a different working directory. The session's stored folder, and so the folder the app shows, is unchanged, as
+the report says: a folder stored with a trailing slash still shows one in the app. One note: the updated tab test now
+runs `python3` inside a tmux pane, the only Rust test that does; the release gate already needs `python3`, so this costs
+nothing there.
+
+#### Checks
+
+- Reused: the report's checks. The code on main after the merge is identical to the PR they ran on, and nothing but the
+  planning queue's bookkeeping reached main in between.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
