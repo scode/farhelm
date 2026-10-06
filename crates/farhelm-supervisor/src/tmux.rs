@@ -1833,7 +1833,19 @@ fn pane_in_session(session: &str, pane: &str) -> String {
 /// Only `-c` needs this. `-e` values and the command after `--` reach tmux
 /// as literal argv and are not format-expanded, so escaping them would
 /// corrupt them instead.
+///
+/// Strip trailing slashes only at this launch boundary. tmux passes its
+/// `-c` spelling to the child's `PWD`, and shells that retain it can show
+/// `~/` instead of `~`. Stored paths keep the caller's spelling, including
+/// for existing sessions; no symlinks or interior components are resolved.
+/// An all-slash path remains `/`, and empty input stays empty.
 fn tmux_start_directory(cwd: &str) -> String {
+    let trimmed = cwd.trim_end_matches('/');
+    let cwd = if !cwd.is_empty() && trimmed.is_empty() {
+        "/"
+    } else {
+        trimmed
+    };
     cwd.replace('#', "#{a:35}")
 }
 
@@ -3934,6 +3946,26 @@ mod tests {
     use super::test_support::{ScratchServer, tail_containing};
     use super::*;
 
+    /// Start-directory normalization must remove the spelling that produces
+    /// `~/` prompts without changing roots, symlinks, or tmux format escaping.
+    /// This boundary also handles stored paths from sessions created before
+    /// the fix; normalizing only on creation would leave them affected.
+    #[test]
+    fn tmux_start_directory_removes_trailing_slashes_and_escapes_formats() {
+        for (cwd, expected) in [
+            ("/x/", "/x"),
+            ("/x///", "/x"),
+            ("/", "/"),
+            ("//", "/"),
+            ("/x", "/x"),
+            ("", ""),
+            ("/link/../x/", "/link/../x"),
+            ("/C#Samples/", "/C#{a:35}Samples"),
+        ] {
+            assert_eq!(tmux_start_directory(cwd), expected, "cwd: {cwd:?}");
+        }
+    }
+
     /// ScratchServer must retain its private directory until shared diagnostics
     /// and shutdown run. A removed socket would make the diagnostic owner refuse
     /// authorization, silently losing the evidence that motivated consolidation.
@@ -5781,7 +5813,8 @@ mod tests {
 
     /// Spec: opening a tab (`new-window`) in a directory whose name contains
     /// tmux format syntax starts the tab's shell in exactly that directory,
-    /// and nothing in the name is ever executed.
+    /// with no trailing slash in its inherited `PWD`, and nothing in the
+    /// name is ever executed.
     ///
     /// SPEC.md's tab working-directory rule allows normal filesystem
     /// resolution but requires unusable paths to fail clearly; tmux
@@ -5790,6 +5823,10 @@ mod tests {
     /// `#(...)` directory name ran its command on every open, and a user
     /// running `git reset` or `rm` in what looked like the project tab did it
     /// in the wrong directory.
+    ///
+    /// Pass a trailing slash too, and inspect the child's inherited `PWD`
+    /// directly. A shell may clean it up itself, and `pane_current_path`
+    /// resolves the directory, so neither would expose the `~/` prompt bug.
     #[farhelm_testtrace::test]
     async fn new_window_starts_in_a_directory_named_with_tmux_format_syntax() {
         let server = ScratchServer::start().await;
@@ -5817,16 +5854,22 @@ mod tests {
         for name in &names {
             let directory = server.dir.path().join(name);
             std::fs::create_dir(&directory).expect("create the oddly named directory");
+            let cwd = directory.to_str().expect("utf-8 scratch path");
+            let argv = [
+                "python3".to_string(),
+                "-c".to_string(),
+                "import os, sys, time; print('PWD-MATCH' if os.environ.get('PWD') == sys.argv[1] \
+                 else 'PWD-MISMATCH ' + repr(os.environ.get('PWD')), flush=True); time.sleep(60)"
+                    .to_string(),
+                cwd.to_string(),
+            ];
             let (_window, pane) = server
                 .driver
-                .new_window(
-                    "fmt",
-                    directory.to_str().expect("utf-8 scratch path"),
-                    &[],
-                    &sleep,
-                )
+                .new_window("fmt", &format!("{cwd}/"), &[], &argv)
                 .await
                 .expect("open a tab in the directory");
+            let tail = tail_containing(&server.driver, "fmt", &pane, "PWD-M").await;
+            assert!(tail.contains("PWD-MATCH"), "inherited PWD: {tail}");
             let actual = server
                 .driver
                 .run(&["display-message", "-p", "-t", &pane, "#{pane_current_path}"])

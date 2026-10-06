@@ -129,11 +129,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
-- **Terminal tab next to an agent started in `~` opens in `~/`.** Opening a terminal tab beside an agent session whose
-  folder is the home directory gives a shell whose prompt shows `~/` rather than `~`, so its working directory carries a
-  trailing slash. Find where the slash comes from and make the tab start in exactly the session's folder. Plan:
-  `plans/queue/home-tab-trailing-slash.md`.
-
 - **Cmd+N for a new session.** Cmd+N on macOS, and the equivalent elsewhere, does what clicking the new session button
   does. Pick the non-Mac chord with care: Ctrl+N is next-history in readline and emacs inside the terminal, and browsers
   keep Ctrl+N (and Cmd+N in the web UI on a Mac) for a new window. The terminal text-size shortcut in SPEC.md (Cmd+Shift
