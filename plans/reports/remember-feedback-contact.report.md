@@ -93,3 +93,35 @@ SQL formatting, type/module documentation, browser cleanup, and user-facing docs
 corrections, including the final browser null assertion against the unchanged feedback protocol, and reported no
 actionable findings. The executor inspected the changes and performed the validation above. Only required reviews and
 cold reads were delegated; implementation and checks were performed by the executor.
+
+### Landing
+
+Landed on 2026-10-06 (UTC) as #1689 (the feedback dialog can remember its contact), one squash commit on main.
+
+#### What else was on main
+
+Nothing that could interact: between the commit the change was built on and the landing, main gained only the planning
+queue's own bookkeeping. This change takes the helm database to version 43; no other open change touches the helm's
+database (the notification change in progress alongside it changes the supervisor's own database, not the helm's).
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan checked the change before it merged and found nothing that breaks.
+It confirmed:
+
+- Nothing else that reads or writes the helm's shared preferences drops or overwrites the new contact: every write
+  changes only the fields it names, an older app build ignores the field, the replay of unsaved choices after signing in
+  again includes it, and none of the screenshot, README image, demo video or desktop smoke staging writes it. The
+  browser tests reset the shared preferences around every feedback test, so a remembered contact cannot leak into other
+  tests.
+- The contact does not reach logs, supervisors, remote hosts or agents: the helm's refusal of an over-long contact does
+  not repeat it, the feedback route and the app's request logging record no contact, the full preferences are returned
+  only to a signed-in app, and nothing on the supervisor, agent or command-line side reads preferences.
+
+#### Checks
+
+- Reused: the report's checks, including its browser run on the final revision. The code on main after the merge is
+  identical to that revision, and nothing but the planning queue's bookkeeping reached main in between.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
