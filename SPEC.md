@@ -2302,6 +2302,13 @@ path before proceeding. Compatibility is decided per feature; this is not blanke
 or ordinary runtime data loss. Revisit broader compatibility as the project matures, and record future breaking
 transitions when there is an expectation of users beyond the maintainer.
 
+Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
+supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io
+serve, must update to the new release through its normal path and come up on its existing state, and the new helm must
+be able to update the supervisors that release installed. A change that cannot meet this waits for upgrade epochs. This
+constrains the update path itself; whether a feature's own data survives the update is still decided per feature, as
+above.
+
 The helm is optimized for a handful of browser/desktop clients, not a large device fleet. Retaining the 64 newest
 browser credentials is acceptable even when an older credential is actively used. The desktop app's own credentials are
 not counted among them and are never evicted. Beyond a few tens of enrollments, reauthentication friction is acceptable;
