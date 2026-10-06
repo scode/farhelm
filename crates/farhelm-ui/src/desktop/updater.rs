@@ -41,6 +41,11 @@ use sha2::Digest as _;
 /// `/v<version>/`.
 const SITE_URL: &str = "https://get.farhelm.io";
 
+/// Release tests can select a stable candidate before `/latest` names it.
+/// Only the version selection changes; the download origin and verification
+/// chain remain the same as an ordinary update.
+const LATEST_OVERRIDE_ENV: &str = "FARHELM_DESKTOP_UPDATE_LATEST";
+
 /// The command the reinstall notice tells the user to run: the installer
 /// over TLS, which needs no key, so it works however far behind this app is.
 const REINSTALL_COMMAND: &str = "curl -fsSL https://get.farhelm.io/install.sh | sh";
@@ -284,7 +289,8 @@ exec "$opener" -n "$app""#;
 /// app's exit does not take it along, with every standard stream closed.
 ///
 /// The app never waits for the returned child; tests do, to observe what
-/// the helper did.
+/// the helper did. The release-test version override is removed before
+/// spawning, so the opener does not inherit it for the next app instance.
 fn spawn_relaunch_helper(
     pid: u32,
     bundle: &Path,
@@ -292,8 +298,22 @@ fn spawn_relaunch_helper(
     wait_tenths: u32,
     seen_alive: Option<&Path>,
 ) -> io::Result<Child> {
+    relaunch_command(pid, bundle, opener, wait_tenths, seen_alive).spawn()
+}
+
+/// Configure the detached opener without carrying a release-test candidate
+/// into the next app instance. Keeping construction separate makes this
+/// environment contract inspectable without mutating the test environment.
+fn relaunch_command(
+    pid: u32,
+    bundle: &Path,
+    opener: &Path,
+    wait_tenths: u32,
+    seen_alive: Option<&Path>,
+) -> Command {
     let mut command = Command::new("/bin/sh");
     command
+        .env_remove(LATEST_OVERRIDE_ENV)
         .arg("-c")
         .arg(RELAUNCH_SCRIPT)
         .arg("farhelm-relaunch")
@@ -310,7 +330,7 @@ fn spawn_relaunch_helper(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    command.spawn()
+    command
 }
 
 /// Start the updater for this app, or return `None` when [`active_bundle`]
@@ -329,8 +349,14 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
     let contents = active_bundle(&current_exe, Path::new(&home), running)?;
     let installed_record = contents.join("Versions").join("installed");
     let handle_state_path = state_path.clone();
+    // Capture once: automatic and on-demand checks must test the same
+    // candidate for this app's lifetime, including when the value is invalid.
+    let latest_override = std::env::var_os(LATEST_OVERRIDE_ENV);
+    if latest_override.is_some() {
+        tracing::info!("updater: {LATEST_OVERRIDE_ENV} override is active");
+    }
     let deps = Deps {
-        probe: Box::new(probe_latest_release),
+        probe: probe_with_latest_override(latest_override, Box::new(probe_latest_release)),
         install: Box::new(run_installer),
         read_installed: Box::new(move || read_installed_record(&installed_record)),
         automatic_enabled: Box::new(move || automatic_updates_enabled(&state_path)),
@@ -796,6 +822,24 @@ impl Engine {
 
 // ===== The real probe and installer ========================================
 
+/// Select the captured release-test override or the ordinary site probe.
+///
+/// A present value is authoritative even when malformed or empty: every check fails
+/// instead of silently testing whichever release `/latest` happens to name.
+/// The site's stable-tag parser is shared, and the worker still decides
+/// whether the selected version is newer before running its verified install.
+/// Taking the value and site probe as inputs keeps tests off the environment
+/// and network.
+fn probe_with_latest_override(value: Option<OsString>, site_probe: Box<ProbeFn>) -> Box<ProbeFn> {
+    match value {
+        None => site_probe,
+        Some(value) => Box::new(move || {
+            latest_from_site(value.as_encoded_bytes())
+                .with_context(|| format!("invalid {LATEST_OVERRIDE_ENV} override"))
+        }),
+    }
+}
+
 /// Ask get.farhelm.io which stable release is the latest: a plain GET of
 /// `/latest`, one line naming the tag.
 fn probe_latest_release() -> anyhow::Result<String> {
@@ -1176,6 +1220,20 @@ mod tests {
 
     // ---- Restart to update ----
 
+    /// Spec: the opener's environment explicitly excludes the test override,
+    /// even when the parent app inherited it. This guards the child launch
+    /// contract without setting any variable in the test process; native
+    /// LaunchServices forwarding still needs the Mac release test.
+    #[farhelm_testtrace::test]
+    fn the_relaunch_command_removes_the_latest_override() {
+        let command = relaunch_command(1, Path::new("bundle"), Path::new("opener"), 0, None);
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == LATEST_OVERRIDE_ENV && value.is_none())
+        );
+    }
+
     /// A stand-in for `/usr/bin/open` that records the arguments it was
     /// given, so a test can see whether and how the helper relaunched.
     fn recording_opener(dir: &Path) -> (PathBuf, PathBuf) {
@@ -1357,6 +1415,110 @@ mod tests {
                 "{:?} must be refused",
                 String::from_utf8_lossy(refused)
             );
+        }
+    }
+
+    /// Spec: without a captured override each check still asks the site.
+    ///
+    /// Injecting the site probe distinguishes delegation from a cached
+    /// answer without making the test depend on the live release service.
+    #[farhelm_testtrace::test]
+    fn an_absent_latest_override_uses_the_site_each_time() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let site_calls = Arc::clone(&calls);
+        let probe = probe_with_latest_override(
+            None,
+            Box::new(move || {
+                site_calls.fetch_add(1, Ordering::SeqCst);
+                Ok("1.2.3".into())
+            }),
+        );
+        assert_eq!(probe().unwrap(), "1.2.3");
+        assert_eq!(probe().unwrap(), "1.2.3");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// Spec: a present override accepts the site's stable-tag grammar and
+    /// never consults the site, even on repeated failures. Falling back
+    /// would let a candidate test pass against a different release.
+    #[farhelm_testtrace::test]
+    fn a_latest_override_is_authoritative_even_when_invalid() {
+        for value in ["v1.2.3", "v1.2.3\n"] {
+            let probe = probe_with_latest_override(
+                Some(value.into()),
+                Box::new(|| panic!("a present override must not reach the site")),
+            );
+            for _ in 0..2 {
+                assert_eq!(probe().unwrap(), "1.2.3", "{value:?}");
+            }
+        }
+        for value in [
+            "",
+            "1.2.3",
+            "v1.2.3-rc.1",
+            "v1.2.3+build",
+            "v1.2.3\nv1.2.4",
+            "nonsense",
+        ] {
+            let probe = probe_with_latest_override(
+                Some(value.into()),
+                Box::new(|| panic!("a present override must not reach the site")),
+            );
+            for _ in 0..2 {
+                assert!(
+                    format!("{:#}", probe().unwrap_err()).contains(LATEST_OVERRIDE_ENV),
+                    "{value:?}"
+                );
+            }
+        }
+    }
+
+    /// Spec: an environment value that is not UTF-8 is a failed check,
+    /// never an absent override. Unix environments can contain these bytes;
+    /// lossy conversion would hide the value the release test actually set.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn a_non_text_latest_override_never_falls_back() {
+        use std::os::unix::ffi::OsStringExt;
+        let probe = probe_with_latest_override(
+            Some(OsString::from_vec(b"v1.2.3\xff".to_vec())),
+            Box::new(|| panic!("a non-text override must not reach the site")),
+        );
+        for _ in 0..2 {
+            assert!(format!("{:#}", probe().unwrap_err()).contains(LATEST_OVERRIDE_ENV));
+        }
+    }
+
+    /// Spec: automatic and manual checks use the same captured candidate,
+    /// and selecting an older release still cannot downgrade the app.
+    /// The worker must retain these rules regardless of probe selection.
+    #[farhelm_testtrace::test]
+    fn latest_override_preserves_both_triggers_and_version_order() {
+        for manual in [false, true] {
+            for (candidate, expected) in [("v1.2.0", vec!["1.2.0"]), ("v0.9.0", vec![])] {
+                let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("9.0.0"), true);
+                // Keep the rig's counting probe as the site probe: zero
+                // calls then proves the candidate did not come from the site.
+                let site_probe =
+                    std::mem::replace(&mut rig.engine.deps.probe, Box::new(|| unreachable!()));
+                rig.engine.deps.probe =
+                    probe_with_latest_override(Some(candidate.into()), site_probe);
+                if manual {
+                    *rig.automatic.lock().unwrap() = false;
+                    rig.shared.check_now();
+                }
+                rig.engine.wake_once();
+                assert_eq!(
+                    *rig.installs.lock().unwrap(),
+                    expected,
+                    "{candidate}, manual={manual}"
+                );
+                assert_eq!(
+                    rig.probes.load(Ordering::SeqCst),
+                    0,
+                    "the site was not consulted"
+                );
+            }
         }
     }
 

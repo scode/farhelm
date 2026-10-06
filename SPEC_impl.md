@@ -3090,6 +3090,15 @@ the probe's 30-second timeout): exactly one line, `v` and a stable release versi
 prerelease there is refused rather than installed, since `/latest` never names one, and so is anything else that is not
 exactly that; either is a failed check. The probe is one function, so a later channel setting can replace it.
 
+Release tests in `releasing/mac-vm-test/` can select a stable candidate before `/latest` names it by launching the app
+with `FARHELM_DESKTOP_UPDATE_LATEST=v<version>`. The updater captures it once as an `Option<OsString>` when building its
+dependencies; automatic and on-demand checks share that probe. A present value goes through the same stable-tag parser
+as `/latest`, and an invalid value (including non-UTF-8 or a prerelease) fails every check without falling back to the
+site. Startup logs that the override is active; the UI wording is unchanged. This selects only a version: the
+newer-version comparison, real download origin and verification chain below all remain in force. The installer already
+strips every `FARHELM_*` variable, and the relaunch helper removes this override from its environment before spawning
+the opener, so Restart to update returns the app to the ordinary `/latest` probe.
+
 To install version X, nothing is trusted on TLS alone. The updater downloads `https://get.farhelm.io/vX/SHA256SUMS` and
 its `.minisig` and verifies them with `farhelm_helm::verify_signed_sums`, the rules the helm applies to its own
 downloads: a signature by any key in the compiled-in ring, and the trusted comment `farhelm vX`. It then downloads
