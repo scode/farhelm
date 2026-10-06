@@ -989,6 +989,8 @@ export interface Preferences {
   skip_host_remove_confirmation?: boolean;
   /** Whether host setup skips its confirmation dialog after this client seeds. */
   skip_host_setup_confirmation?: boolean;
+  /** Contact reused by feedback dialogs after this client seeds from the helm. */
+  feedback_contact?: string;
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -1018,6 +1020,7 @@ export async function patchPreferences(
     remembered_workspace_trust?: boolean | null;
     skip_host_remove_confirmation?: boolean | null;
     skip_host_setup_confirmation?: boolean | null;
+    feedback_contact?: string | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
@@ -1041,6 +1044,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     remembered_permissions: null,
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
+    feedback_contact: null,
   });
 }
 

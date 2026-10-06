@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 42;
+const SCHEMA_VERSION: i64 = 43;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -917,7 +917,8 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// type rather than carved into a read-only exception), but no shipped
 /// client sends either one. Host setup and removal confirmation choices are
 /// helm-wide opt-outs: an explicit permanent answer is shared by every
-/// client, while an unset field keeps asking.
+/// client, while an unset field keeps asking. Feedback contact is a client
+/// choice recorded only after a successful send, and explicit null forgets it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -945,6 +946,9 @@ pub struct Preferences {
     /// Whether host setup skips its confirmation dialog for this helm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_host_setup_confirmation: Option<bool>,
+    /// Contact from the last successful feedback send that opted into reuse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback_contact: Option<String>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -1008,6 +1012,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub skip_host_setup_confirmation: Option<Option<bool>>,
+    /// A successful send may replace or explicitly forget the contact.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub feedback_contact: Option<Option<String>>,
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -1769,6 +1780,7 @@ pub struct HelmStore {
 /// - 42: `agent_create_bindings` is dropped: a keyed agent create is matched
 ///   on its host by the request the agent sent (SPEC.md, Agent-spawned
 ///   sessions), so nothing needs the stored resolution any more.
+/// - 43: the nullable feedback contact joins the shared preferences row.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1971,7 +1983,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  remembered_permissions TEXT,
                  remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1)),
                  skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
-                 skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1))
+                 skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
+                 feedback_contact TEXT
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2060,7 +2073,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 42;",
+              PRAGMA user_version = 43;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3005,6 +3018,27 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 42")?;
         version = 42;
     }
+    if version == 42 {
+        // Added only when absent, for the reason the 37→38 step gives:
+        // ladder fixtures can rewind user_version over a current database.
+        // Genuine schema-42 files start with no remembered contact.
+        let present: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('preferences') \
+                 WHERE name = 'feedback_contact'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking for preferences.feedback_contact")?
+            > 0;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN feedback_contact TEXT;")
+                .context("migrating helm.db to schema version 43")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 43;")
+            .context("migrating helm.db to schema version 43")?;
+        version = 43;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3902,7 +3936,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -3924,6 +3958,7 @@ impl HelmStore {
                             remembered_workspace_trust: row.get(4)?,
                             skip_host_remove_confirmation: row.get(5)?,
                             skip_host_setup_confirmation: row.get(6)?,
+                            feedback_contact: row.get(7)?,
                         })
                     },
                 )
@@ -3943,8 +3978,8 @@ impl HelmStore {
     /// whole-row write from either would reinstall its own stale copy of the
     /// field the other just wrote. Sparse patches make the last writer win
     /// per FIELD, which is the only order anyone can observe anyway. The
-    /// clear exists for a deselect and for test harnesses that need a "nothing
-    /// remembered" precondition; the UI's ordinary writes never send one.
+    /// clear lets a successful feedback send forget its contact and lets test
+    /// harnesses establish a "nothing remembered" precondition.
     ///
     /// Validation (that `list_sort` is a word this helm serves) belongs to
     /// the handler, not here: the store records what it is told, exactly as
@@ -3961,6 +3996,8 @@ impl HelmStore {
             let remembered_workspace_trust_present = patch.remembered_workspace_trust.is_some();
             let skip_host_remove_confirmation_present = patch.skip_host_remove_confirmation.is_some();
             let skip_host_setup_confirmation_present = patch.skip_host_setup_confirmation.is_some();
+            let feedback_contact_present = patch.feedback_contact.is_some();
+            let feedback_contact = patch.feedback_contact.flatten();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
@@ -3971,21 +4008,22 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?8 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?9 THEN excluded.last_selected \
+                         list_sort = CASE WHEN ?9 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?10 THEN excluded.last_selected \
                                               ELSE last_selected END, \
-                         compact = CASE WHEN ?10 THEN excluded.compact ELSE compact END, \
-                         remembered_permissions = CASE WHEN ?11 \
+                         compact = CASE WHEN ?11 THEN excluded.compact ELSE compact END, \
+                         remembered_permissions = CASE WHEN ?12 \
                              THEN excluded.remembered_permissions ELSE remembered_permissions END, \
-                         remembered_workspace_trust = CASE WHEN ?12 \
+                         remembered_workspace_trust = CASE WHEN ?13 \
                              THEN excluded.remembered_workspace_trust ELSE remembered_workspace_trust END, \
-                         skip_host_remove_confirmation = CASE WHEN ?13 \
+                         skip_host_remove_confirmation = CASE WHEN ?14 \
                              THEN excluded.skip_host_remove_confirmation ELSE skip_host_remove_confirmation END, \
-                         skip_host_setup_confirmation = CASE WHEN ?14 \
-                             THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END",
+                         skip_host_setup_confirmation = CASE WHEN ?15 \
+                             THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END, \
+                         feedback_contact = CASE WHEN ?16 THEN excluded.feedback_contact ELSE feedback_contact END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -3994,13 +4032,15 @@ impl HelmStore {
                         remembered_workspace_trust,
                         skip_host_remove_confirmation,
                         skip_host_setup_confirmation,
+                        feedback_contact,
                         sort_present,
                         selected_present,
                         compact_present,
                         remembered_permissions_present,
                         remembered_workspace_trust_present,
                         skip_host_remove_confirmation_present,
-                        skip_host_setup_confirmation_present
+                        skip_host_setup_confirmation_present,
+                        feedback_contact_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7244,6 +7284,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 27;",
@@ -9388,6 +9429,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -9407,6 +9449,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -9425,6 +9468,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -9492,6 +9536,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -9754,6 +9799,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 28;",
@@ -10614,6 +10660,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -10736,6 +10783,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -10763,6 +10811,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
+                feedback_contact: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -10795,6 +10844,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
                  -- Down to schema 25, so the checkout-config tables added
@@ -10820,8 +10870,82 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
+                feedback_contact: None,
             },
             "the new field defaults absent while every existing choice survives"
+        );
+    }
+
+    /// Upgrading schema 42 adds an unset contact without disturbing existing
+    /// preferences. Reopening proves both the migration and subsequent memory
+    /// are durable, rather than only changing the connection's current view.
+    #[farhelm_testtrace::test]
+    async fn schema_43_adds_durable_feedback_contact_to_schema_42() {
+        let (dir, store) = fresh_store().await;
+        store
+            .update_preferences(PreferencePatch {
+                list_sort: Some(Some("title".to_string())),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN feedback_contact; PRAGMA user_version = 42;",
+            )
+            .unwrap();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('preferences') \
+                 WHERE name = 'feedback_contact'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+        }
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("title".to_string()),
+                ..Preferences::default()
+            }
+        );
+        migrated
+            .update_preferences(PreferencePatch {
+                feedback_contact: Some(Some("  contact@example.test  ".to_string())),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        drop(migrated);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened
+                .preferences()
+                .await
+                .unwrap()
+                .feedback_contact
+                .as_deref(),
+            Some("  contact@example.test  ")
+        );
+        reopened
+            .update_preferences(serde_json::from_str(r#"{"feedback_contact":null}"#).unwrap())
+            .await
+            .unwrap();
+        drop(reopened);
+        let cleared = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            cleared.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("title".to_string()),
+                ..Preferences::default()
+            }
         );
     }
 
@@ -10851,6 +10975,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  PRAGMA user_version = 32;",
             )
             .expect("plant schema-32 preferences");
@@ -10986,6 +11111,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -12465,6 +12591,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;

@@ -1716,13 +1716,13 @@ the agent creates it.
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Three best-effort exceptions log a failure but stay silent rather than surfacing
   it: the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
-  choices), because losing next-launch convenience must not turn a choice that already took effect into a failed current
-  operation, and a helm that lost the preference falls back to the defaults; and the automatic "mark seen" a session's
-  own opening or activity advance triggers (see Status), because a lost automatic mark costs nothing worse than a dot
-  that is one open-and-close cycle behind, corrected by the next successful write; and marking a session's notifications
-  read when their list closes (see Status), for the same reason: a lost mark costs a bell that stays loud until the list
-  is next closed. The manual "mark unread"/"mark read" toggle and the notification list's clear button are not covered —
-  a failed toggle or clear surfaces like any other operation.
+  choices, and the feedback contact), because losing next-launch convenience must not turn a choice that already took
+  effect into a failed current operation, and a helm that lost the preference falls back to the defaults; and the
+  automatic "mark seen" a session's own opening or activity advance triggers (see Status), because a lost automatic mark
+  costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next successful write; and
+  marking a session's notifications read when their list closes (see Status), for the same reason: a lost mark costs a
+  bell that stays loud until the list is next closed. The manual "mark unread"/"mark read" toggle and the notification
+  list's clear button are not covered — a failed toggle or clear surfaces like any other operation.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   with the older-host update button also available inline, while the global details disclosure shows the evidence and
@@ -1757,6 +1757,15 @@ until the user presses Send. Feedback goes only to the project's maintainer, not
 account; opening a public issue stays possible for anyone who prefers that. On success the dialog thanks the user and
 closes. On any failure (offline, the feedback service unreachable or refusing) it says sending failed, in plain words,
 and keeps the typed text so the user can retry or copy it. Nothing is queued or retried later.
+
+While the contact field is not blank, the dialog shows **Re-use for future feedback**, checked by default, with hover
+text. A successful send remembers exactly the contact sent when checked; when unchecked, or when the user emptied a
+prefilled field, it clears the remembered contact. A failed send changes nothing. The helm stores the contact in its
+shared preferences, so desktop and web clients share it. Each client reads those preferences once after authentication,
+and each dialog starts with that client's copy and reuse checked. Another client's later change appears after a reload.
+Every successful send writes the preference, even when it looks unchanged locally, since another client may have changed
+it meanwhile. The feedback submission itself is unchanged; remembering or clearing happens in a separate best-effort
+preference write after success.
 
 The helm sends the submission on the UI's behalf; the browser and the desktop webview never send it themselves. Sending
 feedback is a UI action only. Farhelm offers agents no way to send feedback, and no agent request or `farhelm` CLI

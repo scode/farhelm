@@ -13,7 +13,10 @@
 //! Nothing leaves the machine until Send: the dialog posts to its own helm
 //! (`api::send_feedback`), which forwards to the project's endpoint. A
 //! failure keeps the typed text and says sending failed; nothing is queued
-//! or retried. Agents have no way to open this dialog or send through it.
+//! or retried. Only success changes shared contact memory, through a separate
+//! best-effort preference write. Each dialog seeds from this client's
+//! authenticated snapshot, so another client's changes need a reload.
+//! Agents have no way to open this dialog or send through it.
 
 use dioxus::prelude::*;
 use farhelm_proto::feedback::{
@@ -21,7 +24,9 @@ use farhelm_proto::feedback::{
     fit_machine_field, is_blank,
 };
 
+use crate::api::{PreferenceValue, store_preference};
 use crate::hosts::settings_dialog::install_dialog_with_selector;
+use crate::list::SharedPreferences;
 use crate::reader::sleep_ms;
 use crate::{ApiBase, modal_isolation};
 
@@ -132,10 +137,19 @@ fn may_close(state: &SendState) -> bool {
     *state != SendState::Sending
 }
 
+/// The contact to remember after a successful send, using the exact submission.
+/// An unchecked choice or a blank field forgets the previous contact. Callers
+/// must apply this only after success; editing, cancel and failure preserve it.
+fn contact_after_success(sent: Option<String>, reuse: bool) -> Option<String> {
+    sent.filter(|contact| reuse && !is_blank(contact))
+}
+
 /// The dialog. `version` is the version the sidebar shows, which is what
 /// is sent. `on_sent` fires on success, so the parent's always-mounted
 /// status region can announce it; `on_close` closes the dialog and the
-/// parent returns focus.
+/// parent returns focus. Contact starts from the shared authenticated snapshot;
+/// editing and failed sends leave memory unchanged, and success writes the
+/// captured submission and reuse choice through the preference queue.
 #[component]
 pub(crate) fn FeedbackDialog(
     version: String,
@@ -144,7 +158,16 @@ pub(crate) fn FeedbackDialog(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut message = use_signal(String::new);
-    let mut contact = use_signal(String::new);
+    let mut preferences = use_context::<SharedPreferences>();
+    let mut contact = use_signal(move || {
+        preferences
+            .0
+            .peek()
+            .feedback_contact
+            .clone()
+            .unwrap_or_default()
+    });
+    let mut remember = use_signal(|| true);
     let mut os = use_signal(|| fit_machine_field("", FEEDBACK_OS_MAX_CHARS));
     let mut state = use_signal(|| SendState::Editing);
     let version = fit_machine_field(&version, FEEDBACK_VERSION_MAX_CHARS);
@@ -192,10 +215,16 @@ pub(crate) fn FeedbackDialog(
         }
         let base = base.clone();
         let outgoing = submission();
+        let reuse = remember();
         state.set(SendState::Sending);
         spawn(async move {
             match crate::api::send_feedback(&base, &outgoing).await {
                 Ok(()) => {
+                    let remembered = contact_after_success(outgoing.contact.clone(), reuse);
+                    preferences.0.write().feedback_contact = remembered.clone();
+                    // Always write, even when this client's seed looks unchanged:
+                    // another client may have replaced the helm's value meanwhile.
+                    store_preference(&base, PreferenceValue::FeedbackContact(remembered));
                     state.set(SendState::Sent);
                     on_sent.call(());
                     // Send is gone and the fields were disabled while
@@ -264,6 +293,20 @@ pub(crate) fn FeedbackDialog(
                             oninput: move |event| contact.set(event.value()),
                         }
                     }
+                    if !is_blank(&contact.read()) {
+                        label {
+                            class: "app-settings-choice",
+                            "data-tooltip": "reuse: remember this contact on the helm after a successful send, for the desktop app and web UI",
+                            input {
+                                r#type: "checkbox",
+                                class: "feedback-reuse",
+                                checked: remember(),
+                                disabled: sending,
+                                onchange: move |event| remember.set(event.checked()),
+                            }
+                            "Re-use for future feedback"
+                        }
+                    }
                     div { class: "feedback-attached",
                         p { class: "host-settings-help", "Sent with it, and nothing else:" }
                         dl {
@@ -316,6 +359,21 @@ pub(crate) fn FeedbackDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reuse preserves exactly the sent contact; opting out or emptying the
+    /// field forgets it. The send handler applies this only on success, whose
+    /// integration boundary is covered by the feedback browser scenarios.
+    #[farhelm_testtrace::test]
+    fn successful_send_remembers_only_an_opted_in_nonblank_contact() {
+        let sent = Some("  contact@example.test  ".to_string());
+        assert_eq!(contact_after_success(sent.clone(), true), sent);
+        assert_eq!(contact_after_success(sent, false), None);
+        assert_eq!(contact_after_success(None, true), None);
+        assert_eq!(
+            contact_after_success(Some(" \u{2003} ".to_string()), true),
+            None
+        );
+    }
 
     /// The operating system the dialog shows (and sends) is a common name,
     /// not the raw hardware string browsers report, and nothing beyond the
