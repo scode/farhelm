@@ -211,6 +211,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
   for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report.
 
+- **Show Cmd+N in the New button's hover text.** In the Mac desktop app Cmd+N opens the session launcher, but nothing on
+  screen says so: the New button's hover text reads "new session: start an agent or a command on any host". Add the
+  shortcut to that text in the Mac desktop app (for example "… on any host (⌘N)"), and only there: the web UI and the
+  Linux desktop app have no such shortcut, since the browser keeps Cmd+N and Ctrl+N for a new window. Follow-up to the
+  new-session-shortcut plan, at the maintainer's request while reviewing its report.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
