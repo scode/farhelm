@@ -540,6 +540,19 @@ legacy source opens the command tab with only its stored command. The two tabs a
 of signals, so switching shows and submits the other draft without copying anything between them. Destination, folder
 browser, optional name, search, and submission remain shared; only the tab's own controls differ.
 
+The prefill keeps the source's raw directory and title while separately carrying its repository, preferring checkout
+membership over launch provenance. Clone seeds that repository as a fresh destination; Replace with keeps the folder.
+The untouched Clone name is computed at every launch-related read, so display, preview, retry binding and submission
+agree without destroying the copied title needed when returning to a folder. Occupied-name previews advance only that
+default through `-clone`, then `-clone-2` through `-clone-50`; at the cap the conflict stays visible. Changing host
+installation or repository resets the search. The preview API classifies an unmarked 409 as occupied, separately from
+the helm's stale-precondition 409, transport errors and other refusals; new conflict responses must revisit that
+classification. The existing preview-authority generation checks reject late results before they can advance a name. A
+retained attempt matching the current intent and installation freezes its name for reconciliation; the occupied
+directory may be its own accepted allocation. Editing the launch while an ambiguous attempt is retained can advance the
+default away from that attempt, even if the edit is later undone; reselecting the repository restarts the search and
+restores the opportunity to reconcile its name. Re-preview never submits a launch by itself.
+
 Search is the composer's one initial and post-selection focus target on both tabs. Its command-tab result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
 would edit only a hidden draft. A harness, known model, or recent setup switches to the agent tab; a folder, host, or

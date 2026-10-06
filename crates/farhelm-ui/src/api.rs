@@ -3026,6 +3026,37 @@ pub(crate) async fn browse_directory(
         .map_err(|error| error.to_string())
 }
 
+/// A preview refusal keeps the occupied-name fact separate from peer text.
+/// The launcher may suffix only its untouched Clone default, never an explicit
+/// name or a transport, configuration, or stale-installation failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GithubPreviewFailure {
+    pub(crate) message: String,
+    pub(crate) occupied: bool,
+}
+
+impl From<String> for GithubPreviewFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            occupied: false,
+        }
+    }
+}
+
+/// Treats this endpoint's unmarked 409 as the occupied-name refusal. The helm marks
+/// its stale-connection 409 separately. A future conflict on this endpoint
+/// must revisit this classification before it can feed Clone's suffix search.
+/// The helm's missing-stable-identity conflict is also unmarked. The UI sends
+/// previews only with a known identity, so that refusal can occur only in a
+/// race; it may exhaust the bounded suffix search before its message is shown.
+fn preview_name_occupied(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> bool {
+    status == reqwest::StatusCode::CONFLICT && !is_stale_precondition(headers)
+}
+
 /// Ask for an exact fresh destination without allocating it. The caller keeps
 /// the request generation and rechecks the returned installation before use.
 pub(crate) async fn preview_github_checkout(
@@ -3034,18 +3065,22 @@ pub(crate) async fn preview_github_checkout(
     incarnation: u64,
     repo: &str,
     title: Option<&str>,
-) -> Result<GithubPreview, String> {
+) -> Result<GithubPreview, GithubPreviewFailure> {
     let url = format!("{base}/api/github-checkout-preview");
     let resp = send(client().post(&url).json(&serde_json::json!({
         "host": host, "expected_incarnation": incarnation, "repo": repo, "title": title,
     })))
     .await?;
     if !resp.status().is_success() {
-        return Err(read_failure("POST", &url, resp).await);
+        let occupied = preview_name_occupied(resp.status(), resp.headers());
+        return Err(GithubPreviewFailure {
+            message: read_failure("POST", &url, resp).await,
+            occupied,
+        });
     }
     resp.json::<GithubPreview>()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| GithubPreviewFailure::from(error.to_string()))
 }
 
 /// Read recent and locally discovered repos together with incomplete-scan
@@ -4049,6 +4084,28 @@ mod tests {
             unguarded.get("expected_incarnation").is_none(),
             "a caller with nothing to assert must still be able to create"
         );
+    }
+
+    /// Suffix search must distinguish occupied names from stale host claims
+    /// and other refusals without depending on a supervisor's error wording.
+    #[test]
+    fn github_preview_classifies_only_unmarked_conflicts_as_occupied() {
+        use reqwest::{StatusCode, header::HeaderMap};
+        let mut headers = HeaderMap::new();
+        assert!(preview_name_occupied(StatusCode::CONFLICT, &headers));
+        assert!(!preview_name_occupied(StatusCode::BAD_REQUEST, &headers));
+        assert!(!preview_name_occupied(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &headers
+        ));
+        headers.insert(
+            farhelm_proto::http::PRECONDITION_HEADER,
+            farhelm_proto::http::PRECONDITION_INCARNATION
+                .parse()
+                .unwrap(),
+        );
+        assert!(!preview_name_occupied(StatusCode::CONFLICT, &headers));
+        assert!(!GithubPreviewFailure::from("transport failed".to_string()).occupied);
     }
 
     /// A create refusal is stale only when the helm's precondition header

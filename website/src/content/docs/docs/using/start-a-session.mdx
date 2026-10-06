@@ -138,6 +138,11 @@ Each checkout gets a new directory of its own, named after the repository and nu
 on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **use existing
 folder** switches back to an ordinary directory.
 
+**Clone** on a session in a GitHub checkout starts a fresh checkout of the same repository, even if the session runs in
+a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when taken.
+Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **use existing
+folder** restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
+
 When you launch, the clone runs in the session's terminal, and the agent starts once it finishes. The clone is a plain
 `git clone` of the repository's default branch, using the host's own Git credentials, so anything Git asks for, such as
 a password, shows up in the terminal for you to answer. If the clone fails, the session's status shows error, the

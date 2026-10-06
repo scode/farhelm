@@ -381,12 +381,13 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     await assertLive(page, foreign.id);
     await deleteSession(request, foreign.id);
 
-    // Ordinary Clone must retain the actual cwd, not inherit fresh repo intent.
+    // Existing-folder mode makes a borrower; Clone otherwise allocates fresh.
     await assertLive(page, origin.id);
     const sourceRow = page.locator(`.session-row[data-session-id="${origin.id}"]`);
     await sourceRow.locator(".session-row-menu").click();
     await sourceRow.locator(".session-row-clone").click();
     const cloneForm = page.locator('.create-session-form[role="dialog"]');
+    await cloneForm.getByRole("button", { name: "use existing folder", exact: true }).click();
     await expect(cloneForm.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
     await expect(cloneForm.locator(".launch-composer-checkout-preview")).toHaveCount(0);
     await cloneForm.getByLabel("name (optional)").fill("same-cwd-borrower");
@@ -535,6 +536,241 @@ test("replacement preserves borrowers and archives only the released checkout", 
     expect(await fs.readFile(path.join(unmanaged, "foreign"), "utf8")).toBe("keep unrelated directory\n");
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close();
+  }
+});
+
+/** Both the origin and a subdirectory borrower clone into independent checkouts.
+ * The untouched name is shared by display, preview and create; explicit edits
+ * must retain the existing refusal instead of entering the suffix search. */
+test("clone defaults to fresh checkouts and searches only untouched names", async ({ page, request }) => {
+  const fixture = await checkoutFixture("browser-clone");
+  const ids: string[] = [];
+  try {
+    const host = await localHostId(request);
+    const sourceForm = await openComposer(page, host);
+    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
+    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(sourceForm);
+    await selectRepo(sourceForm, fixture.repo);
+    const { session: origin } = await launch(page, sourceForm, ids);
+    const original = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
+    const sourceTitle = `${fixture.repoName}-1`;
+    expect(original.title).toBe(sourceTitle);
+
+    /** Each click snapshots the same source again, rather than reusing a draft. */
+    async function clone(source: string) {
+      await page.goto("/");
+      const row = page.locator(`.session-row[data-session-id="${source}"]`);
+      await openRowMenu(row);
+      await row.locator(".session-row-clone").click();
+      const form = page.locator('.create-session-form[role="dialog"]');
+      await expect(form).toBeVisible();
+      return form;
+    }
+    const first = path.join(fixture.root, `${sourceTitle}-clone`);
+    const form = await clone(origin.id);
+    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(first);
+    await expect(fs.stat(first)).rejects.toMatchObject({ code: "ENOENT" });
+    const created = await launch(page, form, ids);
+    expect(created.body).toMatchObject({ title: `${sourceTitle}-clone`, github_checkout: { title: `${sourceTitle}-clone` } });
+    const state = await assertCheckout(page, request, fixture, created.session.id, first, false);
+    expect(state.title).toBe(`${sourceTitle}-clone`);
+    expect(state.working_copy.id).not.toBe(original.working_copy.id);
+
+    const second = path.join(fixture.root, `${sourceTitle}-clone-2`);
+    const again = await clone(origin.id);
+    await expect(again.locator(".launch-composer-checkout-preview")).toContainText(second);
+    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone-2`);
+    await again.getByRole("button", { name: "use existing folder", exact: true }).click();
+    await expect(again.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
+    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(sourceTitle);
+    await selectRepo(again, "fixture/other-repository");
+    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue("");
+    await expect(again.locator(".launch-composer-checkout-preview")).toContainText("other-repository-1");
+    await selectRepo(again, fixture.repo);
+    await expect(again.locator(".launch-composer-checkout-preview")).toContainText(second);
+    // The directory really exists before the explicit-name conflict is tested.
+    expect((await fs.stat(first)).isDirectory()).toBe(true);
+    await again.getByLabel("name (optional)", { exact: true }).fill(`${sourceTitle}-clone`);
+    await expect(again.locator(".create-session-error")).toContainText("a directory with that checkout name already exists");
+    await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone`);
+    await expect(again.locator(".create-session-submit")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(again).toHaveCount(0);
+
+    const subdir = path.join(origin.cwd, "subdirectory");
+    await fs.mkdir(subdir);
+    const borrower = await createSession(request, { host, title: "borrower", cwd: subdir });
+    ids.push(borrower.id);
+    const member = await sessionState(request, borrower.id);
+    expect(member.github_repo).toBeNull();
+    expect(member.working_copy).toEqual(original.working_copy);
+    await assertLive(page, borrower.id);
+    const nested = await clone(borrower.id);
+    await expect(nested.locator(".launch-composer-checkout-preview"))
+      .toContainText(path.join(fixture.root, `${fixture.repoName}-borrower-clone`));
+    await nested.getByRole("button", { name: "use existing folder", exact: true }).click();
+    await expect(nested.getByLabel("folder", { exact: true })).toHaveValue(subdir);
+    await expect(nested.getByLabel("name (optional)", { exact: true })).toHaveValue("borrower");
+    await page.keyboard.press("Escape");
+  } finally {
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close();
+  }
+});
+
+/** A late collision may change Clone's offer but cannot accept a new path.
+ * The real backend refuses the frozen request, and a second explicit click
+ * is required after the suffix search obtains a new authoritative preview. */
+test("clone lost race re-previews a suffix and waits for another launch click", async ({ page, request }) => {
+  const fixture = await checkoutFixture("browser-clone-race");
+  const ids: string[] = [];
+  const bodies: { intent_key: string; github_checkout: { title: string } }[] = [];
+  let resolveRefusal!: (response: { status: number; text: string }) => void;
+  let rejectRefusal!: (error: unknown) => void;
+  const refusal = new Promise<{ status: number; text: string }>((resolve, reject) => {
+    resolveRefusal = resolve;
+    rejectRefusal = reject;
+  });
+  try {
+    const host = await localHostId(request);
+    const sourceForm = await openComposer(page, host);
+    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
+    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(sourceForm);
+    await selectRepo(sourceForm, fixture.repo);
+    const { session: origin } = await launch(page, sourceForm, ids);
+    const original = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
+    const name = `${original.title}-clone`;
+    const occupied = path.join(fixture.root, name);
+    const next = path.join(fixture.root, `${name}-2`);
+    await openRowMenu(page.locator(`.session-row[data-session-id="${origin.id}"]`));
+    await page.locator(`.session-row[data-session-id="${origin.id}"] .session-row-clone`).click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(occupied);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await expect(fs.stat(occupied)).rejects.toMatchObject({ code: "ENOENT" });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      const first = bodies.length === 1;
+      try {
+        if (first) await fs.mkdir(occupied);
+        const response = await route.fetch();
+        const result = { status: response.status(), text: await response.text() };
+        // Even a broken create-time recheck must leave teardown owning the
+        // unexpected session, so a failed premise cannot leak it.
+        if (first && response.ok()) ids.push((await response.json()).id);
+        await route.fulfill({ response });
+        if (first) resolveRefusal(result);
+      } catch (error) {
+        await route.abort("failed").catch(() => {});
+        rejectRefusal(error);
+      }
+    });
+    // Observe the refusal outside the route callback: a setup or fetch failure
+    // must surface here, rather than leaving an unresolved browser request.
+    const [, refused] = await Promise.all([form.locator(".create-session-submit").click(), refusal]);
+    expect(refused.status, refused.text).toBe(409);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(next);
+    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(`${name}-2`);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    expect(bodies).toHaveLength(1);
+    await expect(fs.stat(next)).rejects.toMatchObject({ code: "ENOENT" });
+    const created = await launch(page, form, ids);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].intent_key).not.toBe(bodies[0].intent_key);
+    expect(created.body.github_checkout.title).toBe(`${name}-2`);
+    await assertCheckout(page, request, fixture, created.session.id, next, false);
+    expect((await sessionState(request, origin.id)).working_copy).toEqual(original.working_copy);
+  } finally {
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close();
+  }
+});
+
+/** An occupied re-preview is not evidence that a lost create was refused.
+ * Lose a real accepted Clone reply, refresh the same repository, and prove
+ * that reconciliation keeps the original name, request key and allocation. */
+test("clone retains its name and key after a lost success and occupied re-preview", async ({ page, request }) => {
+  const fixture = await checkoutFixture("browser-clone-retry");
+  const ids: string[] = [];
+  const bodies: { intent_key: string; github_checkout: { title: string; preview: { cwd: string } } }[] = [];
+  let acceptedId: string | undefined;
+  let resolveAccepted!: (response: { status: number; text: string }) => void;
+  let rejectAccepted!: (error: unknown) => void;
+  const accepted = new Promise<{ status: number; text: string }>((resolve, reject) => {
+    resolveAccepted = resolve;
+    rejectAccepted = reject;
+  });
+  try {
+    const host = await localHostId(request);
+    const sourceForm = await openComposer(page, host);
+    await sourceForm.getByRole("tab", { name: "command", exact: true }).click();
+    await sourceForm.getByLabel("agent command").fill(FAKE_AGENT);
+    await answerYolo(sourceForm);
+    await selectRepo(sourceForm, fixture.repo);
+    const { session: origin } = await launch(page, sourceForm, ids);
+    const original = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
+    const name = `${original.title}-clone`;
+    const destination = path.join(fixture.root, name);
+    const row = page.locator(`.session-row[data-session-id="${origin.id}"]`);
+    await openRowMenu(row);
+    await row.locator(".session-row-clone").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(destination);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      const first = bodies.length === 1;
+      try {
+        const response = await route.fetch();
+        const result = { status: response.status(), text: await response.text() };
+        if (response.ok()) {
+          const created = await response.json();
+          ids.push(created.id);
+          if (first) acceptedId = created.id;
+        }
+        if (first) await route.abort("failed");
+        else await route.fulfill({ response });
+        if (first) resolveAccepted(result);
+      } catch (error) {
+        await route.abort("failed").catch(() => {});
+        rejectAccepted(error);
+      }
+    });
+    const [, result] = await Promise.all([form.locator(".create-session-submit").click(), accepted]);
+    expect(result.status, result.text).toBe(200);
+    await expect(form.locator(".create-session-error")).toContainText("original request is retained");
+    expect(bodies).toHaveLength(1);
+    expect(acceptedId).toBeTruthy();
+    expect((await sessionState(request, acceptedId!)).cwd).toBe(destination);
+    expect((await fs.stat(destination)).isDirectory()).toBe(true);
+    // Repository reselection is a real preview-generation change, with no
+    // edit to the intended host, repository, launch or default title.
+    const [occupied] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === "/api/github-checkout-preview"
+        && r.request().postDataJSON().title === name),
+      selectRepo(form, fixture.repo),
+    ]);
+    expect(occupied.status(), await occupied.text()).toBe(409);
+    // The retained path and enabled button also exist while pending. Wait
+    // until the resource effect consumes the occupied response before retrying.
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "failed");
+    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(name);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(destination);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    const recovered = await launch(page, form, ids);
+    expect(recovered.session.id).toBe(acceptedId);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    await assertCheckout(page, request, fixture, recovered.session.id, destination, false);
+    expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(origin.cwd), name].sort());
+  } finally {
+    for (const id of new Set(ids.reverse())) await cleanupSession(request, id);
     await fixture.close();
   }
 });

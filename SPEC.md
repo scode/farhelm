@@ -604,8 +604,12 @@ the session itself — **error** when the agent process could not be started at 
 
 Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with both
 launch kinds. Selecting a folder or editing the ordinary directory returns to an existing-directory launch without
-changing the agent choice. Ordinary Clone and Replace start from the source session's actual directory; a new checkout
-requires an explicit repository selection, a saved repository setup, or a template that sets one.
+changing the agent choice. Clone of a session associated with a GitHub checkout starts on a fresh checkout of that
+repository, preferring its current checkout association over its launch provenance. This includes sessions opened in an
+existing checkout and replacements of the session that created it. A source in a checkout subdirectory clones to the new
+checkout's top level. Clone of other sessions, Replace with, and plain Replace start from the source's actual directory;
+a fresh checkout then requires an explicit repository selection, a saved repository setup, or a template that sets one.
+`farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
 root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
@@ -625,12 +629,17 @@ empty slug or a component over 200 bytes is refused, and so is a checkout path t
 location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on
 macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path, Launch
 reports the conflict and obtains a new preview; it never submits automatically or silently chooses another directory. An
-explicit name remains a conflict rather than gaining a suffix. A title that Clone or Replace with copied from the source
-and the user has not edited is not an explicit name once a fresh checkout is the destination: the session is unnamed, so
-it gets the lowest available `repo-N` rather than showing the ignored copy. Whenever a checkout launch is unnamed, the
-name field shows the `repo-N` it will get as placeholder text. This includes a source renamed after creation and an
-ordinary session cloned into a checkout; both get `repo-N` rather than a name derived from the copied title. Choosing an
-existing folder again restores the copied title.
+explicit name remains a conflict rather than gaining a suffix. For Clone into the source's repository, an untouched
+nonempty copied title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for N ≥ 2. The
+name field shows the effective name, and preview and launch use it alike. Changing hosts or repositories restarts the
+suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch re-previews and
+may advance the default name, but still needs another click on Launch for the newly shown path.
+
+Replace with into a fresh checkout, Clone into a different repository, and Clone of a source with no repository ignore
+an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
+remains unnamed. Whenever a checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder
+text. Choosing an existing folder again restores the source's original directory and copied title; choosing the source
+repository again restores Clone's default name, unless the user has edited it.
 
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
@@ -742,14 +751,16 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
   This action is available exactly when Restart is. Its header button remains visible but greyed out otherwise, with a
   hover tooltip and accessible description explaining why.
-- **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
-  title, and launch — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
-  cloning starts a brand-new, independent create through the same form and the same confirmation described under
-  Creation and identity above, so every field can be edited before submitting and the request can be cancelled like any
-  other create. The source's stored launch is carried into the launcher verbatim: an agent launch's choices including
-  omitted default fields, never rediscovered by parsing its composed command, or a command launch's command, YOLO
-  assertion, declared agent type, and resume command. Cloning does not deduplicate titles — a duplicate is allowed, the
-  same as any other create.
+- **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
+  fresh-conversation counterpart to restart's resumed one. A session associated with a GitHub checkout starts on a fresh
+  checkout of the same repository, named `<title>-clone` with the first free numeric suffix when taken, as described
+  under Fresh GitHub checkouts. Other sessions keep their working directory; choosing an existing folder restores the
+  source's directory and title. The source session is untouched: cloning starts a brand-new, independent create through
+  the same form and the same confirmation described under Creation and identity above, so every field can be edited
+  before submitting and the request can be cancelled like any other create. The source's stored launch is carried into
+  the launcher verbatim: an agent launch's choices including omitted default fields, never rediscovered by parsing its
+  composed command, or a command launch's command, YOLO assertion, declared agent type, and resume command. Cloning does
+  not deduplicate titles — a duplicate is allowed, the same as any other create.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and launch,
   copied exactly as stored — and then DELETES the source. For a command launch, "fresh conversation" means only that
   Farhelm starts the stored command again rather than a resume; a command that itself continues a conversation, such as
@@ -759,19 +770,20 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   source is untouched. If the create succeeds and the removal that follows fails, the reply names both sessions; whether
   the source is still there depends on how the removal failed, and the user checks or removes it by hand. Replace is
   offered wherever clone is offered.
-- **Replace with** opens the same editable create form clone opens, pre-filled the same way clone pre-fills it, so every
-  field can be edited before launching — the key use is starting an equivalent session on a different harness or effort.
-  Launching creates the new session and then deletes the source, with exactly Replace's create-then-delete contract and
-  failure reporting (the same asymmetry: an untouched source on a failed create, both ids named on a failed removal).
-  Unlike clone, it keeps the source's own host — clone is the way to start a session on a different host. Offered
-  wherever clone and replace are offered. Clone, replace with, and New are one launcher — same layout, same controls,
-  same search, same validation — differing only in what is pre-filled when they open and in what launching does (create;
-  create then delete the source). Its launch button is the confirmation of that delete: while the source has anything
-  alive, the launcher shows Replace's warning about the source beside it, following the source's state as the client
-  sees it while the launcher stays open, and launching carries the precondition matching what the launcher showed at the
-  click (see the confirmation rule below). A source that has more alive by then, such as one restarted while the
-  launcher was open, is kept: the new session is still created first, with no liveness check before it, and the user
-  gets Replace's both-sessions-exist error.
+- **Replace with** opens the same editable create form clone opens, pre-filled with the source's host, existing
+  directory, title, and launch even when the source belongs to a GitHub checkout, so every field can be edited before
+  launching — the key use is starting an equivalent session on a different harness or effort. Launching creates the new
+  session and then deletes the source, with exactly Replace's create-then-delete contract and failure reporting (the
+  same asymmetry: an untouched source on a failed create, both ids named on a failed removal). Unlike clone, it keeps
+  the source's own host — clone is the way to start a session on a different host. Offered wherever clone and replace
+  are offered. Clone, replace with, and New are one launcher — same layout, same controls, same search, same validation
+  — differing only in what is pre-filled when they open and in what launching does (create; create then delete the
+  source). Its launch button is the confirmation of that delete: while the source has anything alive, the launcher shows
+  Replace's warning about the source beside it, following the source's state as the client sees it while the launcher
+  stays open, and launching carries the precondition matching what the launcher showed at the click (see the
+  confirmation rule below). A source that has more alive by then, such as one restarted while the launcher was open, is
+  kept: the new session is still created first, with no liveness check before it, and the user gets Replace's
+  both-sessions-exist error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
   confirmation that says so when anything is still alive. Deletion may make partial progress before failing, including
   removing attachment files while retaining the session row for retry. There is no rollback guarantee. Report the

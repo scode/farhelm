@@ -68,8 +68,9 @@ pub(crate) struct GithubRepo {
 
 /// Read-only association reported by the supervisor registry. The origin id
 /// records who allocated the checkout, not who must remain alive to retain it.
-/// Neither this association nor repo provenance changes an ordinary Clone's
-/// destination: that action still uses the source session's actual cwd.
+/// Clone seeds a fresh checkout of this repository, including for borrowers;
+/// Replace and Replace with keep the source's actual cwd. The UI never changes
+/// the registry association itself when choosing a new destination.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct WorkingCopyInfo {
     pub(crate) id: String,
