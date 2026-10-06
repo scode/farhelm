@@ -40,6 +40,7 @@
 
 mod bell;
 mod create_form;
+mod quick_switcher;
 mod row;
 mod shared;
 /// The Templates panel beside New (SPEC.md, Launch templates).

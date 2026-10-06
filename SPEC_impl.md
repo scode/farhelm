@@ -741,6 +741,19 @@ the ends of the range. In the desktop app the size persists as far as the webvie
 restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the default
 rather than earn a native state file.
 
+The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
+renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;
+composition and repeat do not open it. An existing modal or an absent list-owned trigger yields the chord without
+preventing its default. Otherwise it prevents default and propagation before xterm handles input, records the active
+element and clicks that hidden trigger. Each mounted dialog fetches one unfiltered activity-ordered session snapshot and
+partitions it into title and metadata-only subsequence matches, retaining helm order inside each tier. It never adds a
+result cap or subscribes to listing updates. Peer text is escaped and isolated before highlighting. Closing releases
+modal isolation and waits for actual DOM removal before letting ListView's ordinary navigation callback open a session.
+Cancellation, a refused pick and picking the current session restore previous focus; an accepted different session
+leaves focus free for its terminal. The trigger stays mounted but disabled through that handoff, swallowing repeat
+chords without replacing the saved opener; terminal.js's modal focus veto must no longer see the switcher when the new
+selection arrives.
+
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
 the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)

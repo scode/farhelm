@@ -921,6 +921,12 @@ pub(crate) fn ListView(
     let mut show_create = use_signal(|| false);
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
+    // The switcher stays list-owned so picks use the ordinary navigation gate.
+    let mut quick_switcher_open = use_signal(|| false);
+    // A close owns one focus/navigation handoff until the DOM removal is
+    // acknowledged. Reopening in that gap would give the old task a new
+    // dialog and a new focus target to wait for.
+    let mut quick_switcher_closing = use_signal(|| false);
     // Bumped when the dialog closes; the launcher re-reads templates on it.
     let mut templates_revision = use_signal(|| 0_u64);
     use_context_provider(|| super::templates::TemplatesRevision(templates_revision));
@@ -2597,13 +2603,14 @@ pub(crate) fn ListView(
                 .values()
                 .any(|phase| *phase == RowPhase::Pending)
         {
-            return;
+            return false;
         }
         // A USER-initiated selection is what gets remembered — the
         // auto-select fallback deliberately never writes (see
         // `SharedPreferences`).
         remember_selection(&open_base, preferences, &session.id);
         on_open.call(session);
+        true
     };
 
     // Stable callback identities are created once, outside the row loop.
@@ -2611,6 +2618,11 @@ pub(crate) fn ListView(
     // no hook depends on fleet size and unchanged rows remain memoized when
     // their parent refreshes.
     let guarded_open = use_callback(guarded_open);
+    // Sidebar rows do not consume the acceptance result; the switcher does
+    // so a busy refusal preserves both the filter and the opener's focus.
+    let row_open = use_callback(move |session| {
+        guarded_open.call(session);
+    });
     // Auto-select (BUGS_BURNDOWN.md issue 5, interviewed): an empty right
     // pane is a state to END, not to show — the remembered selection if
     // its row is still listed, else the newest-created row.
@@ -3065,7 +3077,52 @@ pub(crate) fn ListView(
         ids
     };
 
+    let switcher_listing = request_listing.clone();
+    let finish_switcher = use_callback(move |session: Option<Session>| {
+        if *quick_switcher_closing.peek() {
+            return;
+        }
+        quick_switcher_closing.set(true);
+        quick_switcher_open.set(false);
+        let switcher_listing = switcher_listing.clone();
+        // Spawn in this parent's scope: a task owned by the closing dialog
+        // would be cancelled by the very unmount it must wait for.
+        spawn(async move {
+            super::quick_switcher::finish_close().await;
+            let mut restore = true;
+            if let Some(session) = session {
+                let same = selected.peek().as_deref() == Some(session.id.as_str());
+                let hidden = filter
+                    .peek()
+                    .host
+                    .is_some_and(|host| session.host != Some(host));
+                if guarded_open.call(session) {
+                    restore = same;
+                    if hidden {
+                        filter.write().host = None;
+                        switcher_listing(Trigger::Explicit);
+                    }
+                }
+            }
+            super::quick_switcher::restore_focus(restore);
+            quick_switcher_closing.set(false);
+        });
+    });
+
     rsx! {
+        button {
+            class: "quick-switcher-trigger", r#type: "button", hidden: true,
+            tabindex: "-1", disabled: quick_switcher_closing(),
+            onclick: move |_| {
+                if !*quick_switcher_closing.peek() { quick_switcher_open.set(true); }
+            },
+        }
+        if quick_switcher_open() {
+            super::quick_switcher::QuickSwitcher {
+                on_close: move |_| finish_switcher.call(None),
+                on_pick: move |session| finish_switcher.call(Some(session)),
+            }
+        }
         // Targets of `menu_panel::install_row_menu_outside_dismiss`: a pointer
         // going down outside the open row menu clicks the relay carrying that
         // menu's identity, and the menu closes the way Escape closes it.
@@ -3670,7 +3727,7 @@ pub(crate) fn ListView(
                                         .filter(|open| open.id == session.id)
                                         .map(|open| open.read_through),
                                 },
-                                on_open: guarded_open,
+                                on_open: row_open,
                                 on_clone,
                                 on_replace_with,
                                 on_mark_seen,

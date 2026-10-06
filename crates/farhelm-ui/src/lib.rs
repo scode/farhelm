@@ -1376,6 +1376,34 @@ fn install_new_session_shortcut() {
     );
 }
 
+/// Reserve the quick-switcher's chord before xterm can send it to a program.
+///
+/// The live trigger only exists after authentication and preferences loading.
+/// Querying it before swallowing the key lets sign-in and other modals keep
+/// ownership. The platform check is the same one terminal.js uses.
+fn install_quick_switcher_shortcut() {
+    document::eval(
+        r#"if (!window.__farhelmQuickSwitcherShortcut) {
+        window.__farhelmQuickSwitcherShortcut = true;
+        window.addEventListener('keydown', (event) => {
+            const mac = /Mac/.test(navigator.platform || '');
+            const chord = mac
+                ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+                : event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+            if (!chord || event.code !== 'KeyK' || event.isComposing) return;
+            if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+            const trigger = document.querySelector('.quick-switcher-trigger');
+            if (!trigger) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.repeat || trigger.disabled) return;
+            window.__farhelmQuickSwitcherFocus = document.activeElement;
+            trigger.click();
+        }, true);
+    }"#,
+    );
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
@@ -1384,6 +1412,7 @@ fn AppBody() -> Element {
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
+    use_hook(install_quick_switcher_shortcut);
     #[cfg(native_desktop)]
     use_hook(|| {
         // cfg! keeps the Mac branch type-checked by the Linux desktop build
