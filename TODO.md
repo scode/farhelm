@@ -161,6 +161,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that loads it into the form below. Find out whether that button is missing, broken, or just hard to find, and fix it
   so editing a template is obvious. Plan: `plans/queue/templates-dialog-overhaul.md`.
 
+- **Plain hover text for the version readout.** Hovering the version at the top of the sidebar says "this client was
+  built as farhelm 0.24.0", which is jargon. Say instead something like: "This is version 0.24.0 of Farhelm. When
+  Farhelm detects there is a newer version available, this will turn red and you can click it to restart and upgrade."
+  Check that this is actually true before using it: what the readout looks like when an update is ready, whether
+  clicking it is how the user restarts to update, and what the web UI, which has no updater, and a desktop app that is
+  not the installed release should say instead.
+
 - **Save the launcher's setup as a template.** Add a "save as template" action to the New session dialog: it asks for a
   name and shows the launcher's current choices as a checklist, with the ones the user chose explicitly already checked,
   and saving creates the template and opens it in the Templates panel. Most templates start as "I just set this up, keep
