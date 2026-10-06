@@ -226,6 +226,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Linux desktop app have no such shortcut, since the browser keeps Cmd+N and Ctrl+N for a new window. Follow-up to the
   new-session-shortcut plan, at the maintainer's request while reviewing its report.
 
+- **Agent-driven Mac release test, first slice.** The first item of `lore/2026-10-05-release-brick-protection-plan.md`,
+  as far as it can be built without a Mac: the per-release test recipe and a one-time bring-up document, both for an
+  agent on the macOS host that drives Tart VMs (a macOS VM with real Claude and Codex sign-ins, and a separate Linux VM
+  as the remote host, each cloned fresh from prepared base images per test pass), plus a test-only override of which
+  version the in-app updater treats as latest, so a later release's test can press the real update button against a
+  candidate `/latest` does not name yet. The agent on the Mac fills in what the plan leaves open and lands it as its own
+  PR. Plan: `plans/queue/mac-release-test.md`.
+
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
