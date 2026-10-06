@@ -145,6 +145,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   makes). Assess what each choice means for each agent type, whether a form should offer only what the selected agent
   type supports, and whether the two fields should be one, then decide what the user should see.
 
+- **Label the repository field in the template editor.** Choosing "fresh GitHub checkout" as a template's destination
+  makes a large, blank, unlabeled text box appear under the host field, and the user has to guess that it is for the
+  GitHub repository. Give it a label and placeholder like the form's other fields, and size it like them.
+
 - **Ask for feedback when the installer finishes.** The installer's closing message should directly encourage the user
   to send feedback through the `?` menu's Send feedback, say that it goes privately to the maintainer, and say that even
   a low-effort, throwaway comment is useful. The installer tests check its exact closing messages, so they change with
