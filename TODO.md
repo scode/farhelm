@@ -127,6 +127,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
+- **Terminal tab next to an agent started in `~` opens in `~/`.** Opening a terminal tab beside an agent session whose
+  folder is the home directory gives a shell whose prompt shows `~/` rather than `~`, so its working directory carries a
+  trailing slash. Find where the slash comes from and make the tab start in exactly the session's folder.
+
 - **Ask for feedback when the installer finishes.** The installer's closing message should directly encourage the user
   to send feedback through the `?` menu's Send feedback, say that it goes privately to the maintainer, and say that even
   a low-effort, throwaway comment is useful. The installer tests check its exact closing messages, so they change with
