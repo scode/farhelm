@@ -120,12 +120,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   what could never see this bug. The overall plan, in priority order, is
   `lore/2026-10-05-release-brick-protection-plan.md`.
 
-- **Remember the feedback contact.** Send feedback's optional field for how to reach the user starts empty every time,
-  so someone who sends feedback more than once retypes it. When a contact is entered, show a "Re-use for future
-  feedback" checkbox, on by default; when it is checked, a successful send remembers the contact and the next feedback
-  dialog starts with it filled in. Decide where it is remembered (the helm, so the desktop app and the web UI share it,
-  or the browser) and say so in SPEC.md's Feedback section. Plan: `plans/queue/remember-feedback-contact.md`.
-
 - **Release-gate coverage for sending feedback.** A Farhelm release has to be able to send feedback to the endpoint that
   is live at farhelm.io, but nothing in the release gate checks that. The endpoint handler's tests run only in the
   on-demand CI website job, the browser test for the feedback dialog is in the disabled browser job, and nothing checks

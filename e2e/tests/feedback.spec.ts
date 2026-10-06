@@ -12,16 +12,24 @@
  * tests against a stand-in server instead.
  */
 import { Locator, Page, Route } from "@playwright/test";
-import { openHostMenu, openRowMenu } from "./helpers/fleet";
+import { openHostMenu, openRowMenu, patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { expect, test } from "./helpers/evidence";
 
 const DOCS_URL = "https://farhelm.io/docs/";
 
 // The premise every test here rests on: no feedback request reaches the real
 // helm. Routes registered later by a test take precedence over this one.
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, request }) => {
+  // Successful sends remember contact on the shared helm. Each case
+  // needs its own seed rather than inheriting the previous case's contact.
+  await resetPreferences(request);
   await page.route("**/api/feedback", (route) =>
     route.fulfill({ status: 500, contentType: "text/plain", body: "Couldn't send feedback: not routed by this test." }));
+});
+
+// The next spec uses the same helm, even when only one feedback case ran.
+test.afterEach(async ({ request }) => {
+  await resetPreferences(request);
 });
 
 async function openHelpMenu(page: Page) {
@@ -284,6 +292,112 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
   await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
   await expect(notice).toContainText("Thanks");
   expect(await notice.evaluate((el) => el.closest("[inert]") === null)).toBe(true);
+});
+
+/**
+ * Contact reuse is helm-wide and preserves exactly what was sent. A second
+ * client's write after the first page authenticated must still be overwritten
+ * by that page's next successful send, even if its local contact is unchanged.
+ * Reload proves the server value, rather than only the dialog's local signal.
+ */
+test("successful feedback remembers the sent contact and writes it again from a stale client", async ({ page, request }) => {
+  const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
+  await page.goto("/");
+  let dialog = await openFeedbackDialog(page);
+  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
+  await expect(reuse).toHaveCount(0);
+  const contact = "  contact@example.test  ";
+  await dialog.locator(".feedback-contact").fill(contact);
+  await expect(reuse).toBeChecked();
+  await dialog.locator(".feedback-message").fill("Remember this contact.");
+  await dialog.locator(".feedback-send").click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await readPreferences(request)).feedback_contact).toBe(contact);
+  expect((sent[0] as { contact: string }).contact).toBe(contact);
+
+  dialog = await openFeedbackDialog(page);
+  await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
+  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
+  await patchPreferences(request, { feedback_contact: "other-client@example.test" });
+  expect((await readPreferences(request)).feedback_contact).toBe("other-client@example.test");
+  await dialog.locator(".feedback-message").fill("Keep my contact.");
+  await dialog.locator(".feedback-send").click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await readPreferences(request)).feedback_contact).toBe(contact);
+  await page.reload();
+  dialog = await openFeedbackDialog(page);
+  await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
+  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
+  await dialog.locator(".feedback-cancel").click();
+});
+
+/**
+ * A successful send forgets prior contact both when reuse is unchecked and
+ * when a prefilled field is emptied. Unchecking changes memory, not the
+ * feedback submission; emptying sends null, the existing wire spelling for
+ * no contact. The feedback request shape must remain unchanged by reuse.
+ */
+test("successful feedback clears contact when reuse is unchecked or the field is emptied", async ({ page, request }) => {
+  const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
+  for (const [round, choice] of ["unchecked", "empty"].entries()) {
+    await patchPreferences(request, { feedback_contact: "remembered@example.test" });
+    expect((await readPreferences(request)).feedback_contact).toBe("remembered@example.test");
+    await page.goto("/");
+    const dialog = await openFeedbackDialog(page);
+    await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
+    const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
+    await expect(reuse).toBeChecked();
+    if (choice === "unchecked") {
+      await reuse.uncheck();
+    } else {
+      await dialog.locator(".feedback-contact").fill("");
+      await expect(reuse).toHaveCount(0);
+    }
+    await dialog.locator(".feedback-message").fill("Forget the contact next time.");
+    await dialog.locator(".feedback-send").click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(async () => (await readPreferences(request)).feedback_contact).toBeUndefined();
+    const body = sent[round] as { contact: string | null };
+    expect(body.contact).toBe(choice === "unchecked" ? "remembered@example.test" : null);
+    await page.reload();
+    const reopened = await openFeedbackDialog(page);
+    await expect(reopened.locator(".feedback-contact")).toHaveValue("");
+    await reopened.locator(".feedback-cancel").click();
+    await expect(reopened).toHaveCount(0);
+  }
+});
+
+/**
+ * Failure and Cancel cannot change shared contact memory. Observe both the
+ * actual preference writes and the server row: an attempted clear that later
+ * failed would violate this boundary even if the row still looked unchanged.
+ */
+test("failed feedback and cancel preserve remembered contact without a preference write", async ({ page, request }) => {
+  await patchPreferences(request, { feedback_contact: "remembered@example.test" });
+  expect((await readPreferences(request)).feedback_contact).toBe("remembered@example.test");
+  const writes: unknown[] = [];
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() === "PUT") writes.push(route.request().postDataJSON());
+    await route.continue();
+  });
+  await interceptFeedback(page, (route) => route.fulfill({ status: 502, body: "Couldn't send feedback: unavailable." }));
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
+  await dialog.locator(".feedback-contact").fill("new@example.test");
+  await dialog.getByRole("checkbox", { name: "Re-use for future feedback" }).uncheck();
+  await dialog.locator(".feedback-message").fill("Keep memory if sending fails.");
+  await dialog.locator(".feedback-send").click();
+  await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback");
+  expect((await readPreferences(request)).feedback_contact).toBe("remembered@example.test");
+  expect(writes).toEqual([]);
+  await dialog.locator(".feedback-cancel").click();
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([]);
+  await page.reload();
+  const reopened = await openFeedbackDialog(page);
+  await expect(reopened.locator(".feedback-contact")).toHaveValue("remembered@example.test");
+  await reopened.locator(".feedback-cancel").click();
 });
 
 /**

@@ -1,10 +1,11 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
 //! last user-selected session, compact-row choice, and the remembered
-//! permissions and workspace-trust choices of successful structured launches.
+//! permissions and workspace-trust choices of successful structured launches,
+//! host confirmation choices, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
-//! design: no client keeps its own copy, so a browser tab and the desktop
+//! design: no client persists its own copy, so a browser tab and the desktop
 //! app open in the same order and on the same session, and the value
 //! survives reloads and relaunches because it lives in `helm.db` instead of
 //! in whichever client last wrote it. Every client fetches the row once
@@ -38,6 +39,8 @@
 //! it, and without the cap one authenticated request could park a
 //! megabyte-scale string in the row for every client to download and
 //! re-resolve on every load until someone cleared it by hand.
+//! Feedback contact uses the feedback submission's code-point cap. Refusals
+//! must never echo it, since clients log preference-write errors.
 //!
 //! ## Why no CORS layer
 //!
@@ -53,6 +56,7 @@ use crate::store::{self, PreferencePatch};
 use crate::{AppState, SupervisorError, http_error};
 use axum::extract::State;
 use axum::response::IntoResponse;
+use farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS;
 use farhelm_proto::{ErrorKind, MAX_SESSION_ID_BYTES};
 use std::sync::Arc;
 
@@ -80,7 +84,8 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// JSON route here), which is what keeps a typo in a client from being an
 /// accepted no-op; a sort word this helm does not serve, or a
 /// `last_selected` longer than any session id can be
-/// ([`MAX_SESSION_ID_BYTES`]), is a 400. 204 on success: there is nothing
+/// ([`MAX_SESSION_ID_BYTES`]), or a feedback contact beyond its code-point
+/// cap is a 400. 204 on success: there is nothing
 /// to say back that the client did not just send.
 pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
@@ -124,6 +129,16 @@ pub(crate) async fn put_preferences(
             ),
         }));
     }
+    if let Some(Some(contact)) = &patch.feedback_contact
+        && contact.chars().count() > FEEDBACK_CONTACT_MAX_CHARS
+    {
+        return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::InvalidRequest,
+            // The UI logs preference refusals. Never put the contact into one.
+            message: format!("feedback_contact exceeds {FEEDBACK_CONTACT_MAX_CHARS} characters"),
+        }));
+    }
     match state.store.update_preferences(patch).await {
         Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Err(error) => http_error(error),
@@ -137,6 +152,7 @@ mod tests {
     use axum::http::StatusCode;
     use tower::ServiceExt;
 
+    /// A protected preference read through the same router clients use.
     fn get() -> axum::http::Request<axum::body::Body> {
         axum::http::Request::builder()
             .method("GET")
@@ -146,6 +162,7 @@ mod tests {
             .unwrap()
     }
 
+    /// Serialize a sparse patch so extraction exercises null versus absence.
     fn put(body: serde_json::Value) -> axum::http::Request<axum::body::Body> {
         axum::http::Request::builder()
             .method("PUT")
@@ -156,6 +173,7 @@ mod tests {
             .unwrap()
     }
 
+    /// Read bounded reply bytes to distinguish omitted fields from JSON null.
     async fn read_raw(harness: &rest_harness::Harness) -> Vec<u8> {
         let response = harness.router().oneshot(get()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -165,9 +183,79 @@ mod tests {
             .to_vec()
     }
 
+    /// Decode the shared row without bypassing the HTTP read contract.
     async fn read(harness: &rest_harness::Harness) -> Preferences {
         serde_json::from_slice(&read_raw(harness).await)
             .expect("the preference reply decodes as the shared type")
+    }
+
+    /// Contact memory uses the feedback cap in code points, never echoes a
+    /// refused value, and clears independently of other shared preferences.
+    /// Exercise the public routes so null and absence pass through extraction.
+    #[farhelm_testtrace::test]
+    async fn feedback_contact_is_bounded_private_and_clearable() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        let at_limit = "界".repeat(farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS);
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "feedback_contact": at_limit, "compact": true
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.feedback_contact.as_deref(),
+            Some(at_limit.as_str())
+        );
+
+        let secret = format!("private-contact-marker{}", "界".repeat(179));
+        assert!(secret.chars().count() > farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS);
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "feedback_contact": secret, "compact": false
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("feedback_contact exceeds 200 characters"));
+        assert!(!body.contains("private-contact-marker"));
+        assert_eq!(
+            read(&harness).await.feedback_contact.as_deref(),
+            Some(at_limit.as_str())
+        );
+        assert_eq!(
+            read(&harness).await.compact,
+            Some(true),
+            "refusal is atomic"
+        );
+
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({"list_sort": "title"})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.feedback_contact.as_deref(),
+            Some(at_limit.as_str())
+        );
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({"feedback_contact": null})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let remembered = read(&harness).await;
+        assert_eq!(remembered.feedback_contact, None);
+        assert_eq!(remembered.list_sort.as_deref(), Some("title"));
+        assert_eq!(remembered.compact, Some(true));
     }
 
     /// Compact may be the first preference a fresh client changes. Exercise
@@ -260,6 +348,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -361,6 +450,7 @@ mod tests {
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
+                feedback_contact: None,
             },
             "an explicit null clears the field it names and only that one"
         );

@@ -333,7 +333,8 @@ impl ListSort {
 /// The one client preference the helm remembers for every client at once
 /// (SPEC.md, Session list): the chosen list order, user-selected session,
 /// compact-row choice, and the remembered permissions and workspace-trust
-/// choices of successful structured launches. The reply shape of
+/// choices of successful structured launches, host confirmation choices,
+/// and the contact reused by Send feedback. The reply shape of
 /// `GET /api/preferences`.
 ///
 /// `None` means "never chosen, use the default". Writes use
@@ -345,7 +346,9 @@ impl ListSort {
 ///
 /// The host confirmation choices are client writes, but they remain helm-wide
 /// because the queue sends sparse patches and the seed is read after
-/// authentication. The remembered launch choices are never this client's OWN writes — no
+/// authentication. Feedback contact is also a client write, and a successful
+/// send can explicitly clear it (`PreferenceValue::FeedbackContact(None)`).
+/// The remembered launch choices are never this client's OWN writes — no
 /// [`PreferenceValue`] variant exists for them. The helm sets them as a side
 /// effect of a successful user structured launch (this client's or another
 /// client's), and this client only mirrors its own launch's result
@@ -368,6 +371,9 @@ pub(crate) struct Preferences {
     pub(crate) skip_host_remove_confirmation: Option<bool>,
     /// Whether adding a host can submit setup immediately after probing.
     pub(crate) skip_host_setup_confirmation: Option<bool>,
+    /// Shared contact memory; dialogs seed this authenticated snapshot once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) feedback_contact: Option<String>,
 }
 
 /// How long the seed read of the shared preference may take before the
@@ -414,6 +420,7 @@ pub(crate) enum PreferenceField {
     Compact,
     HostRemoveConfirmation,
     HostSetupConfirmation,
+    FeedbackContact,
 }
 
 impl PreferenceField {
@@ -425,6 +432,7 @@ impl PreferenceField {
             PreferenceField::Compact => "compact",
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
+            PreferenceField::FeedbackContact => "feedback_contact",
         }
     }
 }
@@ -442,6 +450,8 @@ pub(crate) enum PreferenceValue {
     Compact(bool),
     HostRemoveConfirmation(bool),
     HostSetupConfirmation(bool),
+    /// None is an explicit clear, not an omitted patch field.
+    FeedbackContact(Option<String>),
 }
 
 impl PreferenceValue {
@@ -453,6 +463,7 @@ impl PreferenceValue {
             Self::Compact(_) => PreferenceField::Compact,
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
+            Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
         }
     }
 
@@ -460,6 +471,7 @@ impl PreferenceValue {
     fn wire_value(&self) -> serde_json::Value {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
+            Self::FeedbackContact(value) => serde_json::json!(value),
             Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
@@ -476,6 +488,7 @@ impl PreferenceValue {
                 seed.skip_host_remove_confirmation = Some(*value)
             }
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
+            Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
         }
     }
 }
@@ -525,6 +538,7 @@ struct PreferenceWrites {
     compact: FieldWrite,
     host_remove_confirmation: FieldWrite,
     host_setup_confirmation: FieldWrite,
+    feedback_contact: FieldWrite,
 }
 
 impl PreferenceWrites {
@@ -535,6 +549,7 @@ impl PreferenceWrites {
             PreferenceField::Compact => &mut self.compact,
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
+            PreferenceField::FeedbackContact => &mut self.feedback_contact,
         }
     }
 
@@ -599,6 +614,7 @@ impl PreferenceWrites {
             PreferenceField::Compact => &self.compact,
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
+            PreferenceField::FeedbackContact => &self.feedback_contact,
         };
         if slot.acked {
             return None;
@@ -686,6 +702,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::Compact,
         PreferenceField::HostRemoveConfirmation,
         PreferenceField::HostSetupConfirmation,
+        PreferenceField::FeedbackContact,
     ] {
         let claimed = {
             let mut queue = preference_writes();
@@ -4388,7 +4405,7 @@ mod tests {
 /// pure state machine so no runtime or network is involved.
 #[cfg(test)]
 mod preference_write_tests {
-    use super::{PreferenceField, PreferenceValue, PreferenceWrites};
+    use super::{PreferenceField, PreferenceValue, PreferenceWrites, Preferences};
 
     /// Returning to an in-flight value is still a new explicit choice.
     /// The first true may already have committed while its response is
@@ -4412,6 +4429,38 @@ mod preference_write_tests {
             assert!(!queue.finished(field, &value, false));
             assert_eq!(queue.dirty(field), Some(value));
         }
+    }
+
+    /// A failed contact clear must survive reauthentication as an explicit
+    /// null. Overlaying an old helm seed must not resurrect forgotten contact,
+    /// and a later successful replay returns authority to the helm.
+    #[farhelm_testtrace::test]
+    fn failed_feedback_contact_clear_overlays_and_replays_as_null() {
+        let mut queue = PreferenceWrites::default();
+        let clear = PreferenceValue::FeedbackContact(None);
+        let field = PreferenceField::FeedbackContact;
+        assert!(queue.record(clear.clone()));
+        assert_eq!(queue.next_to_send(field), Some(clear.clone()));
+        assert!(!queue.finished(field, &clear, false));
+        let mut seed = Preferences {
+            feedback_contact: Some("old@example.test".to_string()),
+            compact: Some(true),
+            ..Preferences::default()
+        };
+        let dirty = queue.dirty(field).expect("failed clear remains dirty");
+        dirty.overlay(&mut seed);
+        assert_eq!(seed.feedback_contact, None);
+        assert_eq!(seed.compact, Some(true));
+        let replay = queue
+            .begin_replay(field)
+            .expect("clear gets a replay writer");
+        assert_eq!(
+            serde_json::json!({ replay.field().key(): replay.wire_value() }),
+            serde_json::json!({"feedback_contact": null})
+        );
+        assert_eq!(queue.begin_replay(field), None);
+        assert!(!queue.finished(field, &replay, true));
+        assert_eq!(queue.dirty(field), None);
     }
 
     /// Same-field writes are serialized latest-wins: a value recorded while

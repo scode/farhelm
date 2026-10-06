@@ -128,35 +128,36 @@ Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
-permissions and workspace-trust choices are one preference the HELM keeps, in a singleton row of `helm.db`
-(`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`, `remembered_workspace_trust`) behind
-`GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered launch fields are written
-by the helm after a successful user structured launch; no shipped client PUTs them. Workspace trust changes only after
-an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness leave it alone. This makes
-the remembered values facts of accepted launches rather than claims from one client. Both clients read the row once
-after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the
-sort control and the auto-select effect see the remembered values on their first run and no frame shows a default that
-is then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
-nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
-valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
-then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
-field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
-cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
-in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
-land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
-credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
-cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
-its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
-stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare word
-`?sort=` takes and is validated against that vocabulary at the write; the selection is a bare session id (the browser's
-old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could outlive a state-directory
-swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word
-still reads as the UI default (`activity`) on the client, because the row outlives the build that validated it. Nothing
-is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no credentials either, only the
-webview readiness counter the desktop smoke reads and the desktop app's automatic-updates setting, which is a setting of
-that app installation rather than one of these shared preferences), no eval round trip. The visible consequences are the
-ones SPEC.md names — one answer shared by every client, and a second client attaching to whatever was selected most
-recently anywhere.
+permissions and workspace-trust choices, host confirmation choices, and remembered feedback contact are one preference
+the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`,
+`remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
+`feedback_contact`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered
+launch fields are written by the helm after a successful user structured launch; no shipped client PUTs them. Workspace
+trust changes only after an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness
+leave it alone. This makes the remembered values facts of accepted launches rather than claims from one client. Both
+clients read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing,
+until the read lands, so the sort control and the auto-select effect see the remembered values on their first run and no
+frame shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read
+is one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to
+the helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
+appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
+per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
+fields at nearly the same time cannot clobber each other; the signal in the page is updated before the request leaves,
+which is what keeps the choice in force when the write fails. Same-field writes are serialized latest-wins in the
+client, so a burst of changes cannot land on the helm in reverse order; the write queue is process state outside the
+remounted tree, and after the browser's credential recovery the gate overlays and replays any local choice whose write
+never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
+never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
+expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
+seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the
+selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
+origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
+helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
+row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in
+`desktop-client.json` (which holds no credentials either, only the webview readiness counter the desktop smoke reads and
+the desktop app's automatic-updates setting, which is a setting of that app installation rather than one of these shared
+preferences), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
+client, and a second client attaching to whatever was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -2708,7 +2709,10 @@ submission: the message, the optional contact, the version the sidebar already s
 operating system the browser or webview reports. The helm validates the submission against the shared request type and
 forwards that type as JSON: it adds nothing, trims nothing, and stores nothing. Forwarding through the helm rather than
 posting from the page keeps the webview and the browser off the internet and gives one place where the feedback
-connection lives.
+connection lives. After a successful send the dialog separately remembers or clears the contact through the shared
+preferences row, using the authenticated client's snapshot to seed later dialogs and the existing preference queue to
+write every successful choice; the feedback route still stores nothing. Preference validation uses the same contact cap
+and never includes the contact in a refusal or log.
 
 The request type and its caps live in `farhelm-proto`, shared by the UI and the helm, so both enforce the same numbers:
 a message of at most 4,000 characters that is not empty or whitespace-only, a contact of at most 200 characters,

@@ -182,7 +182,9 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await help.locator('[data-bar-menu-item="send feedback"]').click();
   const feedback = page.getByRole("dialog", { name: "send feedback", exact: true });
   await expect(feedback).toBeVisible();
-  await expectCovered(page, "feedback dialog", ".feedback-dialog", 2);
+  await feedback.locator(".feedback-contact").fill("contact@example.test");
+  await expect(feedback.locator(".feedback-reuse")).toBeChecked();
+  await expectCovered(page, "feedback dialog", ".feedback-dialog", 3);
   await feedback.locator(".feedback-cancel").click();
   await expect(feedback).toHaveCount(0);
 
