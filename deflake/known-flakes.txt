@@ -9,3 +9,5 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
+
+nextest farhelm-supervisor service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working  # unconfirmed-restart-agent-dies-early

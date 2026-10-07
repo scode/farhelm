@@ -1516,3 +1516,32 @@ Class: readiness
 
 Cause: established by code reading — the selected terminal's reveal takes focus from the just-opened help menu, so the
 test's Escape lands in the terminal.
+
+## 2026-10-06 — `unconfirmed_restart_is_refused_only_while_the_agent_is_working` (crates/farhelm-supervisor/src/service/core.rs)
+
+Failed once in the v0.25.0-rc.3 release build's x86_64 Linux gate (release run 37571233310 attempt 1, retained recorder
+run `fc591c2f-c3b8-4ebe-beda-9b64e26a6688` in the hosted `test-run-failure-37571233310-1-2` artifact, which expires), at
+tested commit `7f46e0c6` with a clean tree, selection "workspace except farhelm and farhelm-desktop", 4 nextest slots
+across binaries, retries 0, the recorder's pinned tmux 3.7c (executable SHA256 prefix `f6fc5de04bae852f`), locale
+`C.UTF-8`, and only the recorder-owned `FARHELM_TEST_TRACE_DIR` in the child. It failed alone (2773 of 2774 passed),
+fast (1.46 s) on its first premise assertion, about 0.3 s after the session was created; the same test passed in the
+rc.1 and rc.2 gates on the same supervisor code. It reproduces readily on a quiet Linux x86_64 development machine
+(kernel 6.8, 18 CPUs, recorder-pinned tmux 3.7c with executable SHA256 prefix `c8f5e37c5169b045`, `C.UTF-8`, ambient
+`FARHELM_*` removed by the recorder): 5 of 20 attempts of this test alone at `7f46e0c6`, clean tree (first retained
+failure `749a6ec8-99ff-4943-bcf4-232e23d6a819`). It also fails on v0.24.0's source, 2 of 20 alone, run directly with
+cargo-nextest rather than through the recorder (the scratch copy was not a checkout) and with every `FARHELM_*` unset,
+so it predates this release. Every failure shape is the test's `sleep 300` agent no longer being alive a second or two
+after launch: the "agent is alive" premise fails, or the refused restart's follow-up finds no live agent, or the
+unconfirmed restart is not refused because the session reads `Unknown` instead of working. A failing attempt's trace
+shows the later stop reporting that the launch's transient systemd scope was already gone. Cause not established. The
+suspicion is the launch's transient scope on the shared `systemd --user` manager, or the test's `sh -c` stand-in agent,
+ending early; neither has been checked. Open; recorded in TODO.md's Deflake bucket and in `deflake/known-flakes.txt`.
+
+```
+thread 'service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working' panicked at crates/farhelm-supervisor/src/service/core.rs:17822:18:
+fixture premise: the agent is alive
+```
+
+Class: fixture-premise
+
+Cause: unknown
