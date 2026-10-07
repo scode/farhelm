@@ -231,16 +231,33 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the GitHub release: every
    asset the release contract names present and NO `SHA256SUMS` or `SHA256SUMS.minisig` (those belong on get.farhelm.io;
    the workflow refuses them), the release NOT marked prerelease, and the release page showing the changelog section
-   above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish.
-   Once they have, check get.farhelm.io (read-only): `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and
-   `install.sh` answer, and `https://get.farhelm.io/latest` names `vX.Y.Z`.
-8. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
-9. `cargo clean` again (see "Build outputs" below).
+   above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish at
+   its version path, and that `/latest` must not move yet. Once they have, check get.farhelm.io (read-only):
+   `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and `install.sh` answer, and
+   `https://get.farhelm.io/latest` still names the previous stable release.
+8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
+   it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
+   test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
+   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades the previous stable
+   releases to it, which is the check that the release does not brick existing installations (SPEC.md, "Upgrade
+   compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual checks as material
+   for the test's per-release addendum. Then wait for the maintainer's verdict; do not treat silence, or a test that
+   could not run, as a pass.
+   - Pass: the maintainer moves `/latest`, which no agent does. Once they say it has moved, check that
+     `https://get.farhelm.io/latest` names `vX.Y.Z`, and go on.
+   - Fail: `/latest` stays on the previous release and the release is never promoted. Handle it like a failed tag build
+     (below): fix on main and cut the next patch version. Whether to take the staged version off get.farhelm.io is the
+     maintainer's call.
+   - Could not run: ask the maintainer whether to fix the test environment and run it again, or to promote without it.
+     Only the maintainer decides to skip the test.
+9. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
+10. `cargo clean` again (see "Build outputs" below).
 
 A failed tag build publishes nothing; fix on main and cut again with the next patch version, since a tag name is never
-reused. That means another changelog PR before the new branch: retitle the `## vX.Y.Z` section to the new version (a
-stable `announce` fails unless the newest section names the tag exactly) and fold in the fix commits' fragments. The
-abandoned release branch is left as it is, like the earlier ones.
+reused. A release that failed its brick test is the same case: it was signed and staged but never promoted, and the next
+attempt is the next patch version. That means another changelog PR before the new branch: retitle the `## vX.Y.Z`
+section to the new version (a stable `announce` fails unless the newest section names the tag exactly) and fold in the
+fix commits' fragments. The abandoned release branch is left as it is, like the earlier ones.
 
 # Cutting an RC release
 
