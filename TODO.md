@@ -284,6 +284,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its signal and its marker. A cheap check of the mechanism is a PATH `curl` shim that delays the startup
   `POST /api/sessions` by 25 seconds.
 
+- **Unconfirmed-restart agent dies early.** The supervisor test
+  `unconfirmed_restart_is_refused_only_while_the_agent_is_working` fails about one run in four to ten, alone, because
+  its `sleep 300` stand-in agent is no longer alive a second or two after launch (FLAKES.md, 2026-10-06). It failed the
+  v0.25.0-rc.3 release gate once and also fails on v0.24.0's source. The later stop finds the launch's transient systemd
+  scope already gone. First step: rerun it alone in a loop with the supervisor's debug tracing and record when and how
+  the pane's process exits, to tell an early scope teardown from the stand-in command itself exiting.
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
