@@ -23774,10 +23774,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                27,
-                "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind and \
-                 session-notification \
-                 changes too"
+                28,
+                "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
+                 session-notification and notification-resolution changes too"
             );
             assert_eq!(
                 conn.query_row(
