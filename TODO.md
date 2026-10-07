@@ -138,6 +138,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   clicking it is how the user restarts to update, and what the web UI, which has no updater, and a desktop app that is
   not the installed release should say instead.
 
+- **Enter should launch from anywhere in the session launcher.** Pressing Enter launches the session while the cursor is
+  in the launcher's text box, but after clicking a button or another control in the launcher, Enter no longer launches.
+  Make Enter launch a complete, valid setup wherever focus is in the launcher, keeping SPEC.md's rules for Enter in the
+  text box (a non-empty query with no result never launches). Decide what Enter does on a focused button, where browsers
+  press the button itself.
+
 - **Save the launcher's setup as a template.** Add a "save as template" action to the New session dialog: it asks for a
   name and shows the launcher's current choices as a checklist, with the ones the user chose explicitly already checked,
   and saving creates the template and opens it in the Templates panel. Most templates start as "I just set this up, keep
