@@ -8,6 +8,14 @@ cited by name throughout code comments) are archived under lore/ and are not mai
 This project is either public now, or may become public in the future. No content in this project should contain
 personal information such as personal usernames, hostnames, details about the local environments, etc.
 
+# Release brick tests
+
+When asked **`brick test release vX.Y.Z`**, follow
+[releasing/mac-vm-test/BRICK-TEST.md](releasing/mac-vm-test/BRICK-TEST.md). Discover the private machine profile there,
+read its operator policy and journal, and run the complete planned fresh/upgrade procedure with guest-only product
+mutations. Missing prerequisites mean could not run; resolve them with the maintainer instead of guessing machine
+bindings. A test request does not authorize publication or release promotion.
+
 # Talking to the user
 
 Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
