@@ -1823,23 +1823,7 @@ async fn delete_template_for_agent(
 fn with_launch_kind(
     mut fields: farhelm_proto::launcher::TemplateFields,
 ) -> farhelm_proto::launcher::TemplateFields {
-    use farhelm_proto::launcher::LauncherKind;
-    let command_choice =
-        fields.command.is_some() || fields.yolo.is_some() || fields.resume_command.is_some();
-    let agent_choice = fields.agent.is_some()
-        || fields.model.is_some()
-        || fields.effort.is_some()
-        || fields.permissions.is_some()
-        || fields.workspace_trust.is_some();
-    if fields.kind.is_none() {
-        fields.kind = if command_choice {
-            Some(LauncherKind::Command)
-        } else if agent_choice {
-            Some(LauncherKind::Agent)
-        } else {
-            None
-        };
-    }
+    fields.kind = fields.kind.or(fields.implied_kind());
     fields
 }
 
@@ -1853,15 +1837,8 @@ fn with_launch_kind(
 /// GUI's editor stores shape only (SPEC.md).
 fn mixes_launch_kinds(fields: &farhelm_proto::launcher::TemplateFields) -> bool {
     use farhelm_proto::launcher::LauncherKind;
-    let agent_side = fields.kind == Some(LauncherKind::Agent)
-        || fields.model.is_some()
-        || fields.effort.is_some()
-        || fields.permissions.is_some()
-        || fields.workspace_trust.is_some();
-    let command_side = fields.kind == Some(LauncherKind::Command)
-        || fields.command.is_some()
-        || fields.yolo.is_some()
-        || fields.resume_command.is_some();
+    let agent_side = fields.kind == Some(LauncherKind::Agent) || fields.sets_agent_only_fields();
+    let command_side = fields.kind == Some(LauncherKind::Command) || fields.sets_command_fields();
     agent_side && command_side
 }
 
