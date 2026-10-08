@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-08T04:19:37Z",
-  "captured_from": "f00f0d3ebdcc5a69fd11bf97a35fe6bf3739d06b",
-  "commit": "a131804204dc42021c714e19dce9c4cd60fa54d8",
+  "captured_at": "2026-10-08T13:44:03Z",
+  "captured_from": "a38ea524a5a78c6ec73a43d5b50a495b5aad943c",
+  "commit": "32e41a0e6d9c723d6a5ac402e8aa07acdd965c86",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -72,6 +72,18 @@
     "manage-hosts/remove-dialog": {
       "height": 724,
       "width": 1024
+    },
+    "release-notes/v0-25-0-feedback-contact": {
+      "height": 774,
+      "width": 1520
+    },
+    "release-notes/v0-25-0-quick-switcher": {
+      "height": 1218,
+      "width": 1652
+    },
+    "release-notes/v0-25-0-templates-dialog": {
+      "height": 1848,
+      "width": 1846
     },
     "session-list/controls": {
       "height": 694,

@@ -86,15 +86,22 @@ staged or rewritten. In short:
 ## Release notes
 
 The Release notes page (`/docs/release-notes/`, the sidebar entry under Overview) is generated from the repository's
-`CHANGELOG.md` by `scripts/release-notes.mjs` on every build and preview start, and is gitignored. Do not edit the page
-or its generated Markdown; a change to the notes themselves is a change to `CHANGELOG.md`, which `releasing/AGENTS.md`
-governs. Each release has a stable anchor named after its version, such as `/docs/release-notes/#v0.23.0`.
+`CHANGELOG.md` by `scripts/release-notes.mjs` on every build and preview start, and is gitignored. Do not edit the page;
+a change to the notes themselves is a change to `CHANGELOG.md`, which `releasing/AGENTS.md` governs. Each release has a
+stable anchor named after its version, such as `/docs/release-notes/#v0.23.0`.
 
-Website-only material for one release, such as annotated screenshots of its new dialogs, goes in
-`src/release-notes/<version>.mdx` (for example `src/release-notes/v0.26.0.mdx`); the generator shows it at the top of
-that release, and it never reaches GitHub. One decision is still open before the first such screenshot: the docs
-screenshot system recaptures every shot from the current UI on each refresh, which is wrong for a past release, so
-release screenshots will need images that are captured once and kept.
+An entry can show screenshots of what it changed, behind a closed **show screenshot** link under the entry's text.
+`src/release-notes/<version>.json` (for example `src/release-notes/v0.25.0.json`) lists them, naming each entry by a
+pull request number the entry cites; the generator places them, and fails the build when no entry of that release cites
+the number. `CHANGELOG.md` and the GitHub release stay text only. The screenshots are ordinary docs shots: tests in
+`e2e/docs-shots/release-notes.spec.ts` named `release-notes/v<X-Y-Z>-<what>`, captured and published with every other
+shot. Give a screenshot only to an entry whose change is visible: a new dialog or control, or a redesign, not a fix or
+behaviour a picture cannot show. Most entries get none, and a release with no visible change gets no file.
+
+NOTE: A refresh recaptures those shots from the current UI like any other, which is wrong for a past release once a
+later one changes the same dialog. Until that has an answer, when a refresh would turn a past release's shot into a
+picture of later UI, keep its test's steps as they are and tell the maintainer rather than rewriting the shot to the new
+look.
 
 ## Internal links
 

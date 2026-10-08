@@ -1,0 +1,38 @@
+---
+/**
+ * The screenshots of one release-notes entry, behind a closed "show
+ * screenshot" disclosure under the entry's text. The Release notes page is
+ * generated (scripts/release-notes.mjs), which places one of these inside the
+ * list item of every entry that src/release-notes/<version>.json gives a
+ * screenshot.
+ *
+ * Closed by default so the notes still read as a list: a reader opens the
+ * pictures they want, and a release with several screenshots stays short.
+ */
+import Screenshot from './Screenshot.astro';
+
+interface Props {
+  /** The entry's shots, in the order the release's list names them. */
+  shots: { name: string; alt: string }[];
+}
+
+const { shots } = Astro.props;
+const label = shots.length === 1 ? 'show screenshot' : `show ${shots.length} screenshots`;
+---
+
+<details class="release-screenshots">
+  <summary>{label}</summary>
+  {shots.map((shot) => <Screenshot name={shot.name} alt={shot.alt} />)}
+</details>
+
+<style>
+  .release-screenshots {
+    margin-top: 0.4rem;
+  }
+
+  .release-screenshots summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+    font-size: var(--sl-text-sm);
+  }
+</style>

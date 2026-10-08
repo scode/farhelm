@@ -65,6 +65,11 @@ readonly RETENTION_DAYS=42
 readonly LOCAL_DIR="website/public/docs-shots-local"
 readonly MANIFEST="website/src/data/docs-shots.json"
 readonly CONTENT_DIR="website/src/content/docs"
+# Each release's screenshot list for the Release notes page, a JSON file named
+# after the version that attaches shots to that release's entries
+# (website/AGENTS.md, "Release notes"). Not pages, but the shots they name are
+# published like any.
+readonly RELEASE_NOTES_DIR="website/src/release-notes"
 # Written by scripts/docs-screenshots.sh after a complete capture, and deleted
 # by a one-page one.
 readonly CAPTURE_RECORD="$LOCAL_DIR/capture.json"
@@ -93,22 +98,28 @@ raw_base() {
   printf 'https://raw.githubusercontent.com/%s' "$path"
 }
 
-# Every shot name the docs pages reference, one per line, sorted. A name is
-# `<page>/<shot>` in lowercase kebab case, the form the capture writes.
+# Every shot name the docs pages and the release notes' screenshot lists
+# reference, one per line, sorted. A name is `<page>/<shot>` in lowercase kebab
+# case, the form the capture writes.
 referenced_shots() {
-  python3 - "$1/$CONTENT_DIR" <<'EOF' || die "cannot read the docs pages"
-import pathlib, re, sys
+  python3 - "$1/$CONTENT_DIR" "$1/$RELEASE_NOTES_DIR" <<'EOF' || die "cannot read the docs pages"
+import json, pathlib, re, sys
 names = set()
-for page in pathlib.Path(sys.argv[1]).rglob("*.md*"):
+def add(source, name):
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*/[a-z0-9]+(-[a-z0-9]+)*", name):
+        raise SystemExit(f"{source}: shot name {name!r} is not <page>/<shot> in lowercase kebab case")
+    names.add(name)
+pages, releases = (pathlib.Path(arg) for arg in sys.argv[1:])
+for page in pages.rglob("*.md*"):
     # A <Screenshot> inside an MDX comment or a code fence renders nothing,
     # so it is not a reference.
     text = re.sub(r"\{/\*.*?\*/\}", "", page.read_text(encoding="utf-8"), flags=re.S)
     text = re.sub(r"^(```|~~~).*?^\1", "", text, flags=re.S | re.M)
     for match in re.finditer(r"<Screenshot\b[^>]*?\sname=[\"']([^\"']+)[\"']", text, re.S):
-        name = match.group(1)
-        if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*/[a-z0-9]+(-[a-z0-9]+)*", name):
-            raise SystemExit(f"{page}: shot name {name!r} is not <page>/<shot> in lowercase kebab case")
-        names.add(name)
+        add(page, match.group(1))
+for listing in sorted(releases.glob("*.json")) if releases.is_dir() else []:
+    for shot in json.loads(listing.read_text(encoding="utf-8")).get("screenshots", []):
+        add(listing, shot.get("name"))
 print("\n".join(sorted(names)))
 EOF
 }
@@ -395,8 +406,12 @@ EOF
   remote_git() { git -C "$bare" "$@"; }
 
   page="$checkout/$CONTENT_DIR/docs/page.mdx"
-  mkdir -p "$(dirname "$page")" "$checkout/$LOCAL_DIR/page" || die "mkdir failed"
+  mkdir -p "$(dirname "$page")" "$checkout/$LOCAL_DIR/page" "$checkout/$RELEASE_NOTES_DIR" || die "mkdir failed"
   printf -- '---\ntitle: t\n---\n\n<Screenshot name="page/one" alt="a" />\n<Screenshot\n  name="page/two"\n  alt="b"\n/>\n' >"$page"
+  # A release's screenshot list naming page/two too. Once the page below drops
+  # both of its references, this is what keeps page/two published, which is
+  # the check that the release notes' screenshot lists are read at all.
+  printf -- '{"screenshots": [{"entry": 1, "name": "page/two", "alt": "b"}]}\n' >"$checkout/$RELEASE_NOTES_DIR/v1.0.0.json"
   git -C "$checkout" init -q || die "checkout init failed"
   git -C "$checkout" -c user.name=t -c user.email=t@invalid -c commit.gpgsign=false commit -q --allow-empty -m init || die "commit failed"
   git -C "$checkout" config user.name t
@@ -472,8 +487,9 @@ EOF
   test "$(remote_git rev-parse "$REF")" = "$keep" || { echo "FAIL an unchanged set was pushed"; fail=1; }
   test "$(manifest_captured_from "$checkout")" = "$main2" || { echo "FAIL an unchanged recapture was not recorded"; fail=1; }
 
-  # A page that stops referencing a shot: it leaves the next snapshot.
-  printf -- '---\ntitle: t\n---\n\n<Screenshot name="page/two" alt="b" />\n' >"$page"
+  # A page that stops referencing its shots: page/one leaves the next
+  # snapshot, and page/two stays because the release's screenshot list names it.
+  printf -- '---\ntitle: t\n---\n\nNo shots here.\n' >"$page"
   run >/dev/null || { echo "FAIL publish after dropping a reference"; fail=1; }
   test "$(remote_git ls-tree -r --name-only "$(manifest_commit "$checkout")")" = "page/two.png" ||
     { echo "FAIL an unreferenced shot was published"; fail=1; }
