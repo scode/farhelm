@@ -1290,7 +1290,8 @@ controls underneath native window buttons. Startup, authentication errors, and b
 content clear of native controls.
 
 Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
-New is disabled; the web UI has no such shortcut because browsers keep Cmd/Ctrl+N for a new window.
+New is disabled. New's hover text names the shortcut in the Mac desktop app only; the web UI has no such shortcut
+because browsers keep Cmd/Ctrl+N for a new window.
 
 Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
 terminal. It does nothing while another modal is open or before sign-in and preferences loading finish. Type a

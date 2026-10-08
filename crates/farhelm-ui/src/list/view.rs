@@ -37,6 +37,13 @@ use super::shared::{
 };
 use crate::rename::RenameDialog;
 
+/// Name the shortcut only where the app installs it; browsers keep Cmd+N for windows.
+const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
+    "new session: start an agent or a command on any host (⌘N)"
+} else {
+    "new session: start an agent or a command on any host"
+};
+
 /// One-shot request sent by a session header to the list's existing composer.
 /// AppBody owns the signal so the request survives the keyed session view and
 /// ListView can consume it exactly once.
@@ -3294,7 +3301,7 @@ pub(crate) fn ListView(
                 // Focus restoration and the Mac Cmd+N shortcut select this
                 // live control by class, so both retain its ordinary guards.
                 class: "btn btn-primary new-session-button",
-                "data-tooltip": "new session: start an agent or a command on any host",
+                "data-tooltip": NEW_SESSION_TOOLTIP,
                 // The heading keeps the short visible word "new" while the
                 // accessible name preserves the object named by the former
                 // full-width label.

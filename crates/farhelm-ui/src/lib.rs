@@ -1347,6 +1347,12 @@ fn install_window_activity_tracking() {
     );
 }
 
+/// Whether this build owns Cmd+N rather than leaving it to the browser or OS.
+///
+/// Shortcut installation and the New button's hint share this predicate so a
+/// build cannot advertise a chord that it does not handle.
+pub(crate) const HAS_NEW_SESSION_SHORTCUT: bool = cfg!(all(native_desktop, target_os = "macos"));
+
 /// Give the Mac desktop's Cmd+N the New button's current prefill and busy guard.
 ///
 /// Capture runs before xterm's input handler so the chord cannot reach the
@@ -1417,7 +1423,7 @@ fn AppBody() -> Element {
     use_hook(|| {
         // cfg! keeps the Mac branch type-checked by the Linux desktop build
         // while leaving Linux terminal input alone.
-        if cfg!(target_os = "macos") {
+        if HAS_NEW_SESSION_SHORTCUT {
             install_new_session_shortcut();
         }
     });
