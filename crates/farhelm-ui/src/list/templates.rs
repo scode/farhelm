@@ -345,23 +345,7 @@ impl Draft {
     /// legacy switch as unsaved instead of migrating stored records on read.
     fn from_template(t: &LaunchTemplate) -> Self {
         let mut fields = t.fields.clone();
-        if fields.kind.is_none() {
-            fields.kind = if fields.command.is_some()
-                || fields.yolo.is_some()
-                || fields.resume_command.is_some()
-            {
-                Some(LauncherKind::Command)
-            } else if fields.agent.is_some()
-                || fields.model.is_some()
-                || fields.effort.is_some()
-                || fields.permissions.is_some()
-                || fields.workspace_trust.is_some()
-            {
-                Some(LauncherKind::Agent)
-            } else {
-                None
-            };
-        }
+        fields.kind = fields.kind.or(fields.implied_kind());
         Self {
             name: t.name.clone(),
             fields,

@@ -258,6 +258,46 @@ pub struct TemplateFields {
     pub name: Option<String>,
 }
 
+impl TemplateFields {
+    /// Whether the template sets a command-launch choice, including a false
+    /// YOLO assertion or an explicit null reset of the resume command.
+    ///
+    /// The agent type is shared by both launch kinds: beside these fields it
+    /// declares the command's agent, rather than requiring an agent launch.
+    pub fn sets_command_fields(&self) -> bool {
+        self.command.is_some() || self.yolo.is_some() || self.resume_command.is_some()
+    }
+
+    /// Whether the template sets a choice available only to agent launches.
+    /// Explicit null resets still count as choices.
+    ///
+    /// This deliberately excludes the agent type, which a command launch may
+    /// declare too. Including it would reject valid agent-plus-command templates
+    /// when the helm checks for mixed launch kinds.
+    pub fn sets_agent_only_fields(&self) -> bool {
+        self.model.is_some()
+            || self.effort.is_some()
+            || self.permissions.is_some()
+            || self.workspace_trust.is_some()
+    }
+
+    /// Infer the launcher tab from choices alone, without consulting `kind`.
+    ///
+    /// Command choices take precedence because an accompanying agent type
+    /// declares the command's agent. Otherwise an agent type or agent-only
+    /// choice implies an agent launch; placement alone implies neither. Callers
+    /// keep explicit kinds and decide whether mixed choices should be refused.
+    pub fn implied_kind(&self) -> Option<LauncherKind> {
+        if self.sets_command_fields() {
+            Some(LauncherKind::Command)
+        } else if self.agent.is_some() || self.sets_agent_only_fields() {
+            Some(LauncherKind::Agent)
+        } else {
+            None
+        }
+    }
+}
+
 /// The longest template name the helm stores, in bytes.
 pub const TEMPLATE_NAME_CAP: usize = 128;
 
@@ -627,6 +667,78 @@ pub fn apply_templates<'t>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every launch-specific field determines a legacy template's tab, while
+    /// placement fields do not. False assertions and null resets are choices,
+    /// and a declared command agent must never turn a command into an agent
+    /// launch. Pinning the wire inputs keeps the helm and editor's shared rule
+    /// from losing fields or conflating absence with a reset.
+    #[test]
+    fn template_fields_imply_kind_by_field() {
+        use serde_json::json;
+
+        for (fields, expected) in [
+            (json!({}), None),
+            (
+                json!({"command": "echo hello"}),
+                Some(LauncherKind::Command),
+            ),
+            (json!({"yolo": true}), Some(LauncherKind::Command)),
+            (json!({"yolo": false}), Some(LauncherKind::Command)),
+            (
+                json!({"resume_command": "resume"}),
+                Some(LauncherKind::Command),
+            ),
+            (json!({"resume_command": null}), Some(LauncherKind::Command)),
+            (json!({"agent": "claude"}), Some(LauncherKind::Agent)),
+            (json!({"model": "custom"}), Some(LauncherKind::Agent)),
+            (json!({"model": null}), Some(LauncherKind::Agent)),
+            (json!({"effort": "high"}), Some(LauncherKind::Agent)),
+            (json!({"effort": null}), Some(LauncherKind::Agent)),
+            (
+                json!({"permissions": "smart_approve"}),
+                Some(LauncherKind::Agent),
+            ),
+            (json!({"permissions": null}), Some(LauncherKind::Agent)),
+            (json!({"workspace_trust": true}), Some(LauncherKind::Agent)),
+            (json!({"workspace_trust": false}), Some(LauncherKind::Agent)),
+            (json!({"workspace_trust": null}), Some(LauncherKind::Agent)),
+            (json!({"host": "installation"}), None),
+            (json!({"destination": {"folder": "project"}}), None),
+            (json!({"destination": {"github": "owner/repo"}}), None),
+            (json!({"name": "review"}), None),
+            (json!({"kind": "command"}), None),
+            (
+                json!({"kind": "command", "agent": "claude"}),
+                Some(LauncherKind::Agent),
+            ),
+            (
+                json!({"kind": "agent", "yolo": false}),
+                Some(LauncherKind::Command),
+            ),
+        ] {
+            let parsed: TemplateFields = serde_json::from_value(fields.clone()).unwrap();
+            assert_eq!(parsed.implied_kind(), expected, "fields: {fields}");
+        }
+
+        for fields in [
+            json!({"agent": "claude", "command": "claude {farhelm_args}"}),
+            json!({"agent": "claude", "yolo": false}),
+            json!({"agent": "claude", "resume_command": "resume"}),
+            json!({"agent": "claude", "resume_command": null}),
+        ] {
+            let parsed: TemplateFields = serde_json::from_value(fields.clone()).unwrap();
+            assert_eq!(
+                parsed.implied_kind(),
+                Some(LauncherKind::Command),
+                "fields: {fields}"
+            );
+            assert!(
+                !parsed.sets_agent_only_fields(),
+                "a declared command agent is not agent-only: {fields}"
+            );
+        }
+    }
 
     fn catalog() -> Vec<LaunchCatalogModel> {
         vec![

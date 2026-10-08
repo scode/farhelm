@@ -211,20 +211,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
   is `lore/2026-10-05-release-brick-protection-plan.md`.
 
-- **Keep one copy of the rule for a template's launcher tab.** A template stored before templates chose their launcher
-  tab has no tab, so Farhelm infers one from its fields: any command field (`command`, `yolo`, `resume_command`) means
-  command, otherwise any agent field (`agent`, `model`, `effort`, `permissions`, `workspace_trust`) means agent,
-  otherwise it switches nothing. That rule is written twice, in the helm (`with_launch_kind` in
-  `crates/farhelm-helm/src/agent_requests.rs`, used when an agent creates a template) and in the Templates dialog
-  (`Draft::from_template` in `crates/farhelm-ui/src/list/templates.rs`, used when an old template is opened), and the
-  helm's `mixes_launch_kinds` repeats the same two field lists. The copies agree today, but nothing keeps them in step:
-  a field added to one list and not the other would make the same template switch to different tabs depending on who
-  saved it, with no test to notice. Move the rule into the shared protocol crate (`farhelm-proto::launcher`, which
-  already holds the template types and `apply_template` and which the web UI can use, unlike the helm), as something
-  like `TemplateFields::implied_kind()`, and have all three call sites use it. No reason for the duplication is
-  recorded. Found while reviewing the templates-dialog-overhaul plan's report. Plan:
-  `plans/queue/template-launch-kind-rule.md`.
-
 - **Cache repositories locally for faster fresh checkouts.** Every fresh GitHub checkout clones the whole repository
   from GitHub again. Keep a local cache of each repository's contents on the host, and make a fresh checkout clone from
   it, fetching only what is new from GitHub, so starting a session in a new checkout of a large repository is fast.
