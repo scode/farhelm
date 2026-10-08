@@ -35,7 +35,8 @@ wrong notes.
 The docs website's Release notes page is built from the same file, every release section in it, by
 `website/scripts/release-notes.mjs` on each website build. Nothing extra is needed for a release to appear there, but a
 release heading the generator cannot read (anything at the `##` level other than the format below) fails the website
-build. Screenshots for a release live on the website only (`website/AGENTS.md`, "Release notes"), never in this file.
+build. Screenshots for a release live on the website only (`website/AGENTS.md`, "Release notes"), never in this file;
+step 7 of the stable procedure below has them added for each release.
 
 Curated release sections are historical records. Once a section has been approved or published, do not rewrite it to
 adopt a later layout rule, wording convention, or category set. A change to this process applies to sections curated
@@ -246,6 +247,25 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    its version path, and that `/latest` must not move yet. Once they have, check get.farhelm.io (read-only):
    `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and `install.sh` answer, and
    `https://get.farhelm.io/latest` still names the previous stable release.
+
+   When you tell the maintainer the release is ready to sign, start a subagent in that same turn to give the release's
+   notes their screenshots on the docs website, so they are ready by the time the release is promoted. Do not wait for
+   the signing. The notes' text is already there, built from the changelog section step 4 merged; what the subagent adds
+   is screenshots of the release's visible changes, following `website/AGENTS.md`, "Release notes", and
+   `website/EDITORIAL_RULES.md`. Give it this, in so many words:
+   - Work in a new jj workspace based on the latest `main`, under a subdirectory of your scratch directory, never in the
+     release checkout, which is busy with the release branch. Do not run `cargo clean` or touch tags, the release
+     branch, or anything on get.farhelm.io.
+   - Read the `## vX.Y.Z` section of `CHANGELOG.md` and decide which entries change something a reader would see: a new
+     dialog or control, or a redesign. Most entries do not, and a release with none gets no PR; say so and stop.
+   - For each that does, add a shot to `e2e/docs-shots/release-notes.spec.ts` and an item to
+     `website/src/release-notes/vX.Y.Z.json`, run the full capture (`scripts/docs-screenshots.sh`, no `--only`), look at
+     every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm the website builds.
+   - Open the result as a draft PR per the `jjstack` skill, with its commit message cold-read per the
+     `scode-commit-msg-reviewer` skill, and do not merge it. It starts no preview server, being unattended.
+
+   Pass the PR link on to the maintainer when the subagent reports it, with a note that the website changes only when
+   someone deploys it. The subagent's result does not hold up the steps below.
 8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
    it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
    test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
