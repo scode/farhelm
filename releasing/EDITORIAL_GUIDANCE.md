@@ -31,3 +31,8 @@ with in place.
   show up almost at once…" left the reader confused until the end; it became "The app now shows almost at once, instead
   of up to three seconds later, when an agent's status changes, an agent exits, …". (Prompted by the v0.20.0 curation,
   2026-09-30.)
+- Do not tell users that a release cannot be downgraded from, under Breaking or anywhere else: most releases upgrade a
+  database an older build then refuses to open, so it is normal and goes unsaid. The v0.25.0 draft opened with a
+  Breaking entry modeled on v0.23.0's "After upgrading, you cannot go back to an earlier release …", and two of its
+  fragments ended with the same warning; all three were dropped. (Stated by the maintainer during the v0.25.0 curation,
+  2026-10-07.)
