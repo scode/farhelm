@@ -68,8 +68,6 @@ website/.astro/
 # preview and read by scripts/publish-docs-shots.sh; published images live off
 # main (docs/docs-shots/SPEC.md).
 website/public/docs-shots-local/
-# The Release notes page and its per-release Markdown, generated from
-# CHANGELOG.md on every website build and preview start
-# (website/scripts/release-notes.mjs).
+# The Release notes page, generated from CHANGELOG.md on every website build
+# and preview start (website/scripts/release-notes.mjs).
 website/src/content/docs/docs/release-notes.mdx
-website/src/generated/

@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "entry": 1691,
+      "name": "release-notes/v0-25-0-quick-switcher",
+      "alt": "The quick switcher with tok typed, listing the matching sessions on every host, with the shortcut and what a pick does explained."
+    },
+    {
+      "entry": 1689,
+      "name": "release-notes/v0-25-0-feedback-contact",
+      "alt": "The Send feedback dialog with a contact typed and Re-use for future feedback ticked, explained."
+    },
+    {
+      "entry": 1687,
+      "name": "release-notes/v0-25-0-templates-dialog",
+      "alt": "The redesigned Templates dialog: the template list beside the editor, add field, and duplicate and delete explained."
+    }
+  ]
+}
