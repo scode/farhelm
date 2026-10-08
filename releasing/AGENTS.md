@@ -32,6 +32,11 @@ also uses the heading text as the release's name. `releasing/check-changelog.py`
 the release gate runs it, so a file dist would misread fails the tag build instead of publishing a release with the
 wrong notes.
 
+The docs website's Release notes page is built from the same file, every release section in it, by
+`website/scripts/release-notes.mjs` on each website build. Nothing extra is needed for a release to appear there, but a
+release heading the generator cannot read (anything at the `##` level other than the format below) fails the website
+build. Screenshots for a release live on the website only (`website/AGENTS.md`, "Release notes"), never in this file.
+
 Curated release sections are historical records. Once a section has been approved or published, do not rewrite it to
 adopt a later layout rule, wording convention, or category set. A change to this process applies to sections curated
 after the change; the checker must retain compatibility with older sections so a release in flight does not require

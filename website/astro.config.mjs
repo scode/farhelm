@@ -1,6 +1,7 @@
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
 import { defineConfig } from 'astro/config';
+import { changelogPath, writeReleaseNotes } from './scripts/release-notes.mjs';
 
 // The published site is one Astro project that will eventually carry the
 // farhelm.io landing pages as well as the documentation. Starlight owns the
@@ -36,6 +37,19 @@ export default defineConfig({
     },
   },
   integrations: [
+    // The Release notes page is generated from the repository's CHANGELOG.md
+    // before anything else reads the content collection, for `astro dev` and
+    // `astro build` alike; scripts/release-notes.mjs says why and what it
+    // writes. Watching the changelog restarts the dev server when it changes.
+    {
+      name: 'farhelm-release-notes',
+      hooks: {
+        'astro:config:setup': ({ addWatchFile }) => {
+          writeReleaseNotes();
+          addWatchFile(changelogPath);
+        },
+      },
+    },
     starlight({
       title: 'Farhelm',
       description: 'Farhelm documentation.',
@@ -80,6 +94,8 @@ export default defineConfig({
       // (see AGENTS.md next to this file).
       sidebar: [
         { label: 'Overview', slug: 'docs' },
+        // Reference to come back to, outside the reading order of the groups below.
+        { label: 'Release notes', slug: 'docs/release-notes' },
         { label: 'Get started', items: [{ autogenerate: { directory: 'docs/get-started' } }] },
         { label: 'Using Farhelm', items: [{ autogenerate: { directory: 'docs/using' } }] },
         { label: 'Agents', items: [{ autogenerate: { directory: 'docs/agents' } }] },
