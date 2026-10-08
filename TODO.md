@@ -229,6 +229,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   like `TemplateFields::implied_kind()`, and have all three call sites use it. No reason for the duplication is
   recorded. Found while reviewing the templates-dialog-overhaul plan's report.
 
+- **Cache repositories locally for faster fresh checkouts.** Every fresh GitHub checkout clones the whole repository
+  from GitHub again. Keep a local cache of each repository's contents on the host, and make a fresh checkout clone from
+  it, fetching only what is new from GitHub, so starting a session in a new checkout of a large repository is fast.
+  Decide where the cache lives, how it is kept current and bounded, and how a checkout made from it stays an ordinary,
+  independent clone of the GitHub repository.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
