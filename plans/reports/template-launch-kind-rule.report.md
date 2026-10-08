@@ -59,3 +59,34 @@ The required fresh-context `gpt-6.1-sol` high-effort reviewer found no issues af
 specifications, unchanged callers and tests, and the complete test-authoring charter. The executor read the findings,
 verified the contract preservation, and made a separate documentation pass over every touched file. The independent
 commit and PR wording cold read passed. Implementation stayed local; no workhorse was used.
+
+### Landing
+
+Landed on 2026-10-08 (UTC) as #1715 (one shared rule for a template's launcher tab), one squash commit on main. The plan
+waited about nine hours after delivery because the monitor was down during a host reboot.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, the new-button-shortcut-hint plan landed (#1714, the Mac
+desktop app's New button hint). The two share no code; each removed a different TODO entry, and the rebase applied
+without conflict. Otherwise main gained only the planning queue's own bookkeeping.
+
+#### Review before merging
+
+A separate reviewer that had not worked on either plan checked both before anything merged and found nothing that
+breaks. It compared the new shared rule field by field with the two copies it replaces, the helm's and the Templates
+dialog's: the same command fields, the same agent fields and the same order, so nothing a template does changes. The
+helm's refusal of templates that mix agent-only and command choices behaves as before, and nothing else called the old
+copies.
+
+The report's checks did not build the web app, which now uses the shared rule from the protocol crate. The landing did,
+below.
+
+#### Checks
+
+- Run now, after the rebase: `cargo check -p farhelm-ui --features web --target wasm32-unknown-unknown` (the web app's
+  build), `cargo fmt --all -- --check` and `dprint check TODO.md`, all clean.
+- Reused: the report's other checks. The rebase brought in only #1714, which touches nothing this change uses.
+- Skipped: running the tests again, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
