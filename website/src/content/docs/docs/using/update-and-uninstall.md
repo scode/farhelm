@@ -22,8 +22,8 @@ with an up-arrow in front of it. Hover over it to see which version is waiting.
 
 Select the version number and choose **restart to update**: Farhelm quits and opens again on the new version. Your
 sessions keep running while it does, as they do whenever you quit Farhelm
-([What survives what](/docs/how-it-works/what-survives-what/)). **what's new** in the same menu opens the list of
-releases on GitHub, where each one says what changed.
+([What survives what](/docs/how-it-works/what-survives-what/)). **what's new** in the same menu opens the
+[release notes](/docs/release-notes/), which say what changed in each release.
 
 You do not have to restart right away. The update also takes effect the next time Farhelm opens, whether you quit and
 reopen it or your Mac reboots.

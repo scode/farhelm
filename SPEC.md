@@ -304,9 +304,9 @@ the installer run by hand in a terminal, which the app notices within about a mi
 sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the whole readout red instead of
 grey. Its hover says which version is installed and that a restart finishes the update. Clicking it opens a small menu
 with **Restart to update**, which quits Farhelm and opens it again on the new version (sessions keep running, as they do
-across any quit), and **What's new**, which opens the project's GitHub releases page in the system browser. Without an
-update waiting, the readout behaves as it always has, apart from showing the result of a check the user started in its
-hover.
+across any quit), and **What's new**, which opens the release notes on the docs website
+(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, the readout behaves as it
+always has, apart from showing the result of a check the user started in its hover.
 
 The update can also be checked for on demand: the local machine's host row offers Update (see
 [Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Either checks
