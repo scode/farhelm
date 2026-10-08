@@ -148,7 +148,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   name and shows the launcher's current choices as a checklist, with the ones the user chose explicitly already checked,
   and saving creates the template and opens it in the Templates panel. Most templates start as "I just set this up, keep
   it", and today that means retyping every choice in the Templates panel. Deliberately left out of the Templates dialog
-  overhaul (`plans/queue/templates-dialog-overhaul.md`), which this builds on.
+  overhaul (`plans/queue/templates-dialog-overhaul.md`), which this builds on. Plan:
+  `plans/queue/save-launcher-as-template.md`.
 
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
@@ -206,7 +207,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   screen says so: the New button's hover text reads "new session: start an agent or a command on any host". Add the
   shortcut to that text in the Mac desktop app (for example "… on any host (⌘N)"), and only there: the web UI and the
   Linux desktop app have no such shortcut, since the browser keeps Cmd+N and Ctrl+N for a new window. Follow-up to the
-  new-session-shortcut plan, at the maintainer's request while reviewing its report.
+  new-session-shortcut plan, at the maintainer's request while reviewing its report. Plan:
+  `plans/queue/new-button-shortcut-hint.md`.
 
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
@@ -227,13 +229,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   saved it, with no test to notice. Move the rule into the shared protocol crate (`farhelm-proto::launcher`, which
   already holds the template types and `apply_template` and which the web UI can use, unlike the helm), as something
   like `TemplateFields::implied_kind()`, and have all three call sites use it. No reason for the duplication is
-  recorded. Found while reviewing the templates-dialog-overhaul plan's report.
+  recorded. Found while reviewing the templates-dialog-overhaul plan's report. Plan:
+  `plans/queue/template-launch-kind-rule.md`.
 
 - **Cache repositories locally for faster fresh checkouts.** Every fresh GitHub checkout clones the whole repository
   from GitHub again. Keep a local cache of each repository's contents on the host, and make a fresh checkout clone from
   it, fetching only what is new from GitHub, so starting a session in a new checkout of a large repository is fast.
   Decide where the cache lives, how it is kept current and bounded, and how a checkout made from it stays an ordinary,
-  independent clone of the GitHub repository.
+  independent clone of the GitHub repository. Plan: `plans/queue/repo-clone-cache.md`.
 
 ## Doc todo
 
