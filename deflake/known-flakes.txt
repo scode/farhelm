@@ -11,3 +11,4 @@
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
 nextest farhelm-supervisor service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working  # unconfirmed-restart-agent-dies-early
+playwright github-checkouts.spec.ts borrowers retain the checkout until the final stopped session is deleted  # shared-checkout-browser-timeout-and-fixture-cleanup

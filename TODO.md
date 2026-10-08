@@ -207,12 +207,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
   is `lore/2026-10-05-release-brick-protection-plan.md`.
 
-- **Cache repositories locally for faster fresh checkouts.** Every fresh GitHub checkout clones the whole repository
-  from GitHub again. Keep a local cache of each repository's contents on the host, and make a fresh checkout clone from
-  it, fetching only what is new from GitHub, so starting a session in a new checkout of a large repository is fast.
-  Decide where the cache lives, how it is kept current and bounded, and how a checkout made from it stays an ordinary,
-  independent clone of the GitHub repository. Plan: `plans/queue/repo-clone-cache.md`.
-
 - **Row marks pile up when a session's notification bell appears.** When a notification showed up for a session, its row
   in the session list drew the marks to the left of the bell (the agent and permission marks, as far as a photo of the
   screen shows) on top of one another into an unreadable smudge, with a stray "<" between them and the bell. Seen on the
@@ -332,6 +326,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   v0.25.0-rc.3 release gate once and also fails on v0.24.0's source. The later stop finds the launch's transient systemd
   scope already gone. First step: rerun it alone in a loop with the supervisor's debug tracing and record when and how
   the pane's process exits, to tell an early scope teardown from the stand-in command itself exiting.
+
+- **Shared-checkout browser timeout and fixture cleanup.** The Chromium test
+  `borrowers retain the checkout until the final stopped session is deleted` in `e2e/tests/github-checkouts.spec.ts`
+  exceeds its 60-second limit on the cache change and on rebuilt, clean main (FLAKES.md, 2026-10-08). Exact runs failed
+  at both four and eight CPUs; traces show slow terminal typing after the clones finished, but the cause is unknown.
+  Diagnose that delay before changing the budget. Independently, a timeout can make session cleanup throw before the Git
+  fixture restores its URL mappings, causing later WebKit fixture premises to resolve to an earlier repository. Ensure
+  restoration runs even when session cleanup fails; that fixes the cascade, not necessarily the original timeout.
 
 ### Difficult deflake
 

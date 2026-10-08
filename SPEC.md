@@ -367,10 +367,10 @@ deleted; retained integration files are reported. The user must stop services ou
 uninstall does not analyze effective service overrides or inspect their processes.
 
 Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
-logs, and cached payloads. Completion names the retained data locations; retaining data must not be presented as erasing
-all traces of Farhelm. There is no `--purge` in this first version. Project directories, agent harness installations and
-their own data, independently installed dependencies, and unrelated files are untouched. Uninstall does not remove
-shared parent directories or change their permissions.
+logs, cached payloads, and repository caches. Completion names the retained data locations; retaining data must not be
+presented as erasing all traces of Farhelm. There is no `--purge` in this first version. Project directories, agent
+harness installations and their own data, independently installed dependencies, and unrelated files are untouched.
+Uninstall does not remove shared parent directories or change their permissions.
 
 The command affects only the selected local installation. It does not contact registered hosts, uninstall remotely
 provisioned supervisors (the hosts panel's uninstall does that; see [Topology](#topology)), or remove a separate
@@ -662,10 +662,15 @@ repository again restores Clone's default name, unless the user has edited it.
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
 ASCII letters, digits, underscores, dots or hyphens, excluding `.` and `..`. Identity is lowercase. Clone uses the
-constructed HTTPS GitHub URL, with the target user's ordinary credentials. Clone, configured hook, and agent run in that
-order inside the session terminal, so progress, authentication prompts and failures are visible. A failed stage prevents
-later stages and preserves partial content. A checkout is not permission to run a hook unless the maintainer configured
-that hook.
+constructed HTTPS GitHub URL, with the target user's ordinary credentials. The clone stage first creates or refreshes
+the host's cache of that repository's branches and tags, then clones from GitHub using its cached objects. The cache
+lives under the supervisor's state directory on that host, is always used, and is removed at supervisor startup after
+more than 30 days without a successful checkout. Concurrent checkouts of the same repository take turns on the cache.
+Every checkout is independent: its origin remains the constructed GitHub URL, and removing the cache cannot break it. A
+cache failure fails the clone stage with the cache path in the error; there is no fallback to a clone without it. Cache
+refresh, clone, configured hook, and agent run in that order inside the session terminal, so progress, authentication
+prompts and failures are visible. A failed stage prevents later stages and preserves partial content. A checkout is not
+permission to run a hook unless the maintainer configured that hook.
 
 Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
@@ -1547,9 +1552,9 @@ Ordinary session operation is version-control-agnostic. Explicit fresh-checkout 
   Stacked changes work because the control plane stays out of the way, not because it models them.
 - The system never performs VCS mutations implicitly. Repository state is owned by the agent, repository instructions
   (`AGENTS.md` and kin), and user-chosen tools (`jj`, Graphite, plain Git, whatever).
-- An explicit GitHub checkout request runs the clone and configured post-clone command described above. It creates no
-  branch/worktree workflow, and later session operations do not infer one. Last-reference Delete moves the owned
-  directory intact; it does not inspect, reset or clean its repository state.
+- An explicit GitHub checkout request runs the repository-cache refresh, clone and configured post-clone command
+  described above. It creates no branch/worktree workflow, and later session operations do not infer one. Last-reference
+  Delete moves the owned directory intact; it does not inspect, reset or clean its repository state.
 - The working directory and the running agent are authoritative; the UI never presents a cached branch model as truth.
   VCS-specific UI, if any exists, is informational and degrades to hidden when not applicable.
 

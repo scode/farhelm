@@ -51,6 +51,7 @@ pub mod files;
 pub mod hook_report;
 pub mod launch;
 mod pi_extension;
+mod repo_cache;
 pub mod repository_discovery;
 // Private, and deliberately so: `procs` is the process-table read seam
 // (`/proc` on Linux, `sysctl` on macOS) and nothing outside `service::sweep`

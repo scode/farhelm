@@ -1579,3 +1579,38 @@ Error: element(s) not found
 Class: readiness
 
 Cause: established
+
+## 2026-10-08 — `borrowers retain the checkout until the final stopped session is deleted` (e2e/tests/github-checkouts.spec.ts)
+
+The fresh-checkout cache plan's browser selection failed this Chromium scenario at its unchanged 60-second test limit in
+run `687d4902-b93f-4b51-8aac-c992e53883c9`, clean commit `1aba59e805580ff20f2e1bc0ef6ab7b8e110055e`. That selection ran
+only `github-checkouts.spec.ts`, both engines, one worker and zero retries: 11 passed, six timed out, and three WebKit
+fixture premises failed. The timeouts were Chromium borrowers, replacement and clone defaults, and WebKit lost durable
+refusal, structured checkout and clone lost race. The three later fixture failures followed a separate, established
+cleanup defect: session cleanup throws before the Git fixture restores its URL mappings, so the next engine's reused
+repository name resolves to the old fixture commit. Exact borrowers-only Chromium runs, with a fresh stack each time,
+also timed out: one of one at four CPUs (`ef15cc41-c2b8-4631-8e67-6369ab1a0538`), one of one at eight CPUs
+(`22f6e517-77a1-40b4-ab51-c6410d6cb0e5`), and one of one on rebuilt, clean main
+`7b2c390b07c9a7654a13f73f2dbb877d00842adb` at eight CPUs (`0217e0f1-a5fc-4400-ac7c-99c94c008d62`). Their redacted child
+command was
+`npx playwright test --project=chromium-github-checkouts --workers=1 --retries=0 --grep 'borrowers retain the checkout until the final stopped session is deleted'`.
+The timeout therefore predates the cache change; the other five timeouts have no clean-main control. Traces show several
+64-character keyboard typing calls taking 5–10 seconds after real clones completed, but the cause is unknown. More CPU
+capacity did not resolve it. The runner was an owned Linux x86_64 Ubuntu 26.04 sandbox, kernel 6.8.0-146-generic, 8 GiB
+memory, initially four CPUs; no other build or test ran during the exact reproductions. Initial run CPU usage reached
+its four-CPU cap; load average and typical passing duration are unavailable. Node 22.22.1, Playwright 1.62.0, native
+Chromium build 1234 and WebKit build 2336, Rust 1.98.1 and Python 3.14.4; tmux 3.7c executable SHA256
+`7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1` was recorded. Locale `LC_CTYPE=C.UTF-8`, with `LANG`
+and `LC_ALL` absent. Ambient `FARHELM_*` names were empty; the recorder supplied `FARHELM_TEST_TRACE_DIR`, and the
+controlled spec run also supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`. Browser test and UI sources were identical between
+the tested cache commit and main. Full evidence, including traces copied before later runs could overwrite them, is
+retained privately on the executing machine with no hosted expiry. Open: TODO.md's Deflake entry tracks the timeout and
+cleanup cascade; only the borrowers scenario is excluded from the deflake sweep.
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown

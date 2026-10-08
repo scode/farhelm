@@ -213,6 +213,12 @@ pub struct CheckoutPreparation {
     /// fields. Verified here defensively (shape, no shell metacharacters)
     /// before any process runs: fail closed on anything unexpected.
     pub clone_url: String,
+    /// Host-local object cache derived by the supervisor, never supplied by
+    /// a create request. Older launch specs deserialize with an empty path;
+    /// an unstarted preparation then fails its clone stage rather than bypassing
+    /// the cache. A Ready preparation still needs no Git work on restart.
+    #[serde(default)]
+    pub repo_cache_path: PathBuf,
     /// The allocated target directory, accepted as an absolute path. May
     /// contain spaces or shell-hostile characters — the shim runs argv,
     /// never shell text, so the path only needs to BE a directory, never
@@ -1420,19 +1426,7 @@ fn run_checkout_preparation(
             false,
         );
     }
-    // argv, never shell text: the URL and the directory were validated
-    // above, and hostile characters in either must be able to end up in
-    // a file NAME, never in a command.
-    let mut clone = launch_child_command(std::ffi::OsStr::new("git"), spec);
-    clone
-        .args([
-            "clone".to_string(),
-            "--".to_string(),
-            preparation.clone_url.clone(),
-            preparation.cwd.clone(),
-        ])
-        .env("GIT_TERMINAL_PROMPT", "1");
-    if let Err(detail) = run_preparation_child_process(&mut clone, "clone") {
+    if let Err(detail) = clone_with_repo_cache(spec, preparation) {
         return abort_preparation(preparation, status_path, seam, "clone", detail, true);
     }
 
@@ -1492,7 +1486,72 @@ fn run_checkout_preparation(
     Ok(())
 }
 
-/// Run one preparation child process (the clone or the hook) with the
+/// Refresh the host's object cache and produce an independent GitHub checkout.
+///
+/// This is part of the durable CloneStarted stage, in the user's terminal and
+/// environment. The working-copy lock is already held; the repository lock is
+/// taken second and held through dissociation, including foreground Git gc.
+/// Every failure names the cache and aborts the clone stage without fallback.
+fn clone_with_repo_cache(
+    spec: &LaunchSpec,
+    preparation: &CheckoutPreparation,
+) -> Result<(), String> {
+    let cache = &preparation.repo_cache_path;
+    let result = (|| {
+        if !cache.is_absolute() {
+            return Err("repository cache path must be absolute; this launch spec may predate repository caching".to_string());
+        }
+        let lock =
+            crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
+
+        // argv, never shell text. init is deliberately idempotent, including
+        // after an interrupted first fetch; no staging or cache repair policy.
+        let mut init = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        init.args(["init", "--bare", "-q"])
+            .arg(cache)
+            .env("GIT_TERMINAL_PROMPT", "1");
+        run_preparation_child_process(&mut init, "cache init")?;
+
+        let mut fetch = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        fetch
+            .args([
+                "-c",
+                "gc.autoDetach=false",
+                "-c",
+                "maintenance.autoDetach=false",
+                "-C",
+            ])
+            .arg(cache)
+            .args([
+                "fetch",
+                "--prune",
+                &preparation.clone_url,
+                "+refs/heads/*:refs/heads/*",
+                "+refs/tags/*:refs/tags/*",
+            ])
+            .env("GIT_TERMINAL_PROMPT", "1");
+        run_preparation_child_process(&mut fetch, "cache fetch")?;
+
+        let mut clone = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        clone
+            .args(["clone", "--reference"])
+            .arg(cache)
+            .args([
+                "--dissociate",
+                "--",
+                &preparation.clone_url,
+                &preparation.cwd,
+            ])
+            .env("GIT_TERMINAL_PROMPT", "1");
+        run_preparation_child_process(&mut clone, "clone")?;
+        lock.mark_used()
+            .map_err(|e| format!("could not record cache use: {e}"))?;
+        Ok(())
+    })();
+    result.map_err(|detail| format!("repository cache {}: {detail}", cache.display()))
+}
+
+/// Run one preparation child process (cache init/fetch, clone, or hook) with the
 /// terminal's own stdin/stdout/stderr inherited, and classify its
 /// outcome. There is deliberately NO timeout: credential prompts and
 /// slow networks are ordinary terminal work, and Stop/Delete own the
@@ -1610,9 +1669,9 @@ fn validate_preparation(preparation: &CheckoutPreparation) -> Result<(), String>
     Ok(())
 }
 
-/// The per-working-copy preparation lock, held across the whole
-/// read-decide-clone-hook-record sequence and released BEFORE the agent
-/// exec.
+/// A CLOEXEC flock shared by checkout preparation and repository-cache guards.
+/// Preparation holds it across read-decide-clone-hook-record; the nested cache
+/// guard holds it across init-fetch-clone. Both end before the agent exec.
 ///
 /// Two properties, both load-bearing:
 ///
@@ -1627,10 +1686,11 @@ fn validate_preparation(preparation: &CheckoutPreparation) -> Result<(), String>
 ///   flock would keep the guard alive after the shim released it,
 ///   silently re-serializing unrelated preparations for as long as the
 ///   agent lived.
-struct PreparationLock(std::fs::File);
+pub(crate) struct PreparationLock(std::fs::File);
 
 impl PreparationLock {
-    fn open(path: &Path) -> std::io::Result<Self> {
+    /// Open a permanent lock inode with no descriptor inheritance into children.
+    pub(crate) fn open(path: &Path) -> std::io::Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1655,12 +1715,39 @@ impl PreparationLock {
     }
 
     /// Take the exclusive lock, blocking until it is free.
-    fn acquire(&self) -> std::io::Result<()> {
+    pub(crate) fn acquire(&self) -> std::io::Result<()> {
         // SAFETY: flock on a valid fd; LOCK_EX is the exclusive mode.
         if unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_EX) } < 0 {
             return Err(std::io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// Skip an active cache during startup without delaying surviving sessions.
+    /// An independently opened descriptor observes a held lock, even in this
+    /// process; only a genuine would-block result means someone else owns it.
+    pub(crate) fn try_acquire(&self) -> std::io::Result<bool> {
+        // SAFETY: flock operates on this guard's valid descriptor.
+        if unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            Ok(false)
+        } else {
+            Err(error)
+        }
+    }
+
+    /// Last successful cache use, read under its lock before deciding eviction.
+    pub(crate) fn modified(&self) -> std::io::Result<std::time::SystemTime> {
+        self.0.metadata()?.modified()
+    }
+
+    /// Successful dissociation renews retention without replacing the lock inode.
+    pub(crate) fn mark_used(&self) -> std::io::Result<()> {
+        self.0
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))
     }
 }
 
@@ -2706,6 +2793,7 @@ exec sleep 60
             let preparation = CheckoutPreparation {
                 working_copy_id: "wc-1".to_string(),
                 clone_url: clone_url.to_string(),
+                repo_cache_path: state_dir.join("repo-cache/example/repo.git"),
                 cwd: cwd.to_string_lossy().into_owned(),
                 directory_device: cwd_metadata.dev(),
                 directory_inode: cwd_metadata.ino(),
@@ -3042,43 +3130,55 @@ exec sleep 60
         unsafe { libc::_exit(if wrote_error { 0 } else { 1 }) }
     }
 
-    /// Write one JSON line to the trace file `PREP_TRACE` names: the
-    /// child's kind, its exact argv, and its cwd. Used by every fixture
-    /// script via a tiny JSON emitter; `argv_json` is the shell-quoted
-    /// JSON array the script template builds.
-    /// The fake `git` the D1/D3/D4 fixtures install: records its exact
-    /// argv and cwd as one JSON line, refuses a second invocation (D3's
-    /// counting), creates the git marker proving the clone "ran", and —
-    /// when the wiring file says so — fails instead.
+    /// Record each Git stage separately and require init → fetch → clone.
+    /// Only clone writes the completion marker; a repeated preparation fails
+    /// instead of overwriting its evidence. Failure wiring targets clone unless
+    /// a stage-specific `.fail` file asks init or fetch to refuse.
     fn fake_git_script(argv_record: &str, marker: &str) -> String {
         format!(
             r#"#!/bin/sh
-# One invocation only: D3 counts invocations via this marker.
-if [ -f "{marker}.git-ran" ]; then
-    echo "fake git: invoked twice" >&2
+case "$1" in
+    init) stage=init; record="{argv_record}.init" ;;
+    -c) stage=fetch; record="{argv_record}.fetch" ;;
+    clone) stage=clone; record="{argv_record}" ;;
+    *) echo "unexpected Git stage" >&2; exit 98 ;;
+esac
+if [ -f "$record.count" ]; then
+    echo "fake git: repeated $stage" >&2
     exit 99
 fi
-: > "{marker}.git-ran"
-# Record the EXACT argv, one file per element, plus this process's cwd.
+case "$stage" in
+    fetch) [ -f "{argv_record}.init.done" ] || exit 97 ;;
+    clone) [ -f "{argv_record}.fetch.done" ] || exit 96 ;;
+esac
+printf '%s\n' "$stage" >> "{argv_record}.calls"
 i=0
 for a in "$@"; do
-    printf '%s' "$a" > "{argv_record}.$i"
+    printf '%s' "$a" > "$record.$i"
     i=$((i+1))
 done
-printf '%s' "$i" > "{argv_record}.count"
-printf '%s' "$(pwd)" > "{argv_record}.cwd"
-# The CLOEXEC evidence: while THIS child runs, the shim holds the
-# preparation flock; list this process's descriptors.
-# Absolute paths: the child-only PATH contains ONLY fixture scripts.
-/bin/ls -l /proc/self/fd > "{argv_record}.fds" 2>/dev/null || true
-# Optional nonzero exit, wired per test. Leaves a partial file inside
-# the clone target first, so D3 can prove it is retained untouched.
-if [ -f "{argv_record}.git-fail" ]; then
-    printf 'partial\n' > "$4/.git-partial" 2>/dev/null || true
-    exit 1
+printf '%s' "$i" > "$record.count"
+printf '%s' "$(pwd)" > "$record.cwd"
+# Both guards must be CLOEXEC; inspect every Git child's descriptors.
+/bin/ls -l /proc/self/fd > "$record.fds" 2>/dev/null || true
+[ "${{GIT_TERMINAL_PROMPT-unset}}" = 1 ] || exit 95
+# Park after both guards exist; the readiness file names that boundary.
+if [ -f "$record.block" ]; then
+    release="$(/bin/cat "$record.block")"
+    exec 3<>"$release"
+    printf '%s' "$$" > "$record.ready"
+    read -r _ <&3 || exit 93
 fi
-# The marker the hook requires: the ORDER proof.
-: > "{marker}"
+if [ -f "$record.fail" ]; then exit 44; fi
+if [ "$stage" = clone ]; then
+    : > "{marker}.git-ran"
+    if [ -f "{argv_record}.git-fail" ]; then
+        printf 'partial\n' > "$7/.git-partial" || exit 94
+        exit 1
+    fi
+    : > "{marker}"
+fi
+: > "$record.done"
 "#
         )
     }
@@ -3325,6 +3425,7 @@ printf 'AGENT-RAN\n'
             marker.with_extension("git").display()
         ));
         !git_ran.exists()
+            && !marker.with_extension("git.argv.init.count").exists()
             && !marker.with_extension("hook").exists()
             && !marker.with_extension("agent").exists()
     }
@@ -3333,7 +3434,7 @@ printf 'AGENT-RAN\n'
     /// fake agent — all in a child-only PATH — must run the three stages
     /// IN ORDER (the hook refuses to run before the git marker exists;
     /// the agent refuses before the hook marker), with the EXACT argv
-    /// vectors recorded (`clone -- <url> <cwd>`; `shell -c <hook>`), and
+    /// vectors recorded (cache init/fetch, reference-dissociate clone, hook), and
     /// leave the durable state at Ready.
     #[farhelm_testtrace::test]
     fn d1_fake_git_hook_agent_run_in_order_with_exact_argv() {
@@ -3345,13 +3446,39 @@ printf 'AGENT-RAN\n'
             "the shim must complete the preparation without error: \
              status={status:?} report={report} terminal={terminal}"
         );
-        // Exact argv of the clone: `clone -- <url> <absolute cwd>` —
-        // asserted as a vector, never as a shell string.
-        let (git_argv, _) = read_recorded_argv(&marker.with_extension("git.argv"));
+        let cache = fixture.preparation.repo_cache_path.to_str().unwrap();
+        let prefix = marker.with_extension("git.argv");
+        assert_eq!(
+            std::fs::read_to_string(format!("{}.calls", prefix.display())).unwrap(),
+            "init\nfetch\nclone\n"
+        );
+        let (init, _) = read_recorded_argv(&PathBuf::from(format!("{}.init", prefix.display())));
+        assert_eq!(init, ["init", "--bare", "-q", cache]);
+        let (fetch, _) = read_recorded_argv(&PathBuf::from(format!("{}.fetch", prefix.display())));
+        assert_eq!(
+            fetch,
+            [
+                "-c",
+                "gc.autoDetach=false",
+                "-c",
+                "maintenance.autoDetach=false",
+                "-C",
+                cache,
+                "fetch",
+                "--prune",
+                "https://github.com/example/repo.git",
+                "+refs/heads/*:refs/heads/*",
+                "+refs/tags/*:refs/tags/*"
+            ]
+        );
+        let (git_argv, _) = read_recorded_argv(&prefix);
         assert_eq!(
             git_argv,
-            vec![
+            [
                 "clone",
+                "--reference",
+                cache,
+                "--dissociate",
                 "--",
                 "https://github.com/example/repo.git",
                 &fixture.preparation.cwd
@@ -3378,6 +3505,89 @@ printf 'AGENT-RAN\n'
         // The state file recorded Ready (asserted above), the sentinel
         // was never written (no failure).
         assert!(!fixture.sentinel_contains("exec_failed"));
+    }
+
+    /// A missing field in an old launch spec must deserialize, then fail its
+    /// unstarted clone stage; it must never quietly become a network-only clone.
+    #[farhelm_testtrace::test]
+    fn missing_cache_field_refuses_clone_but_ready_restart_still_works() {
+        let mut fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        fixture.write_spec();
+        let mut old: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
+        old["preparation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("repo_cache_path");
+        let parsed: LaunchSpec = serde_json::from_value(old).unwrap();
+        fixture.preparation = parsed.preparation.unwrap();
+        assert!(fixture.preparation.repo_cache_path.as_os_str().is_empty());
+        let (report, terminal, _) = fixture.run_shim_in_child();
+        assert!(
+            report.contains("preparation failed at stage clone")
+                && report.contains("predate repository caching"),
+            "{report}: {terminal}"
+        );
+        assert!(no_stage_ran(&fixture));
+        assert!(
+            matches!(fixture.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
+        );
+
+        // Ready means all preparation work already completed on an earlier
+        // launch; neither cache availability nor a new field is needed then.
+        // Use a fresh harness result path so the earlier deliberate refusal
+        // cannot masquerade as a failed restart after the agent exec succeeds.
+        let mut fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        fixture.preparation.repo_cache_path = PathBuf::new();
+        write_preparation_state(
+            &fixture.preparation.state_path,
+            "wc-1",
+            &PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        fixture.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
+        let (report, terminal, _) = fixture.run_shim_in_child();
+        assert!(
+            report.is_empty() && terminal.contains("AGENT-RAN"),
+            "{report}: {terminal}"
+        );
+        assert!(
+            !fixture
+                .marker()
+                .with_extension("git.argv.init.count")
+                .exists()
+        );
+    }
+
+    /// Cache failures are clone-stage failures, and stop before checkout, hook
+    /// or agent. Distinct init/fetch markers identify which real stage refused.
+    #[farhelm_testtrace::test]
+    fn cache_git_failure_has_no_plain_clone_fallback() {
+        for stage in ["init", "fetch"] {
+            let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+            let prefix = fixture.marker().with_extension("git.argv");
+            std::fs::write(format!("{}.{}.fail", prefix.display(), stage), "").unwrap();
+            let (report, terminal, _) = fixture.run_shim_in_child();
+            assert!(
+                PathBuf::from(format!("{}.{}.count", prefix.display(), stage)).exists(),
+                "failing stage must have run"
+            );
+            assert!(
+                report.contains(&format!("cache {stage} exited with status 44")),
+                "{report}: {terminal}"
+            );
+            assert!(report.contains(fixture.preparation.repo_cache_path.to_str().unwrap()));
+            assert!(
+                matches!(fixture.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
+            );
+            assert!(
+                !PathBuf::from(format!("{}.count", prefix.display())).exists(),
+                "checkout clone must not run"
+            );
+            assert!(!fixture.marker().with_extension("hook").exists());
+            assert!(!fixture.marker().with_extension("agent").exists());
+        }
     }
 
     /// D1's hostile-argv check: shell-hostile characters in the clone URL
@@ -3573,7 +3783,7 @@ printf 'AGENT-RAN\n'
 
     /// D3: after a successful preparation, a restart must skip clone AND
     /// hook entirely and exec the agent directly — the fake git REFUSES a
-    /// second invocation (exit 99), so any re-clone fails this loudly,
+    /// second invocation of any stage (exit 99), so any re-clone fails this loudly,
     /// and the hook's echo proves it did not run again either.
     #[farhelm_testtrace::test]
     fn d3_ready_restart_skips_clone_and_hook() {
@@ -3732,8 +3942,9 @@ printf 'AGENT-RAN\n'
 
     /// D2: the shim, running the REAL git through the insteadOf mapping,
     /// must produce a checkout holding the tracked file's content, with
-    /// `origin` pointing at the REWRITTEN (local) url — and record Ready
-    /// end to end, hook included.
+    /// the GitHub origin preserved and no dependency on cached objects. A second
+    /// checkout observes a new upstream commit, while pull refs never enter the
+    /// cache; removing the cache leaves both ordinary clones intact.
     #[farhelm_testtrace::test]
     fn d2_real_git_offline_clones_the_instead_of_fixture() {
         let setup = tempfile::tempdir().unwrap();
@@ -3799,6 +4010,27 @@ printf 'AGENT-RAN\n'
             String::from_utf8_lossy(&out.stderr)
         );
 
+        let original_head = String::from_utf8(out.stdout).unwrap().trim().to_string();
+        for reference in ["refs/tags/v1", "refs/pull/1/head"] {
+            assert!(
+                isolated_git(&[
+                    "-C",
+                    bare.to_str().unwrap(),
+                    "update-ref",
+                    reference,
+                    &original_head
+                ])
+                .status
+                .success()
+            );
+            let observed = isolated_git(&["-C", bare.to_str().unwrap(), "rev-parse", reference]);
+            assert_eq!(
+                String::from_utf8(observed.stdout).unwrap().trim(),
+                original_head,
+                "premise: upstream reference {reference}"
+            );
+        }
+
         // A fixture WITHOUT a fake git: its bin dir stays empty, and the
         // child's PATH gains the ambient PATH after it so the REAL git
         // resolves. The hook runs under the real /bin/sh.
@@ -3806,7 +4038,7 @@ printf 'AGENT-RAN\n'
         let agent_marker = setup.path().join("d2-agent-marker");
         let hook_body = format!("touch {}", hook_marker.display());
         let fixture = PrepFixture::new(
-            "https://github.com/example/repo",
+            "https://github.com/example/repo.git",
             Some(hook_body),
             "/bin/sh",
         );
@@ -3828,7 +4060,7 @@ printf 'AGENT-RAN\n'
             ("GIT_CONFIG_KEY_0", std::ffi::OsStr::new(&instead_of_key)),
             (
                 "GIT_CONFIG_VALUE_0",
-                std::ffi::OsStr::new("https://github.com/example/repo"),
+                std::ffi::OsStr::new("https://github.com/example/repo.git"),
             ),
             ("GIT_CONFIG_GLOBAL", std::ffi::OsStr::new("/dev/null")),
             ("GIT_CONFIG_SYSTEM", std::ffi::OsStr::new("/dev/null")),
@@ -3849,44 +4081,152 @@ printf 'AGENT-RAN\n'
         let tracked = std::fs::read_to_string(fixture.tmp.path().join("checkout/tracked-file.txt"))
             .expect("tracked file in the checkout");
         assert_eq!(tracked, "tracked content\n");
-        // Origin behavior: git stores the ORIGINAL url in the config and
-        // applies `insteadOf` at fetch/push/read time, so the rewrite is
-        // observable only WITH the mapping env applied to the read
-        // command too — exactly how a later fetch from this checkout
-        // would behave.
-        let out = std::process::Command::new("git")
-            .args([
-                "-C",
-                fixture.tmp.path().join("checkout").to_str().unwrap(),
-                "remote",
-                "get-url",
-                "origin",
-            ])
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", &instead_of_key)
-            .env("GIT_CONFIG_VALUE_0", "https://github.com/example/repo")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .expect("read origin url");
-        assert!(
-            out.status.success(),
-            "reading origin: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        let checkout = fixture.tmp.path().join("checkout");
+        let cache = &fixture.preparation.repo_cache_path;
+        assert!(!checkout.join(".git/objects/info/alternates").exists());
+        let origin = isolated_git(&[
+            "-C",
+            checkout.to_str().unwrap(),
+            "config",
+            "remote.origin.url",
+        ]);
+        assert!(origin.status.success());
         assert_eq!(
-            String::from_utf8_lossy(&out.stdout).trim(),
-            bare.to_str().unwrap(),
-            "origin must resolve to the insteadOf-rewritten (local) url"
+            String::from_utf8(origin.stdout).unwrap().trim(),
+            "https://github.com/example/repo.git"
+        );
+        let refs = isolated_git(&[
+            "-C",
+            cache.to_str().unwrap(),
+            "for-each-ref",
+            "--format=%(refname)",
+        ]);
+        assert!(refs.status.success());
+        let refs = String::from_utf8(refs.stdout).unwrap();
+        assert!(refs.lines().any(|r| r.starts_with("refs/heads/")), "{refs}");
+        assert!(refs.lines().any(|r| r == "refs/tags/v1"), "{refs}");
+        assert!(
+            refs.lines()
+                .all(|r| r.starts_with("refs/heads/") || r.starts_with("refs/tags/")),
+            "{refs}"
         );
         assert!(
             hook_marker.exists(),
-            "the post-clone hook ran in the real checkout"
+            "the post-clone hook ran in the checkout"
         );
         assert!(agent_marker.exists(), "the agent ran after the real clone");
+
+        // Mutate only the owned upstream fixture, then prove the second cache
+        // fetch advances the ordinary checkout to that new commit.
+        std::fs::write(work.join("tracked-file.txt"), "new upstream content\n").unwrap();
+        for args in [
+            vec!["-C", work.to_str().unwrap(), "add", "."],
+            vec![
+                "-C",
+                work.to_str().unwrap(),
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "next",
+            ],
+            vec![
+                "-C",
+                work.to_str().unwrap(),
+                "push",
+                bare.to_str().unwrap(),
+                "HEAD",
+            ],
+        ] {
+            let out = isolated_git(&args);
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let updated = isolated_git(&["-C", bare.to_str().unwrap(), "rev-parse", "HEAD"]);
+        assert!(updated.status.success());
+        let updated = String::from_utf8(updated.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_ne!(
+            updated, original_head,
+            "premise: upstream advanced before checkout"
+        );
+        let mut second = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        second.preparation.repo_cache_path = cache.clone();
+        second.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
+        let second_path = format!(
+            "{}:{}",
+            second.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let (report, terminal, _) = second.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&second_path)),
+            &envs,
+            &["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"],
+        );
+        assert!(report.is_empty(), "{report}: {terminal}");
+        assert_eq!(second.state().unwrap(), PreparationState::Ready);
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&second.preparation.cwd).join("tracked-file.txt"))
+                .unwrap(),
+            "new upstream content\n"
+        );
+        let second_head = isolated_git(&["-C", &second.preparation.cwd, "rev-parse", "HEAD"]);
+        assert!(second_head.status.success());
+        assert_eq!(
+            String::from_utf8(second_head.stdout).unwrap().trim(),
+            updated
+        );
+
+        std::fs::remove_dir_all(cache).unwrap();
+        for cwd in [&fixture.preparation.cwd, &second.preparation.cwd] {
+            assert!(!Path::new(cwd).join(".git/objects/info/alternates").exists());
+            let fsck = isolated_git(&["-C", cwd, "fsck", "--connectivity-only"]);
+            assert!(
+                fsck.status.success(),
+                "independent checkout: {}",
+                String::from_utf8_lossy(&fsck.stderr)
+            );
+        }
+
+        // A local I/O error fails before an otherwise valid remote can clone.
+        // Sharing the same upstream fixture rules out remote failure as cause.
+        let broken = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        std::fs::create_dir_all(broken.preparation.repo_cache_path.parent().unwrap()).unwrap();
+        std::fs::write(&broken.preparation.repo_cache_path, "not a Git directory").unwrap();
+        assert!(broken.preparation.repo_cache_path.is_file());
+        broken.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
+        let broken_path = format!(
+            "{}:{}",
+            broken.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let (report, terminal, _) = broken.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&broken_path)),
+            &envs,
+            &["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"],
+        );
+        assert!(
+            report.contains("cache init exited")
+                && report.contains(broken.preparation.repo_cache_path.to_str().unwrap()),
+            "{report}: {terminal}"
+        );
+        assert!(
+            matches!(broken.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
+        );
+        assert!(
+            !Path::new(&broken.preparation.cwd)
+                .join("tracked-file.txt")
+                .exists()
+        );
+        assert!(!terminal.contains("AGENT-RAN"));
     }
 
     // ---------------------------------------------------------------------
@@ -4181,9 +4521,95 @@ printf 'AGENT-RAN\n'
         assert!(!fixture.sentinel_contains(""), "no sentinel on success");
     }
 
-    /// CLOEXEC proof (Linux): the fake git lists its OWN /proc fds while
-    /// the shim holds the preparation flock — no descriptor in that
-    /// listing may name the lock file. This is the in-situ proof chosen
+    /// Different checkouts of one repository wait on the same cache lock.
+    /// Observe the first shim parked inside fetch and the second shim's kernel
+    /// flock waiter before releasing either; late child startup cannot imitate
+    /// serialization. Both preparations then finish after the fetch is released.
+    #[farhelm_testtrace::test]
+    #[cfg(target_os = "linux")]
+    fn concurrent_checkouts_serialize_cache_fetch_and_copy() {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let first = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        let mut second = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        second.preparation.repo_cache_path = first.preparation.repo_cache_path.clone();
+        let fifo = first.tmp.path().join("fetch-release");
+        let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: NUL-terminated owned path, with no existing fixture entry.
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+        let fetch_prefix = first.marker().with_extension("git.argv.fetch");
+        std::fs::write(
+            fetch_prefix.with_extension("fetch.block"),
+            fifo.to_str().unwrap(),
+        )
+        .unwrap();
+        let mut first_child = first.spawn_shim_group();
+        assert!(
+            poll_until(Duration::from_secs(30), || {
+                assert!(
+                    !first_child.exited_without_reaping(),
+                    "first shim exited before fetch readiness"
+                );
+                fetch_prefix.with_extension("fetch.ready").exists()
+            }),
+            "first shim never reached the locked fetch boundary"
+        );
+        let lock_file =
+            std::fs::File::open(first.preparation.repo_cache_path.with_extension("lock")).unwrap();
+        let mut second_child = ReapedPrepChild(second.spawn_shim());
+        assert!(
+            poll_until(Duration::from_secs(30), || {
+                assert!(
+                    second_child.0.try_wait().unwrap().is_none(),
+                    "second shim exited before waiting"
+                );
+                preparation_flock_is_waiting(second_child.0.id(), &lock_file)
+            }),
+            "second shim did not wait on the shared repository lock; first fetch ready: {}",
+            fetch_prefix.with_extension("fetch.ready").exists()
+        );
+        assert!(
+            no_stage_ran(&second),
+            "no Git command starts before cache admission"
+        );
+        assert!(
+            !first_child.exited_without_reaping(),
+            "first shim died before releasing its fetch; state: {:?}",
+            first.state()
+        );
+        // Readiness is historical evidence, not a promise that the fetch
+        // reader survived. A nonblocking open closes that race: a dead reader
+        // must fail this test rather than strand it outside the polling bound.
+        let mut release = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "fetch release failed: {e}; shim exited: {}; state: {:?}",
+                    first_child.exited_without_reaping(),
+                    first.state()
+                )
+            });
+        release.write_all(b"ready\n").unwrap();
+        drop(release);
+        assert!(
+            poll_until(Duration::from_secs(30), || first
+                .marker()
+                .with_extension("agent")
+                .exists()
+                && second.marker().with_extension("agent").exists()),
+            "both checkouts must finish after cache release"
+        );
+        first_child.teardown();
+        assert!(second_child.0.wait().unwrap().success());
+        assert_eq!(first.state().unwrap(), PreparationState::Ready);
+        assert_eq!(second.state().unwrap(), PreparationState::Ready);
+    }
+
+    /// CLOEXEC proof (Linux): every fake Git child lists its OWN /proc fds while
+    /// the shim holds both flocks — no descriptor in those listings may name
+    /// either lock file. This is the in-situ proof chosen
     /// over a synthetic probe: it is the REAL child, under the REAL
     /// lock, at the moment the leak would matter. (Non-Linux unixes lack
     /// /proc; the crate is unconditionally unix-only and this proof is
@@ -4195,22 +4621,21 @@ printf 'AGENT-RAN\n'
             run_d1_style_fixture(Some("echo hook-body-ran".to_string()));
         let marker = fixture.marker();
         assert!(report.is_empty(), "the run must succeed: {report}");
-        let fds = std::fs::read_to_string(PathBuf::from(format!(
-            "{}.fds",
-            marker.with_extension("git.argv").display()
-        )))
-        .expect("the fake git must have listed its fds");
-        assert!(fds.contains("->"), "the listing must be real: {fds}");
-        let lock_name = fixture
-            .lock_path()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        assert!(
-            !fds.lines().any(|line| line.contains(&lock_name)),
-            "no preparation child may inherit the flock descriptor: {fds}"
-        );
+        for suffix in ["git.argv.init.fds", "git.argv.fetch.fds", "git.argv.fds"] {
+            let fds = std::fs::read_to_string(marker.with_extension(suffix))
+                .expect("Git child descriptor listing");
+            assert!(fds.contains("->"), "the listing must be real: {fds}");
+            for lock in [
+                fixture.lock_path(),
+                fixture.preparation.repo_cache_path.with_extension("lock"),
+            ] {
+                let lock_name = lock.file_name().unwrap().to_string_lossy();
+                assert!(
+                    !fds.lines().any(|line| line.contains(lock_name.as_ref())),
+                    "Git child must not inherit {lock_name}: {fds}"
+                );
+            }
+        }
     }
 
     /// Spec: a working copy's preparation state file is

@@ -6579,6 +6579,20 @@ impl Supervisor {
             .collect();
         sweep_launch_dir(&self.state_dir.join("launch"), &known_sessions).await;
         sweep_tmux_config_temp_files(&self.state_dir).await;
+        // Surviving tmux shims hold repository locks independently of this
+        // supervisor. The sweep skips those caches; recursive removal runs
+        // off the async runtime, like other potentially blocking disk work.
+        let cache_state_dir = self.state_dir.clone();
+        match tokio::task::spawn_blocking(move || crate::repo_cache::sweep(&cache_state_dir)).await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                warn!(error = %e, "repository-cache sweep failed; unused caches may remain")
+            }
+            Err(e) => {
+                warn!(error = %e, "repository-cache sweep task failed; unused caches may remain")
+            }
+        }
         sweep_legacy_snapshots_dir(&self.state_dir).await;
         // The attachments tree's own reconciliation, which needs the same
         // authoritative session set the launch-dir sweep does: staging
@@ -9134,6 +9148,7 @@ impl Supervisor {
                     // constructor from the re-parsed repo pair — never by
                     // interpolating caller text.
                     clone_url: resolved.repo.clone_url(),
+                    repo_cache_path: crate::repo_cache::path(&self.state_dir, &resolved.repo),
                     cwd: cwd.clone(),
                     directory_device: accepted.identity.0,
                     directory_inode: accepted.identity.1,

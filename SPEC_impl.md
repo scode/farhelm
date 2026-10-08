@@ -1553,6 +1553,37 @@ once publication may have started, missing or ambiguous evidence refuses automat
 create may recover an unstarted preparation. Ready restart validates the recorded identity and skips clone and hook. The
 agent's kind and launch metadata remain its actual values, rather than identifying the preparation wrapper.
 
+Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
+lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
+request input and does not change the frozen fingerprints. Old launch specs deserialize with an empty path, then refuse
+the clone stage rather than bypassing the cache. A Ready restart skips Git and needs no cache path.
+
+The shim takes the working-copy preparation lock first, then a blocking flock on the permanent sibling `<name>.lock`.
+Both descriptors are CLOEXEC. While holding the repository lock it runs these commands in the session terminal, with the
+same launch markers, environment scrubbing and `GIT_TERMINAL_PROMPT=1` as the clone:
+
+```text
+git init --bare -q <cache>
+git -c gc.autoDetach=false -c maintenance.autoDetach=false -C <cache> fetch --prune <https url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+git clone --reference <cache> --dissociate -- <https url> <cwd>
+```
+
+Bare init is idempotent, including after an interrupted initial fetch. Command-line refspecs keep the cache to branches
+and tags without writing a remote configuration. Git's automatic gc remains enabled, but runs in the foreground so it
+cannot outlive the lock. Plain `--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the
+clone stage; `--dissociate` copies the borrowed objects so the checkout has no alternates and keeps its GitHub origin.
+The lock stays held through dissociation, then its modification time records successful use. There is no timeout or
+fallback. Cache errors name the path and use the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole
+sequence, including restart refusal after interruption.
+
+Supervisor startup sweeps `repo-cache/` on a blocking worker. It enumerates the permanent locks and tries each without
+waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes leftover
+`<name>.git.trash`, then renames a cache unused for more than 30 days to that trash path before removing it recursively.
+An interrupted eviction therefore leaves only trash to finish at the next startup, never a partially removed live cache.
+`remove_dir_all` does not follow directory symlinks. Lock files are never unlinked: a waiting shim still holds their
+inode, and replacing it would allow two owners. One empty lock file per repository ever cached is the accepted leftover.
+A sweep failure is logged and leaves unused caches for a later startup; it does not prevent sessions from starting.
+
 Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
 `renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers
 precede journal retirement and atomic metadata settlement. Recovery accepts a matching already-moved destination but
@@ -2142,8 +2173,9 @@ evidence, but cannot authorize another directory move.
   prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
-  private tmux server, `hook-log/<session>.log` (each session's hook diagnostics) and `hook-reports/<session>/` (its
-  waiting report files; see "Report files"), and `launch/` holding one 0600 JSON spec per LAUNCH, named
+  private tmux server, `repo-cache/` (host-local repository objects and permanent locks; see "Owned checkout admission
+  and lifetime"), `hook-log/<session>.log` (each session's hook diagnostics) and `hook-reports/<session>/` (its waiting
+  report files; see "Report files"), and `launch/` holding one 0600 JSON spec per LAUNCH, named
   `<session>.<generation>.json`. A launch spec carries the agent's command line and the session credential, but nothing
   the session's own database row does not already hold, in the same private state directory, for the session's whole
   lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one). Removing specs is

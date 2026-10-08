@@ -58,6 +58,20 @@ original request even if configuration changes meanwhile. When the server proves
 checkout, the composer refreshes its preview; launching that new destination requires another explicit click. A
 connection error or ordinary conflict alone does not authorize a second checkout.
 
+## Repository caches
+
+Repeated fresh checkouts of the same repository are faster because each host keeps a cache of its Git objects. Before
+each checkout, Git fetches new branches, tags and objects into that cache in the session terminal, then makes an
+independent clone with the ordinary GitHub origin. Git uses the host's own credentials for both commands; a private
+repository without a credential helper can ask for credentials twice. A cache error stops the clone stage and names the
+cache path, rather than falling back to downloading the whole repository again.
+
+The cache is `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, outside the working-copy root. It takes roughly the
+disk space of one extra repository copy per host. When the supervisor starts, it removes caches unused for more than 30
+days. You can remove a cache directory by hand at any time; existing checkouts do not depend on it, and the next fresh
+checkout downloads it again. Avoid removing it while a checkout is being prepared, since that preparation can fail.
+Leave the sibling `.lock` files in place so simultaneous checkouts continue to take turns on the same lock.
+
 ## What deletion does
 
 A checkout stays in place while any retained session uses it or one of its subdirectories. Stopped, exited, and errored
