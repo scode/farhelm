@@ -2,8 +2,9 @@
 // Renders the drawn blocks of the project's introduction (the header mark,
 // the pillars grid, and the how-it-works drawing) as SVG files, one light and
 // one dark variant each, into website/src/assets/intro/, plus the standalone
-// wordmark files beside the app icon in packaging/ and the docs website's
-// header mark under website/src/.
+// wordmark files beside the app icon in packaging/, the docs website's
+// header mark under website/src/, and the website's favicon, cut from the app
+// icon, under website/public/.
 //
 // The intro SVGs have one home and two readers. The website owns them: the
 // docs landing page imports them from src/assets/intro/, so Astro bundles
@@ -433,6 +434,23 @@ const brandDir = join(here, "..", "..", "packaging", "farhelm-desktop");
 // resolves the logo path relative to the project), not under public/, so it
 // is bundled and fingerprinted like the rest of the site's assets.
 const siteDir = join(here, "..", "src");
+
+// The favicon is the app icon itself, read from its one source file rather
+// than redrawn, so the two cannot differ. The icon's canvas keeps a
+// transparent margin around the tile for macOS's icon grid; a browser tab has
+// no such grid and shows the icon at 16 to 32 pixels, where that margin would
+// shrink the tile by a fifth, so the favicon's viewBox crops to the tile. It
+// lives in public/ because Starlight's `favicon` option names a file served
+// as is.
+const iconSvg = readFileSync(join(brandDir, "icon.svg"), "utf8");
+const iconCanvas = 'width="1024" height="1024" viewBox="0 0 1024 1024"';
+if (!iconSvg.includes(iconCanvas)) {
+  throw new Error("packaging/farhelm-desktop/icon.svg no longer has the 1024px canvas the favicon crop assumes");
+}
+writeFileSync(
+  join(here, "..", "public", "favicon.svg"),
+  iconSvg.replace(/<!--[\s\S]*?-->\n/, "").replace(iconCanvas, 'viewBox="100 100 824 824"'),
+);
 
 for (const [theme, p] of Object.entries(palettes)) {
   writeFileSync(join(introDir, `header-${theme}.svg`), headerSvg(p));

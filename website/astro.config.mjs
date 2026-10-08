@@ -51,10 +51,17 @@ export default defineConfig({
       locales: {
         root: { label: 'English', lang: 'en' },
       },
+      // The app icon, cropped to its tile; scripts/render-svgs.mjs writes it.
+      favicon: '/favicon.svg',
       customCss: ['./src/styles/farhelm.css'],
       // The search box is wrapped so the install command can sit beside it in
-      // the header (src/components/HeaderSearch.astro says why there).
-      components: { Search: './src/components/HeaderSearch.astro' },
+      // the header (src/components/HeaderSearch.astro says why there), and the
+      // Overview page hides its title so it opens with the logo
+      // (src/components/PageTitle.astro).
+      components: {
+        Search: './src/components/HeaderSearch.astro',
+        PageTitle: './src/components/PageTitle.astro',
+      },
       // Every internal link, heading anchors included, is checked at build
       // time, so a moved page or a renamed heading fails `bun run build`
       // (and with it CI and the Vercel deploy) instead of shipping a dead

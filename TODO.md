@@ -144,10 +144,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   text box (a non-empty query with no result never launches). Decide what Enter does on a focused button, where browsers
   press the button itself.
 
-- **Favicon for the docs website.** The website sets no favicon and has none in `website/public/`, so its browser tabs
-  show no Farhelm mark. Add one made from the app icon (`packaging/farhelm-desktop/icon.svg`), following the brand mark
-  rules in CLAUDE.md.
-
 - **Save the launcher's setup as a template.** Add a "save as template" action to the New session dialog: it asks for a
   name and shows the launcher's current choices as a checklist, with the ones the user chose explicitly already checked,
   and saving creates the template and opens it in the Templates panel. Most templates start as "I just set this up, keep

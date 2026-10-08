@@ -1,0 +1,50 @@
+---
+/**
+ * Starlight's page title on every page but the docs Overview.
+ *
+ * The Overview (src/content/docs/docs/index.mdx) opens with the Farhelm logo,
+ * name, and tagline drawn in its intro header, and the maintainer wants it to
+ * lead with that rather than a "Farhelm documentation" heading above it. The
+ * heading still exists there, visually hidden, so the page keeps its one h1
+ * for screen readers and the `#_top` anchor Starlight links to; the browser
+ * tab title comes from the page's frontmatter either way. The panel that
+ * holds the title is collapsed by the styles below, so nothing is left where
+ * the heading was.
+ */
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+
+// The Overview's content id: its file is docs/index.mdx.
+const isOverview = Astro.locals.starlightRoute.id === 'docs';
+---
+
+{
+  isOverview ? (
+    <h1 id="_top" class="farhelm-overview-title">
+      {Astro.locals.starlightRoute.entry.data.title}
+    </h1>
+  ) : (
+    <Default />
+  )
+}
+
+<style is:global>
+  .farhelm-overview-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The title's own panel, now empty to the eye, takes no space, and the
+     content panel after it loses the dividing line it would draw. */
+  .content-panel:has(.farhelm-overview-title) {
+    padding: 0;
+  }
+
+  .content-panel:has(.farhelm-overview-title) + .content-panel {
+    border-top: none;
+  }
+</style>
