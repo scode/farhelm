@@ -100,7 +100,7 @@ impl BarMenuItem {
                 "restart to update: quit Farhelm and open it again on the version that is installed; your sessions keep running"
             }
             BarMenuItem::WhatsNew => {
-                "what's new: open Farhelm's releases on GitHub in your browser, each with what changed"
+                "what's new: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
             }
         }
     }
@@ -112,7 +112,7 @@ impl BarMenuItem {
             BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
             BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
             BarMenuItem::RestartToUpdate => "sessions keep running",
-            BarMenuItem::WhatsNew => "opens the releases on GitHub",
+            BarMenuItem::WhatsNew => "opens the release notes in your browser",
         }
     }
 }
@@ -143,9 +143,13 @@ const UPDATE_MENU_ITEMS: [BarMenuItem; 2] = [BarMenuItem::RestartToUpdate, BarMe
 /// The docs site the Documentation item opens.
 const DOCS_URL: &str = "https://farhelm.io/docs/";
 
-/// The release list the What's new item opens: every release with what
-/// changed in it.
-const RELEASES_URL: &str = "https://github.com/scode/farhelm/releases";
+/// The release notes the What's new item opens: every stable release with
+/// what changed in it, on the docs site (generated there from CHANGELOG.md,
+/// the same text the GitHub releases carry). The docs site rather than the
+/// GitHub releases page because that is where the rest of Farhelm's help
+/// lives, and it can show what changed with screenshots the GitHub page
+/// cannot.
+const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 
 /// Open one of Farhelm's own pages through the page's shared link opener
 /// (`terminal-links.js`), which knows how to reach the system browser from
@@ -683,7 +687,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                             updater.restart_to_update();
                         }
                     }
-                    BarMenuItem::WhatsNew => open_external_page(RELEASES_URL),
+                    BarMenuItem::WhatsNew => open_external_page(RELEASE_NOTES_URL),
                     // The help menu's items; never in this menu's list.
                     BarMenuItem::SendFeedback
                     | BarMenuItem::Documentation
