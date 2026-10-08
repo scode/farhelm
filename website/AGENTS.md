@@ -83,6 +83,19 @@ staged or rewritten. In short:
   production build (`bun run build`) fails on a shot that is not published, so publish before landing. Never push the
   screenshot ref by hand.
 
+## Release notes
+
+The Release notes page (`/docs/release-notes/`, the sidebar entry under Overview) is generated from the repository's
+`CHANGELOG.md` by `scripts/release-notes.mjs` on every build and preview start, and is gitignored. Do not edit the page
+or its generated Markdown; a change to the notes themselves is a change to `CHANGELOG.md`, which `releasing/AGENTS.md`
+governs. Each release has a stable anchor named after its version, such as `/docs/release-notes/#v0.23.0`.
+
+Website-only material for one release, such as annotated screenshots of its new dialogs, goes in
+`src/release-notes/<version>.mdx` (for example `src/release-notes/v0.26.0.mdx`); the generator shows it at the top of
+that release, and it never reaches GitHub. One decision is still open before the first such screenshot: the docs
+screenshot system recaptures every shot from the current UI on each refresh, which is wrong for a past release, so
+release screenshots will need images that are captured once and kept.
+
 ## Internal links
 
 Write internal links as absolute site paths with a trailing slash: `[Manage hosts](/docs/using/manage-hosts/)`, or with
