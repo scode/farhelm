@@ -46,11 +46,12 @@ installed, however it got there.
 
 ## How updates are checked
 
-The update check and the download both go to get.farhelm.io over HTTPS. Before installing an update, Farhelm checks that
-the release is signed with one of the project's keys, and installs nothing otherwise. The signature shows that a release
-comes from the project; it says nothing about whether its code was reviewed. Installing Farhelm by hand is different:
-nothing can check a signature before Farhelm is on your Mac, so the install command trusts get.farhelm.io over HTTPS. If
-Farhelm ever cannot verify an update, the version number shows a warning with the command to reinstall it. See the
+The update check and the download both go to get.farhelm.io over HTTPS, which hands the release files themselves over
+from GitHub, so your Mac needs to reach both. Before installing an update, Farhelm checks that the release is signed
+with one of the project's keys, and installs nothing otherwise. The signature shows that a release comes from the
+project; it says nothing about whether its code was reviewed. Installing Farhelm by hand is different: nothing can check
+a signature before Farhelm is on your Mac, so the install command trusts get.farhelm.io over HTTPS. If Farhelm ever
+cannot verify an update, the version number shows a warning with the command to reinstall it. See the
 [security model](/docs/how-it-works/security-model/) for the rest of what leaves your Mac.
 
 ## Update remote hosts, or uninstall

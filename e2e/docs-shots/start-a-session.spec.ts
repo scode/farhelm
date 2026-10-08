@@ -68,7 +68,7 @@ test("destination", async ({ page, request }) => {
   );
   await director.callout(
     destination.getByLabel("recent folders"),
-    "Directories you launch in most on this host. Local home is your home on the machine in front of you.",
+    "Directories you launched in recently on this host, newest first. Local home is your home on the machine in front of you.",
     { side: "left", dy: 80 },
   );
   await shot(page, `${PAGE}/destination`, [destination]);
