@@ -25,9 +25,13 @@ The maintainer reviews drafts in a browser, served from this checkout by `websit
 script's header says why, and what that costs. Use the script rather than `bun run dev` or `astro dev` directly, which
 pick their own port.
 
-This flow is for sessions where the maintainer is reviewing drafts with you. An unattended run (a plan being executed, a
-delegate, a reviewer in a scratch copy) starts no preview server: nobody is there to read it, and starting one would
-take the port from the maintainer's own drafting session.
+When the main thing you were asked to do is change the docs website (writing or revising pages, their screenshots, the
+site's structure or look), this flow is the default: start the preview and hand over the links every time you report the
+change, without being asked, and again when you open or update its PR. It does not apply when a docs edit rides along in
+a change whose point is elsewhere, such as a code fix that also corrects a sentence on a page; name the page in your
+report there instead. An unattended run (a plan being executed, a delegate, a reviewer in a scratch copy) starts no
+preview server either: nobody is there to read it, and starting one would take the port from the maintainer's own
+drafting session.
 
 - Run `website/scripts/preview.sh` each time before you hand the maintainer a change. It starts the server if this
   checkout is not already serving, waits until it answers, and prints the docs front page URL; when the server is
