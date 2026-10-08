@@ -74,6 +74,11 @@ sections; the checker accepts the historical formats that are already present.
   procedure).
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
   not only what changed.
+- That a release cannot be downgraded from is not Breaking, and it gets no entry at all. Most releases upgrade the
+  helm's or the supervisor's database, so an older build refusing to open it afterwards is the normal case, not news.
+  The maintainer ruled this on 2026-10-07. The risk report's downgrade check still tells the maintainer, who is the one
+  reader that needs it. Sections up to and including `v0.23.0` carry such entries; like every curated section, they stay
+  as they are.
 - A release that changes the helm–supervisor protocol version opens its Breaking category with exactly this entry, and a
   release that does not change it never carries it:
 
@@ -134,8 +139,9 @@ commit that added it.
 
 The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
 accumulated wording rules: the first paragraph is the entry candidate, and further paragraphs supply context for
-curation. Err toward including caveats. It is not reviewed at PR time and it is not the final text; curation rewrites
-it. When the draft rests on a guess (a PR with no description, say), say so in the body so the curator verifies it.
+curation. Err toward including caveats, except that the release cannot be downgraded from, which no entry mentions (see
+the format). It is not reviewed at PR time and it is not the final text; curation rewrites it. When the draft rests on a
+guess (a PR with no description, say), say so in the body so the curator verifies it.
 
 ## The checker
 

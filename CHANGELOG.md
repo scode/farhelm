@@ -2,6 +2,26 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.25.0 - 2026-10-07
+
+### 🚀 Added
+
+- Press Cmd+K on a Mac, or Ctrl+Shift+K elsewhere, to find a session on any host by typing part of its name and jump to it, even while a terminal has focus. Sessions whose name matches come before ones that match by host or folder, and recently active sessions come first. Escape takes you back to where you were. Type a name for a new session, or `tl:` and part of a template's name, to open the session launcher already filled in; check it and press **Launch** to start it. (#1691, #1692, #1699)
+- In the Mac desktop app, Cmd+N opens the session launcher, the same as **New**, even while a terminal has focus. It does nothing while a dialog is open or **New** is unavailable. In the web UI, Cmd+N still opens a new browser window. (#1675)
+- **Send feedback** can remember how to reach you, so you do not have to type it again next time. The contact is kept by your helm, so the desktop app and the web UI share it. **Re-use for future feedback** starts checked; unchecking it, or emptying the field, forgets the contact once the feedback is sent. A send that fails changes nothing. (#1689)
+- A fresh install now ends by inviting you to send private feedback from the app's **?** menu, or to open a public GitHub issue. Updates end with the same message as before. (#1674)
+
+### 🔄 Changed
+
+- **Clone** on a session that works in a GitHub checkout now makes a fresh checkout of the same repository for the copy, instead of sharing the original's folder. The new checkout is named after the original with `-clone` added, then `-clone-2`, `-clone-3` and so on if that name is taken. Choose **use existing folder** to share the original's folder and name as before. **Replace with**, **Replace**, and `farhelm agent clone` still use the existing folder. (#1684)
+- A session's warning that its conversation has gone missing, or that its agent never said which conversation it is in, now stays in the bell's list marked resolved once **Restart** can resume the conversation again, and no longer turns the bell red. If the same problem comes back before the agent is relaunched, the warning shows as new and unread again, even if you had cleared it. (#1690)
+- The **Templates** dialog now shows your templates in a list beside the one you are editing. Its settings are labeled fields you can add or remove, the approval choices offered follow the agent type, changes are saved only when you press save, and closing with unsaved changes asks what to do. Templates can be duplicated, and after deleting one you can undo it for about ten seconds while the dialog stays open. (#1687)
+- When an agent creates a template that says how a session launches (an agent type, whether a command runs without approval prompts, or a resume command), applying that template now switches the session launcher to the matching tab. Templates you already have behave as before. (#1678)
+
+### 🔧 Fixed
+
+- Terminal tabs opened beside a session that works in your home folder now start in `~` rather than `~/` in shells that show the path they started in. Existing sessions whose folder was stored with a trailing slash are fixed too. (#1673)
+
 ## v0.24.0 - 2026-10-05
 
 ### 🚀 Added
