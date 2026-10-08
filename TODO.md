@@ -203,13 +203,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
   for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report.
 
-- **Show Cmd+N in the New button's hover text.** In the Mac desktop app Cmd+N opens the session launcher, but nothing on
-  screen says so: the New button's hover text reads "new session: start an agent or a command on any host". Add the
-  shortcut to that text in the Mac desktop app (for example "… on any host (⌘N)"), and only there: the web UI and the
-  Linux desktop app have no such shortcut, since the browser keeps Cmd+N and Ctrl+N for a new window. Follow-up to the
-  new-session-shortcut plan, at the maintainer's request while reviewing its report. Plan:
-  `plans/queue/new-button-shortcut-hint.md`.
-
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a

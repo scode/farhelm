@@ -21,7 +21,8 @@ The initial implementation deliberately leaves these observations for the mainta
 - Compare the browser and Linux desktop: neither should gain traffic-light padding or a window-drag area.
 - In the Mac desktop app, press Cmd+N with focus in the sidebar and in a terminal: the new-session form opens with the
   same prefill as New, and the terminal program receives no key. Repeat while the form or another dialog is open and
-  while New is disabled by a busy list: nothing opens or closes. In a browser on a Mac, Cmd+N still opens a new window.
+  while New is disabled by a busy list: nothing opens or closes. Hover New: its text ends with `(⌘N)`. In a browser on a
+  Mac, Cmd+N still opens a new window and New's hover text has no shortcut hint.
 - Press Cmd+K from the sidebar and from a focused terminal. Search and open another session, then type: input reaches
   that session's terminal. Reopen and press Escape: focus returns to the previous control or terminal. Repeat with a
   modal open and during sign-in/preferences loading: the switcher does not open and does not send the chord to the
