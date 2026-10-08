@@ -145,13 +145,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   text box (a non-empty query with no result never launches). Decide what Enter does on a focused button, where browsers
   press the button itself.
 
-- **Save the launcher's setup as a template.** Add a "save as template" action to the New session dialog: it asks for a
-  name and shows the launcher's current choices as a checklist, with the ones the user chose explicitly already checked,
-  and saving creates the template and opens it in the Templates panel. Most templates start as "I just set this up, keep
-  it", and today that means retyping every choice in the Templates panel. Deliberately left out of the Templates dialog
-  overhaul (`plans/queue/templates-dialog-overhaul.md`), which this builds on. Plan:
-  `plans/queue/save-launcher-as-template.md`.
-
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
   the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a

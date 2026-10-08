@@ -226,6 +226,11 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-trust-choice")).toBeVisible();
   await expectCovered(page, "new session form, Codex picked", ".create-session-form", 15);
+  await form.locator(".launch-composer-save-template").click();
+  await expect(form.locator(".save-template-panel")).toBeVisible();
+  await expectCovered(page, "launcher save-template checklist", ".save-template-panel", 3);
+  await form.locator(".save-template-cancel").click();
+  await expect(form.locator(".save-template-panel")).toHaveCount(0);
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   for (const query of ["perms:", "trust:", "effort:"]) {
     await search.fill(query);

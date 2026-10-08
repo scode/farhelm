@@ -931,6 +931,9 @@ pub(crate) fn ListView(
         use_signal(|| None::<crate::launch_composer::ComposerSearchResult>);
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
+    // A launcher save hands the actual stored snapshot to the next dialog;
+    // loading the list must not decide which template the person just opened.
+    let mut initial_template = use_signal(|| None::<farhelm_proto::launcher::LaunchTemplate>);
     // The switcher stays list-owned so picks use the ordinary navigation gate.
     let mut quick_switcher_open = use_signal(|| false);
     // A close owns one focus/navigation handoff until the DOM removal is
@@ -3354,16 +3357,18 @@ pub(crate) fn ListView(
                     "data-tooltip": "templates: saved session setups to start from",
                     aria_haspopup: "dialog",
                     disabled: busy,
-                    onclick: move |_| templates_open.set(true),
+                    onclick: move |_| { initial_template.set(None); templates_open.set(true); },
                     "templates"
                 }
             }
             if templates_open() {
                 super::templates::TemplatesDialog {
                     hosts: host_options.clone(),
+                    initial_template: initial_template(),
                     on_close: move |_| {
                         super::templates::return_focus_to_templates_button();
                         templates_open.set(false);
+                        initial_template.set(None);
                         templates_revision += 1;
                     },
                 }
@@ -3411,6 +3416,15 @@ pub(crate) fn ListView(
                         ordinary_new_cwd.set(None);
                         show_create.set(false);
                         focus_new_session_button();
+                    },
+                    on_template_saved: move |template| {
+                        chosen_host.set(None);
+                        clone_prefill.set(None);
+                        initial_create_action.set(None);
+                        ordinary_new_cwd.set(None);
+                        show_create.set(false);
+                        initial_template.set(Some(template));
+                        templates_open.set(true);
                     },
                     on_created: move |created: CreatedSession| {
                         let CreatedSession {

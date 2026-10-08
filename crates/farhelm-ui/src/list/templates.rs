@@ -64,7 +64,7 @@ fn restore_template_focus() {
 }
 
 /// The same wire words serve as select values on both renderers.
-fn word<T: serde::Serialize>(value: T) -> String {
+pub(super) fn word<T: serde::Serialize>(value: T) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(word)) => word,
         _ => String::new(),
@@ -80,7 +80,7 @@ fn from_word<T: serde::de::DeserializeOwned>(value: &str) -> Option<T> {
 /// Adding a field writes a present value immediately; removing it is the only
 /// way to make its launcher edit absent again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Field {
+pub(super) enum Field {
     Agent,
     Model,
     Effort,
@@ -97,7 +97,7 @@ enum Field {
 impl Field {
     // Command-only fields lead when present; their absence keeps the agent
     // editor in its usual agent/model/effort order without a second ordering table.
-    const ALL: [Self; 11] = [
+    pub(super) const ALL: [Self; 11] = [
         Self::Command,
         Self::Yolo,
         Self::Agent,
@@ -113,7 +113,7 @@ impl Field {
 
     /// Both stored approval fields have one user-facing name, but remain
     /// separate edits so switching kind cannot silently reinterpret either.
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Agent => "agent type",
             Self::Model => "model",
@@ -130,7 +130,7 @@ impl Field {
 
     /// Stable field keys keep two different approvals controls distinguishable
     /// in the DOM and in tests even though their labels deliberately match.
-    fn key(self) -> &'static str {
+    pub(super) fn key(self) -> &'static str {
         match self {
             Self::Agent => "agent",
             Self::Model => "model",
@@ -148,7 +148,7 @@ impl Field {
 
     /// Presence, including a reset or an empty draft text, means this field
     /// will be applied; value truthiness must never decide whether it exists.
-    fn is_set(self, f: &TemplateFields) -> bool {
+    pub(super) fn is_set(self, f: &TemplateFields) -> bool {
         match self {
             Self::Agent => f.agent.is_some(),
             Self::Model => f.model.is_some(),
@@ -184,7 +184,7 @@ impl Field {
 
     /// Removal leaves the field alone when the template is applied; it does
     /// not reset the launcher's current value.
-    fn remove(self, f: &mut TemplateFields) {
+    pub(super) fn remove(self, f: &mut TemplateFields) {
         match self {
             Self::Agent => f.agent = None,
             Self::Model => f.model = None,
@@ -202,7 +202,7 @@ impl Field {
 
     /// Decide which edits can be added under this switch, using harness-owned
     /// capability answers rather than a second list of per-agent facts.
-    fn offered(self, f: &TemplateFields) -> bool {
+    pub(super) fn offered(self, f: &TemplateFields) -> bool {
         match self {
             Self::Host | Self::Destination | Self::Name => true,
             Self::Agent => f.kind.is_some(),
@@ -433,6 +433,30 @@ fn save_name_refusal(previous: Option<&str>, name: &str, listed: &ListedNames) -
             format!("a template named {name:?} already exists; edit that one, or choose another name")
         }),
     }
+}
+
+/// Give the launcher the editor's compatibility and unfinished-field rules.
+/// Saving a partial setup need not make a complete launch, but must not store
+/// a field combination the same editor would refuse.
+pub(super) fn saved_fields_refusal(
+    template: &LaunchTemplate,
+    catalog: Option<&[LaunchCatalogModel]>,
+) -> Option<String> {
+    Draft {
+        name: template.name.clone(),
+        fields: template.fields.clone(),
+    }
+    .refusal(catalog)
+}
+
+/// Check a new launcher save against the freshly read catalog of names.
+/// A failed read cannot prove a name is free, and must never enable a write.
+pub(super) fn new_name_refusal(name: &str, templates: Option<&[LaunchTemplate]>) -> Option<String> {
+    let names = match templates {
+        Some(templates) => ListedNames::Loaded(templates.iter().map(|t| t.name.as_str()).collect()),
+        None => ListedNames::Failed,
+    };
+    save_name_refusal(None, name, &names)
 }
 
 /// A one-line description of what a template sets, for its row in the
@@ -818,7 +842,13 @@ fn name_refusal(
 /// draft and one serialized write at a time. Async save/delete/undo work keeps
 /// navigation disabled until its outcome is known; failed writes keep the draft.
 #[component]
-pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>) -> Element {
+pub(super) fn TemplatesDialog(
+    hosts: Vec<HostOption>,
+    on_close: EventHandler<()>,
+    /// A successful launcher save opens its actual returned fields directly;
+    /// the asynchronous list read is not needed to rediscover the new record.
+    initial_template: Option<LaunchTemplate>,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     let list_base = base.clone();
     let mut templates = use_resource(move || {
@@ -830,10 +860,15 @@ pub(super) fn TemplatesDialog(hosts: Vec<HostOption>, on_close: EventHandler<()>
         let base = catalog_base.clone();
         async move { crate::api::fetch_launch_catalog(&base).await }
     });
-    let mut draft = use_signal(Draft::default);
-    let mut baseline = use_signal(Draft::default);
-    let mut previous = use_signal(|| None::<String>);
-    let opened = use_signal(|| false);
+    let initial_draft = initial_template
+        .as_ref()
+        .map(Draft::from_template)
+        .unwrap_or_default();
+    let initial_baseline = initial_draft.clone();
+    let mut draft = use_signal(move || initial_draft);
+    let mut baseline = use_signal(move || initial_baseline);
+    let mut previous = use_signal(|| initial_template.as_ref().map(|t| t.name.clone()));
+    let opened = use_signal(|| initial_template.is_some());
     let mut pending = use_signal(|| None::<Departure>);
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);

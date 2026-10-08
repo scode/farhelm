@@ -1545,3 +1545,37 @@ fixture premise: the agent is alive
 Class: fixture-premise
 
 Cause: unknown
+
+## 2026-10-09 — `the session view gives every control hover text` (e2e/tests/tooltip-coverage.spec.ts)
+
+The launcher template-save validation's three-spec browser run `0bcdfedf-2839-4732-b2c2-8accc96344a6` passed 37 of 38
+cases and failed this existing WebKit case alone, before terminal interaction: the shared row did not appear within the
+helper's default five-second assertion budget. An exact WebKit-only three-repeat run
+`fb09f027-72c6-4384-b643-6573f1c895dd` passed twice and failed once at the same boundary, without the preceding sidebar
+test. Both runs tested clean commit `3293195e`; the first selected templates, tooltip coverage and launcher tabs on both
+engines, the second selected only this case, each with one browser worker and zero retries. Both failed traces contain
+successful session listings with the shared session still present. In the first trace, browser-side processing of that
+listing completed 4.80 seconds after the row assertion began, the assertion expired at 5.05 seconds, and the terminal
+received focus at 6.78 seconds; the healthy fixture's initial rendering raced the assertion budget. Underlying
+scheduling pressure is unproven: original load was not recorded; the narrow run's observed load averages were
+9.51/11.81/13.97 on 18 logical CPUs, with no other owned build, but other executors' activity was not inventoried. Linux
+x86_64, kernel 6.8.0-146-generic, Node 26.11.0, Playwright 1.62.0, pinned tmux 3.7c executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, locale `C.UTF-8`; ambient `FARHELM_*` was scrubbed.
+The initial strict browser run supplied recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`;
+the generic narrow run supplied only `FARHELM_TEST_TRACE_DIR`. Browser executable identity and compiler version were not
+extracted. Full evidence, including both failed traces, is retained privately under the run IDs above. Disposition: the
+launcher template-save PR (#1717) gives the shared helper the sidebar fixture's existing 20-second row-readiness budget
+and probes the session API on a timeout to distinguish disappearance from delayed rendering. Attachment and fake-agent
+readiness remain separate oracles. With the correction, the same exact WebKit case passed three of three repetitions in
+run `98ba4b12-ce93-414d-8911-c4d759db83a0`; the original failures remain retained.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: established

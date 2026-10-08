@@ -6672,9 +6672,11 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   await search.focus();
   await expect(search).toBeFocused();
   // The action row sits above search in DOM order. Reverse traversal therefore
-  // reaches its trailing Reset, then Cancel, then Launch; name belongs after
-  // the folder block and is covered by the forward destination sequence.
+  // reaches its trailing save-as-template action (offered on New and Clone),
+  // then Reset, then Cancel, then Launch; name belongs after the folder block
+  // and is covered by the forward destination sequence.
   const reverseLeadingControls = [
+    form.getByRole("button", { name: "save as template", exact: true }),
     form.getByRole("button", { name: "reset choices", exact: true }),
     form.getByRole("button", { name: "cancel", exact: true }),
     form.getByRole("button", { name: /^launch\b/ }),

@@ -297,7 +297,24 @@ export function sharedSessionRow(page: Page) {
 export async function openTerminal(page: Page) {
   await page.goto("/");
   const row = sharedSessionRow(page);
-  await expect(row).toBeVisible();
+  // Navigation's load event precedes WASM startup and the first list render.
+  // Use the sidebar fixture's readiness budget: WebKit can return a healthy
+  // session listing near the default five-second deadline, before its row paints.
+  try {
+    await expect(row).toBeVisible({ timeout: 20_000 });
+  } catch (error) {
+    // Keep this probe inside the page/request lifetime. A timeout must say
+    // whether the session disappeared or the browser never rendered its row.
+    const premise = await page.request.get("/api/sessions", { timeout: 5_000 })
+      .then(async (response) => {
+        if (!response.ok()) return `session listing HTTP ${response.status()}`;
+        const listing = await response.json();
+        const present = listing.sessions.some((session: { title: string }) => session.title === "e2e-session");
+        return `shared session present in API: ${present}`;
+      })
+      .catch((probeError) => `session listing unavailable: ${probeError}`);
+    throw new Error(`shared session row readiness failed; ${premise}`, { cause: error });
+  }
   const id = await row.getAttribute("data-session-id");
   expect(id, "the shared session row must identify the terminal it opens").toBeTruthy();
   await attachSession(page, id!);
