@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-05T03:46:37Z",
-  "captured_from": "457897dadd9f6c57c7231dce3e5df0e0b78ef5ab",
-  "commit": "60177b4ae84c0748680d23df020265f7df791596",
+  "captured_at": "2026-10-08T04:19:37Z",
+  "captured_from": "f00f0d3ebdcc5a69fd11bf97a35fe6bf3739d06b",
+  "commit": "a131804204dc42021c714e19dce9c4cd60fa54d8",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -42,12 +42,12 @@
       "width": 1800
     },
     "launch-templates/edit-form": {
-      "height": 1396,
-      "width": 1860
+      "height": 1308,
+      "width": 1796
     },
     "launch-templates/panel": {
-      "height": 1396,
-      "width": 1860
+      "height": 1042,
+      "width": 1844
     },
     "launch-templates/templates-button": {
       "height": 294,
@@ -90,7 +90,7 @@
       "width": 1332
     },
     "start-a-session/destination": {
-      "height": 778,
+      "height": 800,
       "width": 1562
     },
     "start-a-session/effort-permissions-trust": {
@@ -143,7 +143,7 @@
     },
     "work-in-a-session/header": {
       "height": 392,
-      "width": 1064
+      "width": 1078
     },
     "work-in-a-session/tabs": {
       "height": 410,

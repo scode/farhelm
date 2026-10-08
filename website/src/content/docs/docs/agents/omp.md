@@ -52,16 +52,21 @@ tests, but have not been exercised through the same live lifecycle scenarios.
 You can leave the model unset in Farhelm. OMP then uses its configured provider and model, without a Farhelm
 `--provider` or `--model` override. The rules below apply when you choose a model explicitly.
 
-Farhelm stores the model id you enter verbatim and emits the command shown below, with `<id>` preserved as one argv
-element. What Farhelm does not do is guarantee that OMP hands that exact string to OpenRouter: OMP's own model
-resolution runs after Farhelm's argv, and it is deliberately fuzzy. OMP resolves provider-qualified ids through an exact
-catalog match first, then falls back through alias and variant spellings, and finally to a provider-scoped fuzzy match —
-so a typo or a retired id can land on a different model rather than failing. A trailing `:suffix` on an unknown id can
-also be interpreted as a thinking level rather than part of the model name (OMP guards the common cases, but the
-interpretation is OMP's, not Farhelm's). The explicit `--provider openrouter` spelling makes provider intent explicit;
-it does not switch that resolution off. If exact upstream routing of an arbitrary custom id matters, verify it in OMP
-itself: the session launcher accepts a syntactically valid custom id that need not exist in OMP's catalog, subject to
-Farhelm's existing harness-compatibility checks on which harness owns which id.
+Farhelm stores the model id you enter verbatim and passes it to OMP as shown below (the launch's other options left
+out), with `<id>` preserved as one argv element. What Farhelm does not do is guarantee that OMP hands that exact string
+to OpenRouter: OMP's own model resolution runs after Farhelm's argv, and it is deliberately fuzzy. OMP resolves
+provider-qualified ids through an exact catalog match first, then falls back through alias and variant spellings, and
+finally to a provider-scoped fuzzy match — so a typo or a retired id can land on a different model rather than failing.
+A trailing `:suffix` on an unknown id can also be interpreted as a thinking level rather than part of the model name
+(OMP guards the common cases, but the interpretation is OMP's, not Farhelm's). The explicit `--provider openrouter`
+spelling makes provider intent explicit; it does not switch that resolution off. If exact upstream routing of an
+arbitrary custom id matters, verify it in OMP itself: the session launcher accepts a syntactically valid custom id that
+need not exist in OMP's catalog, subject to Farhelm's existing harness-compatibility checks on which harness owns which
+id.
+
+```sh
+omp --provider openrouter --model <id>
+```
 
 ## Limitations
 
