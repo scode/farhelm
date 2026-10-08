@@ -317,20 +317,25 @@ With both settled, the process is:
   slow-battery reruns are not a prerequisite for tagging.
 - Watch the workflow run to completion rather than fire-and-forgetting it, then verify the GitHub release: every asset
   the release contract names present, no `SHA256SUMS` or `SHA256SUMS.minisig`, and the release marked prerelease
-  (cargo-dist does that for `-rc.N` versions on its own). Tell the maintainer it is ready to sign and publish. Once they
-  have, check that `https://get.farhelm.io/vX.Y.Z-rc.N/SHA256SUMS`, its `.minisig` and `install.sh` answer, and that
-  `https://get.farhelm.io/latest` still names the last stable release, so ordinary installs are unaffected.
-- After the workflow succeeds and the published release passes those checks, close the version-bump PR without merging
-  it. The tag preserves the release commit; the PR does not need to stay open for the RC to remain available. Keep the
-  tag and published release intact.
-- Finish by handing the maintainer the exact copy-paste command, with the installer get.farhelm.io serves FOR THAT TAG
-  (the one signed with the release) and the version pinned on the far side of the pipe:
+  (cargo-dist does that for `-rc.N` versions on its own).
+- Hand the maintainer one copy-paste line that signs and publishes the release and then installs it. The signing half is
+  `./bin/dev-release.sh vX.Y.Z-rc.N`, the maintainer's signing tooling (outside this repository, run on their trusted
+  host from that tooling's own directory, never by an agent), which exits 0 once the release is signed and published at
+  its version path on get.farhelm.io. The install half runs only after that succeeds, and uses the installer
+  get.farhelm.io serves FOR THAT TAG (the one signed with the release) with the version pinned on the far side of the
+  pipe:
 
   ```
-  curl -fsSL https://get.farhelm.io/vX.Y.Z-rc.N/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
+  ./bin/dev-release.sh vX.Y.Z-rc.N && curl -fsSL https://get.farhelm.io/vX.Y.Z-rc.N/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
   ```
 
-  Remind the maintainer to quit the desktop app before updating and relaunch after.
+  The maintainer asked for this one line on 2026-10-07 so that trying an RC costs them only running it in the right
+  directory and supplying the signing key's passphrase. Remind the maintainer that it runs from the signing tooling's
+  directory, and to quit the desktop app before running it and relaunch after.
+- Once the maintainer reports that it ran, check that `https://get.farhelm.io/vX.Y.Z-rc.N/SHA256SUMS`, its `.minisig`
+  and `install.sh` answer, and that `https://get.farhelm.io/latest` still names the last stable release, so ordinary
+  installs are unaffected. Then close the version-bump PR without merging it. The tag preserves the release commit; the
+  PR does not need to stay open for the RC to remain available. Keep the tag and published release intact.
 - Then `cargo clean` again (see "Build outputs" below).
 - A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
   the incomplete-release recovery below deletes only a GitHub release, and keeps the tag).
