@@ -29,8 +29,10 @@
 # Which checkout a process belongs to is decided by comparing its working directory with the website directory by
 # device and inode (ss and /proc, so Linux only), never by matching process names or path strings. Strings would fail
 # for a checkout reached through a symlink, and name matching is how a stale lock gets the wrong process killed: Astro's
-# own `astro dev stop` trusts any pid in the lock whose command line looks like astro, and pids get reused. Astro's lock
-# also cannot say who holds the port, because it is per checkout and knows nothing about another checkout's server.
+# own `astro dev stop` trusts any pid in the lock whose command line looks like astro, and pids get reused. A stale
+# background lock can therefore target a later build, preview or check in the same directory. The lock's recorded
+# start time also has to fit the process's age before stopping it. Astro's lock cannot say who holds the port, because
+# it is per checkout and knows nothing about another checkout's server.
 
 port=14000
 base_url="http://127.0.0.1:$port"
@@ -105,8 +107,29 @@ lock_pid() {
     } catch {}' "$1"
 }
 
+# Require process $1 to predate the background lock $2. Astro writes startedAt after its server is listening, so a
+# later process cannot have written that lock. Two seconds cover whole-second ps/date readings and their separation.
+# A missing or invalid timestamp fails closed. A backwards clock step that puts the lock more than two seconds ahead
+# of now also discards it; this wall-clock comparison does not identify every possible clock change or short PID reuse.
+started_before_lock() {
+  lock_start=$(node -e '
+    try {
+      const l = require(process.argv[1]);
+      const started = typeof l.startedAt === "string" ? Date.parse(l.startedAt) : NaN;
+      if (l.background === true && Number.isFinite(started)) console.log(Math.floor(started / 1000));
+    } catch {}' "$2") || return 1
+  [ -n "$lock_start" ] || return 1
+  elapsed=$(ps -o etimes= -p "$1") || return 1
+  elapsed=$(printf '%s' "$elapsed" | tr -d '[:space:]')
+  case "$elapsed" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  now=$(date +%s) || return 1
+  [ "$lock_start" -le "$((now + 2))" ] && [ "$((now - elapsed))" -le "$((lock_start + 2))" ]
+}
+
 # Stop the Astro background server of the website directory $1, but only if the pid its lock names really runs there.
-# A lock whose pid is dead or belongs to some other process is stale and is deleted instead (see the header for why
+# A lock whose pid is dead, runs elsewhere or started too late is stale and is deleted instead (see the header for why
 # `astro dev stop` must not be trusted with it). A lock for a foreground server is left alone entirely (see lock_pid).
 stop_server_in() {
   dir=$1
@@ -115,7 +138,7 @@ stop_server_in() {
   pid=$(lock_pid "$dir_lock")
   if [ -z "$pid" ]; then
     return 0
-  elif runs_in "$pid" "$dir"; then
+  elif runs_in "$pid" "$dir" && started_before_lock "$pid" "$dir_lock"; then
     (cd "$dir" && ./node_modules/.bin/astro dev stop >&2)
   else
     rm -f "$dir_lock"
