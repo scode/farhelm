@@ -1645,7 +1645,7 @@ pub(super) mod test_support {
             }
             Some(Override::FailFirst(remaining)) => {
                 let failed = remaining
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                         left.checked_sub(1)
                     })
                     .is_ok();
