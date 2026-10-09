@@ -13,6 +13,32 @@ use crate::launch_composer::{self, ModelEnterTarget, ModelOption, harness_label}
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
+/// Apply a focused choice before invoking its dialog's ordinary primary action.
+///
+/// Only controls with a caller-supplied primary opt in. Action buttons and
+/// nested editors keep native or dedicated Enter handling. Consuming repeat
+/// and composition events prevents the browser from activating the button as
+/// a fallback; `apply` retains the caller's live transition guards, while the
+/// primary action remains responsible for admitting a launch or restart.
+pub(crate) fn enter_choice(
+    event: KeyboardEvent,
+    busy: bool,
+    apply: impl FnOnce(),
+    primary: Option<EventHandler<()>>,
+) {
+    let Some(primary) = primary else { return };
+    if event.key() != Key::Enter {
+        return;
+    }
+    event.prevent_default();
+    event.stop_propagation();
+    if busy || event.is_auto_repeating() || event.is_composing() {
+        return;
+    }
+    apply();
+    primary.call(());
+}
+
 /// Render a baseline value only when this field now differs from it.
 ///
 /// The marker compares wire values, so restoring a choice clears it even if
@@ -45,6 +71,8 @@ fn model_marker_label(old: Option<&str>) -> DetailPart {
 /// `model_id_prefix` scopes the transient listbox and option IDs when two
 /// surfaces are mounted together. The launcher passes its historical prefix
 /// so its DOM and existing browser selectors remain unchanged.
+/// `on_choice_enter` opts the segment buttons into apply-then-primary behavior;
+/// the model field retains its own Enter contract regardless of that callback.
 #[component]
 pub(crate) fn LaunchControls(
     harness: Option<LaunchHarness>,
@@ -66,6 +94,7 @@ pub(crate) fn LaunchControls(
     model_id_prefix: String,
     #[props(default)] baseline: Option<LaunchSelection>,
     #[props(default)] fixed_harness: bool,
+    #[props(default)] on_choice_enter: Option<EventHandler<()>>,
     on_model_focus: EventHandler<()>,
     on_model_input: EventHandler<String>,
     on_model_blur: EventHandler<()>,
@@ -293,6 +322,7 @@ pub(crate) fn LaunchControls(
                             "data-tooltip": "use the agent's default reasoning effort",
                             aria_pressed: effort.is_none(),
                             disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_effort.call(None), on_choice_enter),
                             onclick: move |_| on_effort.call(None),
                             "default"
                         }
@@ -304,6 +334,7 @@ pub(crate) fn LaunchControls(
                                 "data-tooltip": "use {launch_composer::effort_value(offered)} reasoning effort",
                                 aria_pressed: effort == Some(offered),
                                 disabled: busy,
+                                onkeydown: move |event| enter_choice(event, busy, || on_effort.call(Some(offered)), on_choice_enter),
                                 onclick: move |_| on_effort.call(Some(offered)),
                                 "{launch_composer::effort_value(offered)}"
                             }
@@ -322,6 +353,7 @@ pub(crate) fn LaunchControls(
                             "data-tooltip": "use the agent's default permission mode",
                             aria_pressed: permissions.is_none(),
                             disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(None), on_choice_enter),
                             onclick: move |_| on_permissions.call(None),
                             "default"
                         }
@@ -339,6 +371,7 @@ pub(crate) fn LaunchControls(
                                 || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)),
                             "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Yolo),
                             disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Yolo)), on_choice_enter),
                             onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
                             "yolo"
                         }
@@ -364,6 +397,7 @@ pub(crate) fn LaunchControls(
                             "data-tooltip": launch_composer::permission_tooltip(permission),
                             aria_pressed: permissions == Some(permission),
                             disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(permission)), on_choice_enter),
                             onclick: move |_| on_permissions.call(Some(permission)),
                             "{launch_composer::permission_value(permission)}"
                         }
@@ -387,6 +421,7 @@ pub(crate) fn LaunchControls(
                             "data-tooltip": launch_composer::workspace_trust_tooltip(harness, choice),
                             aria_pressed: workspace_trust == choice,
                             disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_workspace_trust.call(choice), on_choice_enter),
                             onclick: move |_| on_workspace_trust.call(choice),
                             "{label}"
                         }
