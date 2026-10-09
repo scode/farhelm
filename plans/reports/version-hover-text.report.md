@@ -75,3 +75,39 @@ executor inspected both complete artifacts and the diff. Commit and PR wording p
 read; the PR body is empty. Implementation and investigation stayed with the executor. Native model-reporting and usage
 counters were unavailable, so exact reviewer attribution cannot be independently verified; private galaxy session
 evidence records that gap.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1733 (the sidebar's version readout explained in plain language), one squash commit on
+main. The plan waited 8 to 19 hours after delivery because the monitor stalled between landing rounds; that was the
+monitor's fault, not the plan's.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, main gained documentation, TODO entries, two browser-test
+cleanups (#1739, #1740), a Clippy cleanup for Rust 1.99 (#1742) and the planning queue's bookkeeping. The rebase met one
+conflict: FLAKES.md, where main and this change each appended an entry; both were kept, main's first.
+
+#### Review before merging
+
+A separate reviewer that had not worked on any of the five plans landing in this round (version-hover-text,
+enter-launches-anywhere, drag-copy-notice, preview-lock-identity, transcript-reads-on-need) read them against each other
+and main before anything merged. They share no code that conflicts; the only textual conflicts were TODO.md, where each
+plan removed only its own entries, and FLAKES.md, where entries were appended. No protocol, supervisor or helm database
+version changes. Moving the development-build check into the protocol crate is safe because the helm re-exports it, and
+the old hover text only appears in files this change updates.
+
+#### Checks
+
+- Run now, on all five plans stacked together in landing order: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` (again after main gained
+  a Rust 1.99 lint cleanup, still clean), `cargo check -p farhelm-ui --features desktop`, the web build check,
+  `dprint
+  check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format` and the UI
+  JavaScript tests (203 passed), all clean; the supervisor and protocol unit tests in full with the Codex, Grok and hook
+  identity end-to-end tests (run `30c797ad`: 1205 of 1206; the one failure is described in transcript-reads-on-need's
+  notes and passed after its fix, 22 of 22 identity tests); and, through the recorder on Chromium and WebKit, the
+  GitHub-checkout composer, GitHub checkouts, destination authority, create idempotency, clone, replace, mouse modes,
+  launcher Enter and Restart with specs (run `cd71dca0`, 196 of 196 passed).
+
+Nothing in the report above was made untrue by the landing.
