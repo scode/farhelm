@@ -1370,7 +1370,8 @@ impl RestartReadiness {
     ///
     /// No surface may assume more than that shape: none of them can hold a
     /// link, so Grok's hook setup is named as a documentation page in plain
-    /// text.
+    /// text. Restart explanations, agent instructions, and the supervisor's
+    /// silent-conversation-hook notification share this timing phrase.
     pub fn clause(self, wording: ReadinessWording) -> &'static str {
         match (self, wording) {
             (RestartReadiness::ShortlyAfterStart, _) => "a few seconds after it starts",

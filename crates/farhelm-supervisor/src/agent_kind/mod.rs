@@ -50,8 +50,8 @@
 //!   agent's name for people and the moment it normally reports a
 //!   conversation Restart can resume. The supervisor's `not_captured`
 //!   refusal (`RestartOffer::unavailable_reason`), the agent instructions,
-//!   and the browser's Restart explanations all word that one fact; a new
-//!   kind that reports conversations needs an entry there, or every surface
+//!   the silent-hook notification, and the browser's Restart explanations
+//!   all word that one fact; a new kind that reports conversations needs an entry there, or every surface
 //!   falls back to wording that names no agent.
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
 //!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,

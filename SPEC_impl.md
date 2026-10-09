@@ -2716,22 +2716,24 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   an insert beyond a session's 10th drops its oldest, and deleting the session deletes its rows. The kinds are the hook
   that never reported (the 65-second tripwire above, recorded by the capture pass that runs it, only for an agent whose
   report is due by its first prompt, `RestartReadiness::due_by_first_prompt`, and not for a launch already told its OMP
-  reporter does not match), a hook that could not be added (recorded by the spawn that decided it, except when
-  `FARHELM_AGENT_HOOKS` turned hooks off for that agent, which is the user's own choice, and except for a kind that adds
-  no hook at all), a Codex or Grok record whose verification withdrew the resume offer (recorded only after the
-  withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's final check
-  before a Restart both record it), and an OMP launch whose recorded reporter is older than this build's or whose
-  installed reporter file is there with different contents (a missing or unreadable file records nothing). The first two
-  say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation, checked in the
-  same statement as the insert, which is also what closes the race between a report's commit and the tripwire. The
-  listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an additive `resolved`
-  bool (false omitted and the decode default): the kind and generation stay columns, because an enum on `SessionInfo`
-  that a newer supervisor extended would make the whole record fail to decode in an older helm, which drops a session it
-  cannot decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor
-  sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a
-  session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and replaced
-  after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the
-  silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
+  reporter does not match; its text uses `AgentKind::display_name` and `RestartReadiness::clause(ToTheUser)` to name the
+  agent and its usual timing, then explains the loss of Resume and suggests checking `{farhelm_args}` for custom
+  commands or sending feedback from the help menu), a hook that could not be added (recorded by the spawn that decided
+  it, except when `FARHELM_AGENT_HOOKS` turned hooks off for that agent, which is the user's own choice, and except for
+  a kind that adds no hook at all), a Codex or Grok record whose verification withdrew the resume offer (recorded only
+  after the withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's
+  final check before a Restart both record it), and an OMP launch whose recorded reporter is older than this build's or
+  whose installed reporter file is there with different contents (a missing or unreadable file records nothing). The
+  first two say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation,
+  checked in the same statement as the insert, which is also what closes the race between a report's commit and the
+  tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an
+  additive `resolved` bool (false omitted and the decode default): the kind and generation stay columns, because an enum
+  on `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm, which
+  drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell and an
+  older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives
+  in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
+  replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves
+  the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
   captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
   non-resolving kind or an earlier launch's warning still triggers a zero-row store call on each pass when the current
   offer is Resume; clearing in the helm does not remove that stored history. Each call uses two indexed updates in one

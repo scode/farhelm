@@ -159,7 +159,7 @@ impl Supervisor {
             entry.info.id.as_str(),
             entry.generation,
             super::notifications::NotificationKind::HookSilent,
-            super::notifications::HOOK_SILENT_TEXT,
+            &super::notifications::hook_silent_text(entry.snapshot.kind),
         )
         .await;
     }
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(silent.len(), 1, "one notification per launch: {silent:?}");
         assert_eq!(
             silent[0].text,
-            super::super::notifications::HOOK_SILENT_TEXT
+            super::super::notifications::hook_silent_text(AgentKind::Claude)
         );
         let entry = sup
             .sessions
