@@ -928,12 +928,6 @@
     "Not connected: this terminal never finished connecting, so nothing typed here would "
     + "reach the session — reopen the session to try again.";
 
-  // Which "this drag did not copy" notices this page has already shown
-  // (copy-on-select.js's `takeNoticeOnce`). Page-wide rather than per
-  // terminal: each distinct text shows once per page load, whichever pane
-  // the drag happened in, so a user who has read it is not told again.
-  const shownDragNotices = new Set();
-
   // The clipboard provider handed to every mount's `ClipboardAddon`
   // (`mount()`, below) in place of the addon's own default
   // `BrowserClipboardProvider`. One shared, stateless object rather than
@@ -3255,6 +3249,7 @@
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
           window.farhelmCopyOnSelect &&
+          window.farhelmTooltip &&
           window.farhelmClipboardWriter &&
           window.farhelmTerminalLinks &&
           fontSettled &&
@@ -5218,9 +5213,28 @@
           if (window.farhelmCopyOnSelect.isOsc52Write(data)) osc52Writes += 1;
           return false;
         });
+        // The live region is rendered by Rust; this mount owns its timer and
+        // listeners. Cancel a pending grace check on the next press as well:
+        // an older drag must not raise a notice after that dismissal boundary.
+        const noticeElement = spec.notice ? document.getElementById(spec.notice) : null;
+        const dragNotice = noticeElement
+          ? window.farhelmCopyOnSelect.createDragCopyNotice(noticeElement, {
+            place: window.farhelmTooltip.placeTooltip,
+            viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+            setTimeout: window.setTimeout.bind(window),
+            clearTimeout: window.clearTimeout.bind(window),
+          })
+          : null;
+        let noticeGraceTimer = null;
+        let pressSequence = 0;
         const handleTerminalMouseDown = (ev) => {
+          pressSequence += 1;
+          if (noticeGraceTimer !== null) clearTimeout(noticeGraceTimer);
+          noticeGraceTimer = null;
+          if (dragNotice) dragNotice.hide();
           gestureStartedHere = true;
           pressed = {
+            sequence: pressSequence,
             x: ev.clientX,
             y: ev.clientY,
             button: ev.button,
@@ -5230,35 +5244,17 @@
             osc52AtPress: osc52Writes,
           };
         };
-        // After the grace period: no OSC 52 since the press means the
-        // program kept the drag to itself, so show the notice (once per
-        // page per text). Never takes focus and never blocks input: it only
-        // writes text into an overlaid, pointer-transparent live region.
-        const showDragCopyNotice = (osc52AtPress) => {
-          if (!alive || osc52Writes !== osc52AtPress) return;
-          const el = spec.notice ? document.getElementById(spec.notice) : null;
-          if (!el) return;
-          // A pane the user switched away from during the grace period is
-          // hidden, not unmounted: showing (and spending the once-per-page
-          // allowance) there would mean nobody ever sees this notice.
-          if (el.closest(".terminal-pane:not(.selected)")) return;
+        // The OSC 52 grace and wording are unchanged. Only a selected pane
+        // shows guidance; a pane switched away during the wait stays silent.
+        const showDragCopyNotice = (press, release) => {
+          noticeGraceTimer = null;
+          if (!alive || press.sequence !== pressSequence || osc52Writes !== press.osc52AtPress) return;
+          if (!dragNotice || noticeElement.closest(".terminal-pane:not(.selected)")) return;
           const text = window.farhelmCopyOnSelect.dragCopyNoticeText({
             platform: navigator.platform,
             appHint: spec.copyHint,
           });
-          if (!window.farhelmCopyOnSelect.takeNoticeOnce(shownDragNotices, text)) return;
-          el.textContent = text;
-          // Below the pane's banner when one is up (a detach or takeover
-          // line sits in flow at the top of the pane), so the notice never
-          // covers it.
-          const banner = spec.banner ? document.getElementById(spec.banner) : null;
-          el.style.top = banner && banner.offsetHeight ? `${banner.offsetHeight}px` : "";
-          // Restart the CSS fade (app.css `.drag-copy-notice.showing`);
-          // reading `offsetWidth` between the two class changes is what
-          // makes the browser treat the second as a new animation.
-          el.classList.remove("showing");
-          void el.offsetWidth;
-          el.classList.add("showing");
+          dragNotice.show(text, release);
         };
         const handleCopyOnSelectMouseUp = (ev) => {
           if (!gestureStartedHere) return;
@@ -5277,6 +5273,7 @@
             const selectionText = hasSelection ? term.getSelection() : "";
             if (
               press &&
+              press.sequence === pressSequence &&
               window.farhelmCopyOnSelect.dragMayHaveCopiedNothing({
                 button: press.button,
                 moved: Math.hypot(ev.clientX - press.x, ev.clientY - press.y),
@@ -5287,8 +5284,8 @@
                 osc52SincePress: osc52Writes !== press.osc52AtPress,
               })
             ) {
-              setTimeout(
-                () => showDragCopyNotice(press.osc52AtPress),
+              noticeGraceTimer = setTimeout(
+                () => showDragCopyNotice(press, { x: ev.clientX, y: ev.clientY }),
                 window.farhelmCopyOnSelect.OSC52_GRACE_MS,
               );
             }
@@ -5305,6 +5302,7 @@
         };
         term.element.addEventListener("mousedown", handleTerminalMouseDown);
         document.addEventListener("mouseup", handleCopyOnSelectMouseUp);
+        if (dragNotice) window.addEventListener("resize", dragNotice.reposition);
         // Removable independently of every other per-mount listener (see
         // this hoisted variable's own declaration above): a DOCUMENT
         // listener outlives the element it was conceptually "for", so
@@ -5313,6 +5311,11 @@
         stopCopyOnSelect = () => {
           term.element.removeEventListener("mousedown", handleTerminalMouseDown);
           document.removeEventListener("mouseup", handleCopyOnSelectMouseUp);
+          if (noticeGraceTimer !== null) clearTimeout(noticeGraceTimer);
+          if (dragNotice) {
+            window.removeEventListener("resize", dragNotice.reposition);
+            dragNotice.dispose();
+          }
         };
         // `baseUrl`, not the `base` the socket was built from: uploads are
         // ordinary HTTP to the same origin the rest of this UI's API calls

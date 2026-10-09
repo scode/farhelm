@@ -35,6 +35,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createSession, listSessions } from "./helpers/fleet";
 import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { addTab, selectTerminal } from "./helpers/terminal-suite";
 import { stackScratchDir } from "./helpers/scratch";
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
@@ -442,7 +443,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
 //
 // When a program has mouse reporting on, a plain drag goes to the program;
 // Farhelm makes no selection and copies nothing unless the program writes
-// OSC 52 itself. terminal.js then shows a short notice (copy-on-select.js's
+// OSC 52 itself. terminal.js then shows a notice (copy-on-select.js's
 // "The drag that copies nothing" has the decision). These two tests drive it
 // through real pointer events against real panes, on both engines, because
 // the notice depends on xterm's live mouse-tracking state, the pane's OSC 52
@@ -488,8 +489,9 @@ async function waitForMouseTracking(page: Page): Promise<void> {
 }
 
 /** A plain left-button drag across the agent terminal's screen, well past
- * the drag threshold, starting a few rows down so it is on the screen. */
-async function dragAcrossTerminal(page: Page): Promise<void> {
+ * the drag threshold, starting a few rows down so it is on the screen.
+ * Return the release point so placement is checked against the actual input. */
+async function dragAcrossTerminal(page: Page): Promise<{ x: number; y: number }> {
   const box = await page.locator("#terminal .xterm-screen").boundingBox();
   if (!box) throw new Error("the agent terminal's screen has no box");
   const y = box.y + Math.min(60, box.height / 2);
@@ -497,6 +499,7 @@ async function dragAcrossTerminal(page: Page): Promise<void> {
   await page.mouse.down();
   await page.mouse.move(box.x + 160, y, { steps: 8 });
   await page.mouse.up();
+  return { x: box.x + 160, y };
 }
 
 /** The forcing modifier the page itself will name, from the shipped rule. */
@@ -512,8 +515,9 @@ async function pageForcingModifier(page: Page): Promise<string> {
  * appears and names the platform's forcing key.
  *
  * Why: the notice is only useful if it appears exactly when a drag copied
- * nothing. The negative gestures run first because each notice text shows
- * once per page, and the stub program copies only on its first byte.
+ * nothing. The stub program copies only on its first byte, so the negative
+ * OSC 52 case runs first. Later drags exercise repeat visibility and input
+ * isolation for the dismiss button against xterm's actual event handlers.
  */
 test("drag-copy notice: shown only for a drag the program kept without copying", async ({
   page,
@@ -533,28 +537,88 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     await waitForTermText(page, ready);
     await waitForMouseTracking(page);
     const notice = page.locator(AGENT_NOTICE);
-    await expect(notice).toHaveText("");
+    const noticeText = notice.locator(".drag-copy-notice-text");
+    await expect(noticeText).toHaveText("");
+    await expect(notice).toBeHidden();
 
     // The program copies in answer to this drag's first byte.
     await dragAcrossTerminal(page);
     await waitForTermText(page, "COPIED");
     // sleep-ok: observation window for a notice that must not appear, past the OSC 52 grace period.
     await page.waitForTimeout(NO_NOTICE_WINDOW_MS);
-    await expect(notice, "a drag the program copied must not raise the notice").toHaveText("");
+    await expect(notice, "a drag the program copied must not raise the notice").toBeHidden();
 
     // A click is not a drag, whatever the program does with it.
     const box = await page.locator("#terminal .xterm-screen").boundingBox();
     await page.mouse.click(box!.x + 40, box!.y + Math.min(60, box!.height / 2));
     // sleep-ok: observation window for a notice that must not appear, past the OSC 52 grace period.
     await page.waitForTimeout(NO_NOTICE_WINDOW_MS);
-    await expect(notice, "a click must not raise the notice").toHaveText("");
+    await expect(notice, "a click must not raise the notice").toBeHidden();
 
     // The program keeps this drag and copies nothing.
-    await dragAcrossTerminal(page);
+    const release = await dragAcrossTerminal(page);
     const key = await pageForcingModifier(page);
     await expect(notice).toContainText("handles mouse selection itself", { timeout: 10_000 });
     await expect(notice).toContainText(`hold ${key} while dragging`);
     await expect(notice).not.toContainText("Codex");
+    await expect(notice).toBeVisible();
+    const noticeBox = (await notice.boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(noticeBox.x).toBeGreaterThanOrEqual(4);
+    expect(noticeBox.y).toBeGreaterThanOrEqual(4);
+    expect(noticeBox.x + noticeBox.width).toBeLessThanOrEqual(viewport.width - 4);
+    expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(viewport.height - 4);
+    expect(Math.abs(noticeBox.x + noticeBox.width / 2 - release.x)).toBeLessThan(2);
+    expect(noticeBox.y).toBeCloseTo(Math.max(4, release.y - 6 - noticeBox.height), 0);
+
+    const textarea = page.locator("#terminal .xterm-helper-textarea");
+    await expect(textarea).toBeFocused();
+    // Observe xterm's real input doorway: a plain terminal press must emit
+    // a mouse report, whereas × must not produce any input through it.
+    await page.evaluate(() => {
+      const state = window as any;
+      state.__noticeInput = [];
+      state.__farhelmTerm.onData((data: string) => state.__noticeInput.push(data));
+    });
+    const dismiss = notice.getByRole("button", { name: "dismiss drag-copy notice" });
+    await expect(dismiss).toHaveAttribute("data-tooltip", "Dismiss this notice");
+    await dismiss.hover();
+    await expect(page.locator(".farhelm-tooltip")).toHaveText("Dismiss this notice");
+    const dismissPoint = (await dismiss.boundingBox())!;
+    await dismiss.click();
+    await expect(notice).toBeHidden();
+    await expect(textarea).toBeFocused();
+    expect(await page.evaluate(() => (window as any).__noticeInput)).toEqual([]);
+
+    await dragAcrossTerminal(page);
+    await expect(notice).toBeVisible({ timeout: 10_000 });
+    await page.evaluate(() => { (window as any).__noticeInput = []; });
+    await page.mouse.click(box!.x + 40, box!.y + Math.min(60, box!.height / 2));
+    await expect(notice).toBeHidden();
+    await expect.poll(() => page.evaluate(() => (window as any).__noticeInput.length)).toBeGreaterThan(0);
+
+    // Hidden × must not eat input at its old location. Inspect the actual
+    // hit-test owner rather than treating an invisible box as proof.
+    expect(await page.evaluate(({ x, y }) =>
+      !!document.elementFromPoint(x, y)?.closest(".drag-copy-notice"),
+    { x: dismissPoint.x + dismissPoint.width / 2, y: dismissPoint.y + dismissPoint.height / 2 }))
+      .toBe(false);
+
+    await dragAcrossTerminal(page);
+    await expect(notice).toBeVisible({ timeout: 10_000 });
+    // Panes retain their layout when switched away. A showing child must
+    // inherit the pane's hidden state rather than leaving × over the shell.
+    const tab = await addTab(page, 0);
+    await expect(page.locator(`.terminal-pane[data-terminal="${tab}"]`)).toBeVisible();
+    await expect(notice).toBeHidden();
+    await selectTerminal(page, "agent");
+    await expect(notice).toBeVisible();
+    // Observe the real timer, not a replacement test-only duration. The
+    // unit clock tests additionally prove the exact 30-second boundary.
+    await expect(notice).toBeHidden({ timeout: 35_000 });
+    await expect(noticeText).toHaveText("");
+    await dragAcrossTerminal(page);
+    await expect(notice).toBeVisible({ timeout: 10_000 });
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -564,12 +628,11 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
  * Spec: in a Codex session's agent terminal, the notice gives Codex's own
  * copy instruction.
  *
- * Why: the session's agent kind is derived from the invocation's basename,
- * so a stub program named `codex` (an absolute path, not the bare word,
- * which the stack's PATH maps to a fake agent that never turns on mouse
- * reporting) exercises the whole path from the supervisor's kind through the
- * UI's spec to the notice. The stub ignores the arguments the supervisor
- * adds for Codex and never copies.
+ * Why: the session explicitly declares the Codex kind, and a private stub
+ * (an absolute path, not the bare word that the stack's PATH maps to a fake
+ * agent without mouse reporting) exercises the whole path from that kind
+ * through the UI's spec to the notice. The stub ignores the arguments the
+ * supervisor adds for Codex and never copies.
  */
 test("drag-copy notice: a Codex session gets Codex's own instruction", async ({
   page,

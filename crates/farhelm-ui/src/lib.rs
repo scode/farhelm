@@ -1212,9 +1212,10 @@ declare_assets! {
     const EVENTS_JS: Asset = asset!("/assets/events.js");
     // Farhelm's own hover tooltip (see the file's module docs for why the
     // browser's `title` tooltip is not used anywhere). It installs one
-    // delegated listener set on `document` when it loads and needs nothing
-    // from the Rust side, so no snippet waits for its global; components only
-    // set `data-tooltip`. Rendered from `App` on both builds rather than from
+    // delegated listener set on `document` when it loads; components only
+    // set `data-tooltip`. The terminal mount gate also waits for its pure
+    // placement helper, which positions drag-copy notices at the pointer.
+    // Rendered from `App` on both builds rather than from
     // `AppBody` with the terminal and feed scripts: it has nothing to do with
     // authentication, and the desktop's startup and failure pages (whose
     // Retry button has hover text) render before `AppBody` exists.
