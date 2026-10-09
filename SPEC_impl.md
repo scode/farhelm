@@ -1719,12 +1719,14 @@ evidence, but cannot authorize another directory move.
   ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame
   (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk tmux confirmed. The terminal's
   automatic replies to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports)
-  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. Residuals: an Enter
-  that only answers a dialog counts, and a paste large enough to span frames has its middle frames judged without their
-  markers. A launch the running supervisor did not spawn (one reloaded after a supervisor restart) is not checked at
-  all, because only the spawn knows whether it added the hook. Its anchor is an in-memory monotonic instant, reset with
-  the diagnostic latch on every relaunch. A Resume carries its identity and therefore stays silent even if its new hook
-  never reports. The warning changes no offer or admission rule.
+  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the
+  latest screen reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An
+  outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path. With no reading
+  yet, or no dedicated reader, the existing submitted-line rule applies. A paste large enough to span frames still has
+  its middle frames judged without their markers. A launch the running supervisor did not spawn (one reloaded after a
+  supervisor restart) is not checked at all, because only the spawn knows whether it added the hook. Its anchor is an
+  in-memory monotonic instant, reset with the diagnostic latch on every relaunch. A Resume carries its identity and
+  therefore stays silent even if its new hook never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
