@@ -233,6 +233,43 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   submitted, so by now it should have been, and say what the user can do about it. Plan:
   `plans/queue/conversation-notice-hook-restart.md`.
 
+- **Read agent transcripts only when functionally needed.** The supervisor re-reads every hook-reported Codex session's
+  transcript header on every sweep (about once a second each: 64 KiB read, copied, and the 23 KB first line parsed), and
+  Grok has an equivalent per-sweep re-check. With hooks as the source of conversation identity, a transcript is read
+  only when a decision functionally depends on content no hook provides: not as a defensive fallback, and not because
+  SPEC.md or SPEC_impl.md currently asks for it (where they do, the specs change). Candidate needs to settle when
+  planning: telling a root Codex conversation from a subagent thread at admission (the hook payload does not say; the
+  header's `source` does), and noticing the new transcript after a `/clear` whose hook fired before the file existed
+  (until it exists, or via a later hook event). Decide whether Restart needs a check at all, and if so do it there
+  rather than on the sweep. Any read that remains stops at the first line. Findings, data, and the options weighed:
+  `lore/2026-10-08-supervisor-idle-cpu.md`.
+
+- **Sweep on the timer only, and stop re-deriving known state.** The per-session sweep runs on the 2 s ticker and again
+  at the start of every session-list and session-info request, including the lists the helm sends after every
+  status-change hint: about one full sweep every 1.3 s, overlapping and contending, enough that ticks overrun. The
+  hook-only identity change (#1540) removed the coalescing that used to skip a ticker sweep after a list's. Run the
+  sweep from the timer only; requests answer from the state it leaves. Within the sweep, stop re-reading anything that
+  cannot have changed since it was last read: in particular stopped sessions whose outcome is settled, which today
+  re-read their launch status file, query checkout provenance, and re-parse their checkout-preparation JSON on every
+  ticker tick and every list, forever. Settle how fresh a list must be, and keep pane liveness (`list-panes`) on the
+  list if exit reporting needs to stay immediate. Needs SPEC_impl.md edits where it says the capture sweep rides
+  `ListSessions` on purpose. Details: `lore/2026-10-08-supervisor-idle-cpu.md`.
+
+- **Cut the supervisor's remaining per-sweep overhead.** Skip the three report-slot renames when a session's report
+  folder listing shows no report file (today every folder costs three failed renames and three UUIDs per sweep, stopped
+  sessions included); when any report is present, keep the full take order Grok's selection and enrichment pairing
+  depends on. Drop the second read of the same session row in the Codex and Grok refresh. Use cached prepared statements
+  for the hot store reads (the crate has none; statement parsing dominates the session-row read). Run the
+  notification-resolve write transaction only when a notification it could resolve exists (SPEC_impl.md currently
+  accepts the unconditional call, so that part is a spec edit). Details: `lore/2026-10-08-supervisor-idle-cpu.md`.
+
+- **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
+  win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
+  supervisor's CPU was the kernel's cross-CPU interrupts from those `munmap` calls, though most of the churn comes from
+  polling the entries above remove. After they land, profile the supervisor, try mimalloc or jemalloc, and keep it only
+  if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for every
+  release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
