@@ -3919,26 +3919,28 @@ pub(crate) struct SessionCells {
     /// the cell is shared across generations: generation-conditional SQL
     /// alone would protect the row while an old capture still moved memory.
     pub(crate) last_work_started_at: Arc<std::sync::atomic::AtomicI64>,
-    /// The session's notifications as the listing carries them, newest first
+    /// The session's notification history and private resolution metadata, newest first
     /// (SPEC.md, Status; [`farhelm_proto::SessionInfo::notifications`]).
     ///
     /// SESSION-scoped like the two stamps above, and for the same reason: a
     /// notification describes the session, a restart must not wipe the
     /// problem it was told about, and a rename certainly must not. The store
     /// is the truth (`session_notifications`, capped, one row per kind per launch);
-    /// this is its in-memory copy, because replies are built synchronously
+    /// this is its in-memory copy, including kind and generation so a capture
+    /// pass can skip resolutions that cannot match. Replies project only the
+    /// wire fields and are built synchronously
     /// from immutable entries (`status::entry_info` overlays it on every
     /// reply). It is only ever REPLACED wholesale from the store
     /// ([`Supervisor::reload_notification_cell`]), never edited in place, so
     /// it cannot drift from what a supervisor restart would load.
-    pub(crate) notifications: Arc<std::sync::Mutex<Vec<farhelm_proto::SessionNotification>>>,
+    pub(crate) notifications: Arc<std::sync::Mutex<Vec<crate::store::StoredSessionNotification>>>,
 }
 
 /// An empty [`SessionCells::notifications`] cell, for an entry the store has
 /// not been read for yet; [`Supervisor::reload_notification_cell`] fills it
 /// once the entry is published.
-pub(crate) fn notification_cell() -> Arc<std::sync::Mutex<Vec<farhelm_proto::SessionNotification>>>
-{
+pub(crate) fn notification_cell()
+-> Arc<std::sync::Mutex<Vec<crate::store::StoredSessionNotification>>> {
     Arc::new(std::sync::Mutex::new(Vec::new()))
 }
 
@@ -6216,7 +6218,7 @@ impl Supervisor {
         // cannot be read leaves the cell empty rather than failing startup
         // over a diagnostic.
         for (id, entry) in &sessions {
-            match store.session_notifications(id).await {
+            match store.session_notification_records(id).await {
                 Ok(stored) => {
                     *entry
                         .session
@@ -19757,7 +19759,12 @@ pub(crate) mod tests {
         assert_eq!(resolved.len(), 1);
         assert!(resolved[0].resolved);
         assert_eq!(resolved[0].seq, warning[0].seq);
-        assert_eq!(*entry.session.notifications.lock().unwrap(), resolved);
+        assert_eq!(
+            crate::service::notifications::notification_wire(
+                &entry.session.notifications.lock().unwrap()
+            ),
+            resolved
+        );
         std::fs::remove_file(&summary).unwrap();
         sup.capture_now().await;
         assert_eq!(
@@ -19775,7 +19782,12 @@ pub(crate) mod tests {
             recurrence[0].seq > warning[0].seq,
             "old read/cleared marks must not cover the recurrence"
         );
-        assert_eq!(*entry.session.notifications.lock().unwrap(), recurrence);
+        assert_eq!(
+            crate::service::notifications::notification_wire(
+                &entry.session.notifications.lock().unwrap()
+            ),
+            recurrence
+        );
     }
 
     /// Codex's exact record can disappear and return without another report.
@@ -19848,14 +19860,24 @@ pub(crate) mod tests {
         assert_eq!(resolved.len(), 1);
         assert!(resolved[0].resolved);
         assert_eq!(resolved[0].seq, warning[0].seq);
-        assert_eq!(*entry.session.notifications.lock().unwrap(), resolved);
+        assert_eq!(
+            crate::service::notifications::notification_wire(
+                &entry.session.notifications.lock().unwrap()
+            ),
+            resolved
+        );
         std::fs::remove_file(&file).unwrap();
         sup.capture_now().await;
         let recurrence = sup.store.session_notifications(&id).await.unwrap();
         assert_eq!(recurrence.len(), 1);
         assert!(!recurrence[0].resolved);
         assert!(recurrence[0].seq > warning[0].seq);
-        assert_eq!(*entry.session.notifications.lock().unwrap(), recurrence);
+        assert_eq!(
+            crate::service::notifications::notification_wire(
+                &entry.session.notifications.lock().unwrap()
+            ),
+            recurrence
+        );
     }
 
     /// A historical Codex row — a bare id admitted before the ownership

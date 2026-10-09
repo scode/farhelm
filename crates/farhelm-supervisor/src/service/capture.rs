@@ -787,11 +787,148 @@ mod tests {
                 (before[0].seq, before[0].at, &before[0].text)
             );
             assert_eq!(
-                *published.session.notifications.lock().unwrap(),
+                super::super::notifications::notification_wire(
+                    &published.session.notifications.lock().unwrap()
+                ),
                 resolved,
                 "the listing cell must publish the resolution, restart={restart}"
             );
         }
+    }
+
+    /// Only unresolved warnings that Resume can resolve for this launch may
+    /// open a resolve transaction. Old launches, setup failures, unknown kinds
+    /// and resolved history remain visible without paying that cost every pass.
+    /// SQLite's authorizer observes actual BEGIN statements, so a no-op SQL
+    /// update cannot pass this test merely because it changes no rows.
+    #[farhelm_testtrace::test]
+    async fn notification_resolution_skips_transactions_without_eligible_history() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.unwrap();
+        let cases = [
+            ("setup", "hook_not_added", false, false, false),
+            ("reporter", "reporter_mismatch", false, false, false),
+            ("unknown", "future_warning", false, false, false),
+            ("older", "hook_silent", true, false, false),
+            ("resolved", "resume_withdrawn", false, true, false),
+            ("silent", "hook_silent", false, false, true),
+            ("withdrawn", "resume_withdrawn", false, false, true),
+        ];
+        let mut entries = Vec::new();
+        for (id, kind, older, resolved, should_resolve) in cases {
+            silent_hook_session(&sup, id, Some("ready-conversation")).await;
+            assert!(
+                sup.store
+                    .record_session_notification(id, 0, kind, "fixture warning", 100, false,)
+                    .await
+                    .unwrap()
+            );
+            if resolved {
+                assert!(
+                    sup.store
+                        .resolve_session_notifications_if_current(
+                            id,
+                            0,
+                            "ready-conversation",
+                            &[kind],
+                        )
+                        .await
+                        .unwrap()
+                );
+            }
+            let mut published = sup.sessions.lock().await.remove(id).unwrap();
+            let entry = Arc::get_mut(&mut published).unwrap();
+            entry.snapshot.resume_template = Some(vec![
+                "claude".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+            ]);
+            if older {
+                sup.store
+                    .conn
+                    .lock()
+                    .execute("UPDATE sessions SET generation = 1 WHERE id = ?1", [id])
+                    .unwrap();
+                entry.generation = 1;
+            }
+            assert!(
+                entry
+                    .run
+                    .capture
+                    .lock()
+                    .unwrap()
+                    .advance(CaptureState::Reported {
+                        conversation: "ready-conversation".into(),
+                        ownership_version: 0,
+                    })
+            );
+            assert_eq!(
+                super::super::status::session_restart_offer(entry),
+                farhelm_proto::RestartOffer::Resume
+            );
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.into(), published.clone());
+            sup.reload_notification_cell(id).await;
+            let stored = sup.store.session_notification_records(id).await.unwrap();
+            assert_eq!(stored.len(), 1);
+            assert_eq!(stored[0].kind, kind);
+            assert_eq!(stored[0].generation, 0);
+            assert_eq!(stored[0].notification.resolved, resolved);
+            entries.push((published, resolved, should_resolve));
+        }
+
+        let begins = Arc::new(AtomicUsize::new(0));
+        let observed = begins.clone();
+        sup.store
+            .conn
+            .lock()
+            .authorizer(Some(move |context: AuthContext<'_>| {
+                if let AuthAction::Transaction {
+                    operation: TransactionOperation::Begin,
+                } = context.action
+                {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        for (entry, was_resolved, should_resolve) in entries {
+            let before = begins.load(Ordering::Relaxed);
+            sup.resolve_resumable_notifications(std::slice::from_ref(&entry))
+                .await;
+            assert_eq!(
+                begins.load(Ordering::Relaxed) - before,
+                usize::from(should_resolve),
+                "{}",
+                entry.info.id
+            );
+            let wire = sup.published_notifications(&entry.info.id).await;
+            assert_eq!(wire.len(), 1);
+            assert_eq!(
+                wire[0].resolved,
+                was_resolved || should_resolve,
+                "{}",
+                entry.info.id
+            );
+            let settled = begins.load(Ordering::Relaxed);
+            sup.resolve_resumable_notifications(std::slice::from_ref(&entry))
+                .await;
+            assert_eq!(
+                begins.load(Ordering::Relaxed),
+                settled,
+                "settled history must skip subsequent writes"
+            );
+        }
+        sup.store
+            .conn
+            .lock()
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
     }
 
     /// Spec (SPEC.md, Status): an agent that reports only after its first

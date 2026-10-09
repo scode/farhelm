@@ -417,6 +417,10 @@ pub(crate) fn check_hook_report(
 /// moment later and then judge its enrichment against the old selection,
 /// refusing and losing it.
 ///
+/// An empty listing skips all slot takes; a newly published report waits for
+/// the next pass. Recovered taken files count as waiting reports even when the
+/// original listing contained no public slot. Temporary-file cleanup still runs.
+///
 /// Generic over `apply` so the file handling can be tested without a
 /// supervisor, a store, or a pane.
 pub(crate) async fn drain_session_dir<F, Fut>(dir: &Path, mut apply: F)
@@ -433,6 +437,11 @@ where
             return;
         }
     };
+    let mut has_report = names.iter().any(|name| {
+        Slot::TAKE_ORDER
+            .into_iter()
+            .any(|slot| *name == slot.file_name())
+    });
     for name in &names {
         let path = dir.join(name);
         if let Some(rest) = name.strip_prefix(hook_report::TAKEN_PREFIX) {
@@ -440,7 +449,10 @@ where
                 .into_iter()
                 .find(|slot| rest.starts_with(&format!("{}-", slot.name())));
             match slot {
-                Some(slot) => put_back(&path, &dir.join(slot.file_name())).await,
+                Some(slot) => {
+                    has_report = true;
+                    put_back(&path, &dir.join(slot.file_name())).await;
+                }
                 None => {
                     let _ = tokio::fs::remove_file(&path).await;
                 }
@@ -448,6 +460,12 @@ where
         } else if name.starts_with(hook_report::TEMP_PREFIX) && is_stale(&path).await {
             let _ = tokio::fs::remove_file(&path).await;
         }
+    }
+    // A hook that publishes after an empty listing waits for the next pass.
+    // Once any slot was observed or recovered, take ALL slots in the existing
+    // order: selecting only listed slots can lose a concurrently written pair.
+    if !has_report {
+        return;
     }
     let mut taken = Vec::new();
     for slot in Slot::TAKE_ORDER {

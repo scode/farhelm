@@ -37,6 +37,7 @@
 //! says so in those words.
 
 use super::core::Supervisor;
+use crate::store::StoredSessionNotification;
 use farhelm_proto::{AgentKind, ReadinessWording};
 use tracing::warn;
 
@@ -44,7 +45,7 @@ use tracing::warn;
 ///
 /// The unit of the one-row-per-launch rule (the store's `(session, generation,
 /// kind)` key) and the reason the record does not assume there is only one
-/// kind of notification. Kind stays private to storage; peers receive the
+/// kind of notification. Kind stays private to the supervisor; peers receive the
 /// text and resolved flag without interpreting a kind enum
 /// (see [`farhelm_proto::SessionInfo::notifications`] for why).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,12 +278,13 @@ impl Supervisor {
         id: &str,
     ) -> Vec<farhelm_proto::SessionNotification> {
         match self.sessions.lock().await.get(id) {
-            Some(entry) => entry
-                .session
-                .notifications
-                .lock()
-                .expect("notification cell poisoned")
-                .clone(),
+            Some(entry) => notification_wire(
+                &entry
+                    .session
+                    .notifications
+                    .lock()
+                    .expect("notification cell poisoned"),
+            ),
             None => Vec::new(),
         }
     }
@@ -295,6 +297,8 @@ impl Supervisor {
     /// vendor record can regain Resume without a new report. The store compares
     /// the exact conversation before resolving, so a concurrent withdrawal
     /// wins over an earlier Resume observation. Older launches stay history.
+    /// The in-memory kind/generation snapshot skips the database entirely when
+    /// no unresolved current-launch warning has a resolving event.
     pub(crate) async fn resolve_resumable_notifications(
         &self,
         entries: &[std::sync::Arc<super::core::SessionEntry>],
@@ -302,11 +306,6 @@ impl Supervisor {
         if !self.may_record() {
             return;
         }
-        let kinds: Vec<&str> = NotificationKind::ALL
-            .into_iter()
-            .filter(|kind| kind.resolves_on_resume())
-            .map(NotificationKind::as_str)
-            .collect();
         for entry in entries {
             if !entry
                 .session
@@ -314,7 +313,13 @@ impl Supervisor {
                 .lock()
                 .expect("notification cell poisoned")
                 .iter()
-                .any(|notification| !notification.resolved)
+                .any(|stored| {
+                    !stored.notification.resolved
+                        && stored.generation == entry.generation
+                        && NotificationKind::ALL
+                            .into_iter()
+                            .any(|kind| kind.resolves_on_resume() && kind.as_str() == stored.kind)
+                })
             {
                 continue;
             }
@@ -332,6 +337,11 @@ impl Supervisor {
             let Some(conversation) = conversation else {
                 continue;
             };
+            let kinds: Vec<&str> = NotificationKind::ALL
+                .into_iter()
+                .filter(|kind| kind.resolves_on_resume())
+                .map(NotificationKind::as_str)
+                .collect();
             match self
                 .store
                 .resolve_session_notifications_if_current(
@@ -362,7 +372,7 @@ impl Supervisor {
     /// may have recorded before the entry existed. An entry that is not
     /// published, or a store that cannot be read, leaves things as they are.
     pub(crate) async fn reload_notification_cell(&self, id: &str) -> bool {
-        let stored = match self.store.session_notifications(id).await {
+        let stored = match self.store.session_notification_records(id).await {
             Ok(stored) => stored,
             Err(error) => {
                 warn!(session = %id, error = %format!("{error:#}"),
@@ -386,6 +396,19 @@ impl Supervisor {
     }
 }
 
+/// Project the stored history onto the protocol without leaking private kinds.
+///
+/// Keeping this projection shared ensures lifecycle replies and ordinary lists
+/// carry identical fields even though the supervisor retains resolution metadata.
+pub(crate) fn notification_wire(
+    stored: &[StoredSessionNotification],
+) -> Vec<farhelm_proto::SessionNotification> {
+    stored
+        .iter()
+        .map(|stored| stored.notification.clone())
+        .collect()
+}
+
 /// Whether `stored` is at least as recent as `current`, judged by their newest
 /// sequence number, then their resolved count (the lists are newest first).
 ///
@@ -396,14 +419,14 @@ impl Supervisor {
 /// resolved count. That second ordering prevents an older unresolved snapshot
 /// from undoing a resolution when neither reload added an entry.
 fn newer_or_equal(
-    stored: &[farhelm_proto::SessionNotification],
-    current: &[farhelm_proto::SessionNotification],
+    stored: &[StoredSessionNotification],
+    current: &[StoredSessionNotification],
 ) -> bool {
-    let version = |list: &[farhelm_proto::SessionNotification]| {
+    let version = |list: &[StoredSessionNotification]| {
         (
-            list.first().map(|n| n.seq),
+            list.first().map(|n| n.notification.seq),
             list.iter()
-                .filter(|notification| notification.resolved)
+                .filter(|stored| stored.notification.resolved)
                 .count(),
         )
     };
@@ -443,19 +466,23 @@ mod tests {
     /// even though its resolved count falls, because its sequence advances.
     #[farhelm_testtrace::test]
     fn notification_snapshots_order_resolution_and_recurrence() {
-        let unresolved = vec![farhelm_proto::SessionNotification {
-            seq: 2,
-            at: 100,
-            text: "warning".into(),
-            resolved: false,
+        let unresolved = vec![StoredSessionNotification {
+            notification: farhelm_proto::SessionNotification {
+                seq: 2,
+                at: 100,
+                text: "warning".into(),
+                resolved: false,
+            },
+            generation: 1,
+            kind: NotificationKind::HookSilent.as_str().into(),
         }];
         let mut resolved = unresolved.clone();
-        resolved[0].resolved = true;
+        resolved[0].notification.resolved = true;
         assert!(newer_or_equal(&resolved, &unresolved));
         assert!(!newer_or_equal(&unresolved, &resolved));
         assert!(newer_or_equal(&resolved, &resolved));
         let mut recurrence = unresolved.clone();
-        recurrence[0].seq = 3;
+        recurrence[0].notification.seq = 3;
         assert!(newer_or_equal(&recurrence, &resolved));
         assert!(!newer_or_equal(&resolved, &recurrence));
         assert!(newer_or_equal(&unresolved, &[]));
