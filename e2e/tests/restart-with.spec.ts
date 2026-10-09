@@ -2,12 +2,13 @@
  * Restart with edits a session's stored launch choice while keeping its conversation.
  *
  * An injected resumable row gives the UI an offer that the fake agent cannot
- * produce on demand. Only its restart route is mocked; the real listing supplies
- * host metadata and the real controls supply their model catalog. This keeps the
- * assertion on the browser's consent and request, without relaunching an agent.
+ * produce on demand. The real listing supplies host metadata; restart answers
+ * are controlled so assertions stay on browser consent and request contents.
+ * Cases that require particular model or effort choices also supply a stamped
+ * catalog, keeping that fixture premise independent of the shipped inventory.
  */
 import { expect, test } from "./helpers/evidence";
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { agentLaunchRow, commandLaunchRow, SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
@@ -43,7 +44,7 @@ const BASELINE = {
  * Copying the stack's existing row keeps host and transport metadata valid;
  * the test changes only the state whose offer and stored selection matter.
  */
-async function injectSession(page: Page, launch: typeof BASELINE | null, offer: string) {
+async function injectSession(page: Page, launch: typeof BASELINE | null, offer: string, state = "interrupted") {
   await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -65,7 +66,7 @@ async function injectSession(page: Page, launch: typeof BASELINE | null, offer: 
         launch === null
           ? { kind: "legacy", invocation: "codex", agent_kind: "codex", resume_template: null }
           : agentLaunchRow(launch),
-      status: { state: "interrupted" },
+      status: { state },
       restart_offer: offer,
     });
     listing.total += 1;
@@ -112,7 +113,25 @@ async function acceptYoloRestart(page: Page): Promise<unknown[]> {
 async function openInjectedDialog(page: Page) {
   await page.goto("/");
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
-  await expect(row).toBeVisible();
+  // Navigation finishes before WASM startup and the injected list render. Use
+  // the same readiness budget as openTerminal: WebKit can receive the listing
+  // near five seconds and paint its healthy row only after that deadline.
+  try {
+    await expect(row).toBeVisible({ timeout: 20_000 });
+  } catch (error) {
+    // The row exists only in the page's intercepted response. A direct API
+    // probe checks its real source premise, not whether the synthetic row is
+    // stored in the helm; the DOM probe says whether injection reached paint.
+    const source = await page.request.get("/api/sessions", { timeout: 5_000 })
+      .then(async (response) => {
+        if (!response.ok()) return `source listing HTTP ${response.status()}`;
+        const listing = await response.json();
+        return `source session present: ${listing.sessions.length > 0}`;
+      })
+      .catch((probeError) => `source listing unavailable: ${probeError}`);
+    const titlePainted = await page.getByRole("button", { name: TITLE, exact: false }).count();
+    throw new Error(`injected row readiness failed; ${source}; matching title buttons: ${titlePainted}`, { cause: error });
+  }
   await row.locator(".session-row-open").click();
   await page.locator(".restart-with-trigger").click();
   const dialog = page.locator(".restart-with-dialog");
@@ -1214,3 +1233,238 @@ test("a YOLO command restart-with asks inside the dialog, worded for an assertio
   expect(bodies[1].with_command).toEqual(bodies[0].with_command);
   expect(bodies[1].with_command.yolo).toBe(true);
 });
+
+/**
+ * Give the new Enter fixtures a known effort vocabulary before opening the dialog.
+ *
+ * These cases assert same-event effort changes, not the shipped model inventory.
+ * The injected stored model may leave that inventory over time; an explicit
+ * catalog keeps Low available and lets the test establish its actual premise.
+ */
+async function installEnterCatalog(page: Page) {
+  await page.route("**/api/launch-catalog", async (route) => fulfillAsHelm(route, { json: [
+    { id: BASELINE.model, harness: "codex", efforts: ["high", "low"] },
+    { id: "enter-model", harness: "codex", efforts: ["high", "low"] },
+  ] }));
+}
+
+/**
+ * Keep each Enter attempt observable without starting a real resumed agent.
+ * Numbered stamped refusals prove that the specific request completed and
+ * released the ordinary operation lock before another choice is exercised.
+ */
+async function refuseEnterRestarts(page: Page): Promise<unknown[]> {
+  const bodies: unknown[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, {
+      status: 409,
+      contentType: "text/plain",
+      body: `Enter fixture refused restart ${bodies.length}`,
+    });
+  });
+  return bodies;
+}
+
+/** Focus is a fixture premise; the new refusal identifies this attempt's completed primary action. */
+async function enterRestartChoice(dialog: Locator, control: Locator, bodies: unknown[]) {
+  const before = bodies.length;
+  const submit = dialog.locator(".restart-with-submit");
+  const submitWasDisabled = await submit.isDisabled();
+  await expect(control, "the Enter fixture must offer the choice before input").toBeVisible();
+  await control.focus();
+  await expect(control).toBeFocused();
+  await control.press("Enter");
+  await expect(dialog.locator(".restart-with-error")).toHaveText(`Enter fixture refused restart ${before + 1}`);
+  await expect(dialog.locator(".restart-with-submit")).not.toHaveAttribute("aria-disabled", "true");
+  // A first choice can still see the unchanged render's disabled submit.
+  // Either surviving target is valid; body or an agent control is not.
+  await expect.poll(() => dialog.evaluate((node) => node.contains(document.activeElement)), {
+    message: "focus must survive the primary action inside the restart dialog",
+  }).toBe(true);
+  if (!submitWasDisabled) await expect(submit).toBeFocused();
+  expect(bodies, "one deliberate Enter sends one ordinary restart").toHaveLength(before + 1);
+  return bodies[before];
+}
+
+/** A choice must reach the restart in the same key event, rather than sending the previous rendered edit. */
+test("restart with choice Enter applies effort permissions and trust before restarting", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  await installEnterCatalog(page);
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  const choice = (group: string, name: string) => dialog.locator(group).getByRole("button", { name, exact: true });
+  expect(await enterRestartChoice(dialog, choice(".launch-composer-effort-choice", "low"), bodies))
+    .toMatchObject({ stop_if_running: false, with: { harness: "codex", model: BASELINE.model, effort: "low" } });
+  expect(await enterRestartChoice(dialog, choice(".launch-composer-permissions-choice", "yolo"), bodies))
+    .toMatchObject({ with: { effort: "low", permissions: "yolo" } });
+  expect(await enterRestartChoice(dialog, choice(".launch-composer-trust-choice", "true"), bodies))
+    .toMatchObject({ with: { effort: "low", permissions: "yolo", workspace_trust: true } });
+});
+
+/** Enter confirms exactly the displayed stop-and-restart warning for a working agent. */
+test("restart with choice Enter carries the displayed working-agent confirmation", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume", "running");
+  await installEnterCatalog(page);
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  await expect(dialog.locator(".restart-with-submit")).toHaveText("stop and restart");
+  await expect(dialog.locator(".restart-with-stop-note")).toHaveText("agent is working; it is stopped first");
+  const low = dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true });
+  expect(await enterRestartChoice(dialog, low, bodies)).toMatchObject({ stop_if_running: true, with: { effort: "low" } });
+});
+
+/** Unchanged, repeating and composing keys cannot apply a choice or bypass primary admission. */
+test("restart with unchanged repeated and composing choice Enter sends nothing", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  await installEnterCatalog(page);
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  const efforts = dialog.locator(".launch-composer-effort-choice");
+  const high = efforts.getByRole("button", { name: "high", exact: true });
+  await expect(high).toHaveAttribute("aria-pressed", "true");
+  await high.focus();
+  await expect(high).toBeFocused();
+  await high.press("Enter");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  const low = efforts.getByRole("button", { name: "low", exact: true });
+  await expect(low, "the catalog fixture must offer Low before repeat input").toBeVisible();
+  for (const flags of [{ repeat: true }, { isComposing: true }]) {
+    await low.focus();
+    await expect(low).toBeFocused();
+    const uncanceled = await low.evaluate((node, flags) => node.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "Enter", bubbles: true, cancelable: true, ...flags,
+    })), flags);
+    expect(uncanceled, "native activation must be canceled too").toBe(false);
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await expect(low).toHaveAttribute("aria-pressed", "false");
+  }
+  expect(bodies).toHaveLength(0);
+  // Positive control: the same ready fixture admits the deliberate edge.
+  expect(await enterRestartChoice(dialog, low, bodies)).toMatchObject({ with: { effort: "low" } });
+});
+
+/** The model field's Restart with policy chooses and restarts; New session's policy remains separate. */
+test("restart with model Enter chooses and restarts from open and closed fields", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  await page.route("**/api/launch-catalog", async (route) => fulfillAsHelm(route, { json: [
+    { id: BASELINE.model, harness: "codex", efforts: ["high", "low"] },
+    { id: "enter-model", harness: "codex", efforts: ["high", "low"] },
+  ] }));
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  const model = dialog.getByRole("combobox", { name: "model", exact: true });
+  await model.fill("enter-model");
+  await expect(dialog.getByRole("option", { name: "enter-model", exact: true })).toBeVisible();
+  expect(await enterRestartChoice(dialog, model, bodies)).toMatchObject({ with: { model: "enter-model" } });
+  // Pointer selection closes the list without restarting and retains field
+  // focus. Closed-field Enter must perform primary without reviving its query.
+  await model.click();
+  await dialog.getByRole("option", { name: "harness default", exact: true }).click();
+  await expect(model).toBeFocused();
+  await expect(model).toHaveValue("harness default");
+  await expect(dialog.locator("#restart-with-model-results")).toHaveCount(0);
+  expect(await enterRestartChoice(dialog, model, bodies)).toMatchObject({ with: { harness: "codex" } });
+  expect(bodies[1]).toHaveProperty("with.model", null);
+});
+
+/** A refused model draft cannot restart the old model, even when another setting already changed. */
+test("restart with model Enter refuses an unselected draft and held keys", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  await page.route("**/api/launch-catalog", async (route) => fulfillAsHelm(route, { json: [
+    { id: BASELINE.model, harness: "codex", efforts: ["high", "low"] },
+    { id: "other-harness-model", harness: "claude", efforts: ["high"] },
+  ] }));
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  await dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }).click();
+  const model = dialog.getByRole("combobox", { name: "model", exact: true });
+  await model.fill("other-harness-model");
+  await expect(model).toBeFocused();
+  for (const flags of [{ repeat: true }, { isComposing: true }]) {
+    const uncanceled = await model.evaluate((node, flags) => node.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "Enter", bubbles: true, cancelable: true, ...flags,
+    })), flags);
+    expect(uncanceled).toBe(false);
+    await expect(model).toHaveValue("other-harness-model");
+  }
+  await model.press("Enter");
+  await expect(dialog.locator(".launch-composer-choice-error")).toHaveText("choose a model for this harness");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  const cancel = dialog.locator(".restart-with-cancel");
+  await cancel.focus();
+  await expect(cancel).toBeFocused();
+  await cancel.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  expect(bodies, "the refused draft, held keys and Cancel send no restart").toHaveLength(0);
+});
+
+/** Command fields invoke primary, while an unselected YOLO radio submits the shown assertion without toggling it. */
+test("restart with command Enter validates and keeps the shown YOLO value", async ({ page }) => {
+  await injectCommandSession(page, "claude --resume {conversation} {farhelm_args}", "resume");
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  const command = dialog.locator(".restart-with-command-input");
+  await command.fill("claude --model sonnet");
+  await expect(command).toBeFocused();
+  await command.press("Enter");
+  await expect(dialog.locator(".restart-with-command-error")).toContainText("{farhelm_args}");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  expect(bodies).toHaveLength(0);
+  await command.fill("claude --model sonnet {farhelm_args}");
+  expect(await enterRestartChoice(dialog, command, bodies)).toMatchObject({
+    with_command: { command: "claude --model sonnet {farhelm_args}", yolo: false },
+  });
+  const yes = dialog.getByRole("radio", { name: "yes (YOLO)", exact: true });
+  await expect(yes).not.toBeChecked();
+  expect(await enterRestartChoice(dialog, yes, bodies)).toMatchObject({ with_command: { yolo: false } });
+  await expect(yes).not.toBeChecked();
+  const resume = dialog.locator(".restart-with-resume-input");
+  await resume.fill("claude --model sonnet --resume {conversation} {farhelm_args}");
+  expect(await enterRestartChoice(dialog, resume, bodies)).toMatchObject({
+    with_command: { resume: "claude --model sonnet --resume {conversation} {farhelm_args}" },
+  });
+});
+
+for (const controlKind of ["effort", "model"] as const) {
+  /** The first changed Enter must hand focus off before busy disables its source control. */
+  test(`restart with first ${controlKind} Enter keeps focus inside while the request is held`, async ({ page }) => {
+    await injectSession(page, BASELINE, "resume");
+    await page.route("**/api/launch-catalog", async (route) => fulfillAsHelm(route, { json: [
+      { id: BASELINE.model, harness: "codex", efforts: ["high", "low"] },
+      { id: "enter-model", harness: "codex", efforts: ["high", "low"] },
+    ] }));
+    const gate = routeGate();
+    const bodies: unknown[] = [];
+    await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+      bodies.push(route.request().postDataJSON());
+      await gate.wait();
+      await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held Enter restart refused" });
+    });
+    try {
+      const dialog = await openInjectedDialog(page);
+      const submit = dialog.locator(".restart-with-submit");
+      const control = controlKind === "effort"
+        ? dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true })
+        : dialog.getByRole("combobox", { name: "model", exact: true });
+      if (controlKind === "model") {
+        await control.fill("enter-model");
+        await expect(dialog.getByRole("option", { name: "enter-model", exact: true })).toBeVisible();
+      }
+      await control.focus();
+      await expect(control).toBeFocused();
+      await expect(submit, "the prior unchanged or pending-model render cannot receive focus").toBeDisabled();
+      await control.press("Enter");
+      await expect(submit).toHaveAttribute("aria-disabled", "true");
+      await expect(control, "busy must disable the control that held focus before Enter").toBeDisabled();
+      await expect(dialog, "the surviving container owns focus before any recovery key").toBeFocused();
+      await expect.poll(() => bodies.length, { message: "the held restart route must capture this request" }).toBe(1);
+      expect(bodies[0]).toMatchObject({ with: controlKind === "effort" ? { effort: "low" } : { model: "enter-model" } });
+      gate.release();
+      await expect(dialog.locator(".restart-with-error")).toHaveText("held Enter restart refused");
+      await expect(dialog).toBeFocused();
+    } finally {
+      gate.release();
+    }
+  });
+}

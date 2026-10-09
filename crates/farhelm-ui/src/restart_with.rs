@@ -42,16 +42,17 @@
 //! there does not focus the button, so focus stays on whichever control the
 //! user touched last until the submit handler runs
 //! [`focus_restart_with_submit`]. The handler does that only when the
-//! render-time `may_submit` is still true. Anything that makes `may_submit`
-//! false, or natively disables the previously focused control, between the
-//! pointer press and the handler (a blur-driven validation error, say) skips
-//! that focus move, and the busy render then drops focus to `body`.
+//! live draft is valid and changed. Every admitted primary action moves focus
+//! before asking the parent to restart, including an Enter that just applied
+//! a choice. Before that choice renders, the submit can still be disabled;
+//! the dialog container is then the surviving focus target. Validation and
+//! focus transfer must stay in that shared path.
 
 use dioxus::prelude::*;
 
 use crate::api;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
-use crate::launch_controls::LaunchControls;
+use crate::launch_controls::{LaunchControls, enter_choice};
 use crate::modal_isolation;
 use crate::peer::display_peer;
 use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
@@ -172,19 +173,21 @@ fn install_focus_trap() {
     document::eval(&format!("{trap}\n{isolate}"));
 }
 
-/// Put focus on the submit button as its click starts a request.
+/// Keep focus inside the modal before a primary action makes its controls busy.
 ///
-/// Busy natively disables every other dialog control, and a disabled control
-/// cannot hold focus, so the submit button (kept enabled while busy, see the
-/// footer) is the one in-dialog target that survives the request. A click
-/// normally focuses it already, but WebKit on macOS does not focus a button
-/// on click, which would leave focus on whichever control the user touched
-/// last and let the busy render drop it to the page body. The call is gated
-/// on the render-time `may_submit`, which is the ordering hazard the module
-/// docs describe.
+/// The submit button survives busy renders, but a same-event choice Enter can
+/// admit a changed draft before the unchanged render's native `disabled` has
+/// cleared. Focusing that button would do nothing. The dialog container is the
+/// existing focus-trap fallback and also survives; use it until the button is
+/// focusable. A pointer submit normally already focuses the button, except on
+/// WebKit, where the previous field can still hold focus and need this handoff.
 fn focus_restart_with_submit() {
     document::eval(
-        "document.querySelector('.restart-with-dialog .restart-with-submit')?.focus({ preventScroll: true })",
+        r#"(() => {
+            const dialog = document.querySelector('.restart-with-dialog');
+            const submit = dialog?.querySelector('.restart-with-submit');
+            (submit && !submit.disabled ? submit : dialog)?.focus({ preventScroll: true });
+        })()"#,
     );
 }
 
@@ -312,40 +315,59 @@ pub(crate) fn RestartWithDialog(
     let yolo_seed = opening_command.as_ref().is_some_and(|c| c.yolo);
     let mut command_yolo = use_signal(move || yolo_seed);
 
-    let current = selection();
-    let draft_pending = model_open() && !model_draft().is_empty();
-    // A pending or failed catalog read cannot establish that a stored
-    // selection became invalid (`launch_composer::selection_fits_catalog`).
-    let compatible = launch_composer::selection_fits_catalog(&current, catalog_answer.as_deref());
-    // The edit as it stands, and why it cannot be sent yet, if it cannot.
-    // A command edit is checked by the same rules a create applies
-    // (`CommandLaunch::validate`), so a mistake shows here, before anything
-    // is stopped, rather than as the helm's refusal.
-    let (edit, edit_problem) = match &opening_command {
-        None => (RestartEdit::Agent(current.clone()), None),
-        Some(stored) => {
-            let draft = CommandLaunch {
-                command: if command_edited() {
-                    command_text()
-                } else {
-                    stored_command.clone()
-                },
-                yolo: command_yolo(),
-                agent: stored.agent,
-                resume: Some(if resume_edited() {
-                    resume_text()
-                } else {
-                    stored_resume.clone()
-                }),
+    // Both paint and submission read the same draft contract. Signals are read
+    // inside the callback: a choice followed by Enter submits in the same event,
+    // before Dioxus can render that choice into props or button availability.
+    // Command edits use create validation before anything stops. Untouched
+    // escaped fields still send the stored bytes, rather than their display text.
+    let read_edit = Callback::new({
+        let opening_command = opening_command.clone();
+        let stored_command = stored_command.clone();
+        let stored_resume = stored_resume.clone();
+        move |()| {
+            let current = selection();
+            let catalog = catalog_resource.read();
+            let catalog = catalog.as_ref().and_then(|answer| answer.as_ref().ok());
+            let compatible = launch_composer::selection_fits_catalog(
+                &current,
+                catalog.map(|models| models.as_slice()),
+            );
+            let (edit, problem) = match &opening_command {
+                None => (RestartEdit::Agent(current), None),
+                Some(stored) => {
+                    let draft = CommandLaunch {
+                        command: if command_edited() {
+                            command_text()
+                        } else {
+                            stored_command.clone()
+                        },
+                        yolo: command_yolo(),
+                        agent: stored.agent,
+                        resume: Some(if resume_edited() {
+                            resume_text()
+                        } else {
+                            stored_resume.clone()
+                        }),
+                    };
+                    let problem = draft.validate().err();
+                    (RestartEdit::Command(draft), problem)
+                }
             };
-            let problem = draft.validate().err();
-            (RestartEdit::Command(draft), problem)
+            let ready = match &edit {
+                RestartEdit::Agent(_) => {
+                    !(model_open() && !model_draft().is_empty())
+                        && model_error().is_none()
+                        && compatible
+                }
+                RestartEdit::Command(_) => problem.is_none(),
+            };
+            (edit, problem, ready)
         }
-    };
-    let ready = match &edit {
-        RestartEdit::Agent(_) => !draft_pending && model_error().is_none() && compatible,
-        RestartEdit::Command(_) => edit_problem.is_none(),
-    };
+    });
+    let current = selection();
+    // A failed catalog read cannot prove that a stored choice became invalid.
+    let compatible = launch_composer::selection_fits_catalog(&current, catalog_answer.as_deref());
+    let (edit, edit_problem, ready) = read_edit.call(());
     // Which fields the edit changes, judged on what it would send (an
     // untouched field sends the stored bytes), for each field's marker.
     let (command_changed, resume_changed, yolo_changed) = match (&edit, &opening_command) {
@@ -357,9 +379,23 @@ pub(crate) fn RestartWithDialog(
         _ => (false, false, false),
     };
     let may_submit = !busy && edit != opening && ready;
-    // One copy per submit path: each handler is called again on the next
-    // click, and the edit it sends is the one on screen at this render.
-    let (edit_confirm, edit_stop_asking, edit_submit) = (edit.clone(), edit.clone(), edit);
+    // The parent still owns live operation admission and the rendered stop
+    // consent. Reading the draft live must not widen that consent to a working
+    // agent the displayed action did not say it would stop.
+    let primary = Callback::new({
+        let opening = opening.clone();
+        move |(confirm_yolo, stop_asking)| {
+            let (edit, _, ready) = read_edit.call(());
+            if busy || !ready || edit == opening {
+                return;
+            }
+            // Move focus before the busy render disables the choice that held
+            // it. This ordering applies to keyboard submits and YOLO answers too.
+            focus_restart_with_submit();
+            on_submit.call((edit, confirm_yolo, stop_asking));
+        }
+    });
+    let choice_primary = EventHandler::new(move |()| primary.call((false, false)));
     let host = session.host_name.as_deref().unwrap_or("unknown host");
     let title = display_peer(&session.title);
     let folder = display_peer(&session.cwd);
@@ -408,6 +444,11 @@ pub(crate) fn RestartWithDialog(
                 tabindex: "-1",
                 onmounted: move |_| install_focus_trap(),
                 onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Enter && (evt.is_auto_repeating() || evt.is_composing()) {
+                        // Native action-button activation needs the same held-key
+                        // boundary as the explicit choice and text-field paths.
+                        evt.prevent_default();
+                    }
                     if evt.key() == Key::Escape && !evt.is_composing() && !busy {
                         on_cancel.call(());
                     }
@@ -447,6 +488,7 @@ pub(crate) fn RestartWithDialog(
                                 dir: "ltr",
                                 value: "{command_text}",
                                 disabled: busy,
+                                onkeydown: move |evt| enter_choice(evt, busy, || {}, Some(choice_primary)),
                                 oninput: move |evt| {
                                     command_text.set(evt.value());
                                     command_edited.set(true);
@@ -468,6 +510,7 @@ pub(crate) fn RestartWithDialog(
                                 dir: "ltr",
                                 value: "{resume_text}",
                                 disabled: busy,
+                                onkeydown: move |evt| enter_choice(evt, busy, || {}, Some(choice_primary)),
                                 oninput: move |evt| {
                                     resume_text.set(evt.value());
                                     resume_edited.set(true);
@@ -486,6 +529,7 @@ pub(crate) fn RestartWithDialog(
                                     name: "restart-with-command-yolo",
                                     checked: command_yolo(),
                                     disabled: busy,
+                                    onkeydown: move |evt| enter_choice(evt, busy, || {}, Some(choice_primary)),
                                     onchange: move |_| command_yolo.set(true),
                                 }
                                 "yes (YOLO)"
@@ -497,6 +541,7 @@ pub(crate) fn RestartWithDialog(
                                     name: "restart-with-command-yolo",
                                     checked: !command_yolo(),
                                     disabled: busy,
+                                    onkeydown: move |evt| enter_choice(evt, busy, || {}, Some(choice_primary)),
                                     onchange: move |_| command_yolo.set(false),
                                 }
                                 "no"
@@ -527,6 +572,8 @@ pub(crate) fn RestartWithDialog(
                     model_id_prefix: "restart-with-model".to_string(),
                     baseline: Some(baseline.clone()),
                     fixed_harness: true,
+                    on_choice_enter: Some(choice_primary),
+                    on_model_primary_enter: Some(choice_primary),
                     on_model_focus: move |_| {
                         model_draft.set(String::new());
                         model_open.set(true);
@@ -557,8 +604,14 @@ pub(crate) fn RestartWithDialog(
                     on_model_enter: {
                         move |target| match target {
                             ModelEnterTarget::Nothing => {
-                                model_draft.set(String::new());
-                                model_open.set(false);
+                                // An obsolete highlighted row must not discard an
+                                // unselected draft and restart the previous model.
+                                if !model_draft().trim().is_empty() {
+                                    model_error.set(Some("choose a model before restarting".to_string()));
+                                } else {
+                                    model_draft.set(String::new());
+                                    model_open.set(false);
+                                }
                             }
                             ModelEnterTarget::Option(option) => apply_option.call(option),
                             ModelEnterTarget::Custom { id, harness } if harness == baseline.harness => {
@@ -609,20 +662,14 @@ pub(crate) fn RestartWithDialog(
                         // `focus_restart_with_cancel` and
                         // `focus_restart_with_submit`.
                         on_confirm: move |_| {
-                            if may_submit {
-                                focus_restart_with_submit();
-                                on_submit.call((edit_confirm.clone(), true, false));
-                            }
+                            primary.call((true, false));
                         },
                         // The answer takes the question down while the host
                         // is marked safe, which would drop the focus of this
                         // button with it; the submit button is the control
                         // that stays enabled.
                         on_confirm_and_stop_asking: move |_| {
-                            if may_submit {
-                                focus_restart_with_submit();
-                                on_submit.call((edit_stop_asking.clone(), true, true));
-                            }
+                            primary.call((true, true));
                         },
                         on_cancel: move |_| {
                             focus_restart_with_cancel();
@@ -660,10 +707,7 @@ pub(crate) fn RestartWithDialog(
                         disabled: !may_submit && !busy,
                         aria_disabled: if busy { "true" },
                         onclick: move |_| {
-                            if may_submit {
-                                focus_restart_with_submit();
-                                on_submit.call((edit_submit.clone(), false, false));
-                            }
+                            primary.call((false, false));
                         },
                         if stop_first { "stop and restart" } else { "restart" }
                     }

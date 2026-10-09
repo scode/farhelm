@@ -773,13 +773,18 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   effort, permissions, or workspace trust of an agent launch, or the command, resume command, and YOLO assertion of a
   command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can change the harness or
   folder, and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary
-  action is inactive until a setting changes. A working agent is stopped first with the user's confirmation on that
-  action; a live agent in any other status is stopped first without it, as for Restart. The edited launch is validated
-  exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent running and the
-  dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. Restart with runs the
-  resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
-  This action is available exactly when Restart is. Its header button remains visible but greyed out otherwise, with a
-  hover tooltip and accessible description explaining why.
+  action is inactive until a setting changes. Enter on an effort, permission or trust button applies that choice, then
+  performs the primary action with the resulting settings. Enter in the model field chooses the model and performs the
+  primary action; with the model list closed it uses the selected model. Enter on a YOLO radio or command field performs
+  the primary action with the values shown, without toggling the radio. An unchanged or invalid draft does nothing, and
+  held or composing Enter never restarts. Action buttons and the YOLO confirmation keep their own Enter rules. When the
+  primary action says "stop and restart", Enter on a choice or field confirms that displayed action. A working agent is
+  stopped first with the user's confirmation on that action; a live agent in any other status is stopped first without
+  it, as for Restart. The edited launch is validated exactly as a create validates it before anything is stopped, so an
+  invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves the dialog and its edits
+  visible with the reason. Restart with runs the resume command, so an edited start command of a command launch takes
+  effect the next time it is cloned or replaced. This action is available exactly when Restart is. Its header button
+  remains visible but greyed out otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one. A session associated with a GitHub checkout starts on a fresh
   checkout of the same repository, named `<title>-clone` with the first free numeric suffix when taken, as described
