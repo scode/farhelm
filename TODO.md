@@ -220,6 +220,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for every
   release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
 
+- **Resizable sidebar.** Let the user resize the sidebar by dragging a handle on its edge, with sensible minimum and
+  maximum widths. Decide whether the width is remembered per device, like the terminal text size, or shared by every
+  client.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
