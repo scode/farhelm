@@ -1035,6 +1035,12 @@ export async function patchPreferences(
  * (an order, a selected row) is what the next test's page opens with. A
  * spec whose subject is the order or the auto-select must therefore reset
  * the row in `beforeEach` rather than inherit the last test's answer.
+ *
+ * Every field `patchPreferences` accepts belongs in this reset. One left out
+ * leaks across spec files without any test noticing locally: remembered
+ * workspace trust was missing, so the quick switcher's `true` survived its
+ * own `afterEach` and the sidebar's model-first composer test, which runs
+ * later in a full-suite run, saw `trust: true` in both engines.
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
@@ -1042,6 +1048,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     last_selected: null,
     compact: null,
     remembered_permissions: null,
+    remembered_workspace_trust: null,
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
     feedback_contact: null,

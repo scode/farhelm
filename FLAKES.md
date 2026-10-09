@@ -1614,3 +1614,45 @@ Test timeout of 60000ms exceeded.
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-09 — `composer keeps arbitrary model-first choices reviewable` (e2e/tests/sidebar.spec.ts)
+
+The deflake sweep's browser phase failed this scenario in both Chromium and WebKit in run
+`edf936f9-21f6-463b-8ecd-01a1b2eb1efd`, clean commit `0c2453de30267184405ce1868031a822344596fd` (empty porcelain). The
+selection was the full browser suite on both engines, one worker and zero retries, with the redacted child command
+`npx playwright test --grep-invert '<the known-flakes exclusions>'`; 1360 passed, 14 skipped and 4 failed in 3.0 hours.
+The only other failures were `a wheel over the header or the sidebar edge never scrolls the document` in
+`e2e/tests/shell-scroll.spec.ts`, in both engines, a deterministic cleanup failure fixed separately in #1740. Both
+failing attempts here ended on a five-second assertion timeout, not the test limit: 7.4 seconds in Chromium and 14.2
+seconds in WebKit, against isolated passes of 3.1–3.9 and 7.2–8.5 seconds. The summary showed `trust: true` throughout
+the wait. The deflake driver's three classification reruns, each running the test alone in both engines, passed six of
+six (`eec5659f-2500-45bd-8956-89110f94210a`, `877a67bb-3be6-457b-aac7-e9761a1db2fb`,
+`46f837df-e174-4133-9411-155d45d2bade`), which is what made it look like a flake. It is order dependence instead. A
+fresh launch dialog preselects the helm-wide remembered workspace trust. The quick-switcher test
+`the pinned name action opens ordinary New with remembered defaults` sets that preference to `true`, and its spec's
+`afterEach` calls the shared `resetPreferences` helper, which reset every preference except remembered workspace trust.
+Projects run in file order with one worker, so `quick-switcher.spec.ts` runs before `sidebar.spec.ts` in each engine and
+the sidebar test inherited `true`. The test already pinned its permissions choice for the same reason, but not trust.
+Running only those two tests in that order on main `b7188aaa` failed the sidebar test in both engines on the first
+attempt (`1b3eebcb-e7bf-4f11-8ad5-cab554017f3d`, one of one). Fixed in #1739: `resetPreferences` now clears remembered
+workspace trust, and the test pins trust to default as it does permissions. With both changes the same pair passed four
+of four (`f7bd1275-bcea-447c-b2d9-f78b11aa3903`). With only the test's pin, and the helper still leaking, it also passed
+four of four (`a5851836-1b7f-41f3-889e-7ac7f4656bf2`). The full quick-switcher and tooltip-coverage specs passed 20 of
+20 on both engines with the helper change (`ae8c5025-e05d-4eb0-909c-e4e3ad0dfe49`). The sweep ran on a Linux x86_64 host
+with 18 CPUs, kernel 6.8.0-146-generic, Python 3.14.8, while another agent ran its own test batteries from a sibling
+checkout; load average was not recorded. tmux 3.7c, executable SHA256
+`9278b74aab5e012b9732f9f1af693929ba9edc7296c7b2a2c25818683adc2647`, was recorded. Locale `LANG=C.UTF-8` with `LC_ALL`
+and `LC_CTYPE` absent. The recorder removed the ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` and supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+Node, Playwright and browser build versions are unavailable here. The full evidence is retained privately on the
+executing machine with no hosted expiry.
+
+```
+Expected: "model: reviewable-codex · effort: default · permissions: default · trust: default"
+Received: "model: reviewable-codex · effort: default · permissions: default · trust: true"
+Timeout:  5000ms
+```
+
+Class: fixture-premise
+
+Cause: established
