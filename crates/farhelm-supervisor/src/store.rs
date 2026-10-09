@@ -1377,6 +1377,19 @@ pub struct SessionStore {
     pub(crate) conn: crate::db::Db,
 }
 
+/// A notification's private resolution metadata beside its wire representation.
+///
+/// The supervisor keeps all three fields in one snapshot so it can identify an
+/// eligible current-launch warning without a database read on each capture pass.
+/// Kind and generation never go onto the wire, where a future kind must remain
+/// readable by an older helm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StoredSessionNotification {
+    pub(crate) notification: farhelm_proto::SessionNotification,
+    pub(crate) generation: i64,
+    pub(crate) kind: String,
+}
+
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
 /// (`user_version` 0, SQLite's default for a database that has never set
 /// it) or migrating it forward one step at a time.
@@ -2706,13 +2719,14 @@ fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Optio
 /// Keeping decoding shared preserves the same corruption refusal for ordinary
 /// reads and preparation observation. Splitting raw SQLite decoding from outcome
 /// validation retains the specific diagnostic for a corrupt stored outcome.
+/// Only the prepared statement is cached: every call still reads current rows,
+/// including when reached through another transaction on this connection.
 fn read_session(conn: &Connection, id: &str) -> anyhow::Result<Option<StoredSession>> {
     let raw = conn
-        .query_row(
-            &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
-            [id],
-            read_session_columns,
-        )
+        .prepare_cached(&format!(
+            "SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"
+        ))?
+        .query_row([id], read_session_columns)
         .optional()
         .context("reading a session row")?;
     raw.map(decode_session_row).transpose()
@@ -2728,11 +2742,8 @@ fn read_origin_working_copy(
     session_id: &str,
 ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
     let recorded: Option<String> = conn
-        .query_row(
-            "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT fresh_checkout_id FROM sessions WHERE id = ?1")?
+        .query_row([session_id], |row| row.get(0))
         .optional()?
         .flatten();
     let origin = crate::working_copies::origin_working_copy(conn, session_id)
@@ -5089,28 +5100,51 @@ impl SessionStore {
             .await
     }
 
-    /// Session `id`'s notifications as the listing carries them, newest
-    /// first. Empty for a session with none, or one that does not exist.
+    /// Session `id`'s notifications as the listing carries them, newest first.
+    /// Empty for a session with none, or one that does not exist. Internal
+    /// resolution metadata stays out of lifecycle replies and protocol fields.
     pub async fn session_notifications(
         &self,
         id: &str,
     ) -> anyhow::Result<Vec<farhelm_proto::SessionNotification>> {
+        Ok(self
+            .session_notification_records(id)
+            .await?
+            .into_iter()
+            .map(|stored| stored.notification)
+            .collect())
+    }
+
+    /// Load wire history and resolution metadata from the same database snapshot.
+    ///
+    /// Current-generation, unresolved, resolving kinds are the only warnings a
+    /// capture pass can change. Retaining their metadata with the wire history
+    /// avoids a per-pass probe, while the resolve SQL still validates identity
+    /// and generation at the moment it writes.
+    pub(crate) async fn session_notification_records(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Vec<StoredSessionNotification>> {
         let id = id.to_string();
         self.conn
             .call(
                 "session notification read task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Vec<farhelm_proto::SessionNotification>> {
-                    let mut statement = conn.prepare(
-                        "SELECT seq, recorded_at, text, resolved_at IS NOT NULL FROM session_notifications \
+                move |conn: &mut Connection| -> anyhow::Result<Vec<StoredSessionNotification>> {
+                    let mut statement = conn.prepare_cached(
+                        "SELECT seq, recorded_at, text, resolved_at IS NOT NULL, generation, kind FROM session_notifications \
                          WHERE session_id = ?1 ORDER BY seq DESC",
                     )?;
                     let rows = statement
                         .query_map([&id], |row| {
-                            Ok(farhelm_proto::SessionNotification {
-                                seq: row.get::<_, i64>(0)?.max(0) as u64,
-                                at: row.get(1)?,
-                                text: row.get(2)?,
-                                resolved: row.get(3)?,
+                            Ok(StoredSessionNotification {
+                                notification: farhelm_proto::SessionNotification {
+                                    seq: row.get::<_, i64>(0)?.max(0) as u64,
+                                    at: row.get(1)?,
+                                    text: row.get(2)?,
+                                    resolved: row.get(3)?,
+                                },
+                                generation: row.get(4)?,
+                                kind: row.get(5)?,
                             })
                         })?
                         .collect::<Result<Vec<_>, _>>()
@@ -5481,7 +5515,7 @@ impl SessionStore {
                 "session load task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<Vec<StoredSession>> {
                     let mut stmt = conn
-                        .prepare(&format!("SELECT {SESSION_COLUMNS} FROM sessions"))
+                        .prepare_cached(&format!("SELECT {SESSION_COLUMNS} FROM sessions"))
                         .context("preparing session load query")?;
                     // Two stages, not one: the outcome, kind, and template columns
                     // are reassembled by functions that return `anyhow::Error` for

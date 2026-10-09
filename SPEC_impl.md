@@ -2739,17 +2739,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   first two say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation,
   checked in the same statement as the insert, which is also what closes the race between a report's commit and the
   tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an
-  additive `resolved` bool (false omitted and the decode default): the kind and generation stay columns, because an enum
-  on `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm, which
-  drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell and an
-  older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives
-  in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
-  replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves
-  the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
-  captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
-  non-resolving kind or an earlier launch's warning still triggers a zero-row store call on each pass when the current
-  offer is Resume; clearing in the helm does not remove that stored history. Each call uses two indexed updates in one
-  transaction. No per-entry latch suppresses these calls. The resolve SQL compares the exact captured conversation and
+  additive `resolved` bool (false omitted and the decode default): the kind and generation stay private to the store and
+  supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer supervisor extended would
+  make the whole record fail to decode in an older helm, which drops a session it cannot decode. The field is additive
+  with a decode default, so an older helm shows no bell and an older supervisor sends none, and needed no protocol bump.
+  Replies are built from immutable entries, so the list lives in a session-scoped cell beside the activity time, seeded
+  from the store when an entry is built from a row and replaced after each recording or resolution, which then sends the
+  `SessionsChanged` hint. Each capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic
+  restart offer is Resume, rather than merely when a captured conversation exists. This includes reports admitted before
+  startup publishes the entry. An unresolved non-resolving kind or an earlier launch's warning remains history; clearing
+  in the helm does not remove it from the store. The in-memory snapshot retains kind and generation beside the wire
+  fields, so a pass with no unresolved, resolving kind for the current launch skips the store call entirely. An eligible
+  pass uses two indexed updates in one transaction. The resolve SQL compares the exact captured conversation and
   generation on the session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads
   order snapshots by newest sequence and then resolved count: with the newest sequence fixed, only resolution changes,
   and it only grows; reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old

@@ -772,7 +772,7 @@ pub fn delete_planned(conn: &Connection, working_copy_id: &str) -> Result<()> {
 /// permission to run that directory's clone or preparation again. More
 /// than one origin record is corruption and refuses recovery.
 pub fn origin_working_copy(conn: &Connection, session_id: &str) -> Result<Option<WorkingCopyRow>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
          original_basename, origin_session_id, root_device, root_inode, \
          path_device, path_inode, root_birth_ns, path_birth_ns, allocation_state, archive_destination, \
@@ -791,7 +791,7 @@ pub fn origin_working_copy(conn: &Connection, session_id: &str) -> Result<Option
 /// Membership says nothing about which session originated a checkout;
 /// callers recovering preparation must use [`origin_working_copy`].
 pub fn member_working_copies(conn: &Connection, session_id: &str) -> Result<Vec<WorkingCopyRow>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT w.id, w.canonical_root, w.canonical_path, w.repo_owner, w.repo_name, \
          w.original_basename, w.origin_session_id, w.root_device, w.root_inode, \
          w.path_device, w.path_inode, w.root_birth_ns, w.path_birth_ns, w.allocation_state, w.archive_destination, \
