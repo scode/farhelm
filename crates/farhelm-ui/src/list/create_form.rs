@@ -38,6 +38,51 @@ const MINT_ATTEMPTS: usize = 3;
 /// destination correction can retire only this refusal, not an unrelated error.
 const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a different installation; choose the host or folder again before launching";
 
+/// The first unmet launch prerequisite, shared by the button and its refusal.
+///
+/// These are presentation inputs, not admission authority: submit still checks
+/// live signals and the helm decides whether the request can actually launch.
+/// Keeping one reason for both the grey state and hover prevents a button from
+/// advertising readiness while silently refusing an attempt.
+struct LaunchPrerequisites {
+    busy: bool,
+    saving_template: bool,
+    host_available: bool,
+    destination_ready: bool,
+    github_search: bool,
+    remembered_destination_valid: bool,
+    needs_harness: bool,
+    incompatible_choice: bool,
+}
+
+impl LaunchPrerequisites {
+    /// Explain the first condition the user must clear before launching.
+    /// Ordering keeps transient operation locks ahead of draft corrections.
+    fn refusal(&self) -> Option<&'static str> {
+        if self.busy {
+            Some("wait for the current operation to finish before launching")
+        } else if self.saving_template {
+            Some("finish or cancel saving the template before launching")
+        } else if !self.host_available {
+            Some("choose a connected host before launching")
+        } else if self.github_search {
+            Some("select a GitHub repository from search before launching")
+        } else if !self.destination_ready {
+            Some("wait for a current checkout preview before launching")
+        } else if !self.remembered_destination_valid {
+            Some(REMEMBERED_DESTINATION_CHANGED)
+        } else if self.needs_harness {
+            Some("choose a structured harness before launching")
+        } else if self.incompatible_choice {
+            Some(
+                "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+            )
+        } else {
+            None
+        }
+    }
+}
+
 /// The host installation a create intent is bound to.
 ///
 /// The idempotency key and clone target are installation-specific: a
@@ -1844,7 +1889,7 @@ fn effective_title(
 /// mounts immediately (SPEC.md: "creation launches the agent; you type
 /// your first prompt into its terminal") — the sidebar itself stays
 /// mounted throughout. On failure the form stays mounted with its values
-/// untouched and the error text rendered next to it — the fields are
+/// untouched and the refusal rendered beside Launch — the fields are
 /// plain `use_signal<String>`s rather than being reset or lifted into
 /// `ListView`, so "form contents preserved" falls out of simply not
 /// clearing them rather than needing a restore step. On success the
@@ -2202,6 +2247,10 @@ pub(super) fn CreateSessionForm(
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // An untouched dialog is allowed to be incomplete. Once attempted, its
+    // prerequisite reason follows the current draft and disappears when ready;
+    // request failures retain the helm's own words until the next attempt.
+    let mut launch_attempted = use_signal(|| false);
     // A YOLO launch the helm refused because its host asks before YOLO launches, and the
     // user's confirmation of one (see `yolo_confirm`). Both are tied to the intent key the
     // refused request carried, not to "the next submit": the key is bound to the whole
@@ -3024,6 +3073,23 @@ pub(super) fn CreateSessionForm(
     let fresh_destination_ready = matches!(destination_draft(), DestinationDraft::Existing { .. })
         || retry_binding.is_some()
         || current_preview.is_some();
+    let command_requires_text = retry_binding.is_none();
+    let launch_refusal = LaunchPrerequisites {
+        busy,
+        saving_template: template_panel().is_some() || template_saving(),
+        host_available: selected_host_available,
+        destination_ready: fresh_destination_ready,
+        github_search: crate::launch_composer::scoped_query(&composer_search()).0
+            == crate::launch_composer::SearchScope::Github,
+        remembered_destination_valid,
+        needs_harness: retry_binding.is_none()
+            && launch_tab() == LaunchTab::Agent
+            && structured_harness().is_none(),
+        incompatible_choice: retry_binding.is_none()
+            && launch_tab() == LaunchTab::Agent
+            && structured_choice_error.is_some(),
+    }
+    .refusal();
     let displayed_preview = retry_binding
         .as_ref()
         .and_then(|binding| {
@@ -3775,6 +3841,9 @@ pub(super) fn CreateSessionForm(
             "data-history-activation-attempts": "{history_activation_attempts}",
             "data-remembered-destination-valid": "{remembered_destination_valid}",
             role: "dialog",
+            // Browser validity bubbles cannot explain a refusal beside Launch.
+            // Submit and the helm keep their ordinary validation authority.
+            novalidate: true,
             aria_modal: "true",
             aria_label: "launch a session",
             onmounted: move |_| {
@@ -3797,6 +3866,8 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt| {
                 evt.prevent_default();
+                launch_attempted.set(true);
+                error.set(None);
                 if template_panel().is_some() || template_saving() { return; }
                 // The claim is the guard, and it is synchronous: it covers a
                 // second submit of THIS form (a double-click, a stray repeat
@@ -3830,7 +3901,6 @@ pub(super) fn CreateSessionForm(
                 // from the one the button was pressed on.
                 let launch = if *launch_tab.peek() == LaunchTab::Agent {
                     let Some(harness) = *structured_harness.peek() else {
-                        error.set(Some("choose a structured harness before launching".to_string()));
                         ops.release();
                         return;
                     };
@@ -3852,6 +3922,13 @@ pub(super) fn CreateSessionForm(
                     // The RAW bytes while untouched, not the escaped display
                     // the field shows — see [`submitted_field`]
                     // (item2-review2.md F5).
+                    // Replacing browser required-field validation keeps its
+                    // empty-command refusal visible at Launch. Accepted fresh
+                    // retries keep their existing exemption from this check.
+                    if command_requires_text && invocation.peek().is_empty() {
+                        error.set(Some("enter an agent command before launching".to_string()));
+                        return;
+                    }
                     let Some(command) = command_intent(
                         submitted_field(
                             &invocation.peek(),
@@ -3890,7 +3967,6 @@ pub(super) fn CreateSessionForm(
                     remembered_destination.peek().as_ref(),
                     live_destination.peek().as_ref(),
                 ) {
-                    error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
                     return;
                 }
                 // The host target must have caught up with the selector before
@@ -3909,10 +3985,6 @@ pub(super) fn CreateSessionForm(
                         .find(|host| host.id == id)
                         .is_some_and(|host| host.phase.is_none())
                 }) {
-                    error.set(Some(
-                        "the selected host is unavailable, so this create was not sent — choose a connected host"
-                            .to_string(),
-                    ));
                     ops.release();
                     return;
                 }
@@ -3989,7 +4061,6 @@ pub(super) fn CreateSessionForm(
                     return;
                 };
                 if crate::launch_composer::scoped_query(&composer_search()).0 == crate::launch_composer::SearchScope::Github {
-                    error.set(Some("select a GitHub repository from search before launching".into()));
                     return;
                 }
                 let fresh_draft_snapshot = move || (
@@ -4041,7 +4112,6 @@ pub(super) fn CreateSessionForm(
                     && let LaunchIntent::Structured(selection) = &binding.agent
                     && !crate::launch_composer::selection_fits_catalog(selection, catalog_for_submit.as_deref())
                 {
-                    error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
                     return;
                 }
                 let base = base.clone();
@@ -4072,6 +4142,9 @@ pub(super) fn CreateSessionForm(
                     .find(|host| host.id == binding.host)
                     .map(HostOption::label)
                     .unwrap_or_else(|| "this host".to_string());
+                // An admitted attempt is progress, not a refusal. Do not show
+                // the busy prerequisite merely because its request is running.
+                launch_attempted.set(false);
                 error.set(None);
                 let catalog_for_recheck = catalog_for_submit.clone();
                 spawn(async move {
@@ -4428,27 +4501,12 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "submit",
                     class: "btn btn-primary create-session-submit",
-                    "data-tooltip": if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" },
+                    "data-tooltip": launch_refusal.unwrap_or(if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
                     aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
-                    // `blocked` as well as this form's own flag: a create must
-                    // not overlap a host mutation (see `ListView`'s operation
-                    // gate), and a control that is inert for that window says so
-                    // rather than silently dropping the click.
-                    //
-                    // Inert with no structured harness selected for a different
-                    // reason: there is nothing to launch, and the handler
-                    // refuses in words anyway (a `disabled` attribute is one
-                    // render behind, so it is the visible half of that rule
-                    // rather than the guard).
-                    disabled: busy
-                        || template_panel().is_some()
-                        || !selected_host_available
-                        || !fresh_destination_ready
-                        || search_scope == crate::launch_composer::SearchScope::Github
-                        || !remembered_destination_valid
-                        || (retry_binding.is_none() && *launch_tab.read() == LaunchTab::Agent
-                            && (structured_harness.read().is_none()
-                                || structured_choice_error.is_some())),
+                    // Keep refused attempts reachable: native disabled would
+                    // swallow both a click and implicit Enter before submit can
+                    // say why. The operation guard still prevents another create.
+                    aria_disabled: launch_refusal.is_some(),
                     "{submit_verb}"
                     " "
                     span { class: "launch-composer-launch-context",
@@ -4548,6 +4606,17 @@ pub(super) fn CreateSessionForm(
                                 }), host_label_for_template_save.clone())));
                         }, "save as template"
                     }
+                }
+            }
+            if let Some(err) = error.read().clone().or_else(|| {
+                launch_attempted().then_some(launch_refusal).flatten().map(str::to_string)
+            }) {
+                // Refusals are visible beside the action they explain, even
+                // when the rest of the dialog needs scrolling. Helm-owned words
+                // still get the same escaping and directional isolation.
+                PeerLine {
+                    class: "create-session-error launch-composer-refusal".to_string(),
+                    parts: vec![DetailPart::Peer(err)],
                 }
             }
             if let Some((candidate, host_label)) = template_panel() {
@@ -4790,19 +4859,11 @@ pub(super) fn CreateSessionForm(
                                 // query would bubble to the form and launch whatever stale
                                 // selection the composer happened to hold.
                                 //
-                                // An EMPTY box is the one case Enter is allowed through: the
-                                // browser's own implicit submission then clicks the form's
-                                // default button — the launch button, the first submit button
-                                // in the dialog — unless that button is disabled, in which case
-                                // nothing happens. That is exactly the "launch only a complete,
-                                // valid selection through the ordinary Launch path" rule
-                                // (SPEC.md's launch composer), and it is why the empty case
-                                // returns BEFORE `prevent_default` rather than re-creating the
-                                // click by hand: the platform already owns that rule, including
-                                // the disabled check, and a hand-rolled selector click would be
-                                // a second copy of it that could drift from the markup. Literal
-                                // emptiness, not trimmed: a box holding only spaces still shows
-                                // a query, and SPEC.md's rule is about an empty box.
+                                // An empty query submits normally. Launch uses
+                                // aria-disabled so an incomplete setup reaches
+                                // submit and produces words beside that button.
+                                // Literal emptiness matters: spaces still form
+                                // a query and must never launch stale choices.
                                 Key::Enter if !evt.is_composing() => {
                                     // A HELD Enter must not launch. Accepting a result
                                     // empties the box synchronously, so the key's OS
@@ -5830,16 +5891,6 @@ pub(super) fn CreateSessionForm(
                             "{display_peer(&child)}"
                         }
                     }
-                }
-            }
-            if let Some(err) = error.read().clone() {
-                // The helm's own words, which for a create refused by a
-                // host's state quote that host and its identities — so the
-                // same escaping and isolation every other peer string gets
-                // (see `peer::PeerLine`).
-                PeerLine {
-                    class: "create-session-error".to_string(),
-                    parts: vec![DetailPart::Peer(err)],
                 }
             }
             }
