@@ -546,10 +546,89 @@ test("Replace with refuses a template that sets a host", async ({ page, request 
     await row.locator(".session-row-replace-with").click();
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
+    await expect(form.locator(".launch-composer-save-template")).toHaveCount(0);
     await applyTemplate(form, name);
     await expect(form.locator(".launch-composer-template-error")).toContainText("this dialog keeps the session's host");
   } finally {
     await deleteTemplate(request, name);
     await cleanupSession(request, source.id);
+  }
+});
+
+/**
+ * A saved launcher snapshot contains only checked edits and opens directly in
+ * the editor. Enter belongs to the inline name field, never to session launch.
+ * Count create requests so an otherwise successful template save cannot hide a
+ * second operation; read stored fields rather than trusting checkbox visuals.
+ */
+for (const kind of ["agent", "command"] as const) {
+  test(`save as template captures the ${kind} setup without launching`, async ({ page, request }) => {
+    const name = `e2e-launcher-save-${kind}-${Date.now()}`;
+    const creates: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && /\/api\/sessions(?:\?|$)/.test(new URL(r.url()).pathname)) creates.push(r.url());
+    });
+    try {
+      const form = await openNew(page);
+      if (kind === "agent") {
+        await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      } else {
+        await form.getByRole("tab", { name: "command", exact: true }).click();
+        await form.getByLabel("agent command").fill("printf hello");
+        await form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }).check();
+      }
+      await form.getByLabel("folder", { exact: true }).fill("/tmp");
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('[data-field="destination"]')).toBeChecked();
+      await panel.locator('[data-field="destination"]').uncheck();
+      if (kind === "agent") await expect(panel.locator('[data-field="agent"]')).toBeChecked();
+      else await expect(panel.locator('[data-field="command"]')).toBeChecked();
+      await panel.locator(".save-template-name").fill(name);
+      await expect(panel.locator(".save-template-name")).toBeFocused();
+      await panel.locator(".save-template-name").press("Enter");
+      const editor = page.locator('.templates-dialog[role="dialog"]');
+      await expect(editor).toBeVisible();
+      await expect(form).toHaveCount(0);
+      await expect(editor.locator(".templates-name")).toHaveValue(name);
+      await expect(editor.locator(".templates-unsaved")).toHaveCount(0);
+      const stored = await storedTemplate(request, name);
+      expect(stored.fields.kind).toBe(kind);
+      expect(stored.fields.destination).toBeUndefined();
+      if (kind === "agent") expect(stored.fields.agent).toBe("codex");
+      else expect(stored.fields).toEqual({ kind: "command", command: "printf hello", yolo: false });
+      expect(creates, "saving a template sends no session create").toEqual([]);
+    } finally {
+      await deleteTemplate(request, name);
+    }
+  });
+}
+
+/**
+ * A collision is a refusal, not a replacement. Escape dismisses only the
+ * inline panel and leaves the setup editable, including after a failed save.
+ */
+test("launcher template save refuses a taken name and Escape keeps the launcher", async ({ page, request }) => {
+  const name = `e2e-launcher-taken-${Date.now()}`;
+  const fields = { kind: "command", command: "printf original", yolo: false };
+  try {
+    await putTemplate(request, name, fields);
+    const form = await openNew(page);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await form.locator(".launch-composer-save-template").click();
+    const panel = form.locator(".save-template-panel");
+    await panel.locator(".save-template-name").fill(name);
+    await panel.locator(".save-template-save").click();
+    await expect(panel.getByRole("alert")).toContainText("already exists");
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+    await panel.locator(".save-template-name").focus();
+    await expect(panel.locator(".save-template-name")).toBeFocused();
+    await panel.locator(".save-template-name").press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(form).toBeVisible();
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+  } finally {
+    await deleteTemplate(request, name);
   }
 });

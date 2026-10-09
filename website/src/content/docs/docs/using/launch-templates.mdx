@@ -40,6 +40,18 @@ Templates belong to the helm, the program that shows you every host's sessions
 ([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
 a command still needs that command to exist on the host you launch on.
 
+## Save a setup from the launcher
+
+When you have set up a launch in **new** or **clone**, choose **save as template**. Give it a new name and check the
+choices you want to keep. Agent, model and effort choices are checked when set, as are command choices. Approvals and
+workspace trust are checked when you chose them; a host, directory and session name only when you picked or typed them.
+A fresh GitHub checkout's repository is checked too. Remembered defaults and a cloned session's host and directory
+stay available, but unchecked.
+
+The template keeps the current **agent** or **command** tab and only the choices you check. Saving closes the launcher
+and opens the new template for editing in the Templates panel. A name already in use is refused; choose another name.
+**cancel** or Escape returns to the setup without saving. This action is not offered in **replace with**.
+
 ## Edit a template
 
 <Screenshot

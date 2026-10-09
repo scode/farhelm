@@ -3793,6 +3793,15 @@ function refuses a field that does not apply to the launch kind then active, an 
 offer, a host the dialog holds fixed (Replace with), and a host no known install has (a host row in the
 identity-mismatch phase does not count, exactly as for the create default); any refusal leaves the launcher unchanged.
 
+The launcher's "save as template" panel shares the snapshot reader used for application, including raw relayed text,
+destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
+remembered defaults and Clone's inherited placement. A folder-explicit flag is separate from its raw-text ownership:
+picking a directory retains a raw seed while still pre-checking it. The inline panel removes unchecked fields through
+the editor's field identities, validates through its compatibility rules and `check_template_shape`, and reads the name
+list before the existing last-write-wins PUT. This refuses ordinary collisions, not a concurrent write after the read;
+there is no new endpoint or version check. The parent guards cancellation and session submission while saving, and a
+successful save hands the actual template to the Templates dialog's initial editor state without waiting for its list.
+
 In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first runs `apply_template`
 on a snapshot of the launcher, so a refusal applies nothing; then it replays the template as the launcher's own search
 actions (agent type, model, effort, permissions, trust, host, folder, repository, name) and sets directly only what has

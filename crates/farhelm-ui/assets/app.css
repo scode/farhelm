@@ -5349,14 +5349,54 @@ samp {
 
 /* The first controls answer the maintainer's complaint directly: Launch says
    what it will do, Cancel remains available beside it, and Reset is distant
-   enough not to compete with either. The row does not wrap at ordinary
-   widths on purpose — the launch context's `max-width` plus ellipsis (below)
-   is what keeps a long folder from pushing Cancel onto a second line; only
-   the phone-width media query lets Reset drop to its own line. */
+   enough not to compete with either. Long launch context is truncated below;
+   trailing actions may wrap rather than widening the modal at intermediate
+   widths. */
 .launch-composer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* The save checklist is a review of one snapshot. Long relayed choices must
+   wrap inside the launcher rather than widening its phone layout. */
+.save-template-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+}
+
+.save-template-panel p {
+  margin: 0;
+}
+
+.save-template-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.save-template-choice {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.save-template-choice > span {
+  min-width: 0;
+}
+
+.save-template-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.save-template-error {
+  color: var(--danger);
 }
 
 /* "Replace with"'s warning about the source session, directly under the

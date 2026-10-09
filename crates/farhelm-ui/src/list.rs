@@ -42,6 +42,8 @@ mod bell;
 mod create_form;
 mod quick_switcher;
 mod row;
+/// Save a snapshot of the launcher without changing the draft being launched.
+mod save_template;
 mod shared;
 /// The Templates panel beside New (SPEC.md, Launch templates).
 mod templates;
