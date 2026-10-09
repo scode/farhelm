@@ -131,7 +131,7 @@ impl CodexLocator {
         let Some(path) = &self.session_file else {
             return Ok(());
         };
-        let Some(text) = super::read_bounded_regular_file(Path::new(path)).await? else {
+        let Some(text) = super::read_record_header(Path::new(path)).await? else {
             return Ok(());
         };
         let Some((record, runtime)) = parse_record(&text)? else {

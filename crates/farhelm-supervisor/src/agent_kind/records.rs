@@ -28,7 +28,9 @@ pub async fn read_record(
     path: &Path,
     integration: &dyn AgentIntegration,
 ) -> anyhow::Result<Option<RecordCorrelators>> {
-    let Some(text) = read_prefix(path).await? else {
+    let Some(text) =
+        read_header(path, |first| integration.record_header_has_prelude(first)).await?
+    else {
         return Ok(None);
     };
     integration.parse_record(&text)
@@ -85,6 +87,48 @@ pub(crate) async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
         .await
         .map_err(|e| anyhow::Error::new(e).context(format!("reading {}", path.display())))?;
     Ok(Some(String::from_utf8_lossy(&buffer).into_owned()))
+}
+
+/// Read only the first record, retaining its newline when it fits under the cap.
+///
+/// Header verification needs none of the transcript's later records. The cap
+/// remains a byte ceiling, not a read target; incomplete final lines are left
+/// for the vendor parser to judge. Valid UTF-8 transfers its buffer into the
+/// String without another allocation. Malformed bytes keep the existing lossy
+/// decoding behavior, including a code point cut by the byte ceiling.
+pub(crate) async fn read_first_line(path: &Path) -> anyhow::Result<Option<String>> {
+    read_header(path, |_| false).await
+}
+
+/// Stop after the header, including one integration-authorized prelude.
+///
+/// OMP's optional title precedes its actual session header. Reading that second
+/// line is necessary to keep its existing format contract; other integrations
+/// stop after the first newline. Both lines share one byte ceiling and one open
+/// descriptor. Buffered I/O may fetch a small suffix beyond the last newline,
+/// but the returned buffer contains only the relevant records.
+async fn read_header(
+    path: &Path,
+    has_prelude: impl FnOnce(&str) -> bool,
+) -> anyhow::Result<Option<String>> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+    let Some(file) = open_regular_file(path).await? else {
+        return Ok(None);
+    };
+    let mut buffer = Vec::new();
+    let mut reader = BufReader::new(file.take(RECORD_PREFIX_BYTES as u64));
+    reader.read_until(b'\n', &mut buffer).await.map_err(|e| {
+        anyhow::Error::new(e).context(format!("reading header of {}", path.display()))
+    })?;
+    if buffer.ends_with(b"\n") && has_prelude(&String::from_utf8_lossy(&buffer)) {
+        reader.read_until(b'\n', &mut buffer).await.map_err(|e| {
+            anyhow::Error::new(e).context(format!("reading header of {}", path.display()))
+        })?;
+    }
+    let text = String::from_utf8(buffer)
+        .unwrap_or_else(|error| String::from_utf8_lossy(&error.into_bytes()).into_owned());
+    Ok(Some(text))
 }
 
 /// Read one complete small vendor file as strict UTF-8.
@@ -256,6 +300,102 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Header verification must stop at the newline rather than treating the
+    /// byte ceiling as a read target. Invalid tail bytes prove that only the
+    /// first record is decoded, even when the transcript has already grown.
+    #[farhelm_testtrace::test]
+    async fn a_record_header_ignores_the_rest_of_the_transcript() {
+        let dir = farhelm_teststate::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        let mut bytes = b"header\n".to_vec();
+        bytes.extend(vec![0xff; RECORD_PREFIX_BYTES]);
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(
+            read_first_line(&path).await.unwrap().as_deref(),
+            Some("header\n")
+        );
+    }
+
+    /// The original byte ceiling still separates complete and truncated
+    /// headers: a newline exactly at the ceiling fits, one beyond it does not.
+    #[farhelm_testtrace::test]
+    async fn a_record_header_keeps_the_byte_ceiling() {
+        let dir = farhelm_teststate::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        for content_len in [
+            RECORD_PREFIX_BYTES - 1,
+            RECORD_PREFIX_BYTES,
+            RECORD_PREFIX_BYTES + 1,
+        ] {
+            let mut bytes = vec![b'x'; content_len];
+            bytes.push(b'\n');
+            std::fs::write(&path, &bytes).unwrap();
+            let actual = read_first_line(&path).await.unwrap().unwrap();
+            assert_eq!(
+                actual.as_bytes(),
+                &bytes[..bytes.len().min(RECORD_PREFIX_BYTES)]
+            );
+            assert_eq!(actual.ends_with('\n'), content_len < RECORD_PREFIX_BYTES);
+        }
+    }
+
+    /// Valid headers avoid a copy without changing the old lossy decoding
+    /// contract for malformed bytes or the missing-file verdict.
+    #[farhelm_testtrace::test]
+    async fn a_record_header_preserves_lossy_decoding_and_missing_files() {
+        let dir = farhelm_teststate::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        assert!(read_first_line(&path).await.unwrap().is_none());
+        std::fs::write(&path, b"\xff\n").unwrap();
+        assert_eq!(
+            read_first_line(&path).await.unwrap().as_deref(),
+            Some("\u{fffd}\n")
+        );
+    }
+
+    /// The file reader must preserve OMP's title-slot exception without letting
+    /// that tolerance leak into Pi. An invalid tail also proves decoding stops
+    /// at the header for both OMP shapes, rather than reading a fixed prefix.
+    #[farhelm_testtrace::test]
+    async fn record_reads_preserve_the_vendor_header_boundary() {
+        let dir = farhelm_teststate::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let header = br#"{"type":"session","version":3,"id":"omp-id-1","cwd":"/workspace","timestamp":"2026-09-17T00:00:00Z"}
+"#;
+        let title = r#"{"type":"title","v":1,"title":"t","updatedAt":"u","pad":""#;
+        let title = format!("{title}{}\"}}\n", " ".repeat(256 - title.len() - 3));
+        assert_eq!(title.len(), 256, "the fixture uses OMP's title-slot width");
+        let omp = super::super::integration_for(farhelm_proto::AgentKind::Omp).unwrap();
+        let pi = super::super::integration_for(farhelm_proto::AgentKind::Pi).unwrap();
+        let spaced_title = format!("\u{00a0}{title}");
+        for prelude in ["", title.as_str(), spaced_title.as_str()] {
+            let mut bytes = prelude.as_bytes().to_vec();
+            bytes.extend_from_slice(header);
+            bytes.extend(vec![0xff; RECORD_PREFIX_BYTES]);
+            std::fs::write(&path, bytes).unwrap();
+            let text = read_header(&path, |first| omp.record_header_has_prelude(first))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(text.as_bytes(), [prelude.as_bytes(), header].concat());
+            assert_eq!(
+                read_record(&path, omp).await.unwrap().unwrap().conversation,
+                "omp-id-1"
+            );
+            if prelude.is_empty() {
+                assert_eq!(
+                    read_record(&path, pi).await.unwrap().unwrap().conversation,
+                    "omp-id-1"
+                );
+            } else {
+                assert!(
+                    read_record(&path, pi).await.is_err(),
+                    "Pi cannot skip OMP's title slot"
+                );
+            }
+        }
+    }
 
     /// A growing transcript must not make report verification read without a
     /// bound. ASCII distinguishes the input byte cap from lossy UTF-8 expansion.
