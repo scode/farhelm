@@ -79,14 +79,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   surface what is going on, such as that a session lives in a checkout and of which repository, and what a `gh:` launch
   or an action on such a session is about to do. Related to the checkout archiving entry above.
 
-- **Fix the "drag copies nothing" notice.** PR #1499 added a terminal notice for drags that copy nothing because the
-  program in the terminal handles the mouse itself, as Codex does. It does show when drag-selecting in Codex's prompt
-  box, but it is so easy to miss that it looked like it never showed at all: it appears off in a corner, away from where
-  the user is looking. Show it at the mouse cursor, keep it up for a long time, and give it a quick dismiss button. It
-  was also seen showing when selecting text where copy and paste do work; make it show only when a drag really copies
-  nothing, and check that the release note's description of it holds. Discuss the details with the maintainer when
-  planning this for execution. Plan: `plans/queue/drag-copy-notice.md`.
-
 - **Deep end-to-end upgrade tests before a release ships.** Catch a release that bricks an existing installation before
   it goes out: upgrade from real released artifacts (the previous release, and older ones users may still run) to the
   candidate build, on every path a user upgrades through (the Mac app through the installer, the helm, and remote hosts

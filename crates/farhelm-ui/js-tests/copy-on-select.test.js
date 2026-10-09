@@ -1,4 +1,4 @@
-// Unit coverage for copy-on-select.js's `copySelectionOnMouseUp`, run with
+// Unit coverage for copy-on-select.js's copy decisions and notice lifecycle, run with
 // node's built-in test runner (matches shift-enter-key.test.js's rationale:
 // one small decision does not earn a bundler, and `node --test` already
 // loads the exact file the page ships).
@@ -85,7 +85,8 @@ const {
   forcingModifier,
   dragMayHaveCopiedNothing,
   dragCopyNoticeText,
-  takeNoticeOnce,
+  createDragCopyNotice,
+  DRAG_NOTICE_MS,
   pressForcesSelection,
   isOsc52Write,
   DRAG_THRESHOLD_PX,
@@ -153,13 +154,6 @@ test("the notice names the platform's key, with the agent's own instruction when
   assert.match(codex, /hold Option while dragging/);
 });
 
-test("each distinct notice shows once per page", () => {
-  const shown = new Set();
-  assert.equal(takeNoticeOnce(shown, "generic"), true);
-  assert.equal(takeNoticeOnce(shown, "generic"), false, "the same text is not repeated");
-  assert.equal(takeNoticeOnce(shown, "codex"), true, "a different text still shows");
-});
-
 test("the forcing modifier is read from the press with xterm's rule", () => {
   // Option on xterm's Mac platforms, Shift elsewhere; the other key does
   // nothing, so holding it is not a forced press.
@@ -174,4 +168,120 @@ test("only an OSC 52 write counts as the program copying, never a read query", (
   assert.equal(isOsc52Write(";YW5zd2VyZWQ="), true, "an empty selection target is still a write");
   assert.equal(isOsc52Write("c;?"), false);
   assert.equal(isOsc52Write("?"), false);
+});
+
+// --- Notice placement and lifecycle --------------------------------------
+
+/**
+ * Minimal DOM and clock seam for the shipped notice controller. Time advances
+ * explicitly, so expiry and replacement are asserted at their exact boundary
+ * rather than inferred from a slow wall-clock wait. Pointer/focus behavior is
+ * also exercised against real DOM in mouse-modes.spec.ts.
+ */
+function noticeFixture() {
+  const { placeTooltip } = require("../assets/tooltip.js");
+  const listeners = new Map();
+  const text = { textContent: "" };
+  const showing = new Set();
+  const dismiss = {
+    addEventListener: (type, fn) => listeners.set(type, fn),
+    removeEventListener: (type, fn) => {
+      assert.equal(listeners.get(type), fn);
+      listeners.delete(type);
+    },
+  };
+  const size = { width: 200, height: 50 };
+  const viewport = { width: 800, height: 600 };
+  const el = {
+    querySelector: (selector) => selector.endsWith("-text") ? text : dismiss,
+    classList: { add: (name) => showing.add(name), remove: (name) => showing.delete(name) },
+    getBoundingClientRect: () => size,
+    style: {},
+  };
+  let now = 0;
+  let nextId = 0;
+  const timers = new Map();
+  const controller = createDragCopyNotice(el, {
+    place: placeTooltip,
+    viewport: () => viewport,
+    setTimeout: (fn, ms) => { const id = ++nextId; timers.set(id, { fn, at: now + ms }); return id; },
+    clearTimeout: (id) => timers.delete(id),
+  });
+  return {
+    controller, el, text, showing, listeners, timers, viewport,
+    advance(ms) {
+      now += ms;
+      for (const [id, timer] of timers) {
+        if (timer.at <= now) { timers.delete(id); timer.fn(); }
+      }
+    },
+  };
+}
+
+/** Placement must follow the release point, including drags at every window edge. */
+test("the notice stays above the release and entirely inside the viewport", () => {
+  const f = noticeFixture();
+  f.controller.show("copied nothing", { x: 300, y: 400 });
+  assert.deepEqual(f.el.style, { left: "200px", top: "344px" });
+  for (const point of [{ x: 0, y: 0 }, { x: 800, y: 600 }, { x: 300, y: 10 }]) {
+    f.controller.show("copied nothing", point);
+    const left = parseFloat(f.el.style.left), top = parseFloat(f.el.style.top);
+    assert.ok(left >= 4 && left + 200 <= 796);
+    assert.ok(top >= 4 && top + 50 <= 596);
+  }
+  f.viewport.width = 400;
+  f.viewport.height = 300;
+  f.controller.reposition();
+  assert.ok(parseFloat(f.el.style.left) + 200 <= 396);
+  assert.ok(parseFloat(f.el.style.top) + 50 <= 296);
+});
+
+/** The same text is a fresh notice every time; an older deadline cannot retire its replacement. */
+test("every show gets thirty seconds, even when it replaces identical text", () => {
+  const f = noticeFixture();
+  assert.equal(DRAG_NOTICE_MS, 30_000);
+  f.controller.show("same notice", { x: 300, y: 400 });
+  f.advance(29_999);
+  assert.equal(f.showing.has("showing"), true);
+  f.controller.show("same notice", { x: 500, y: 300 });
+  assert.equal(f.el.style.left, "400px");
+  assert.equal(f.timers.size, 1);
+  f.advance(1);
+  assert.equal(f.showing.has("showing"), true, "the first deadline cannot hide the replacement");
+  f.advance(29_999);
+  assert.equal(f.showing.has("showing"), false);
+  assert.equal(f.text.textContent, "");
+  assert.equal(f.timers.size, 0);
+  f.controller.show("same notice", { x: 300, y: 400 });
+  assert.equal(f.showing.has("showing"), true, "an expired notice may show again");
+});
+
+/** Dismissal keeps native focus and input local; disposal releases every owned listener and timer. */
+test("dismiss and terminal-press hiding retire the notice without retaining input handlers", () => {
+  const f = noticeFixture();
+  const event = () => ({
+    prevented: false, stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  });
+  f.controller.show("notice", { x: 300, y: 400 });
+  const press = event();
+  f.listeners.get("mousedown")(press);
+  assert.equal(press.prevented, true);
+  assert.equal(press.stopped, true);
+  assert.equal(f.showing.has("showing"), true, "pressing × is not the terminal press dismissal");
+  const click = event();
+  f.listeners.get("click")(click);
+  assert.equal(click.prevented, true);
+  assert.equal(click.stopped, true);
+  assert.equal(f.showing.has("showing"), false);
+  assert.equal(f.timers.size, 0);
+  f.controller.show("notice", { x: 300, y: 400 });
+  f.controller.hide();
+  assert.equal(f.showing.has("showing"), false);
+  f.controller.show("notice", { x: 300, y: 400 });
+  f.controller.dispose();
+  assert.equal(f.showing.has("showing"), false);
+  assert.equal(f.listeners.size, 0);
+  assert.equal(f.timers.size, 0);
 });

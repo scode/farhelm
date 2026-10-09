@@ -2912,7 +2912,7 @@ pub(crate) fn SessionView(
                         }
                         // The "this drag did not copy" notice, overlaid like
                         // the status line above and owned by terminal.js the
-                        // same way. Rendered empty from the start with its
+                        // same way. Its text span starts empty with the
                         // live-region role already in place: a region that
                         // exists before its text is set is what screen
                         // readers announce reliably.
@@ -2920,6 +2920,15 @@ pub(crate) fn SessionView(
                             id: "{drag_copy_notice_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
                             class: "drag-copy-notice",
                             role: "status",
+                            span { class: "drag-copy-notice-text" }
+                            button {
+                                class: "drag-copy-notice-dismiss",
+                                r#type: "button",
+                                tabindex: "-1",
+                                "aria-label": "dismiss drag-copy notice",
+                                "data-tooltip": "Dismiss this notice",
+                                "×"
+                            }
                         }
                     }
                     for (index , tab_id) in tabs.iter().enumerate() {
@@ -2954,6 +2963,15 @@ pub(crate) fn SessionView(
                                     id: "{drag_copy_notice_element_id(&tab_terminal_element_id(tab_id))}",
                                     class: "drag-copy-notice",
                                     role: "status",
+                                    span { class: "drag-copy-notice-text" }
+                                    button {
+                                        class: "drag-copy-notice-dismiss",
+                                        r#type: "button",
+                                        tabindex: "-1",
+                                        "aria-label": "dismiss drag-copy notice",
+                                        "data-tooltip": "Dismiss this notice",
+                                        "×"
+                                    }
                                 }
                             } else {
                                 div { class: "terminal-not-mounted",
@@ -2982,7 +3000,8 @@ pub(crate) fn SessionView(
 /// The notice tells the user that the program in the pane took a plain
 /// drag for itself (it turned on mouse reporting) and copied nothing, and
 /// how to copy instead. terminal.js decides when to show it and owns its
-/// text; this view only renders the empty, overlaid element.
+/// text span and dismiss lifecycle; this view keeps the live region and
+/// button mounted so repeat announcements do not replace their DOM.
 fn drag_copy_notice_element_id(terminal_element_id: &str) -> String {
     format!("drag-copy-notice-{terminal_element_id}")
 }

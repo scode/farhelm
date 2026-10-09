@@ -1,4 +1,4 @@
-// Pure decisions behind terminal.js's mouse-gesture copying: when a
+// Decisions and notice presentation behind terminal.js's mouse-gesture copying: when a
 // completed mouse gesture on the terminal should push the current LOCAL
 // xterm selection to the system clipboard (herdr-style copy-on-select), and,
 // for a drag a mouse-reporting program took for itself, when to tell the
@@ -86,7 +86,7 @@
   // which terminal.js forwards to the clipboard. Programs that only draw a
   // highlight (Codex's prompt box, vim with `mouse=a`) leave the user
   // looking at highlighted text and an unchanged clipboard, with no clue
-  // why. The functions below decide when terminal.js shows a short notice
+  // why. The functions below decide when terminal.js shows a notice
   // for that case and what it says; the notice is guidance about the
   // program, never a report that a clipboard write failed (SPEC.md keeps
   // clipboard failures silent).
@@ -211,20 +211,88 @@
     return `${first} Or hold ${key} while dragging to select and copy here.`;
   }
 
+  /** The notice remains useful long enough to read without watching the corner. */
+  const DRAG_NOTICE_MS = 30_000;
+
   /**
-   * Whether `text` may be shown now, recording that it has been: each
-   * distinct notice shows at most once per page load, so a user who has
-   * read it is not told again on every drag. `shown` is the page's own
-   * `Set`, owned by terminal.js.
+   * Own the persistent notice's placement and lifetime for one terminal mount.
    *
-   * @param {Set<string>} shown
-   * @param {string} text
-   * @returns {boolean}
+   * Only the text span changes: replacing the live region or its children
+   * would discard the dismiss button and make announcements unreliable.
+   * `place` is the shared tooltip placement rule, used with a point-shaped
+   * target at the drag's release. Timers and viewport are injected so tests
+   * can prove the actual lifetime without waiting thirty seconds.
+   *
+   * Hiding clears the text as well as the showing class, allowing a repeated
+   * notice to be announced. The stylesheet makes the entire hidden subtree
+   * inert to the pointer; the dismiss button alone accepts clicks when shown.
    */
-  function takeNoticeOnce(shown, text) {
-    if (shown.has(text)) return false;
-    shown.add(text);
-    return true;
+  function createDragCopyNotice(el, { place, viewport, setTimeout, clearTimeout }) {
+    const text = el.querySelector(".drag-copy-notice-text");
+    const dismiss = el.querySelector(".drag-copy-notice-dismiss");
+    let timer = null;
+    let point = null;
+
+    /** Retire both the visible notice and its deadline, including on teardown. */
+    function hide() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      point = null;
+      el.classList.remove("showing");
+      text.textContent = "";
+    }
+
+    /** Keep the measured box inside the current viewport, including after resize. */
+    function reposition() {
+      if (point === null) return;
+      const size = el.getBoundingClientRect();
+      const windowSize = viewport();
+      const position = place(
+        { left: point.x, right: point.x, top: point.y, bottom: point.y },
+        size,
+        windowSize,
+      );
+      el.style.left = `${position.left}px`;
+      // Tooltip placement shares horizontal centering and edge clamping.
+      // This notice stays above the release rather than flipping below it;
+      // at the top edge it overlaps the pointer instead of leaving the window.
+      const top = Math.max(4, Math.min(point.y - 6 - size.height, windowSize.height - 4 - size.height));
+      el.style.top = `${top}px`;
+    }
+
+    /** Prevent the button's press from moving focus or becoming terminal input. */
+    function keepFocus(event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    /** Dismiss locally; this is never a press in the terminal's gesture handler. */
+    function dismissClick(event) {
+      keepFocus(event);
+      hide();
+    }
+    dismiss.addEventListener("mousedown", keepFocus);
+    dismiss.addEventListener("click", dismissClick);
+
+    return {
+      /** Every qualifying drag replaces the previous position and starts a fresh deadline. */
+      show(message, release) {
+        hide();
+        text.textContent = message;
+        point = release;
+        reposition();
+        el.classList.add("showing");
+        timer = setTimeout(hide, DRAG_NOTICE_MS);
+      },
+      hide,
+      reposition,
+      /** Release listeners and timers with the terminal mount that owns them. */
+      dispose() {
+        hide();
+        dismiss.removeEventListener("mousedown", keepFocus);
+        dismiss.removeEventListener("click", dismissClick);
+      },
+    };
   }
 
   const api = {
@@ -234,7 +302,8 @@
     pressForcesSelection,
     isOsc52Write,
     dragCopyNoticeText,
-    takeNoticeOnce,
+    createDragCopyNotice,
+    DRAG_NOTICE_MS,
     DRAG_THRESHOLD_PX,
     OSC52_GRACE_MS,
   };
