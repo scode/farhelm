@@ -393,9 +393,14 @@ pub(crate) fn check_hook_report(
             ));
         }
     }
-    if let Some(refusal) =
-        crate::agent_kind::foreground_source_refusal(report.vendor, &report.source)
-    {
+    if let Some(refusal) = crate::agent_kind::foreground_source_refusal(
+        report.vendor,
+        &report.source,
+        report
+            .hook_event_name
+            .as_ref()
+            .and_then(serde_json::Value::as_str),
+    ) {
         return Err(RequestError::new(ErrorKind::InvalidRequest, refusal));
     }
     Ok(sanitized_source(&report.source))
@@ -681,33 +686,32 @@ mod tests {
         names
     }
 
-    /// Spec: a pass hands Grok's selection to admission before its
+    /// Spec: a pass hands Codex and Grok selection to admission before their
     /// enrichment, and deletes each report once admission settles it.
     ///
     /// Why: an enrichment is refused unless its selection was applied, so
     /// applying them in the other order after a supervisor outage would
     /// discard the enrichment and keep a conversation without its record.
     #[farhelm_testtrace::test]
-    async fn a_pass_applies_grok_selection_before_enrichment_and_settles_both() {
-        let state = farhelm_teststate::tempdir().expect("state dir");
-        drop_report(
-            state.path(),
-            &report(ReportVendor::Grok, Some("Stop"), "enrich"),
-        );
-        let dir = drop_report(
-            state.path(),
-            &report(ReportVendor::Grok, Some("SessionStart"), "select"),
-        );
-        let seen = Mutex::new(Vec::new());
-        drain_session_dir(&dir, |report| {
-            seen.lock()
-                .unwrap()
-                .push(report.expect("readable").conversation);
-            async { Disposition::Settled }
-        })
-        .await;
-        assert_eq!(*seen.lock().unwrap(), ["select", "enrich"]);
-        assert!(names(&dir).is_empty(), "settled reports are deleted");
+    async fn a_pass_applies_selection_before_enrichment_for_both_integrations() {
+        for vendor in [ReportVendor::Codex, ReportVendor::Grok] {
+            let state = farhelm_teststate::tempdir().expect("state dir");
+            drop_report(state.path(), &report(vendor, Some("Stop"), "enrich"));
+            let dir = drop_report(
+                state.path(),
+                &report(vendor, Some("SessionStart"), "select"),
+            );
+            let seen = Mutex::new(Vec::new());
+            drain_session_dir(&dir, |report| {
+                seen.lock()
+                    .unwrap()
+                    .push(report.expect("readable").conversation);
+                async { Disposition::Settled }
+            })
+            .await;
+            assert_eq!(*seen.lock().unwrap(), ["select", "enrich"]);
+            assert!(names(&dir).is_empty(), "settled reports are deleted");
+        }
     }
 
     /// Spec: a pass takes every waiting slot before it applies any, so a

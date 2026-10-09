@@ -4624,6 +4624,15 @@ pub(crate) struct ReportedConversation {
     pub(crate) launch_generation: Option<i64>,
 }
 
+/// Preserve retryable read failures without turning them into durable withdrawals.
+/// Structural and identity errors are verdicts about the record; an OS read
+/// failure is inconclusive. No later polling pass exists to repair a false loss.
+fn record_read_is_transient(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
+}
+
 impl Supervisor {
     /// Inspect immediate clone origins beneath the effective checkout root.
     /// No ownership or directory-admission lock is taken: discovery is bounded
@@ -6246,17 +6255,13 @@ impl Supervisor {
     /// asserted against the mirror would pass even if nothing had ever been
     /// persisted, which is precisely the property under test.
     ///
-    /// `None` means no such session.
+    /// This projection never reads vendor files. Admitted readiness stays stored
+    /// until a new report or Restart changes it; merely viewing the session must
+    /// not become a defensive transcript poll. `None` means no such session.
     pub async fn session_snapshot(&self, id: &str) -> anyhow::Result<Option<SessionSnapshot>> {
-        let Some(mut row) = self.store.session(id).await? else {
+        let Some(row) = self.store.session(id).await? else {
             return Ok(None);
         };
-        if !self.refresh_reported_capture(&mut row).await? {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the reported conversation changed while its restart offer was being verified; refresh the session",
-            ).into());
-        }
         let snapshot = IntegrationSnapshot::of(&row.launch);
         let captured = row.captured_conversation;
         let restart_offer =
@@ -6283,45 +6288,6 @@ impl Supervisor {
             canonical_cwd: row.canonical_cwd,
             capture_ownership_version: row.capture_ownership_version,
         }))
-    }
-
-    /// Refresh readiness without searching for another record. The durable
-    /// comparison prevents a slow verification of A from replacing a new B.
-    pub(super) async fn refresh_reported_capture(
-        &self,
-        row: &mut StoredSession,
-    ) -> anyhow::Result<bool> {
-        if !crate::agent_kind::refreshes_reported_capture(row.agent_kind()) {
-            return Ok(true);
-        }
-        // The claim is taken HERE rather than by the caller: `session_snapshot`
-        // and the restart replay read through the store with no other
-        // serialization, and the row must be reloaded under the claim because
-        // a report may have replaced it since the caller read it. Callers
-        // that already hold this session's capture claim (the refresh pass)
-        // use `refresh_reported_capture_claimed` instead: the per-key mutex is
-        // not reentrant, so claiming a held key parks the holder against
-        // itself and the pass never completes.
-        let _capture_claim = self.capture_locks.claim(&row.id).await;
-        self.refresh_reported_capture_claimed(row).await
-    }
-
-    /// Refresh an exact report-only binding while the caller owns the
-    #[warn(clippy::wildcard_enum_match_arm)]
-    /// session's shared capture claim.
-    pub(super) async fn refresh_reported_capture_claimed(
-        &self,
-        row: &mut StoredSession,
-    ) -> anyhow::Result<bool> {
-        match row.agent_kind() {
-            AgentKind::Codex => self.refresh_codex_capture_claimed(row).await,
-            AgentKind::Grok => self.refresh_grok_capture_claimed(row).await,
-            AgentKind::Claude
-            | AgentKind::Goose
-            | AgentKind::Pi
-            | AgentKind::Omp
-            | AgentKind::Generic => Ok(true),
-        }
     }
 
     /// Record whatever this launch's kind needs its admission proof to know
@@ -6363,20 +6329,22 @@ impl Supervisor {
     /// generation read by the caller with a non-resumable token. The request
     /// then conflicts, and a refresh exposes `NotCaptured`; a concurrent newer
     #[warn(clippy::wildcard_enum_match_arm)]
-    /// report fails the comparison and remains the durable answer.
+    /// report fails the comparison and remains the durable answer. Codex and
+    /// Grok preserve their offers on OS read failures so the user can retry;
+    /// only an unavailable or inconsistent target is durably withdrawn.
     async fn verify_report_only_resume(
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
     ) -> anyhow::Result<()> {
         match snapshot.kind {
+            AgentKind::Codex => return self.verify_codex_resume(session_id, snapshot).await,
             AgentKind::Grok => return self.verify_grok_resume(session_id, snapshot).await,
             // Pi and OMP share the typed-locator check below; any other kind
             // has no locator and is refused there.
             AgentKind::Pi
             | AgentKind::Omp
             | AgentKind::Claude
-            | AgentKind::Codex
             | AgentKind::Goose
             | AgentKind::Generic => {}
         }
@@ -8245,14 +8213,7 @@ impl Supervisor {
             .await
             .context("reading the session this intent key created")?;
         match row {
-            Some(mut row) => {
-                if !self.refresh_reported_capture(&mut row).await? {
-                    return Err(RequestError::new(
-                        ErrorKind::Conflict,
-                        "the Codex restart offer changed; refresh the session",
-                    )
-                    .into());
-                }
+            Some(row) => {
                 // A replayed create answers with what the listing carries.
                 let replayed_notifications = self
                     .store
@@ -13978,9 +13939,9 @@ impl Supervisor {
     ///   restart landing inside the divergence resumes the reported
     ///   conversation regardless of what memory holds.
     /// - **The mirror catches up on its own.** All integrated kinds reconcile
-    ///   their durable row before replies and on the ticker. Exact-file
-    ///   verification stays part of that refresh where the kind requires it.
-    ///   A reload restores the stored identity directly.
+    ///   their durable row before replies and on the ticker, without reading
+    ///   vendor files. Reports establish readiness; Restart verifies the exact
+    ///   target when used. A reload restores the stored identity directly.
     ///
     /// What the divergence costs is one thing only: `session_restart_offer`
     /// reads the ENTRY, so `ListSessions` advertises `NotCaptured` for the
@@ -19612,12 +19573,70 @@ pub(crate) mod tests {
         );
     }
 
+    /// Both exact-file integrations must keep an admitted offer after an OS
+    /// read failure, then accept a retry. Replacing only the private record
+    /// directory with a file produces ENOTDIR without relying on permissions,
+    /// root privileges, or a test-process environment mutation.
+    async fn assert_resume_read_failure_is_retryable(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        records: &Path,
+    ) {
+        let ready = sup.session_snapshot(id).await.unwrap().unwrap();
+        assert_eq!(ready.restart_offer, RestartOffer::Resume);
+        let saved = records.with_extension("saved");
+        std::fs::rename(records, &saved).unwrap();
+        std::fs::write(records, b"not a directory").unwrap();
+        let refusal = sup
+            .restart_session(id, true, None, None)
+            .await
+            .expect_err("OS read failure must refuse");
+        let replay = sup
+            .replay_created_session(&Reservation {
+                intent_key: "already-created".into(),
+                fingerprint: String::new(),
+                session_id: id.into(),
+                tmux_name: format!("fh-{id}"),
+                dedup_scope: crate::store::DedupScope::Permanent,
+                outcome: ReservationOutcome::Created,
+            })
+            .await
+            .expect("replayed create must not read vendor files");
+        assert_eq!(replay.restart_offer, RestartOffer::Resume);
+        std::fs::remove_file(records).unwrap();
+        std::fs::rename(saved, records).unwrap();
+        assert_eq!(error_kind(&refusal), ErrorKind::Conflict);
+        assert!(
+            refusal.to_string().contains("try Restart again"),
+            "{refusal:#}"
+        );
+        let after = sup.session_snapshot(id).await.unwrap().unwrap();
+        assert_eq!(
+            after.generation, ready.generation,
+            "refusal starts no new generation"
+        );
+        assert_eq!(
+            after.captured_conversation, ready.captured_conversation,
+            "a passing read failure must not permanently withdraw Resume"
+        );
+        assert!(
+            sup.store
+                .session_notifications(id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        sup.verify_report_only_resume(id, &after)
+            .await
+            .expect("restored IO must allow retry");
+    }
+
     /// A ready Grok report that lands before the in-memory entry is published
     /// must become visible through the ordinary list projection. Later loss
-    /// of either exact file withdraws Resume while preserving the selected
-    /// UUID and its timestamp for reload-time ordering. Restoring the record
-    /// across a supervisor restart resolves the original warning; losing it
-    /// again reopens that same row above old read/cleared marks.
+    /// of either exact file is noticed only at Restart, preserving the UUID
+    /// and ordering timestamp. A read error remains retryable. An explicit
+    /// verified report restores Resume and resolves the warning; another missing
+    /// file at Restart reopens the same history row above old read/cleared marks.
     #[farhelm_testtrace::test]
     async fn grok_prepublication_binding_reconciles_and_file_loss_withdraws_resume() {
         let state = StateDir::new();
@@ -19697,7 +19716,21 @@ pub(crate) mod tests {
             "Resume substitutes the verified UUID rather than its file path"
         );
 
+        assert_resume_read_failure_is_retryable(&sup, &id, &session_dir).await;
         std::fs::remove_file(&summary).expect("remove one half of the exact evidence");
+        sup.capture_now().await;
+        assert_eq!(
+            sup.session_snapshot(&id)
+                .await
+                .unwrap()
+                .unwrap()
+                .restart_offer,
+            RestartOffer::Resume,
+            "the capture pass cannot inspect a missing file"
+        );
+        sup.verify_report_only_resume(&id, &ready)
+            .await
+            .expect_err("Restart detects missing summary");
         sup.capture_now().await;
         assert_eq!(
             super::super::status::entry_info(
@@ -19752,8 +19785,19 @@ pub(crate) mod tests {
         let entry = sup.sessions.lock().await.get(&id).cloned().unwrap();
         assert_eq!(
             super::super::status::session_restart_offer(&entry),
-            RestartOffer::Resume,
-            "restored record must actually regain Resume after startup"
+            RestartOffer::NotCaptured,
+            "startup cannot rediscover a restored record without a report"
+        );
+        assert!(
+            locator.verify().await && locator.resumable,
+            "the restored fixture really verifies"
+        );
+        sup.record_conversation_for_test(&id, &locator.encode().unwrap())
+            .await;
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::Resume
         );
         let resolved = sup.store.session_notifications(&id).await.unwrap();
         assert_eq!(resolved.len(), 1);
@@ -19765,7 +19809,11 @@ pub(crate) mod tests {
             ),
             resolved
         );
+        let ready = sup.session_snapshot(&id).await.unwrap().unwrap();
         std::fs::remove_file(&summary).unwrap();
+        sup.verify_report_only_resume(&id, &ready)
+            .await
+            .expect_err("recurring missing file");
         sup.capture_now().await;
         assert_eq!(
             super::super::status::session_restart_offer(&entry),
@@ -19790,9 +19838,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// Codex's exact record can disappear and return without another report.
-    /// The capture pass must resolve its warning when Resume returns, then
-    /// reopen the same warning as unread if verification withdraws it again.
+    /// Codex file loss stays invisible until Restart, which withdraws Resume
+    /// and notifies. An OS read failure retains the offer for retry. Restoring
+    /// the file requires a new verified report; that resolves the warning, and
+    /// a later Restart finding the file missing reopens the same history row.
     #[farhelm_testtrace::test]
     async fn codex_record_restoration_resolves_and_reopens_its_notification() {
         let state = StateDir::new();
@@ -19800,19 +19849,25 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let id = uuid::Uuid::new_v4().to_string();
-        let file = state.path().join("codex-notification.jsonl");
+        let records = state.path().join("codex-records");
+        std::fs::create_dir(&records).unwrap();
+        let file = records.join("codex-notification.jsonl");
         let record = "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\
              \"payload\":{\"id\":\"codex-thread-9\",\"session_id\":\"codex-runtime-9\",\
              \"source\":\"cli\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n";
         std::fs::write(&file, record).unwrap();
-        let token = crate::agent_kind::codex::CodexLocator::reported(
+        let mut locator = crate::agent_kind::codex::CodexLocator::reported(
             "codex-runtime-9".into(),
             Some(serde_json::json!(file.to_str().unwrap())),
             Some(serde_json::json!("SessionStart")),
         )
-        .unwrap()
-        .encode()
         .unwrap();
+        locator.verify().await.unwrap();
+        assert!(
+            locator.resumable,
+            "the fixture record must verify before admission"
+        );
+        let token = locator.encode().unwrap();
         seed_codex_row(&sup, &id, Some(&token), Some("hook"), 1).await;
         let mut entry = entry_with(
             None,
@@ -19841,7 +19896,22 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert_resume_read_failure_is_retryable(&sup, &id, &records).await;
+        let ready = sup.session_snapshot(&id).await.unwrap().unwrap();
         std::fs::remove_file(&file).unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            sup.session_snapshot(&id)
+                .await
+                .unwrap()
+                .unwrap()
+                .restart_offer,
+            RestartOffer::Resume,
+            "neither listing nor a pass reads the missing transcript"
+        );
+        sup.verify_report_only_resume(&id, &ready)
+            .await
+            .expect_err("Restart detects missing transcript");
         sup.capture_now().await;
         assert_eq!(
             super::super::status::session_restart_offer(&entry),
@@ -19851,6 +19921,16 @@ pub(crate) mod tests {
         assert_eq!(warning.len(), 1);
         assert!(!warning[0].resolved);
         std::fs::write(&file, record).unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::session_restart_offer(&entry),
+            RestartOffer::NotCaptured,
+            "restoring a file alone cannot promote the stored offer"
+        );
+        locator.verify().await.unwrap();
+        assert!(locator.resumable);
+        sup.record_conversation_for_test(&id, &locator.encode().unwrap())
+            .await;
         sup.capture_now().await;
         assert_eq!(
             super::super::status::session_restart_offer(&entry),
@@ -19866,7 +19946,11 @@ pub(crate) mod tests {
             ),
             resolved
         );
+        let ready = sup.session_snapshot(&id).await.unwrap().unwrap();
         std::fs::remove_file(&file).unwrap();
+        sup.verify_report_only_resume(&id, &ready)
+            .await
+            .expect_err("recurring missing transcript");
         sup.capture_now().await;
         let recurrence = sup.store.session_notifications(&id).await.unwrap();
         assert_eq!(recurrence.len(), 1);

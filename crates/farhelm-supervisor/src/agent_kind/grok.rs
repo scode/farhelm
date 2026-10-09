@@ -240,7 +240,9 @@ impl GrokLocator {
     /// Require the reported update file and its sibling summary to name the
     /// selected UUID. Missing files return false; malformed evidence is an
     /// error that [`Self::verify`] deliberately collapses to the same refusal.
-    async fn verify_exact_files(&self) -> anyhow::Result<bool> {
+    /// Restart uses this result directly to keep OS read failures retryable
+    /// instead of durably withdrawing the admitted offer.
+    pub(crate) async fn verify_exact_files(&self) -> anyhow::Result<bool> {
         let Some(path) = self.session_file.as_deref() else {
             return Ok(false);
         };

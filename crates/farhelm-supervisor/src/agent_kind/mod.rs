@@ -92,7 +92,7 @@
 //!   the vendor-file verification some locators need. Screen readers:
 //!   `screen_reader.rs`.
 //! - **Stateful per-kind behavior in the supervisor** (report admission,
-//!   capture refresh, resume verification, launch provenance):
+//!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
 //!   exhaustive matches.
 //! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor.
@@ -1308,6 +1308,13 @@ impl AgentIntegration for CodexIntegration {
             instructions,
             farhelm_proto::ReportVendor::Codex,
         ));
+        // Only the selecting hook announces instructions. Stop runs every turn
+        // and exists solely to confirm a clear whose record was not ready yet.
+        let stop_command = toml_basic_string(&hook_command(
+            hook_exe,
+            AgentInstructions::Off,
+            farhelm_proto::ReportVendor::Codex,
+        ));
         vec![
             "--dangerously-bypass-hook-trust".to_string(),
             "-c".to_string(),
@@ -1315,6 +1322,10 @@ impl AgentIntegration for CodexIntegration {
             "-c".to_string(),
             format!(
                 "hooks.SessionStart=[{{hooks=[{{type=\"command\",command={command},timeout=60}}]}}]"
+            ),
+            "-c".to_string(),
+            format!(
+                "hooks.Stop=[{{hooks=[{{type=\"command\",command={stop_command},timeout=60}}]}}]"
             ),
         ]
     }
@@ -1971,29 +1982,13 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
     }
 }
 
-/// Whether this kind's reported binding is re-verified against its exact
-/// vendor evidence when readiness is refreshed (Codex's root record, Grok's
-/// record pair). Other kinds' bindings are taken as reported until a restart
-/// asks.
-#[warn(clippy::wildcard_enum_match_arm)]
-pub fn refreshes_reported_capture(kind: AgentKind) -> bool {
-    match kind {
-        AgentKind::Codex | AgentKind::Grok => true,
-        AgentKind::Claude
-        | AgentKind::Goose
-        | AgentKind::Pi
-        | AgentKind::Omp
-        | AgentKind::Generic => false,
-    }
-}
-
 /// Whether a Resume restart of this kind verifies its captured target on
 /// disk (the exact saved file or record pair) before relaunching.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn verifies_resume_target(kind: AgentKind) -> bool {
     match kind {
-        AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
-        AgentKind::Claude | AgentKind::Codex | AgentKind::Goose | AgentKind::Generic => false,
+        AgentKind::Codex | AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => false,
     }
 }
 
@@ -2019,6 +2014,27 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
     }
 }
 
+/// Preserve selecting reports across an outage while later events enrich them.
+/// Codex and Grok both require selection before enrichment; the remaining
+/// integrations publish complete, independently usable identities in one slot.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub fn conversation_report_slot(
+    vendor: farhelm_proto::ReportVendor,
+    event: Option<&str>,
+) -> crate::hook_report::Slot {
+    use crate::hook_report::Slot;
+    use farhelm_proto::ReportVendor;
+    match vendor {
+        ReportVendor::Codex | ReportVendor::Grok => match event {
+            Some("SessionStart") => Slot::Selection,
+            _ => Slot::Enrichment,
+        },
+        ReportVendor::Claude | ReportVendor::Goose | ReportVendor::Pi | ReportVendor::Omp => {
+            Slot::Latest
+        }
+    }
+}
+
 /// The doorway refusal for a report whose foreground-transition `source` is
 /// outside its vendor's vocabulary, or `None` when it is inside it (or the
 /// vendor has no such vocabulary).
@@ -2030,10 +2046,11 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
 pub fn foreground_source_refusal(
     vendor: farhelm_proto::ReportVendor,
     source: &str,
+    event: Option<&str>,
 ) -> Option<&'static str> {
     use farhelm_proto::ReportVendor;
     match vendor {
-        ReportVendor::Codex => (!codex::is_foreground_source(source))
+        ReportVendor::Codex => (!codex::is_foreground_report(source, event))
             .then_some("Codex reported an unsupported foreground transition"),
         ReportVendor::Omp => (!omp::is_omp_foreground_source(source))
             .then_some("OMP reported an unsupported foreground transition"),
@@ -3800,9 +3817,9 @@ mod tests {
             .expect("Claude's rendered command must be one valid shell command line");
         assert_eq!(claude_words, expected_words);
 
-        // --- Codex: five argv elements, order and identity pinned. ---
+        // --- Codex: selecting and confirming callbacks are separate. ---
         let codex_argv = CodexIntegration.hook_argv(hostile_path, AgentInstructions::On);
-        assert_eq!(codex_argv.len(), 5);
+        assert_eq!(codex_argv.len(), 7);
         assert_eq!(
             codex_argv[0], "--dangerously-bypass-hook-trust",
             "the bypass flag must lead the injected tail: it is what makes every -c override \
@@ -3834,6 +3851,16 @@ mod tests {
         let codex_words = shell_words::split(codex_command)
             .expect("Codex's rendered command must be one valid shell command line");
         assert_eq!(codex_words, expected_words_for("codex"));
+        assert_eq!(codex_argv[5], "-c");
+        let stop_value = codex_argv[6].strip_prefix("hooks.Stop=").unwrap();
+        let stop: toml::Value = toml::from_str(&format!("v = {stop_value}")).unwrap();
+        let stop_words =
+            shell_words::split(stop["v"][0]["hooks"][0]["command"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            stop_words,
+            expected_words_for("codex")[..5],
+            "end-of-turn confirmation must not announce instructions again"
+        );
 
         // --- The same path with the pointer turned off. ---
         //

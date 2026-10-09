@@ -62,12 +62,19 @@ greyed out. Farhelm does not scan for a different Codex conversation to compensa
 ## Identity changes and resume
 
 A legitimate foreground `/clear` can withdraw the old resume target before its new transcript exists. Only that exact
-new transcript can make the replacement resumable. Nested native Codex processes and reports from delegated shells are
-refused; root transcript metadata also separates conversations that share a process.
+new transcript can make the replacement resumable, once Codex's end-of-turn `Stop` hook confirms it. Farhelm does not
+poll for the file between reports. Nested native Codex processes and reports from delegated shells are refused; root
+transcript metadata also separates conversations that share a process.
 
 Historical valid `codex:` locators remain subject to exact-record verification. Historical bare IDs are retained but
 cannot be resumed, so **restart** stays greyed out for those sessions and replace starts one over. Missing or changed
-evidence refuses the restart instead of silently starting fresh.
+evidence refuses the restart instead of silently starting fresh. Farhelm checks saved files when you choose **restart**,
+so the button can remain available after a file was deleted. A missing file withdraws Resume and adds a notification; a
+file holding a different conversation withdraws it without one. A passing read error leaves Resume available and asks
+you to try again.
+
+NOTE: Relaunch Codex sessions that were already running before this update if you want to resume a conversation begun
+with `/clear`. Those processes still have only the old session-start hook; they cannot confirm a pending new transcript.
 
 These checks prevent accidental reporting through inherited credentials. They are not a security boundary against
 another process controlled by the same Unix user that deliberately imitates the permitted process and record shapes.

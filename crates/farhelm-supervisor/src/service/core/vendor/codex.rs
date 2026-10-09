@@ -1,103 +1,58 @@
-//! Codex's stateful supervisor behavior: exact-record refresh of its
+//! Codex's stateful supervisor behavior: click-time verification of its
 //! reported binding, and its proven report admission (foreground-process
 //! attribution plus root record validation).
 
 use super::super::*;
 
 impl Supervisor {
-    /// Refresh a Codex binding for a caller already holding this session's
-    /// capture claim (see above for why the claim cannot be taken twice).
-    /// The reload below is still correct under the caller's claim — it
-    /// re-reads the row the claim serializes, so a report that landed
-    /// between the caller's read and this one is observed, not overwritten.
-    pub(in crate::service) async fn refresh_codex_capture_claimed(
+    /// Check the admitted exact file only when Restart is about to use it.
+    /// Missing evidence withdraws durably and notifies; conflicting metadata
+    /// withdraws silently. An I/O failure refuses this attempt while retaining
+    /// the offer, since no background verifier will restore a transient loss.
+    pub(in crate::service::core) async fn verify_codex_resume(
         &self,
-        row: &mut StoredSession,
-    ) -> anyhow::Result<bool> {
-        if row.agent_kind() != AgentKind::Codex {
-            return Ok(true);
+        session_id: &str,
+        snapshot: &SessionSnapshot,
+    ) -> anyhow::Result<()> {
+        let stored = snapshot
+            .captured_conversation
+            .as_deref()
+            .context("a Codex resume offer has no durable locator")?;
+        let mut locator = crate::agent_kind::codex::CodexLocator::parse(stored)?;
+        let verdict = locator.verify().await;
+        if let Err(error) = &verdict
+            && record_read_is_transient(error)
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Codex transcript could not be read; try Restart again",
+            )
+            .into());
         }
-        // The caller may have loaded its row before a report took the claim.
-        // Verify the current binding, not an earlier conversation whose file is
-        // still valid after a clear. A new launch requires the caller to retry.
-        let Some(current) = self.store.session(&row.id).await? else {
-            return Ok(false);
-        };
-        if current.generation != row.generation || current.agent_kind() != AgentKind::Codex {
-            return Ok(false);
-        }
-        *row = current;
-        // Provenance this build does not recognize is preserved byte for
-        // byte and never promoted: verification below would otherwise
-        // acquire a thread for an unknown-version binding and durably
-        // rewrite a contract it cannot read. Version 0 flows through
-        // deliberately — the v1-token exception keeps pre-column tokens
-        // resumable through the existing verifier — and 1 is the version
-        // admission writes. Anything else returns before any verify or
-        // write; the offer gate independently serves these rows NotCaptured.
-        if !matches!(row.capture_ownership_version, 0 | 1) {
-            return Ok(true);
-        }
-        let Some(stored) = row.captured_conversation.as_deref() else {
-            return Ok(true);
-        };
-        let Ok(mut locator) = crate::agent_kind::codex::CodexLocator::parse(stored) else {
-            // Legacy identities lack foreground attribution. Keep them intact;
-            // the kind's offer/substitution boundary refuses their plain IDs.
-            return Ok(true);
-        };
-        let was_resumable = locator.resumable;
-        let had_thread = locator.thread_id.is_some();
-        let verified = locator.verify().await;
-        let withdrawn = was_resumable && !locator.resumable;
-        if withdrawn {
-            warn!(target: LOG_TARGET, session = %row.id, "the exact Codex record is unavailable or inconsistent; withdrawing its resume offer");
-        }
-        // A read error is not proof the record is gone (it may pass by the
-        // next pass), so only a clean verdict is told to the user.
-        let tell_user = withdrawn && verified.is_ok();
-        // Failure leaves the exact path and any established thread binding
-        // intact, but verify has already withdrawn readiness.
-        drop(verified);
-        if was_resumable == locator.resumable && had_thread == locator.thread_id.is_some() {
-            return Ok(true);
+        if locator.resumable {
+            return Ok(());
         }
         let replacement = locator.encode()?;
-        if !self.may_record() {
-            // Refusing an unavailable target is safe without a write. Publishing
-            // a newly verified identity still requires a durable commitment.
-            if !locator.resumable {
-                row.captured_conversation = Some(replacement);
-            }
-            return Ok(true);
-        }
-        if !self
+        let withdrawn = self
             .store
             .replace_reported_conversation_if_current(
-                &row.id,
-                row.generation,
+                session_id,
+                snapshot.generation,
                 Some(stored),
                 &replacement,
             )
-            .await?
-        {
-            return Ok(false);
-        }
-        row.captured_conversation = Some(replacement);
-        if tell_user {
-            // Told to the user on the session (SPEC.md, Status) only once the
-            // withdrawal is durable: a compare-and-swap lost to a newer report
-            // withdrew nothing. Fenced on this row's generation, so a relaunch
-            // that raced this refresh records nothing.
+            .await?;
+        if withdrawn && verdict.is_ok() {
             self.notify_session(
-                &row.id,
-                row.generation,
+                session_id,
+                snapshot.generation,
                 crate::service::notifications::NotificationKind::ResumeWithdrawn,
                 &crate::service::notifications::resume_withdrawn_text("Codex"),
             )
             .await;
         }
-        Ok(true)
+        Err(RequestError::new(ErrorKind::Conflict,
+            "the exact Codex transcript is missing or inconsistent; nothing was relaunched — refresh the session").into())
     }
 
     /// Codex admission, the completed two-proof design: foreground
@@ -123,7 +78,10 @@ impl Supervisor {
             ancestry,
             launch_generation: _,
         } = report;
-        if !crate::agent_kind::codex::is_foreground_source(&source) {
+        if !crate::agent_kind::codex::is_foreground_report(
+            &source,
+            hook_event_name.as_ref().and_then(serde_json::Value::as_str),
+        ) {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
                 "Codex reported an unsupported foreground transition",
@@ -142,8 +100,8 @@ impl Supervisor {
         // readiness change in the previous conversation must neither discard
         // a legitimate clear nor let a repeated report forget a newly
         // established persistent thread, which is why the binding below is
-        // read only after the claim excludes refresh. The foreground and
-        // exact-record proofs stay under that same claim so refresh cannot
+        // read only after the claim excludes competing reports. The foreground and
+        // exact-record proofs stay under that same claim so a competing report cannot
         // change the binding between either proof and the generation-fenced
         // write; moving them out would turn contention into a refusal again.
         // The claim is unbounded because all work under it is local.
@@ -164,15 +122,50 @@ impl Supervisor {
                 "this session has moved on to another launch",
             ));
         }
+        let enrichment =
+            hook_event_name.as_ref().and_then(serde_json::Value::as_str) == Some("Stop");
         let mut locator = crate::agent_kind::codex::CodexLocator::reported(
             conversation,
             transcript_path,
             hook_event_name,
         )
         .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        if enrichment {
+            // Stop is confirmation, never selection. An already-ready binding
+            // is rejected here before any transcript read, including after its
+            // file disappears. Only Restart decides that offer is stale.
+            let Some(previous) = row
+                .captured_conversation
+                .as_deref()
+                .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
+            else {
+                return Ok(());
+            };
+            if row.capture_ownership_version != 1
+                || previous.resumable
+                || previous.thread_id.is_some()
+                || previous.runtime_session_id != locator.runtime_session_id
+            {
+                return Ok(());
+            }
+            if let Some(path) = previous.session_file.as_ref() {
+                if locator
+                    .session_file
+                    .as_ref()
+                    .is_some_and(|incoming| incoming != path)
+                {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "the Codex confirmation names a different transcript",
+                    ));
+                }
+                locator.session_file = Some(path.clone());
+            }
+            locator.thread_id = previous.thread_id;
+        }
         // Repeating a report is not permission to rebind an already-known
         // file to another persistent thread. Keep that expectation even
-        // after refresh has withdrawn readiness; a legitimate clear/new
+        // after Restart has withdrawn readiness; a legitimate clear/new
         // names a different runtime or path and can establish a new binding.
         if let Some(previous) = row
             .captured_conversation
@@ -195,6 +188,9 @@ impl Supervisor {
                 format!("the Codex report's exact record could not be verified: {error}"),
             )
         })?;
+        if !locator.resumable && enrichment {
+            return Ok(());
+        }
         if !locator.resumable && source != "clear" {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -227,7 +223,7 @@ impl Supervisor {
             .map(|fault| fault(crate::service::capture::CaptureWrite::Report, id));
         let written = match injected {
             Some(Err(e)) => Err(e),
-            // The capture claim excludes refresh/report interleavings, while
+            // The capture claim excludes report/Restart interleavings, while
             // the durable precondition also fences lifecycle changes and
             // preserves the exact binding that authorized verification.
             _ => {

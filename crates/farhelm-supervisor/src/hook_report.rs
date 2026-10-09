@@ -14,17 +14,16 @@
 //! # Layout
 //!
 //! ```text
-//! <state_dir>/hook-reports/<session-id>/latest.json      every vendor but Grok
-//! <state_dir>/hook-reports/<session-id>/selection.json   Grok SessionStart
-//! <state_dir>/hook-reports/<session-id>/enrichment.json  Grok UserPromptSubmit / Stop
+//! <state_dir>/hook-reports/<session-id>/latest.json      single-report integrations
+//! <state_dir>/hook-reports/<session-id>/selection.json   Codex / Grok SessionStart
+//! <state_dir>/hook-reports/<session-id>/enrichment.json  Codex Stop; Grok UserPromptSubmit / Stop
 //! ```
 //!
 //! Each slot holds only the LATEST report of its kind, replaced by an atomic
-//! rename. That is enough because every report but Grok's carries a complete
-//! identity that admission checks against the session's stored binding, so
-//! skipping an intermediate report gives the same result as applying it.
-//! Grok is the one vendor whose reports depend on order: an enrichment is
-//! refused unless a selection for its conversation came first. Its two slots
+//! rename. The single-report integrations carry independently usable identities.
+//! Codex and Grok instead select a conversation before a later event confirms
+//! its persisted record. An enrichment is refused unless a selection for that
+//! conversation came first. Their two slots
 //! are drained selection first, so a long supervisor outage can never evict
 //! the selection in favour of later enrichments. The directory is therefore
 //! bounded at two report files, with no queue, cap, or eviction rule; a
@@ -92,22 +91,22 @@ const MAX_SESSION_ID_BYTES: usize = 128;
 /// why there are exactly these three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
-    /// The latest report of every vendor but Grok.
+    /// The latest independently usable report.
     Latest,
-    /// Grok's latest `SessionStart`: the event that selects a conversation.
+    /// Codex or Grok's latest `SessionStart`, selecting a conversation.
     Selection,
-    /// Grok's latest `UserPromptSubmit` or `Stop`: enrichment of the
+    /// Codex's latest `Stop`, or Grok's `UserPromptSubmit` / `Stop`, enriching the
     /// selected conversation.
     Enrichment,
 }
 
 impl Slot {
-    /// The order the supervisor applies slots in. Grok's selection comes
+    /// The order the supervisor applies slots in. Selection comes
     /// before its enrichment, because an enrichment is only accepted for a
     /// conversation already selected.
     pub const DRAIN_ORDER: [Slot; 3] = [Slot::Selection, Slot::Enrichment, Slot::Latest];
 
-    /// The order the supervisor takes slots in before applying any: Grok's
+    /// The order the supervisor takes slots in before applying any:
     /// enrichment before its selection, so a selection written just before
     /// the enrichment a pass takes is taken by the same pass (see
     /// `service::report_files::drain_session_dir`).
@@ -162,16 +161,13 @@ pub struct HookReport {
 }
 
 impl HookReport {
-    /// The slot this report replaces: Grok's `SessionStart` selects and its
-    /// other events enrich; every other vendor has one latest report.
+    /// Ask the integration which durable slot this event replaces. Selection
+    /// and enrichment must survive independently while the supervisor is down.
     pub fn slot(&self) -> Slot {
-        if self.vendor != farhelm_proto::ReportVendor::Grok {
-            return Slot::Latest;
-        }
-        match self.hook_event_name.as_ref().and_then(|v| v.as_str()) {
-            Some("SessionStart") => Slot::Selection,
-            _ => Slot::Enrichment,
-        }
+        crate::agent_kind::conversation_report_slot(
+            self.vendor,
+            self.hook_event_name.as_ref().and_then(|v| v.as_str()),
+        )
     }
 
     /// Decode the recorded ancestry into attribution evidence.
@@ -624,8 +620,9 @@ mod tests {
         }
     }
 
-    /// Spec: Grok's `SessionStart` goes to the selection slot and its other
-    /// events to the enrichment slot; every other vendor uses one slot.
+    /// Codex and Grok keep selection independently of later confirmation.
+    /// A supervisor outage must not lose the clear/new transition to a Stop;
+    /// integrations with complete independent reports retain one latest slot.
     ///
     /// Why: Grok's enrichment is refused unless its selection was applied
     /// first. With one slot, enrichments made during a long supervisor
@@ -633,7 +630,7 @@ mod tests {
     /// lost; the slot split is what keeps the drop directory bounded at two
     /// files without that loss.
     #[test]
-    fn grok_selection_and_enrichment_get_separate_slots() {
+    fn selecting_integrations_keep_enrichment_in_a_separate_slot() {
         assert_eq!(
             report(ReportVendor::Grok, Some("SessionStart")).slot(),
             Slot::Selection
@@ -646,9 +643,16 @@ mod tests {
             report(ReportVendor::Grok, Some("UserPromptSubmit")).slot(),
             Slot::Enrichment
         );
+        assert_eq!(
+            report(ReportVendor::Codex, Some("SessionStart")).slot(),
+            Slot::Selection
+        );
+        assert_eq!(
+            report(ReportVendor::Codex, Some("Stop")).slot(),
+            Slot::Enrichment
+        );
         for vendor in [
             ReportVendor::Claude,
-            ReportVendor::Codex,
             ReportVendor::Goose,
             ReportVendor::Pi,
             ReportVendor::Omp,

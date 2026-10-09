@@ -916,6 +916,187 @@ async fn real_codex_session_reports_its_identity_across_new() {
     drop(slot);
 }
 
+/// Current Codex must name an existing root transcript at Stop after `/clear`.
+/// The probe reads the header inside the callback: observing it later cannot
+/// prove that the event is usable for confirming a pending conversation. Two
+/// actual completions also establish that ordinary clear changes the path and
+/// leaves the old header intact. Default API authentication remains available;
+/// only this private work directory receives an invocation-time trust override.
+#[farhelm_testtrace::test]
+#[ignore = "needs real Codex credentials and network; run deliberately"]
+async fn real_codex_stop_names_the_persisted_transcript_after_clear() {
+    let _slot = SLOTS.acquire().await.expect("suite slot");
+    let state = farhelm_teststate::tempdir().expect("private audit state");
+    let work = farhelm_teststate::tempdir().expect("private vendor workdir");
+    let sock = state.path().join("tmux.sock");
+    let _tmux = TmuxServerGuard::new(sock.clone());
+    let log = state.path().join("events.jsonl");
+    let probe = state.path().join("probe.py");
+    std::fs::write(&probe, r#"import json, pathlib, sys
+payload = json.load(sys.stdin)
+path = pathlib.Path(payload['transcript_path'])
+try:
+    with path.open('rb') as record:
+        header = record.readline(65536).decode('utf-8')
+except FileNotFoundError:
+    header = None
+with open(sys.argv[1], 'a') as log:
+    log.write(json.dumps({'event': payload['hook_event_name'], 'source': payload.get('source'), 'runtime': payload['session_id'], 'path': str(path), 'header': header}) + '\n')
+"#).expect("callback probe");
+    let hook = shell_words::join(["python3", probe.to_str().unwrap(), log.to_str().unwrap()]);
+    let codex = which_binary("codex").expect("real Codex on PATH");
+    let mut argv = vec![
+        codex.to_string_lossy().into_owned(),
+        "--dangerously-bypass-hook-trust".into(),
+        "--dangerously-bypass-approvals-and-sandbox".into(),
+        "-c".into(),
+        "features.hooks=true".into(),
+        "-c".into(),
+        format!(
+            "projects.{}.trust_level=\"trusted\"",
+            serde_json::to_string(work.path().to_str().unwrap()).unwrap()
+        ),
+    ];
+    for event in ["SessionStart", "Stop"] {
+        argv.extend([
+            "-c".into(),
+            format!(
+                "hooks.{event}=[{{hooks=[{{type=\"command\",command={},timeout=60}}]}}]",
+                serde_json::to_string(&hook).unwrap(),
+            ),
+        ]);
+    }
+    let command = shell_words::join(&argv);
+    let created = tmux_query(
+        &sock,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "audit",
+            "-x",
+            "100",
+            "-y",
+            "30",
+            "-c",
+            work.path().to_str().unwrap(),
+            &command,
+        ],
+    )
+    .await;
+    assert!(created.status.success(), "vendor tmux launch: {created:?}");
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let pane = pane_within(&sock, "audit", deadline).await;
+        if pane.contains("OpenAI Codex (v") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Codex never became ready: {pane}"
+        );
+        // sleep-ok: poll the vendor's rendered startup marker.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    for turn in 0..2 {
+        if turn == 1 {
+            tmux_query(&sock, &["send-keys", "-t", "audit", "-l", "/clear"]).await;
+            deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                let pane = pane_within(&sock, "audit", deadline).await;
+                if pane.contains("/clear") {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "clear not in composer: {pane}"
+                );
+                // sleep-ok: wait for the literal slash command before submitting it.
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            tmux_query(&sock, &["send-keys", "-t", "audit", "Enter"]).await;
+        }
+        let prompt = if turn == 0 {
+            "Reply with exactly OK. Do not use tools."
+        } else {
+            "Reply with exactly PONG. Do not use tools."
+        };
+        tmux_query(&sock, &["send-keys", "-t", "audit", "-l", prompt]).await;
+        deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            let pane = pane_within(&sock, "audit", deadline).await;
+            if pane.contains(prompt) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "prompt not in composer: {pane}"
+            );
+            // sleep-ok: wait for the vendor to render this turn's prompt.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        tmux_query(&sock, &["send-keys", "-t", "audit", "Enter"]).await;
+        loop {
+            let rows = codex_probe_events(&log);
+            if rows.iter().filter(|r| r["event"] == "Stop").count() > turn {
+                break;
+            }
+            let pane = pane_within(&sock, "audit", deadline).await;
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no completed Stop; events={rows:?}; pane={pane}"
+            );
+            // sleep-ok: poll callback evidence while a real model turn completes.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    let rows = codex_probe_events(&log);
+    let stops: Vec<_> = rows.iter().filter(|r| r["event"] == "Stop").collect();
+    assert_eq!(stops.len(), 2, "exactly two turns must complete: {rows:?}");
+    assert_ne!(stops[0]["runtime"], stops[1]["runtime"]);
+    assert_ne!(
+        stops[0]["path"], stops[1]["path"],
+        "ordinary clear must not rewrite the old path"
+    );
+    assert!(
+        rows.iter().any(|r| r["event"] == "SessionStart"
+            && r["source"] == "clear"
+            && r["runtime"] == stops[1]["runtime"]),
+        "the clear must select the runtime Stop confirms: {rows:?}"
+    );
+    for stop in stops {
+        let header = stop["header"]
+            .as_str()
+            .expect("transcript exists during Stop");
+        assert!(header.ends_with('\n'), "Stop must see a complete header");
+        let meta: serde_json::Value = serde_json::from_str(header).unwrap();
+        assert_eq!(meta["payload"]["session_id"], stop["runtime"]);
+        assert_eq!(meta["payload"]["source"], "cli");
+        let text = std::fs::read_to_string(stop["path"].as_str().unwrap()).unwrap();
+        assert!(
+            text.starts_with(header),
+            "the exact callback header survives ordinary clear"
+        );
+    }
+}
+
+/// Read bounded private callback evidence without turning partial appends into
+/// readiness. The vendor probe emits one compact JSON line per callback.
+fn codex_probe_events(path: &std::path::Path) -> Vec<serde_json::Value> {
+    use std::io::Read as _;
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut text = String::new();
+    file.take(1024 * 1024)
+        .read_to_string(&mut text)
+        .expect("bounded callback log");
+    text.split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
+        .map(|line| serde_json::from_str(line).expect("complete callback JSON"))
+        .collect()
+}
+
 /// Type one short, digit-free prompt and submit it, VERIFYING each half
 /// against the rendered pane rather than trusting sleeps.
 ///

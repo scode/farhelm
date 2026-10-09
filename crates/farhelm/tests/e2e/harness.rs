@@ -250,11 +250,15 @@ impl SupervisorClientAttachExt for SupervisorClient {
 /// Pane width used wherever a test reads the fake agent's argv marker.
 ///
 /// Far wider than the suite's usual 80 because the marker carries two
-/// absolute tempdir paths plus injected settings JSON. A pane narrower than
-/// the line wraps it, and a replayed wrap comes back as a real newline;
-/// callers therefore fail loudly through [`argv_marker`] if this bound stops
-/// being sufficient.
-pub(crate) const WIDE_COLS: u16 = 500;
+/// absolute tempdir paths plus injected settings JSON. Codex's injected
+/// SessionStart and Stop hooks each name the absolute path of the `farhelm`
+/// binary under test, so the line grows with the checkout's path length: 500
+/// columns fit a 33-character checkout path but not a 43-character one, which
+/// is why the bound is set well above any line measured so far. A pane
+/// narrower than the line wraps it, and a replayed wrap comes back as a real
+/// newline; callers therefore fail loudly through [`argv_marker`] if this
+/// bound stops being sufficient.
+pub(crate) const WIDE_COLS: u16 = 1000;
 
 /// Pane height; nothing here depends on it.
 pub(crate) const ROWS: u16 = 24;

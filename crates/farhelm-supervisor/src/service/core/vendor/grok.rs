@@ -1,83 +1,15 @@
-//! Grok's stateful supervisor behavior: exact record-pair refresh and
+//! Grok's stateful supervisor behavior: exact record-pair admission and
 //! resume verification, and its proven report admission.
 
 use super::super::*;
 
 impl Supervisor {
-    /// Recheck Grok's exact two-file evidence without changing the selected
-    /// UUID or its durable ordering timestamp.
-    pub(in crate::service::core) async fn refresh_grok_capture_claimed(
-        &self,
-        row: &mut StoredSession,
-    ) -> anyhow::Result<bool> {
-        if row.agent_kind() != AgentKind::Grok {
-            return Ok(true);
-        }
-        let Some(current) = self.store.session(&row.id).await? else {
-            return Ok(false);
-        };
-        if current.generation != row.generation || current.agent_kind() != AgentKind::Grok {
-            return Ok(false);
-        }
-        *row = current;
-        if row.capture_ownership_version != 1 {
-            return Ok(true);
-        }
-        let Some(stored) = row.captured_conversation.as_deref() else {
-            return Ok(true);
-        };
-        let Ok(mut locator) = crate::agent_kind::grok::GrokLocator::parse(stored) else {
-            return Ok(true);
-        };
-        let was_resumable = locator.resumable;
-        let definitive = locator.verify().await;
-        if was_resumable == locator.resumable {
-            return Ok(true);
-        }
-        let tell_user = was_resumable && !locator.resumable && definitive;
-        if was_resumable && !locator.resumable {
-            warn!(target: LOG_TARGET,
-                session = %row.id,
-                "the exact Grok record pair is unavailable or inconsistent; withdrawing its resume offer"
-            );
-        }
-        let replacement = locator.encode()?;
-        if !self.may_record() {
-            if !locator.resumable {
-                row.captured_conversation = Some(replacement);
-            }
-            return Ok(true);
-        }
-        if !self
-            .store
-            .replace_reported_conversation_if_current(
-                &row.id,
-                row.generation,
-                Some(stored),
-                &replacement,
-            )
-            .await?
-        {
-            return Ok(false);
-        }
-        row.captured_conversation = Some(replacement);
-        if tell_user {
-            // Told to the user once the withdrawal is durable, as Codex's is.
-            self.notify_session(
-                &row.id,
-                row.generation,
-                crate::service::notifications::NotificationKind::ResumeWithdrawn,
-                &crate::service::notifications::resume_withdrawn_text("Grok"),
-            )
-            .await;
-        }
-        Ok(true)
-    }
-
     /// Grok's half of `verify_report_only_resume`: re-verify the exact
     /// record pair its stored locator names, and invalidate a stale locator
     /// (only the exact locator and generation the caller read) when it no
-    /// longer checks out.
+    /// longer checks out. OS read failures preserve the offer and refuse only
+    /// this attempt; missing evidence notifies after durable withdrawal, while
+    /// inconsistent evidence withdraws silently.
     pub(in crate::service::core) async fn verify_grok_resume(
         &self,
         session_id: &str,
@@ -88,7 +20,18 @@ impl Supervisor {
         })?;
         let mut locator = crate::agent_kind::grok::GrokLocator::parse(stored)
             .context("decoding the Grok resume locator")?;
-        let definitive = locator.verify().await;
+        let verdict = locator.verify_exact_files().await;
+        if let Err(error) = &verdict
+            && record_read_is_transient(error)
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Grok conversation files could not be read; try Restart again",
+            )
+            .into());
+        }
+        let definitive = verdict.is_ok();
+        locator.resumable = verdict.unwrap_or(false);
         if locator.resume_id().is_some() {
             return Ok(());
         }
@@ -103,9 +46,8 @@ impl Supervisor {
             )
             .await
             .context("invalidating a stale Grok resume locator")?;
-        // The final check before a Restart is a withdrawal like the
-        // background one, and later refreshes see the offer already gone, so
-        // this is the only place the user can be told about it.
+        // Only a clean absence verdict notifies. A different conversation is
+        // an inconsistent binding, not an ordinary user deletion.
         if withdrawn && definitive {
             self.notify_session(
                 session_id,
