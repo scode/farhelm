@@ -68,3 +68,38 @@ dependency and notice visibility when switching terminal tabs. No outstanding fi
 a separate fresh cold read. The resume check reconciled the source, reviews and completed browser evidence. Reviewers
 were requested on the specified models, but the harness did not expose actual model identity or token counters; exact
 attribution and usage could not be independently verified.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1731 (terminal copy guidance shown at the pointer where the drag ended), one squash
+commit on main. The plan waited 8 to 19 hours after delivery because the monitor stalled between landing rounds; that
+was the monitor's fault, not the plan's.
+
+#### A fix made while landing
+
+A separate reviewer that had not worked on any of the five plans landing in this round (version-hover-text,
+enter-launches-anywhere, drag-copy-notice, preview-lock-identity, transcript-reads-on-need) read them against each other
+and main before anything merged. They share no code that conflicts; the only textual conflicts were TODO.md, where each
+plan removed only its own entries, and FLAKES.md, where entries were appended. No protocol, supervisor or helm database
+version changes. It found that the notice was placed on a layer above the session header's confirmations: the
+stylesheet's list of layers puts the header confirmation and the copy warning at 30, and calls their text something a
+user must never lose, while the notice was at 35. A drag released near the top of the terminal followed by Restart
+within the notice's 30 seconds could cover the "restarting stops the agent" line. The landing moved the notice to 25,
+still above the sidebar's row menus (20), which is what the plan needed, and below both warnings, and corrected the
+stylesheet's list, in #1731 before it merged. The mouse-modes spec, which checks the notice, passed on both engines with
+the change (below).
+
+#### Checks
+
+- Run now, on all five plans stacked together in landing order: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` (again after main gained
+  a Rust 1.99 lint cleanup, still clean), `cargo check -p farhelm-ui --features desktop`, the web build check,
+  `dprint
+  check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format` and the UI
+  JavaScript tests (203 passed), all clean; the supervisor and protocol unit tests in full with the Codex, Grok and hook
+  identity end-to-end tests (run `30c797ad`: 1205 of 1206; the one failure is described in transcript-reads-on-need's
+  notes and passed after its fix, 22 of 22 identity tests); and, through the recorder on Chromium and WebKit, the
+  GitHub-checkout composer, GitHub checkouts, destination authority, create idempotency, clone, replace, mouse modes,
+  launcher Enter and Restart with specs (run `cd71dca0`, 196 of 196 passed).
+
+The landing made one thing in the report above untrue: the notice's layer is 25, not 35.
