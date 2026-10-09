@@ -37,6 +37,7 @@
 //! says so in those words.
 
 use super::core::Supervisor;
+use farhelm_proto::{AgentKind, ReadinessWording};
 use tracing::warn;
 
 /// What kind of problem a notification reports.
@@ -104,10 +105,25 @@ impl NotificationKind {
     }
 }
 
-/// The text of a [`NotificationKind::HookSilent`] notification.
-pub(crate) const HOOK_SILENT_TEXT: &str = "Farhelm has not learned which conversation this \
-     agent is in, a minute after the first line you sent it, so Restart will not be able to \
-     resume this conversation.";
+/// Explain the missed report using the same agent name and timing as Restart.
+///
+/// Called only for a kind whose report is due by the first prompt, which
+/// guarantees both facts exist. The custom-command advice names the supported
+/// hook placeholder even for legacy sessions whose command predates it; the
+/// user can instead send feedback when Farhelm composed the launch itself.
+pub(crate) fn hook_silent_text(kind: AgentKind) -> String {
+    let agent = kind.display_name().expect("a silent-hook agent has a name");
+    let timing = kind
+        .restart_readiness()
+        .expect("a silent-hook agent has report timing")
+        .clause(ReadinessWording::ToTheUser);
+    format!(
+        "{agent} normally reports its conversation to Farhelm {timing}, so it should have by now. \
+         Until it does, Restart cannot resume this conversation. If you launched {agent} with a \
+         custom command, check that it passes on `{{farhelm_args}}`; otherwise, please send \
+         feedback from the help (?) menu."
+    )
+}
 
 /// The text of a [`NotificationKind::HookNotAdded`] notification for a
 /// launch that was composed with `{farhelm_args}` but whose reporter could
@@ -397,6 +413,30 @@ fn newer_or_equal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every kind eligible for the silent-hook warning gets its own name,
+    /// Restart's timing, and actionable advice. Deriving the set from the
+    /// eligibility rule keeps a future integration from silently inheriting
+    /// an anonymous warning or sending the user to a log.
+    #[test]
+    fn silent_hook_advice_follows_each_eligible_agents_restart_timing() {
+        for &kind in AgentKind::ALL {
+            let Some(readiness) = kind.restart_readiness() else {
+                continue;
+            };
+            if !readiness.due_by_first_prompt() {
+                continue;
+            }
+            let text = hook_silent_text(kind);
+            assert!(text.contains(kind.display_name().expect("eligible agent name")));
+            assert!(text.contains(readiness.clause(ReadinessWording::ToTheUser)));
+            assert!(text.contains("Restart cannot resume this conversation"));
+            assert!(text.contains("custom command"));
+            assert!(text.contains("`{farhelm_args}`"));
+            assert!(text.contains("feedback from the help (?) menu"));
+            assert!(!text.to_lowercase().contains("log"), "{kind:?}: {text}");
+        }
+    }
 
     /// An overlapping reload may read before a resolve and publish after it.
     /// Equal sequence numbers must preserve resolution; recurrence is newer
