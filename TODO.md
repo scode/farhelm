@@ -223,6 +223,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   selected row. Find what makes the marks overlap when the bell is added, and fix the row's layout so every mark keeps
   its own space.
 
+- **Make the "conversation not learned" notification actionable, per agent.** A minute after the first line sent to an
+  agent, if Farhelm still has not learned the conversation, the session gets a notification: "Farhelm has not learned
+  which conversation this agent is in, a minute after the first line you sent it, so Restart will not be able to resume
+  this conversation." Seen with Codex, it gives the user nothing to act on. Tailor it to the agent the way PR #1618
+  tailored Restart's hover text: for Codex, say that its conversation is normally captured when the first prompt is
+  submitted, so by now it should have been, and say what the user can do about it.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
