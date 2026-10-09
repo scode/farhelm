@@ -137,3 +137,56 @@ The required cold reader also checked the commit and PR wording. Implementation 
 no-workhorse mode; the only delegated work was the required resume checks, code review and wording/report cold reads.
 Galaxy-brain session evidence is retained under session UUID eec309e5-9251-4738-a762-93388ad02c77; native usage
 accounting was unavailable.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1720 (fresh GitHub checkouts clone through a per-host repository cache), one squash
+commit on main.
+
+#### What else was on main, and what lands with it
+
+Between the commit the change was built on and the landing, main gained the save-as-template change to the launcher
+(#1717), documentation and TODO entries, and the planning queue's bookkeeping. Two other plans land right after this
+one, in the same round: row-marks-desktop-utf8 (the desktop app's text encoding) and conversation-notice-hook-restart
+(the missing-conversation warning, including a supervisor database step to version 29). The rebase met one conflict:
+FLAKES.md, where #1717 and this change each appended an entry; both were kept, #1717's first.
+
+A separate reviewer that had not worked on any of the three plans read them against each other and against main before
+anything merged. This change and conversation-notice-hook-restart both edit the supervisor's session code, in different
+places that merge cleanly and do not interact: the cache sweep at supervisor start and the cache path in a checkout's
+preparation here, the launch's hook record there. This change adds no database step: the cache path lives in each
+launch's own preparation record, and an old record started under the new build fails with a named error, as the report
+says. Uninstall already keeps everything under Farhelm's state directory, the cache included.
+
+#### The report's incomplete browser evidence
+
+The report says its GitHub-checkout browser spec had six timeouts and three fixture failures, and that only one timeout
+was shown to fail on main too. The reviewer looked for a way the cache could cause them and found none: all cache work
+finishes, and its lock is released, before the agent starts; Git's background maintenance is forced to run in the
+foreground, so nothing outlives that stage; the slow typing in the traces happens after the clones finished; and each
+test uses its own repository name, so checkouts within a test never wait on each other's cache lock. The landing did not
+re-run that spec on this busy machine, so the five uncompared timeouts remain unexplained, as the report says.
+
+The reviewer also noted three small things the landing did not change: evicting a large unused cache at supervisor start
+delays the supervisor's readiness (at most once every 30 days per cache); a second checkout of the same repository
+waiting for the cache lock shows an empty terminal while the first sits at a credential prompt; and an Enter typed into
+a credential prompt during preparation starts the missing-conversation warning's clock, which this change makes more
+likely for private repositories without a credential helper, since they are now prompted twice.
+
+#### Checks
+
+- Run now, on all three plans stacked together in landing order: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check`, `python -B scripts/check-test-sleeps.py` and
+  `python3 releasing/check-changelog.py format`, all clean; the supervisor's and the protocol crate's unit tests in full
+  through the test-run recorder (run `0bc2d861`, 1176 passed, 2 failed); the desktop UI's unit tests (run `b9f0a31b`,
+  545 passed).
+- The two failures predate the three plans. One is the restart test FLAKES.md already records
+  (`unconfirmed_restart_is_refused_only_while_the_agent_is_working`); the other,
+  `more_than_one_hundred_distinct_matches_are_truncated`, ran out its five-second scan budget while the machine's load
+  average was around 20 to 23 on 18 cores. Five repetitions of both on the stack failed eight times; five on main
+  without any of the three plans failed four times, with the same failure shapes. The landing did not log the discovery
+  test as a flake on this evidence.
+- Reused: the report's other checks.
+
+Nothing in the report above was made untrue by the landing.
