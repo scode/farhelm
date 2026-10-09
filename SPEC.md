@@ -504,6 +504,11 @@ checkout; the agent choice is independent of that destination:
   Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Request refusals
   appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never launches, and
   Escape closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
+  Enter on a choice button (launch-kind tab, harness, effort, permissions, or workspace trust) applies that choice and
+  then launches through the ordinary Launch path, or shows its refusal beside Launch. Enter on the host or agent-type
+  dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; Space and arrows
+  still set values. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
+  save-as-template panel keep their own Enter rules. A held Enter never launches.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
   and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it

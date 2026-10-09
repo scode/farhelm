@@ -11,7 +11,7 @@ use crate::github_checkout::{
     DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
     PreviewState, RepositoryAuthority, repository_choices,
 };
-use crate::launch_controls::LaunchControls;
+use crate::launch_controls::{LaunchControls, enter_choice};
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -833,10 +833,10 @@ fn draft_transition_allowed(ops: OpLock) -> bool {
 
 /// Submit the launcher's form, as its Launch button would.
 ///
-/// For a control that decides in its own handler whether a submit should
-/// happen at all (the YOLO question's answers), where a native submit
-/// button would submit regardless. `requestSubmit` runs the same validation
-/// and `onsubmit` a Launch click does.
+/// Choice shortcuts apply their state before this call, and YOLO answers
+/// take their confirmation before it. Native submit buttons cannot express
+/// either ordering. `requestSubmit` reaches the same `onsubmit` as Launch,
+/// which reads the live draft and retains authority over admission.
 fn resubmit_composer() {
     document::eval(
         "document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()",
@@ -3664,6 +3664,62 @@ pub(super) fn CreateSessionForm(
             pending_initial_action.set(None);
         }
     }));
+    // Pointer and keyboard choices share their transition callbacks. Enter
+    // runs these synchronously before form resubmission reads the live draft.
+    let choose_harness = EventHandler::<LaunchHarness>::new({
+        let catalog = catalog_for_harness.clone();
+        move |harness| {
+            if !draft_transition_allowed(ops) {
+                return;
+            }
+            promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+            let selection = LaunchSelection {
+                harness: structured_harness().unwrap_or(harness),
+                model: structured_model(),
+                effort: structured_effort(),
+                permissions: structured_permissions(),
+                workspace_trust: structured_workspace_trust(),
+            };
+            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
+                selection,
+                *custom_model_harness.peek(),
+                harness,
+                catalog.as_deref(),
+            );
+            composer_reset_reason.set(draft_reconciliation_reason(
+                &LaunchSelection {
+                    harness: structured_harness().unwrap_or(harness),
+                    model: structured_model(),
+                    effort: structured_effort(),
+                    permissions: structured_permissions(),
+                    workspace_trust: structured_workspace_trust(),
+                },
+                &selection,
+                structured_permissions_is_explicit(),
+            ));
+            structured_harness.set(Some(selection.harness));
+            structured_model_raw_seed.set(selection.model.clone());
+            structured_model_edited.set(false);
+            structured_model.set(selection.model);
+            structured_effort.set(selection.effort);
+            structured_permissions.set(selection.permissions);
+            structured_workspace_trust.set(selection.workspace_trust);
+            custom_model_harness.set(owner);
+            launch_tab.set(LaunchTab::Agent);
+            intent_key.set(None);
+            focus_composer_surface();
+        }
+    });
+    let choose_launch_tab = EventHandler::<LaunchTab>::new(move |tab| {
+        if !draft_transition_allowed(ops) {
+            return;
+        }
+        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+        launch_tab.set(tab);
+        intent_key.set(None);
+        focus_composer_surface();
+    });
+    let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
     // The host selector and its reconciliation notes are built once for the
     // shared destination block. Command mode changes only launch controls, so
     // it has no second host path that could drift from this one.
@@ -3680,6 +3736,7 @@ pub(super) fn CreateSessionForm(
             aria_label: "host",
             "data-tooltip": "host: the machine the session runs on",
             disabled: busy,
+            onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
             value: selected.map(|id| id.to_string()).unwrap_or_default(),
             onchange: move |evt| {
                 if !draft_transition_allowed(ops) {
@@ -3859,6 +3916,11 @@ pub(super) fn CreateSessionForm(
                 evt.stop_propagation();
             },
             onkeydown: move |evt| {
+                // Native text-field and action-button submission has no choice
+                // handler. Keep a held or composing Enter from launching there.
+                if evt.key() == Key::Enter && (evt.is_auto_repeating() || evt.is_composing()) {
+                    evt.prevent_default();
+                }
                 if evt.key() == Key::Escape && !ops.busy_now() && !template_saving() {
                     if template_panel().is_some() { template_panel.set(None); }
                     else { on_cancel.call(()); }
@@ -5026,16 +5088,20 @@ pub(super) fn CreateSessionForm(
                                     onkeydown: {
                                         let entry = entry.clone();
                                         move |evt| {
-                                            // The busy guard lives in `apply_recent`
-                                            // (its `false` return below); only the key
-                                            // itself is filtered here.
-                                            if evt.key() != Key::Enter || evt.is_composing() {
+                                            if evt.key() != Key::Enter {
                                                 return;
                                             }
                                             // Native button activation would emit a
                                             // synthetic click after Enter. Suppress it
                                             // so this row fills and submits once.
                                             evt.prevent_default();
+                                            // This row submits explicitly, before a
+                                            // bubbled event reaches the form guard.
+                                            // Reject a held key here even after a
+                                            // fast refusal released the busy lock.
+                                            if evt.is_auto_repeating() || evt.is_composing() {
+                                                return;
+                                            }
                                             if !apply_recent.call(entry.clone()) {
                                                 return;
                                             }
@@ -5356,6 +5422,10 @@ pub(super) fn CreateSessionForm(
                                     tabindex: if launch_tab() == tab { "0" } else { "-1" },
                                     disabled: busy,
                                     onkeydown: move |evt: KeyboardEvent| {
+                                        if evt.key() == Key::Enter {
+                                            enter_choice(evt, ops.busy_now(), || choose_launch_tab.call(tab), Some(launch_from_choice));
+                                            return;
+                                        }
                                         let target = match evt.key() {
                                             Key::ArrowLeft | Key::ArrowRight => match tab {
                                                 LaunchTab::Agent => LaunchTab::Command,
@@ -5381,17 +5451,7 @@ pub(super) fn CreateSessionForm(
                                             "requestAnimationFrame(() => document.querySelector('.create-session-form .launch-kind-tab.selected')?.focus())",
                                         );
                                     },
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
-                                        }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        launch_tab.set(tab);
-                                        intent_key.set(None);
-                                        focus_composer_surface();
-                                    },
+                                    onclick: move |_| choose_launch_tab.call(tab),
                                     "{label}"
                                 }
                             }
@@ -5407,49 +5467,8 @@ pub(super) fn CreateSessionForm(
                                         aria_pressed: launch_tab() == LaunchTab::Agent && *structured_harness.read() == Some(harness),
                                         "data-tooltip": "use {crate::launch_composer::harness_label(harness)} for the session",
                                         disabled: busy,
-                                        onclick: {
-                                            let catalog = catalog_for_harness.clone();
-                                            move |_| {
-                                            if !draft_transition_allowed(ops) {
-                                                return;
-                                            }
-                                            promote_fetched_history_snapshot(
-                                                offered_history, create_target, fetched_history,
-                                            );
-                                            let selection = LaunchSelection {
-                                                harness: structured_harness().unwrap_or(harness),
-                                                model: structured_model(),
-                                                effort: structured_effort(),
-                                                permissions: structured_permissions(),
-                                                workspace_trust: structured_workspace_trust(),
-                                            };
-                                            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
-                                                selection, *custom_model_harness.peek(), harness, catalog.as_deref(),
-                                            );
-                                            composer_reset_reason.set(draft_reconciliation_reason(
-                                                &LaunchSelection {
-                                                    harness: structured_harness().unwrap_or(harness),
-                                                    model: structured_model(),
-                                                    effort: structured_effort(),
-                                                    permissions: structured_permissions(),
-                                                    workspace_trust: structured_workspace_trust(),
-                                                },
-                                                &selection,
-                                                structured_permissions_is_explicit(),
-                                            ));
-                                            structured_harness.set(Some(selection.harness));
-                                            structured_model_raw_seed.set(selection.model.clone());
-                                            structured_model_edited.set(false);
-                                            structured_model.set(selection.model);
-                                            structured_effort.set(selection.effort);
-                                            structured_permissions.set(selection.permissions);
-                                            structured_workspace_trust.set(selection.workspace_trust);
-                                            custom_model_harness.set(owner);
-                                            launch_tab.set(LaunchTab::Agent);
-                                            intent_key.set(None);
-                                            focus_composer_surface();
-                                            }
-                                        },
+                                        onkeydown: move |event| enter_choice(event, ops.busy_now(), || choose_harness.call(harness), Some(launch_from_choice)),
+                                        onclick: move |_| choose_harness.call(harness),
                                         "{crate::launch_composer::harness_label(harness)}"
                                     }
                                 }
@@ -5503,6 +5522,7 @@ pub(super) fn CreateSessionForm(
                                 choice_error: structured_choice_error.map(str::to_string),
                                 reset_reason: composer_reset_reason(),
                                 model_id_prefix: "launch-composer-model".to_string(),
+                                on_choice_enter: launch_from_choice,
                                 on_model_focus: move |_| {
                                     if !draft_transition_allowed(ops) { return; }
                                     model_draft.set(String::new());
@@ -5675,6 +5695,7 @@ pub(super) fn CreateSessionForm(
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
+                        onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
                         checked: command_yolo() == Some(true),
                         disabled: busy,
                         onchange: move |_| {
@@ -5690,6 +5711,7 @@ pub(super) fn CreateSessionForm(
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
+                        onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
                         checked: command_yolo() == Some(false),
                         disabled: busy,
                         onchange: move |_| {
@@ -5705,6 +5727,7 @@ pub(super) fn CreateSessionForm(
                 "agent type"
                 select {
                     class: "launch-command-agent",
+                        onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
                     "data-tooltip": "the agent this command runs, if any, so Farhelm can track and resume it",
                     disabled: busy,
                     onchange: move |evt| {
@@ -5736,6 +5759,7 @@ pub(super) fn CreateSessionForm(
                     input {
                         r#type: "checkbox",
                         class: "launch-command-resume-toggle",
+                        onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
                         checked: command_resume_on(),
                         disabled: busy,
                         onchange: move |evt| {
