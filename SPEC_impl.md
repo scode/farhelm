@@ -3382,19 +3382,21 @@ payloads and unit files are written only when their content differs, so rerunnin
 an earlier run stopped. Remote plans report binary upload and installation as separate actions. Upload verifies the
 nonce temporary's digest; installation checks it again before the atomic rename. The upload's stall timeout (SPEC.md
 "Provisioning transfers time out only on stalls") starts once the host's temporary file first exists and renews only on
-its verified growth. Before that file appears the upload has no deadline of its own: a slow ssh connection setup has no
-byte-progress signal to tell it from a stall, and ssh runs without a connect or keepalive timeout of its own, so a host
-that stops answering in that window holds the upload until the connection itself fails. SPEC.md accepts that window
-(same section): ordinary ssh and TCP behavior bounds it, and Farhelm adds no deadline or ssh timeout of its own for it.
-Both actions use the same staged payload snapshot, and local plans retain a single install action because they do not
-transfer over the network. Matching content also repairs installed-file mode drift. Provisioning may create directories
-with explicit modes and repair permissions on directories dedicated to Farhelm; the supervisor state directory is
-private to its user (`0700`). Existing shared directories, including a shared executable directory or the systemd
-user-unit directory, must retain their permissions. If those permissions prevent installation, report the obstacle
-rather than changing them. Each plan's `EnsureDirectories` step marks every directory dedicated or shared: a dedicated
-one converges on its mode with `install -d -m` (which chmods an existing directory, and that is the point), while a
-shared one is handed to `install -d` only when it is missing, and the confirmation text says an existing one keeps its
-permissions.
+its verified growth. The upload command reports that size on its own ssh stdout every two seconds and once at EOF; no
+second command runs while the upload is active. Local writes into ssh are not progress evidence, including while the
+last buffered bytes drain to the host. Before that file appears the upload has no deadline of its own: a slow ssh
+connection setup has no byte-progress signal to tell it from a stall, and ssh runs without a connect or keepalive
+timeout of its own, so a host that stops answering in that window holds the upload until the connection itself fails.
+SPEC.md accepts that window (same section): ordinary ssh and TCP behavior bounds it, and Farhelm adds no deadline or ssh
+timeout of its own for it. Both actions use the same staged payload snapshot, and local plans retain a single install
+action because they do not transfer over the network. Matching content also repairs installed-file mode drift.
+Provisioning may create directories with explicit modes and repair permissions on directories dedicated to Farhelm; the
+supervisor state directory is private to its user (`0700`). Existing shared directories, including a shared executable
+directory or the systemd user-unit directory, must retain their permissions. If those permissions prevent installation,
+report the obstacle rather than changing them. Each plan's `EnsureDirectories` step marks every directory dedicated or
+shared: a dedicated one converges on its mode with `install -d -m` (which chmods an existing directory, and that is the
+point), while a shared one is handed to `install -d` only when it is missing, and the confirmation text says an existing
+one keeps its permissions.
 
 The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
