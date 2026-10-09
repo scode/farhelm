@@ -54,7 +54,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   into ssh's stdin as the progress signal, and remove the old remote-poll mechanism. Two things to settle: this reverses
   the rule, documented in `crates/farhelm-helm/src/provisioning/backend.rs`, that pipe activity is not progress evidence
   (local writes run ahead of the remote by the pipe, ssh and TCP buffers, a few MB, before they block), and nothing
-  local signals progress after the last byte is written while the remote drains those buffers.
+  local signals progress after the last byte is written while the remote drains those buffers. Plan:
+  `plans/queue/upload-stall-same-session.md`.
 
 - **Help users start the shared ssh connections themselves.** A host that needs an interactive approval for every new
   ssh connection (a second factor, say) only works if the user starts the helm's shared connections for it by hand, at
@@ -201,7 +202,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   about a minute before the restart, when the supervisor restarted; on the Mac that is any quit and reopen of the app,
   and every update. A user who starts a session, quits Farhelm before typing, reopens it and then types gets no bell if
   the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
-  for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report.
+  for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report. Plan:
+  `plans/queue/conversation-notice-hook-restart.md`.
 
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
@@ -221,14 +223,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in the session list drew the marks to the left of the bell (the agent and permission marks, as far as a photo of the
   screen shows) on top of one another into an unreadable smudge, with a stray "<" between them and the bell. Seen on the
   selected row. Find what makes the marks overlap when the bell is added, and fix the row's layout so every mark keeps
-  its own space.
+  its own space. Plan: `plans/queue/row-marks-desktop-utf8.md`.
 
 - **Make the "conversation not learned" notification actionable, per agent.** A minute after the first line sent to an
   agent, if Farhelm still has not learned the conversation, the session gets a notification: "Farhelm has not learned
   which conversation this agent is in, a minute after the first line you sent it, so Restart will not be able to resume
   this conversation." Seen with Codex, it gives the user nothing to act on. Tailor it to the agent the way PR #1618
   tailored Restart's hover text: for Codex, say that its conversation is normally captured when the first prompt is
-  submitted, so by now it should have been, and say what the user can do about it.
+  submitted, so by now it should have been, and say what the user can do about it. Plan:
+  `plans/queue/conversation-notice-hook-restart.md`.
 
 ## Doc todo
 
