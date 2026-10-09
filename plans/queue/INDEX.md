@@ -1,7 +1,6 @@
 # Plans queue
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
-- [landing 707967] `conversation-notice-hook-restart.md` — The "conversation not learned" notification says, per agent, when the agent normally reports and what to do; an Enter answering a dialog no longer starts its clock; a restarted supervisor keeps checking the sessions it picks up.
 - [complete] `upload-stall-same-session.md` — Payload uploads report the remote file's size on their own ssh session, so stall detection works on hosts that allow one session per connection.
 - [in-flight 73e177] `version-hover-text.md` — Hovering the version readout says in plain words which Farhelm is running and, in the Mac app, that it turns red once an update is installed and can then be selected to restart into it.
 - [in-flight 34eb07] `enter-launches-anywhere.md` — Enter on a choice in the New session and Restart with dialogs chooses it and launches or restarts; a launch that cannot happen says why next to the Launch button. (after `save-launcher-as-template.md`)

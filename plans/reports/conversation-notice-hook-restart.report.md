@@ -113,3 +113,47 @@ confirmations. The specification now describes the agreed warning-clock exceptio
 unconditional. The reviewer confirmed the correction. PR2 and PR3 had no findings. Commit/PR wording passed fresh cold
 reads. Implementation stayed local; the harness did not expose native model reporting or usage counters, and the private
 session evidence records that gap.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as three squash commits on main, in order: #1722 (an Enter answering a dialog does not start
+the warning clock), #1723 (the warning names the agent and says what to do) and #1725 (the check survives a supervisor
+restart; supervisor database version 29). Nothing else reached main while they merged.
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, main gained the save-as-template change to the launcher
+(#1717), the repository-cache change (#1720) and the desktop encoding fix (#1724), both landed just before this one in
+the same round, plus documentation and TODO entries (among them the supervisor idle-CPU investigation's four TODO
+entries) and the planning queue's bookkeeping.
+
+The rebase met a conflict in TODO.md. Main had added the idle-CPU investigation's four entries right after the "Make the
+'conversation not learned' notification actionable" entry this stack removes, and the earlier plans in the round removed
+their own entries next to it. The landing removed only this stack's two entries and the earlier plans' entries and kept
+all four idle-CPU entries; taking #1725's side of the conflict as it stood would have deleted them.
+
+#### Review before merging
+
+A separate reviewer that had not worked on any of the three plans read them against each other and main before anything
+merged. This stack and #1720 both edit the supervisor's session code, in different places that merge cleanly and do not
+interact: #1720 prepares a checkout in the session's terminal after the launch, while this stack records the launch's
+hook before tmux starts and clears it when a create fails. Only this stack changes the supervisor database (28 to 29);
+#1723's change to the protocol crate is a comment only, so no protocol version changes. No test still expects the old
+warning text, and the resolve-and-recur behavior that landed with resolve-stale-notifications still holds: re-arming the
+check after a restart cannot bring back a warning the user cleared.
+
+One pre-existing gap the reviewer noted, which #1720 makes a little more likely: an Enter typed during a fresh
+checkout's preparation, for example answering a Git credential prompt, starts the warning clock, so a slow checkout can
+get the warning before the agent is ready. This stack does not make it worse, because the clock's start is not saved
+across restarts.
+
+#### Checks
+
+- Run now, on all three plans stacked together in landing order: the compile, lint, format, delay and changelog checks
+  listed in #1720's landing notes, all clean; the supervisor's and the protocol crate's unit tests in full (run
+  `0bc2d861`, 1176 passed, 2 failed). The two failures, the restart test FLAKES.md already records and a repository
+  discovery test that runs out its scan budget under load, fail on main without any of these plans too (#1720's notes
+  have the comparison); neither is in code this stack changes.
+- Reused: the report's other checks.
+
+Nothing in the report above was made untrue by the landing.
