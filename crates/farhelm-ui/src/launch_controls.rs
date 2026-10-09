@@ -72,7 +72,10 @@ fn model_marker_label(old: Option<&str>) -> DetailPart {
 /// surfaces are mounted together. The launcher passes its historical prefix
 /// so its DOM and existing browser selectors remain unchanged.
 /// `on_choice_enter` opts the segment buttons into apply-then-primary behavior;
-/// the model field retains its own Enter contract regardless of that callback.
+/// the model field has a separate policy: `on_model_primary_enter`, when set,
+/// runs after an open pick is applied or directly from the closed field. Its
+/// caller must validate the live draft, including a pick the model handler refused.
+/// Omitting it keeps New session's selection-only model Enter behavior.
 #[component]
 pub(crate) fn LaunchControls(
     harness: Option<LaunchHarness>,
@@ -95,6 +98,7 @@ pub(crate) fn LaunchControls(
     #[props(default)] baseline: Option<LaunchSelection>,
     #[props(default)] fixed_harness: bool,
     #[props(default)] on_choice_enter: Option<EventHandler<()>>,
+    #[props(default)] on_model_primary_enter: Option<EventHandler<()>>,
     on_model_focus: EventHandler<()>,
     on_model_input: EventHandler<String>,
     on_model_blur: EventHandler<()>,
@@ -241,15 +245,20 @@ pub(crate) fn LaunchControls(
                                         on_model_active.call(Some(index));
                                         scroll_model_result(&model_id_prefix, index);
                                     }
-                                    // Enter is consumed even with the list closed: a model field
-                                    // keystroke must never implicitly submit its containing form.
-                                    Key::Enter if !evt.is_composing() => {
+                                    // The model owns Enter even when closed. Restart with opts
+                                    // into choose-then-primary; New session only chooses. The
+                                    // caller's live validation decides whether a refused pick
+                                    // can proceed, rather than a render-time choice snapshot.
+                                    Key::Enter => {
                                         evt.prevent_default();
+                                        evt.stop_propagation();
+                                        if busy || evt.is_auto_repeating() || evt.is_composing() { return; }
                                         if model_open {
                                             on_model_enter.call(launch_composer::model_enter_target(
                                                 &options, model_active, &model_draft, &catalog, harness,
                                             ));
                                         }
+                                        if let Some(primary) = on_model_primary_enter { primary.call(()); }
                                     }
                                     _ => {}
                                 }
