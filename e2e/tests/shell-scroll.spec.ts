@@ -115,10 +115,20 @@ test("a wheel over the header or the sidebar edge never scrolls the document", a
     // five-minute sessions would skew the row counts and newest-first
     // auto-select later specs assert on. So clean up all of them and
     // only then surface the first failure.
-    const results = await Promise.allSettled(
-      [target.id, ...fillers].map((id) => cleanupSession(request, id)),
-    );
-    const failed = results.find((r) => r.status === "rejected");
-    if (failed && failed.status === "rejected") throw failed.reason;
+    //
+    // One at a time, not in parallel: a host admits at most eight
+    // management requests at once and refuses the rest with a 503
+    // "host is busy" rather than queueing them (SPEC.md "Waiting between
+    // operations on one host"), so twenty-one concurrent stops always
+    // overflow it and the cleanup fails even when the test passed.
+    let firstFailure: unknown = undefined;
+    for (const id of [target.id, ...fillers]) {
+      try {
+        await cleanupSession(request, id);
+      } catch (error) {
+        firstFailure ??= error;
+      }
+    }
+    if (firstFailure !== undefined) throw firstFailure;
   }
 });
