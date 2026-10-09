@@ -5457,9 +5457,20 @@ samp {
   font-weight: 700;
 }
 
-.launch-composer-actions .create-session-submit:hover:not(:disabled),
-.launch-composer-actions .create-session-submit:focus-visible:not(:disabled) {
+.launch-composer-actions .create-session-submit:hover:not([aria-disabled="true"]),
+.launch-composer-actions .create-session-submit:focus-visible:not([aria-disabled="true"]) {
   background: var(--accent);
+}
+
+/* Refused launch attempts stay reachable to explain themselves; their grey
+   presentation must not depend on native disabled, which swallows submission. */
+.launch-composer-actions .create-session-submit[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.launch-composer-refusal {
+  margin: 8px 0;
 }
 
 /* The context is what the button will do, in a lighter weight than the verb;

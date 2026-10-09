@@ -500,9 +500,10 @@ checkout; the agent choice is independent of that destination:
   mode is YOLO. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and
   `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
   `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there. Enter on an empty
-  box launches only a complete, valid selection through the ordinary Launch path; Enter on a non-empty query with no
-  result never launches, and Escape closes the result list without clearing the query, so Enter after Escape does
-  nothing until the box is emptied.
+  box launches only a complete, valid selection through the ordinary Launch path; an incomplete attempt says why beside
+  Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Request refusals
+  appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never launches, and
+  Escape closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
   and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
