@@ -448,6 +448,17 @@ where
                     // ends (`stale_route` below) rather than mid-arm.
                     let stale_route = if let Some(route) = input_routes.get(&frame.channel) {
                         let entry = &route.entry;
+                        // Save the reading before delivering input: an Enter
+                        // can dismiss a dialog before the send returns. The
+                        // activity leaf lock is released before any await or
+                        // attachment lock, so input never waits on a capture.
+                        let before_input = entry
+                            .run
+                            .activity
+                            .lock()
+                            .expect("activity mutex poisoned")
+                            .reading
+                            .state;
                         // The check and the send-keys delivery run under
                         // ONE lock hold, like the Resize arm: releasing
                         // between them is a TOCTOU where a takeover
@@ -496,7 +507,7 @@ where
                             && matches!(send_result, Some(Ok(())))
                             && super::capture::submits_a_line(&frame.body)
                         {
-                            note_first_input(entry);
+                            note_first_input(entry, before_input);
                         }
                         match send_result {
                             Some(Ok(())) => false,

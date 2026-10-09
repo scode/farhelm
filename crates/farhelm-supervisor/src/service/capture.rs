@@ -8,6 +8,7 @@
 //! helm polls the supervisor.
 
 use super::core::{SessionEntry, Supervisor};
+use crate::agent_kind::screen_reader::ScreenState;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
@@ -165,7 +166,7 @@ impl Supervisor {
 }
 
 /// Start the launch's diagnostic clock on the first submitted line delivered
-/// to its agent pane.
+/// to its agent pane outside a recognized dialog.
 ///
 /// A launch can sit idle indefinitely before Codex has a prompt to report, so
 /// launch time is not a useful anchor, and neither is any input at all: the
@@ -176,9 +177,16 @@ impl Supervisor {
 /// carriage return, which none of those replies carries (checked against the
 /// vendored xterm.js: CSI and DCS replies, and OSC answers terminated by ST).
 /// That firing is now a user-facing notification, so it must be true (SPEC.md,
-/// Status). A partly successful send counts, since confirmed bytes reached the
-/// pane. Nothing is persisted or spawned from the input path.
-pub(crate) fn note_first_input(entry: &SessionEntry) {
+/// Status). The whole frame must have been confirmed delivered to the pane.
+/// `before_input` must be the latest reading taken before delivery:
+/// answering a dialog can dismiss it before the send completes, but that Enter
+/// gave the agent no prompt to report. An outdated waiting reading can defer
+/// the clock to another Enter; it must not produce an early warning. Nothing
+/// is persisted or spawned from the input path.
+pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) {
+    if before_input == ScreenState::Waiting {
+        return;
+    }
     entry
         .run
         .first_input
@@ -190,7 +198,7 @@ pub(crate) fn note_first_input(entry: &SessionEntry) {
 /// Whether one input frame to the agent pane submits a line: whether it holds
 /// an Enter that is not part of something else.
 ///
-/// The silent-hook clock starts on the first such frame ([`note_first_input`]),
+/// Such a frame can start the silent-hook clock ([`note_first_input`]),
 /// because an agent has nothing to report before the user submits something,
 /// and its firing is a user-facing notification that must be true (SPEC.md,
 /// Status). A carriage return counts unless it is:
@@ -203,10 +211,11 @@ pub(crate) fn note_first_input(entry: &SessionEntry) {
 ///   bracketed paste enabled keeps the paste in its composer unsubmitted.
 ///
 /// The terminal's automatic replies to the agent's own queries carry no
-/// carriage return at all (checked against the vendored xterm.js). Residuals,
-/// accepted: an Enter that answers a dialog (a trust prompt, a picker) counts,
-/// and a paste large enough to be split across frames has its middle frames
-/// judged without their markers.
+/// carriage return at all (checked against the vendored xterm.js). This only
+/// classifies bytes: [`note_first_input`] separately excludes an Enter while
+/// the latest pre-delivery screen reading shows a dialog. A paste large enough
+/// to be split across frames still has its middle frames judged without their
+/// markers.
 pub(crate) fn submits_a_line(frame: &[u8]) -> bool {
     const PASTE_START: &[u8] = b"\x1b[200~";
     const PASTE_END: &[u8] = b"\x1b[201~";
@@ -816,6 +825,43 @@ mod tests {
         );
         assert!(!submits_a_line(b"\x1b[I"), "a focus report");
         assert!(!submits_a_line(b""));
+    }
+
+    /// Answering a recognized dialog must not start a warning about a prompt
+    /// the user has not submitted. Once the screen leaves that dialog, the next
+    /// confirmed Enter starts the clock, and later input preserves its anchor.
+    #[test]
+    fn a_dialog_enter_waits_for_the_next_prompt_enter() {
+        let entry = entry_with(None, crate::store::LastOutcome::Running);
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+
+        note_first_input(&entry, ScreenState::Waiting);
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+
+        note_first_input(&entry, ScreenState::Idle);
+        let first = entry
+            .run
+            .first_input
+            .lock()
+            .unwrap()
+            .expect("prompt anchor");
+        note_first_input(&entry, ScreenState::Working);
+        assert_eq!(*entry.run.first_input.lock().unwrap(), Some(first));
+    }
+
+    /// A run with no screen sample yet retains the existing Enter behavior.
+    /// The dialog exclusion is evidence-based; requiring a sample would leave
+    /// agents without dedicated readers unable to start the warning clock.
+    #[test]
+    fn an_enter_before_the_first_screen_sample_starts_the_clock() {
+        let entry = entry_with(None, crate::store::LastOutcome::Running);
+        let before_input = entry.run.activity.lock().unwrap().reading.state;
+        assert_ne!(before_input, ScreenState::Waiting, "unsampled fixture");
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+
+        note_first_input(&entry, before_input);
+
+        assert!(entry.run.first_input.lock().unwrap().is_some());
     }
 
     /// Spec: a capture-state advance that changes the session's restart
