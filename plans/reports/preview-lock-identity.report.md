@@ -72,3 +72,25 @@ source, claim, reviews and retained evidence. Reviewers ran no runtime tests. Im
 local under no-workhorse mode; only required reviewers and readers were delegated. The harness exposes neither actual
 served model identities nor token counters, so exact attribution and usage are unavailable. Private galaxy session
 records retain that gap under UUID `eec309e5-9251-4738-a762-93388ad02c77`.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1732 (the docs preview script leaves newer processes alone when stopping a preview), one
+squash commit on main. The plan waited 8 to 19 hours after delivery because the monitor stalled between landing rounds;
+that was the monitor's fault, not the plan's.
+
+#### Review before merging
+
+A separate reviewer that had not worked on any of the five plans landing in this round (version-hover-text,
+enter-launches-anywhere, drag-copy-notice, preview-lock-identity, transcript-reads-on-need) read them against each other
+and main before anything merged. They share no code that conflicts; the only textual conflicts were TODO.md, where each
+plan removed only its own entries, and FLAKES.md, where entries were appended. No protocol, supervisor or helm database
+version changes. This change touches only the website's preview script and TODO.md, and nothing else uses the lock it
+reads.
+
+#### Checks
+
+- Reused: the report's checks; the script is unchanged by the rebase, and nothing else on main touches it.
+- The combined checks for the round (#1733's notes) ran with this change in the stack.
+
+Nothing in the report above was made untrue by the landing.
