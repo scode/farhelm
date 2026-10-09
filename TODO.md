@@ -187,18 +187,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source
   diff before signing, since the signature proves who published a release, not that its code is sound.
 
-- **Keep checking for a silent conversation hook after a supervisor restart.** A session notification tells the user
-  when an agent launched with Farhelm's conversation hook still has not said which conversation it is in a minute after
-  the first Enter, since Restart will then be unable to resume it. That check only covers launches the running
-  supervisor started itself: whether a launch got the hook is kept in the supervisor's memory, and a restarted
-  supervisor that adopts the sessions still running in tmux has lost it, so for those launches the check never fires
-  until the session is relaunched. The launches that miss out are the ones not typed into yet, or typed into less than
-  about a minute before the restart, when the supervisor restarted; on the Mac that is any quit and reopen of the app,
-  and every update. A user who starts a session, quits Farhelm before typing, reopens it and then types gets no bell if
-  the hook is broken. Record on the session whether its launch got the hook, so a restarted supervisor can arm the check
-  for the launches it adopts. Listed as a possible follow-up in the session-notifications plan's report. Plan:
-  `plans/queue/conversation-notice-hook-restart.md`.
-
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
@@ -206,14 +194,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   on it. Covers the desktop app, the helm, and supervisors. Until this lands, SPEC.md's "Upgrade compatibility and
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
   is `lore/2026-10-05-release-brick-protection-plan.md`.
-
-- **Make the "conversation not learned" notification actionable, per agent.** A minute after the first line sent to an
-  agent, if Farhelm still has not learned the conversation, the session gets a notification: "Farhelm has not learned
-  which conversation this agent is in, a minute after the first line you sent it, so Restart will not be able to resume
-  this conversation." Seen with Codex, it gives the user nothing to act on. Tailor it to the agent the way PR #1618
-  tailored Restart's hover text: for Codex, say that its conversation is normally captured when the first prompt is
-  submitted, so by now it should have been, and say what the user can do about it. Plan:
-  `plans/queue/conversation-notice-hook-restart.md`.
 
 - **Read agent transcripts only when functionally needed.** The supervisor re-reads every hook-reported Codex session's
   transcript header on every sweep (about once a second each: 64 KiB read, copied, and the 23 KB first line parsed), and

@@ -535,6 +535,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: true,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -641,6 +642,93 @@ mod tests {
                 .is_empty(),
             "a stored identity suppresses the notification"
         );
+    }
+
+    /// Reload restores either hook policy, but never an old input deadline.
+    /// A hooked launch needs another qualifying Enter before it can warn, and
+    /// another supervisor restart must keep its notification unique. These
+    /// service clocks use an explicit past anchor instead of waiting a minute.
+    #[farhelm_testtrace::test]
+    async fn a_reloaded_hook_warns_after_new_input_and_keeps_one_notification() {
+        for hooked in [false, true] {
+            let state = StateDir::new();
+            let sup = Supervisor::new(state.path()).await.unwrap();
+            silent_hook_session(&sup, "reloaded", None).await;
+            sup.store
+                .record_launch_hooked("reloaded", 0, hooked)
+                .await
+                .unwrap();
+            assert_eq!(
+                sup.store
+                    .session("reloaded")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .launch_hooked,
+                hooked
+            );
+            drop(sup);
+
+            let mut prior_warning = None;
+            for restart in 0..2 {
+                let sup = Supervisor::new(state.path()).await.unwrap();
+                let entry = sup.sessions.lock().await.get("reloaded").cloned().unwrap();
+                assert_eq!(
+                    entry.run.hooked.load(std::sync::atomic::Ordering::Relaxed),
+                    hooked
+                );
+                assert!(entry.run.first_input.lock().unwrap().is_none());
+                assert!(
+                    !entry
+                        .run
+                        .hook_warned
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                );
+                sup.capture_pass(true).await;
+                assert_eq!(
+                    sup.store
+                        .session_notifications("reloaded")
+                        .await
+                        .unwrap()
+                        .len(),
+                    usize::from(hooked && restart > 0),
+                    "reload alone must add no notification"
+                );
+
+                note_first_input(&entry, ScreenState::Working);
+                assert!(entry.run.first_input.lock().unwrap().is_some());
+                sup.capture_pass(true).await;
+                assert_eq!(
+                    sup.store
+                        .session_notifications("reloaded")
+                        .await
+                        .unwrap()
+                        .len(),
+                    usize::from(hooked && restart > 0),
+                    "a new Enter has not exhausted its budget"
+                );
+                *entry.run.first_input.lock().unwrap() = Some(
+                    Instant::now()
+                        .checked_sub(REPORT_WARNING_AFTER + Duration::from_secs(1))
+                        .unwrap(),
+                );
+                sup.capture_pass(true).await;
+                sup.capture_pass(true).await;
+                let notifications = sup.store.session_notifications("reloaded").await.unwrap();
+                assert_eq!(
+                    notifications.len(),
+                    usize::from(hooked),
+                    "one notification across passes and supervisor restarts"
+                );
+                if let Some(prior) = prior_warning.as_ref() {
+                    assert_eq!(
+                        &notifications, prior,
+                        "reload must preserve sequence and time, not reopen the warning as new"
+                    );
+                }
+                prior_warning = Some(notifications);
+            }
+        }
     }
 
     /// A late accepted identity must resolve the existing silent-hook warning,

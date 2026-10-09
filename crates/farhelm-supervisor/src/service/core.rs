@@ -3755,7 +3755,8 @@ pub(crate) struct RunCells {
     /// Shared with any title-only replacement of this entry; see the
     /// struct's own docs for why sharing and isolation are both needed.
     pub(crate) outcome: Arc<std::sync::Mutex<LastOutcome>>,
-    /// First confirmed input to this launch, used only by the no-report warning.
+    /// First confirmed submitted line outside a recognized dialog, used only
+    /// by the no-report warning.
     /// Never persisted. Every relaunch resets it; a rename shares the cell because
     /// the input route can still hold the pre-rename entry.
     pub(crate) first_input: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
@@ -3768,11 +3769,11 @@ pub(crate) struct RunCells {
     /// ([`Supervisor::with_farhelm_args`], which is what decides it).
     ///
     /// Diagnostics only: nothing about capture, restart, or the wire reply
-    /// consults it, and nothing persists it. It describes what this
-    /// process did when it spawned this generation, so a supervisor that
-    /// did not perform the launch — one that reloaded the session after a
-    /// restart — has nothing to say about it and correctly comes back with
-    /// the flag clear.
+    /// consults it. The spawn records it in `StoredSession::launch_hooked`
+    /// before tmux starts, so reload restores the same launch's policy.
+    /// Older stored launches default clear because their injection is unknown.
+    /// The first-input anchor remains process-local: after a supervisor
+    /// restart, the next qualifying Enter starts the clock again.
     ///
     /// Its one reader is the liveness tripwire in [`crate::service::capture`].
     /// A hooked launch that still holds no identity 65 seconds after first
@@ -3808,20 +3809,20 @@ pub(crate) struct RunCells {
     /// confirmed and seeds the cell from [`Spawned::hooked`] directly,
     /// while a restart's entry is minted by `relaunched_entry` inside
     /// [`Supervisor::publish_relaunched`], which raises the flag there when
-    /// the new launch was injected. Nothing outside a launch ever writes
-    /// it.
+    /// the new launch was injected. Reload and retained-row publication
+    /// restore the durable value for that same generation.
     ///
     /// One accepted hole follows from that: a restart whose tmux command
     /// failed AMBIGUOUSLY may in fact be running a hooked agent, and the
     /// generic recovery republishes it through `relaunched_entry` with this
     /// flag clear, because the failure path never learns what the spawn
-    /// decided. Reconstructing it is not worth it — the flag feeds nothing
-    /// but the tripwire, so the entire cost is one launch whose missing
-    /// report goes unwarned about.
+    /// decided. A later supervisor reload can restore the policy recorded
+    /// before spawn; this process keeps that ambiguous recovery unarmed.
     pub(crate) hooked: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the tripwire described above has already logged for this
-    /// launch, so a hook that never reports costs one line per launch
-    /// rather than one per tick for the life of the session.
+    /// launch in this supervisor, so a hook that never reports costs one line
+    /// per launch per supervisor rather than one per tick. Durable notification
+    /// uniqueness separately keeps the user-facing warning once per launch.
     ///
     /// Minted `false` exactly where `hooked` is, and for the sharper half
     /// of the same reason: a warning already spent belongs to the launch
@@ -6076,13 +6077,10 @@ impl Supervisor {
                         // already there.
                         first_input: Arc::new(std::sync::Mutex::new(None)),
                         capture: Arc::new(std::sync::Mutex::new(capture)),
-                        // Clear on a reload, whatever the previous supervisor
-                        // did: `hooked` records that THIS process appended the
-                        // hook flags when it spawned the agent, and this
-                        // process spawned nothing. Leaving the tripwire armed
-                        // from a stored guess would warn about a launch nobody
-                        // here can account for.
-                        hooked: hook_flag(false),
+                        // Restore the launch's recorded argv policy, not a
+                        // guess from its command. Its clock remains unset
+                        // until the first qualifying Enter after this reload.
+                        hooked: hook_flag(row.launch_hooked),
                         hook_warned: hook_flag(false),
                         // Activity samples are process-local and deliberately
                         // not durable. Mark this reload provisional so the
@@ -8419,6 +8417,17 @@ impl Supervisor {
         generation: i64,
         scope: Option<String>,
     ) {
+        // This failed create cannot confirm its launch, so both memory and
+        // reload keep its hook diagnostic unarmed. Clearing only memory would
+        // change that policy the next time the supervisor opened the row.
+        if let Err(error) = self
+            .store
+            .record_launch_hooked(&info.id, generation, false)
+            .await
+        {
+            warn!(session = %info.id, error = %format!("{error:#}"),
+                "could not clear the retained launch's hook diagnostic");
+        }
         self.sessions.lock().await.insert(
             info.id.clone(),
             Arc::new(SessionEntry {
@@ -8707,6 +8716,7 @@ impl Supervisor {
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
                 omp_launch_program: None,
+                launch_hooked: false,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -8845,6 +8855,7 @@ impl Supervisor {
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
                 omp_launch_program: None,
+                launch_hooked: false,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -13267,6 +13278,18 @@ impl Supervisor {
         // ambiguous survivor runs exactly what the row describes.
         self.record_launch_provenance(snapshot.kind, id, generation, hooked, &spec.argv)
             .await;
+        // The same argv decision must survive supervisor restart for every
+        // agent, independently of OMP's admission provenance. Best effort:
+        // a failed write leaves this launch runnable, with reload diagnostics
+        // disabled rather than delaying or refusing a healthy launch.
+        if let Err(error) = self
+            .store
+            .record_launch_hooked(id, generation, hooked)
+            .await
+        {
+            warn!(session = %id, error = %format!("{error:#}"),
+                "could not record the launch's conversation hook policy");
+        }
 
         let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
@@ -13670,7 +13693,7 @@ impl Supervisor {
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
-                    hooked: hook_flag(false),
+                    hooked: hook_flag(row.launch_hooked),
                     hook_warned: hook_flag(false),
                     activity: ActivitySample::unsampled(),
                 },
@@ -15658,6 +15681,7 @@ pub(crate) mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -15764,6 +15788,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -15864,6 +15889,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -17145,6 +17171,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: entry.info.id.clone(),
                     parent: None,
                     title: title.to_string(),
@@ -18486,6 +18513,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "renamed".to_string(),
                     parent: None,
                     title: "renamed".to_string(),
@@ -18583,6 +18611,7 @@ pub(crate) mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -18732,6 +18761,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: "error row".to_string(),
@@ -18888,6 +18918,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: scoped_id.clone(),
                     parent: None,
                     title: "scoped".to_string(),
@@ -19014,6 +19045,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.clone(),
                     parent: None,
                     title: "kind".to_string(),
@@ -19080,6 +19112,7 @@ pub(crate) mod tests {
                     capture_ownership_version: version,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: "codex".to_string(),
@@ -19123,6 +19156,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 1,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: "grok".to_string(),
@@ -19204,6 +19238,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                 },
                 None,
             )
@@ -19348,6 +19383,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                 },
                 None,
             )
@@ -19999,6 +20035,7 @@ pub(crate) mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         id: id.clone(),
                         parent: None,
                         title: "identity".to_string(),
@@ -20130,6 +20167,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                 },
                 None,
             )
@@ -20737,6 +20775,7 @@ exit 0
                         capture_ownership_version: 0,
                         omp_reporter_asset: marker.map(str::to_string),
                         omp_launch_program: program.map(str::to_string),
+                        launch_hooked: false,
                     },
                     None,
                 )
@@ -22079,6 +22118,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                 },
                 None,
             )
@@ -22275,6 +22315,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: doomed.to_string(),
                     parent: None,
                     title: "hooked".to_string(),
@@ -22368,6 +22409,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: "unhooked".to_string(),
@@ -22447,6 +22489,7 @@ exit 0
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -22546,6 +22589,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -22638,6 +22682,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -22923,6 +22968,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "pending archive".to_string(),
@@ -23789,9 +23835,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                28,
+                29,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
-                 session-notification and notification-resolution changes too"
+                 session-notification, notification-resolution and launch-hook changes too"
             );
             assert_eq!(
                 conn.query_row(
@@ -24015,6 +24061,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -25054,6 +25101,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -25140,6 +25188,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "ended".to_string(),
                     parent: None,
                     title: "ended".to_string(),
@@ -25663,6 +25712,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -25758,6 +25808,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26192,6 +26243,7 @@ exit 0
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         id: id.clone(),
                         parent: None,
                         title: "recorded title".to_string(),
@@ -26345,6 +26397,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26495,6 +26548,7 @@ exit 0
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            launch_hooked: false,
             id: "stranded".to_string(),
             parent: None,
             title: "as created".to_string(),
@@ -26657,6 +26711,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26948,6 +27003,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -28648,7 +28704,7 @@ exit 0
 
     /// End to end through a real create: a Claude session's launch spec on
     /// disk carries the hook flags, and its entry records the launch as
-    /// hooked.
+    /// hooked, including its durable flag for a later supervisor reload.
     ///
     /// The pure tests above prove the DECISION; this one proves the
     /// WIRING, which is the part with somewhere to go wrong — the snapshot
@@ -28712,6 +28768,15 @@ exit 0
                 .hooked
                 .load(std::sync::atomic::Ordering::Relaxed),
             "a hooked launch must raise the entry flag the liveness tripwire reads"
+        );
+        assert!(
+            sup.store
+                .session(&info.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked,
+            "the actual spawn must record its hook policy for reload"
         );
     }
 

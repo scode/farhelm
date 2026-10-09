@@ -1723,10 +1723,12 @@ evidence, but cannot authorize another directory move.
   latest screen reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An
   outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path. With no reading
   yet, or no dedicated reader, the existing submitted-line rule applies. A paste large enough to span frames still has
-  its middle frames judged without their markers. A launch the running supervisor did not spawn (one reloaded after a
-  supervisor restart) is not checked at all, because only the spawn knows whether it added the hook. Its anchor is an
-  in-memory monotonic instant, reset with the diagnostic latch on every relaunch. A Resume carries its identity and
-  therefore stays silent even if its new hook never reports. The warning changes no offer or admission rule.
+  its middle frames judged without their markers. The spawn records whether its argv received the hook before tmux
+  starts, fenced by launch generation. Reload restores that flag; older rows default unhooked and stay unchecked. The
+  anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch and supervisor restart, so
+  a picked-up launch starts its clock at the next qualifying Enter after reload rather than recovering the time of an
+  earlier Enter. A Resume carries its identity and therefore stays silent even if its new hook never reports. The
+  warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -2707,6 +2709,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
   starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
+- Schema 29 adds the supervisor session column `launch_hooked` (integer, default 0). New spawns record the argv decision
+  before tmux starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision before spawn
+  decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored conversations
+  and notifications. No hook clock or diagnostic latch is persisted.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs
