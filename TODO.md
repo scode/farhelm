@@ -217,6 +217,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Decide where the cache lives, how it is kept current and bounded, and how a checkout made from it stays an ordinary,
   independent clone of the GitHub repository. Plan: `plans/queue/repo-clone-cache.md`.
 
+- **Row marks pile up when a session's notification bell appears.** When a notification showed up for a session, its row
+  in the session list drew the marks to the left of the bell (the agent and permission marks, as far as a photo of the
+  screen shows) on top of one another into an unreadable smudge, with a stray "<" between them and the bell. Seen on the
+  selected row. Find what makes the marks overlap when the bell is added, and fix the row's layout so every mark keeps
+  its own space.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
