@@ -128,3 +128,47 @@ medium effort, and the required resume/report cold reads to the executing harnes
 were checked against source; the author collected build and runtime evidence. Native usage and exact model telemetry
 were unavailable. Private orchestration evidence is retained under session `2c666c48-ffa9-434a-826f-3b4baa7214f0`; the
 plan's working log beside the checkouts identifies it.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as three squash commits on main, in order: #1729 (launcher refusals by the Launch button),
+#1735 (Enter launches from the launcher's choices) and #1737 (Enter restarts from Restart with's choices). The plan
+waited 8 to 19 hours after delivery because the monitor stalled between landing rounds; that was the monitor's fault,
+not the plan's.
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, main gained the version-hover-text change (#1733, landed just
+before this one), documentation, TODO entries, test cleanups, a Rust 1.99 Clippy cleanup and the planning queue's
+bookkeeping. The only conflict was in TODO.md, where #1733's entry sat next to this plan's; both are removed.
+
+#### Review before merging
+
+A separate reviewer that had not worked on any of the five plans landing in this round (version-hover-text,
+enter-launches-anywhere, drag-copy-notice, preview-lock-identity, transcript-reads-on-need) read them against each other
+and main before anything merged. They share no code that conflicts; the only textual conflicts were TODO.md, where each
+plan removed only its own entries, and FLAKES.md, where entries were appended. No protocol, supervisor or helm database
+version changes. It found no conflict between the new Enter behavior and the quick switcher, Cmd+N, or the
+save-as-template panel (Enter in its name field still saves). It did find that #1729 changes how the Launch button
+refuses (focusable with a refusal next to it, rather than natively disabled) and that several existing browser specs
+outside the stack look up the launcher's error line, which the plan's own browser runs had not covered: GitHub-checkout
+composer, GitHub checkouts, destination authority, create idempotency, clone and replace. The landing ran all of them on
+both engines; they pass (below).
+
+One small point the landing did not change: the comment in the sidebar's launcher Tab-order test still says a disabled
+Launch button is skipped by Tab; after #1729 a refused Launch stays focusable. The test itself still passes.
+
+#### Checks
+
+- Run now, on all five plans stacked together in landing order: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` (again after main gained
+  a Rust 1.99 lint cleanup, still clean), `cargo check -p farhelm-ui --features desktop`, the web build check,
+  `dprint
+  check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format` and the UI
+  JavaScript tests (203 passed), all clean; the supervisor and protocol unit tests in full with the Codex, Grok and hook
+  identity end-to-end tests (run `30c797ad`: 1205 of 1206; the one failure is described in transcript-reads-on-need's
+  notes and passed after its fix, 22 of 22 identity tests); and, through the recorder on Chromium and WebKit, the
+  GitHub-checkout composer, GitHub checkouts, destination authority, create idempotency, clone, replace, mouse modes,
+  launcher Enter and Restart with specs (run `cd71dca0`, 196 of 196 passed).
+
+Nothing in the report above was made untrue by the landing.
