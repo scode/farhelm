@@ -62,10 +62,54 @@ pub(crate) fn readout_marks(readout: &Readout) -> Vec<ReadoutMark> {
     marks
 }
 
-/// The version readout's hover when there is nothing about updates to say:
-/// everywhere no updater runs, and while one is idle.
-pub(crate) fn idle_tooltip(running: &str) -> String {
-    format!("this client was built as farhelm {running}")
+/// The idle hover promises update behavior only where an updater actually runs.
+///
+/// Development stamps keep their own wording even if a caller supplies an
+/// updater: those builds are not releases, and the installed-app activation
+/// gate never starts an updater for them.
+pub(crate) fn idle_tooltip(running: &str, has_updater: bool) -> String {
+    if farhelm_proto::is_development_build(running) {
+        "This is a development build of Farhelm, not a release.".to_owned()
+    } else if has_updater {
+        let running = crate::peer::display_peer(running);
+        format!(
+            "This is Farhelm {running}. When a newer version has been installed, this turns red; select it then to restart into the new version."
+        )
+    } else {
+        let running = crate::peer::display_peer(running);
+        format!("This is Farhelm {running}.")
+    }
+}
+
+/// Choose the hover from the window's build, the helm's stamp and updater readout.
+///
+/// The readout is the updater's existing pure presentation of its state, not a
+/// second update state machine. A mismatch names both builds because the bar
+/// shows the helm's version then; otherwise an active updater owns its activity
+/// wording. No reported stamp means no mismatch is known. Peer build text goes
+/// through the same display boundary as the visible version number.
+pub(crate) fn version_tooltip(
+    running: &str,
+    reported: Option<&str>,
+    updater: Option<&Readout>,
+) -> String {
+    if let Some(reported) = reported.filter(|reported| *reported != running) {
+        let helm = crate::peer::display_peer(reported);
+        if farhelm_proto::is_development_build(running) {
+            return format!(
+                "The helm runs Farhelm {helm}; this window is a development build of Farhelm."
+            );
+        }
+        let window = crate::peer::display_peer(running);
+        return format!("The helm runs Farhelm {helm}; this window was built as Farhelm {window}.");
+    }
+    if farhelm_proto::is_development_build(running) {
+        return idle_tooltip(running, false);
+    }
+    updater.map_or_else(
+        || idle_tooltip(running, false),
+        |state| state.tooltip.clone(),
+    )
 }
 
 #[cfg(native_desktop)]
@@ -207,6 +251,72 @@ pub(crate) fn use_app_updater() -> Option<AppUpdater> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A browser or uninstalled desktop build has no update control to promise.
+    /// Release candidates and dev releases still identify their real version;
+    /// only the shared development-build rule replaces it with non-release text.
+    #[farhelm_testtrace::test]
+    fn a_window_without_an_updater_names_its_build_without_update_advice() {
+        for release in ["1.2.3", "1.2.3-rc.1", "1.2.3-dev.1"] {
+            assert_eq!(
+                version_tooltip(release, None, None),
+                format!("This is Farhelm {release}.")
+            );
+            assert_eq!(
+                version_tooltip(release, Some(release), None),
+                format!("This is Farhelm {release}.")
+            );
+        }
+        for development in ["0.0.0-unreleased", "0.0.0-dev.1+build"] {
+            assert_eq!(
+                version_tooltip(development, None, None),
+                "This is a development build of Farhelm, not a release."
+            );
+        }
+    }
+
+    /// When the bar displays a different helm build, its hover must explain
+    /// both identities instead of describing that number as the window's.
+    /// Development windows must not claim that their stamp names a release.
+    #[farhelm_testtrace::test]
+    fn a_build_mismatch_names_the_helm_and_the_window() {
+        assert_eq!(
+            version_tooltip("1.2.3", Some("1.2.4"), None),
+            "The helm runs Farhelm 1.2.4; this window was built as Farhelm 1.2.3."
+        );
+        assert_eq!(
+            version_tooltip("0.0.0-unreleased", Some("1.2.4"), None),
+            "The helm runs Farhelm 1.2.4; this window is a development build of Farhelm."
+        );
+        assert_eq!(
+            version_tooltip("1.2.3", Some("1.2.4\u{202e}"), None),
+            "The helm runs Farhelm 1.2.4<U+202E>; this window was built as Farhelm 1.2.3."
+        );
+    }
+
+    /// The existing updater owns activity words; the selector must preserve
+    /// them for a matching release window and explain a mismatch instead when
+    /// one is reported. This keeps the two app-bar renderings on the same text.
+    #[farhelm_testtrace::test]
+    fn an_updater_readout_supplies_the_release_windows_hover() {
+        let state = Readout {
+            update_ready: false,
+            needs_reinstall: false,
+            tooltip: idle_tooltip("1.2.3", true),
+        };
+        assert_eq!(
+            version_tooltip("1.2.3", None, Some(&state)),
+            "This is Farhelm 1.2.3. When a newer version has been installed, this turns red; select it then to restart into the new version."
+        );
+        assert_eq!(
+            version_tooltip("1.2.3", Some("1.2.3"), Some(&state)),
+            state.tooltip
+        );
+        assert_eq!(
+            version_tooltip("1.2.3", Some("1.2.4"), Some(&state)),
+            "The helm runs Farhelm 1.2.4; this window was built as Farhelm 1.2.3."
+        );
+    }
 
     /// Spec: the readout leads with the warning mark whenever the reinstall
     /// notice is up, followed by the update arrow whenever an update waits,

@@ -120,13 +120,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Website human review deploy gating.**
 
-- **Plain hover text for the version readout.** Hovering the version at the top of the sidebar says "this client was
-  built as farhelm 0.24.0", which is jargon. Say instead something like: "This is version 0.24.0 of Farhelm. When
-  Farhelm detects there is a newer version available, this will turn red and you can click it to restart and upgrade."
-  Check that this is actually true before using it: what the readout looks like when an update is ready, whether
-  clicking it is how the user restarts to update, and what the web UI, which has no updater, and a desktop app that is
-  not the installed release should say instead. Plan: `plans/queue/version-hover-text.md`.
-
 - **Enter should launch from anywhere in the session launcher.** Pressing Enter launches the session while the cursor is
   in the launcher's text box, but after clicking a button or another control in the launcher, Enter no longer launches.
   Make Enter launch a complete, valid setup wherever focus is in the launcher, keeping SPEC.md's rules for Enter in the
