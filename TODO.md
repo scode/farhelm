@@ -52,16 +52,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   started from the user's own ssh config puts that config's port forwards on Farhelm's connection, where no client can
   cancel them. Say so when a host has no socket at all because the state directory's path is too long.
 
-- **Make the docs preview check that a lock's process is the one that wrote it.** Before asking Astro to stop the
-  background server named in a checkout's `.astro/dev.json`, `website/scripts/preview.sh` only checks that the process
-  runs from that checkout's website directory. A stale lock whose number now belongs to a later Astro server in the same
-  checkout, such as your own `bun run dev`, would pass, and the script would stop that server. Also require that the
-  process started no later than the lock file was last written (`ps -o etimes=` against the lock's mtime), and leave it
-  alone otherwise. Two premises are unverified, so check them against Astro's source when fixing: that Astro writes the
-  lock after its server process exists, and whether a foreground server rewrites the lock as non-background, which would
-  make the scenario unreachable. From review feedback `preview-lock-identity.md`, triaged 2026-10-05. Plan:
-  `plans/queue/preview-lock-identity.md`.
-
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
   as one choice, and ideally a color as well, so a session's host can be told apart at a glance.
