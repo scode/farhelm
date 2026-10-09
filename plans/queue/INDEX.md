@@ -1,7 +1,7 @@
 # Plans queue
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
-- [complete] `upload-stall-same-session.md` — Payload uploads report the remote file's size on their own ssh session, so stall detection works on hosts that allow one session per connection.
+- [landing a56f1d] `upload-stall-same-session.md` — Payload uploads report the remote file's size on their own ssh session, so stall detection works on hosts that allow one session per connection.
 - [complete] `version-hover-text.md` — Hovering the version readout says in plain words which Farhelm is running and, in the Mac app, that it turns red once an update is installed and can then be selected to restart into it.
 - [complete] `enter-launches-anywhere.md` — Enter on a choice in the New session and Restart with dialogs chooses it and launches or restarts; a launch that cannot happen says why next to the Launch button. (after `save-launcher-as-template.md`)
 - [complete] `drag-copy-notice.md` — The "drag copied nothing" notice appears just above the pointer, stays up to 30 seconds with a dismiss button, and shows on every such drag.
