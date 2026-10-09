@@ -207,12 +207,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
   is `lore/2026-10-05-release-brick-protection-plan.md`.
 
-- **Row marks pile up when a session's notification bell appears.** When a notification showed up for a session, its row
-  in the session list drew the marks to the left of the bell (the agent and permission marks, as far as a photo of the
-  screen shows) on top of one another into an unreadable smudge, with a stray "<" between them and the bell. Seen on the
-  selected row. Find what makes the marks overlap when the bell is added, and fix the row's layout so every mark keeps
-  its own space. Plan: `plans/queue/row-marks-desktop-utf8.md`.
-
 - **Make the "conversation not learned" notification actionable, per agent.** A minute after the first line sent to an
   agent, if Farhelm still has not learned the conversation, the session gets a notification: "Farhelm has not learned
   which conversation this agent is in, a minute after the first line you sent it, so Restart will not be able to resume

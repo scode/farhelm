@@ -3080,7 +3080,9 @@ The dx-produced bundle went away because a bare binary has nowhere to put a `Res
 `dioxus://` scheme. The embedded helm does not serve this tree to browsers; standalone helm builds may serve the
 compiled-in tree or an explicit `--ui-dist` directory. Registering a handler for a path prefix takes precedence over
 dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the desktop build's
-asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every change.
+asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every change. The
+desktop page declares UTF-8 in its head, and every `text/*` asset response declares `charset=utf-8`. Without these
+declarations WebKit can use a locale-dependent legacy encoding, garbling literal UTF-8 in the stylesheet and scripts.
 
 A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
 into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
