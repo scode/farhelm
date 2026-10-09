@@ -81,10 +81,13 @@ fn serve_asset(
 ///
 /// Deliberately mirrors `farhelm-helm`'s `serve_embedded` for the rules that
 /// matter — the `GET`/`HEAD` method gate, percent-decoding before lookup, and
-/// `mime_guess` content types — so an asset behaves identically whether a
-/// browser fetched it from the helm or the native window fetched it from
-/// here. It does NOT mirror the SPA `index.html` fallback: this route only
-/// ever serves concrete files, and answering a miss with markup would hand
+/// `mime_guess` content types. Text responses additionally declare UTF-8:
+/// unlike the helm's web page, Dioxus's native index supplies no charset, so
+/// WebKit can decode literal UTF-8 in CSS and scripts as legacy text. The
+/// page also declares UTF-8, but each text asset carries its own guarantee.
+/// Binary types keep their guessed content type. This does NOT mirror the
+/// SPA `index.html` fallback: this route only serves concrete files, and
+/// answering a miss with markup would hand
 /// the webview HTML where it asked for JavaScript. Nor does anything strip a
 /// `HEAD` response's body the way axum's router does for the helm — wry hands
 /// the response straight back — which costs nothing here, since the webview
@@ -136,13 +139,15 @@ fn serve_asset_from(
     match lookup(relative.as_ref()) {
         Some(bytes) => {
             tracing::debug!("desktop asset handler: served {path} (200)");
+            let mime = mime_guess::from_path(relative.as_ref()).first_or_octet_stream();
+            let content_type = mime.essence_str();
+            let content_type = if content_type.starts_with("text/") {
+                format!("{content_type}; charset=utf-8")
+            } else {
+                content_type.to_owned()
+            };
             Response::builder()
-                .header(
-                    header::CONTENT_TYPE,
-                    mime_guess::from_path(relative.as_ref())
-                        .first_or_octet_stream()
-                        .essence_str(),
-                )
+                .header(header::CONTENT_TYPE, content_type)
                 // Matches what dioxus's own resolver stamps on every asset
                 // it serves. The page and its assets share the
                 // `dioxus://index.html` origin, so nothing here NEEDS it
@@ -183,12 +188,15 @@ mod tests {
     // paper over a wrong status, a wrong content type, or a body that is
     // subtly not the file.
 
-    /// A two-entry embedded tree: one JavaScript asset and one whose name
-    /// needs percent-escaping in a URL.
+    /// Cover text decoding separately from escaped paths and binary typing.
+    /// The stylesheet models the minifier's literal zero-width-space bytes;
+    /// the font must keep a binary MIME type without a meaningless charset.
     fn fixture_lookup(relative: &str) -> Option<&'static [u8]> {
         match relative {
             "assets/terminal-dxhabc.js" => Some(b"console.log('hi')\n"),
             "assets/a name with spaces.css" => Some(b"body{}"),
+            "assets/app.css" => Some(b".session-bell-overlay:before{content:\"\xe2\x80\x8b\"}"),
+            "assets/font.woff2" => Some(b"wOF2"),
             _ => None,
         }
     }
@@ -212,7 +220,7 @@ mod tests {
         serve_asset_from(None, &method(method_name), path)
     }
 
-    /// A hit returns the file's exact bytes, a guessed content type, and the
+    /// A hit returns the file's exact bytes, a UTF-8 text type, and the
     /// permissive CORS header dioxus's own resolver stamps on assets.
     ///
     /// The content type is the load-bearing part: a webview that receives
@@ -224,7 +232,7 @@ mod tests {
         assert_eq!(response.status(), 200);
         assert_eq!(
             response.headers().get("content-type").unwrap(),
-            "text/javascript"
+            "text/javascript; charset=utf-8"
         );
         assert_eq!(
             response
@@ -234,6 +242,36 @@ mod tests {
             "*"
         );
         assert_eq!(response.body().as_slice(), b"console.log('hi')\n");
+    }
+
+    /// The stylesheet's literal UTF-8 must never depend on WebKit's page
+    /// fallback. Without this header the zero-width bell baseline becomes
+    /// visible garbage; declaring its encoding must not rewrite its bytes.
+    #[farhelm_testtrace::test]
+    fn a_stylesheet_declares_utf8_without_changing_its_bytes() {
+        let response = serve("GET", "/assets/app.css");
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            response.body().as_slice(),
+            b".session-bell-overlay:before{content:\"\xe2\x80\x8b\"}"
+        );
+    }
+
+    /// A charset describes text decoding, not binary font bytes. Pin the
+    /// other branch so a blanket UTF-8 suffix cannot change font responses.
+    #[farhelm_testtrace::test]
+    fn a_binary_font_keeps_its_content_type_without_a_charset() {
+        let response = serve("GET", "/assets/font.woff2");
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "font/woff2"
+        );
+        assert_eq!(response.body().as_slice(), b"wOF2");
     }
 
     /// A percent-escaped path resolves to the file whose real name contains
@@ -246,7 +284,10 @@ mod tests {
     fn a_percent_escaped_path_is_decoded_once_before_lookup_and_typing() {
         let response = serve("GET", "/assets/a%20name%20with%20spaces.css");
         assert_eq!(response.status(), 200);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/css");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/css; charset=utf-8"
+        );
         assert_eq!(response.body().as_slice(), b"body{}");
     }
 

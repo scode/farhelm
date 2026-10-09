@@ -173,6 +173,10 @@ pub fn run() -> anyhow::Result<()> {
     builder
         .with_cfg(
             dioxus::desktop::Config::new()
+                // Dioxus's index has no charset declaration. WebKit otherwise
+                // can choose a legacy encoding for this native page and the text
+                // assets that inherit it, including literal UTF-8 in CSS.
+                .with_custom_head("<meta charset=\"utf-8\">".to_owned())
                 .with_window(desktop_window())
                 // The webview credential is page-memory-only. Keep the
                 // context-menu reload control out of release windows so the
