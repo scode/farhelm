@@ -400,3 +400,31 @@ above, and every PR that changes code, tests or scripts passed the review gate. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan,
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-09 (claim 28d78c).
+
+### An authenticated Codex run is needed before removing transcript polling
+
+Farhelm currently re-reads Codex conversation files during its regular supervisor passes. The agreed change removes that
+repeated work and confirms a new conversation after `/clear` through a later Codex hook instead. Before relying on that
+hook, the plan requires a real Codex run to establish which event arrives after the new transcript exists and names it.
+It also requires checking that an ordinary `/clear` does not replace the old conversation at its previously reported
+path.
+
+The installed Codex CLI (0.161.0) is unauthenticated. The recorded audit stopped before starting a Codex session, so
+neither requirement has been verified. The public hook documentation lists the events and transcript path but does not
+establish their ordering on disk. No hook or polling-removal change has been built on that assumption.
+
+Independent work is ready in two draft PRs: [PR #1734](https://github.com/scode/farhelm/pull/1734/changes) reduces the
+data read when Farhelm verifies a conversation header, preserving OMP's supported title prelude;
+[PR #1736](https://github.com/scode/farhelm/pull/1736/changes) reduces repeated report-folder and database work,
+preserving report ordering and notification history. Both remain unmerged. Periodic transcript verification still runs,
+and both TODO entries remain because the full plan is unfinished.
+
+Which way should execution continue? I recommend making an authenticated current Codex CLI available to the executor,
+then returning this plan to the queue so it can run the owned audit and finish the remaining behavior. Alternatively,
+arrange an authenticated audit in another supported environment and supply evidence of the callback-time file presence,
+reported path and ordinary `/clear` path behavior; the executor must verify that evidence before building on it. Leaving
+the plan blocked keeps the existing polling behavior in place.
