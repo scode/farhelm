@@ -82,3 +82,50 @@ host-label snapshot. The executor inspected the fixes and review artifacts and r
 wording passed a separate gpt-6.1-sol medium cold read; the PR body is empty. Native model-reporting and usage counters
 were unavailable; private galaxy session evidence records that gap. Implementation and investigation stayed with the
 executor.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1717 (New and Clone can save the launcher's setup as a template), one squash commit on
+main.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, main gained only documentation and TODO entries (a
+supervisor idle-CPU investigation and its TODOs, plan pointers, one more TODO) and the planning queue's bookkeeping;
+none of it touches the launcher, and the rebase applied without conflict.
+
+#### A fix made while landing
+
+A separate reviewer that had not worked on the plan found that the change would break an existing browser test the
+report's runs never selected: the sidebar test that checks the order keyboard focus moves through the launcher's
+controls ("composer menu-closed Tab order follows the displayed launch groups"). The new "save as template" button sits
+at the end of the launcher's button row, so moving backwards from the search box now reaches it before "reset choices".
+The landing added the button to that test's expected order, in #1717 before it merged. The product code did not change.
+
+#### Checks, and an existing WebKit problem they found
+
+To cover the rest of the launcher's surroundings, the landing ran the whole sidebar spec and the launch-button alignment
+spec on Chromium and WebKit with the fix (run `ab642906`). Every Chromium test passed, including the corrected one; on
+WebKit 206 of 218 passed and 12 failed, either waiting for something that never appeared (the host panel, a session row,
+the compact toggle) or running out of time. Re-running just those 12 on WebKit failed all 12 again (run `1e0f3ea6`). The
+same 12 on main without #1717 failed 11 of them (run `d7c7f1c7`), so the failures predate this change. The machine was
+heavily loaded throughout (a load average around 18 to 21 on 18 cores, from other agents' work), which commonly produces
+exactly these symptoms, but the landing did not establish the cause, and they are not logged as a flake on this
+evidence. Worth re-running those WebKit sidebar tests on a quiet machine.
+
+- Reused: the report's checks, which the rebase leaves applicable (it brought in only documentation).
+- Skipped: further runs during the landing.
+
+#### Review before merging
+
+Otherwise the reviewer found the change sound against what landed recently. The quick switcher cannot open over the
+launcher, so it cannot meet the save panel; the panel adds no new layer above the page; saving hands the new template to
+the Templates editor in the state its own save leaves; saving and launching share Clone's fresh-checkout naming; and a
+saved template always records the tab it was saved from. No other browser test or capture script opens the save panel,
+and the longer readiness wait in the shared terminal test helper fits every caller's time limit. Two small points the
+landing did not change: three comments in the stylesheet still describe the launcher's button row as wrapping only on
+phones, which is no longer true, and a save clicked while Clone's name suffix is still being checked records the suffix
+as it stood at that moment.
+
+The landing made one thing in the report above untrue: its browser runs did not cover every existing test the change
+affects; the sidebar test above was the gap.
