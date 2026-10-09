@@ -4841,10 +4841,13 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await form.locator("#launch-composer-model-results").getByRole("option", { name: "reviewable-codex (Codex)", exact: true }).click();
   await expect(model).toHaveValue("reviewable-codex");
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  // The summary's "permissions: default" is this test's own choice: a fresh
-  // dialog preselects the helm-wide remembered mode, which an earlier launch
-  // in this invocation may have set to yolo.
+  // The summary's "permissions: default" and "trust: default" are this
+  // test's own choices: a fresh dialog preselects the helm-wide remembered
+  // permissions mode and workspace trust, and an earlier launch in this
+  // invocation may have set them to yolo and true. The trust choice only
+  // appears once the model has made the harness known.
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
+  await form.locator(".launch-composer-trust-choice").getByRole("button", { name: "default", exact: true }).click();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
     "model: reviewable-codex · effort: default · permissions: default · trust: default",
   );
