@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use farhelm_proto::ControlMsg;
 use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake};
 use sha2::{Digest, Sha256};
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -1148,22 +1147,24 @@ impl SystemBackend {
 
     /// Stream one local file to `remote` over the same `ssh` command every
     /// other provisioning step uses, by running `cat > <remote>` there with
-    /// the file on its stdin.
+    /// the file on its stdin. The same session reports the temporary file's
+    /// size, so supervising an upload never needs a second remote command.
     ///
     /// This replaced an `sftp` upload. sftp parses its destination with its
     /// own grammar (`[user@]host[:path]`, the first colon ending the host), so
     /// an IPv6-literal or `ssh://user@host:port` registration dialed a
     /// different host for this one step than ssh did for all the others. One
     /// command builder means one host, and the remote side needs nothing
-    /// beyond the `sh` and `cat` the rest of provisioning already requires
+    /// beyond the `sh`, `cat`, `stat`, `sleep` and `kill` used here
     /// (no sftp subsystem). The pipe is byte-exact because the helm's ssh never
     /// requests a terminal.
     ///
     /// A successful return does not prove the bytes arrived intact: a local
     /// read that ends early looks like EOF to `cat`. The caller's digest check
     /// on the remote temporary is what proves the transfer. The remote file's
-    /// byte growth is the only progress signal; the pipes can be quiet while
-    /// bytes flow and are not evidence of progress while they do not.
+    /// byte growth is the only progress signal, reported on upload stdout.
+    /// Local writes into ssh can run ahead of the host and cannot renew the
+    /// deadline, including while the final buffered bytes drain remotely.
     async fn ssh_put(
         &self,
         destination: &str,
@@ -1175,7 +1176,7 @@ impl SystemBackend {
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
         let mut command = self
-            .ssh_command(destination, format!("cat > {}", shell_path(remote)?))
+            .ssh_command(destination, upload_script(remote)?)
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
             })?;
@@ -1202,14 +1203,7 @@ impl SystemBackend {
             let flushed = stdin.shutdown().await;
             copied.and(flushed)
         });
-        let output = capture_transfer_child(
-            child,
-            source_bytes,
-            || self.remote_transfer_size(destination, remote),
-            TRANSFER_IDLE_TIMEOUT,
-            TRANSFER_PROGRESS_POLL,
-        )
-        .await;
+        let output = capture_transfer_child(child, source_bytes, TRANSFER_IDLE_TIMEOUT).await;
         let fed = feeder.await;
         let output = output?;
         if output.code != Some(0) {
@@ -1229,24 +1223,6 @@ impl SystemBackend {
                 error.to_string(),
             )),
         }
-    }
-
-    /// Observe bytes at the remote temporary, not activity in the transfer's pipes.
-    /// Missing files and failed probes cannot start or renew the idle deadline;
-    /// an existing zero-byte file is the first observable transfer state.
-    async fn remote_transfer_size(&self, destination: &str, remote: &Path) -> Option<u64> {
-        let target = ProvisioningTarget::Ssh {
-            destination: destination.to_owned(),
-        };
-        let path = shell_path(remote).ok()?;
-        let script = format!("if test -e {path}; then stat -c %s -- {path}; else exit 75; fi");
-        let output = self
-            .run_shell(&target, &script, COMMAND_TIMEOUT)
-            .await
-            .ok()?;
-        (output.code == Some(0))
-            .then_some(output.stdout)
-            .and_then(|bytes| std::str::from_utf8(&bytes).ok()?.trim().parse().ok())
     }
 
     /// The remote shell script an ssh probe runs: find the farhelm binary and
@@ -1337,7 +1313,7 @@ pub(super) struct CommandResult {
     pub(super) code: Option<i32>,
     signal: Option<i32>,
     stdout: Vec<u8>,
-    stderr: String,
+    pub(super) stderr: String,
 }
 
 impl CommandResult {
@@ -1645,36 +1621,103 @@ pub(super) async fn capture_child(
     finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
 }
 
-/// Supervise a payload transfer using growth of its remote temporary as the
-/// progress oracle.
-/// No transfer deadline runs before the nonce file exists: a slow SSH control
-/// connection has no byte-progress signal to distinguish it from a stall.
-/// Failed size probes do not count as progress. An in-flight probe may delay a
-/// stall report by its own bounded command timeout, but cannot extend the
-/// next idle deadline without observed bytes.
-pub(super) async fn capture_transfer_child<F, Fut>(
+/// Upload through foreground `cat`, with file-size reports on the same SSH session.
+///
+/// A background `cat` loses its stdin under noninteractive POSIX shells, so only
+/// the reporter runs in the background. Its sleeping child must inherit no SSH
+/// output pipe: stopping the reporter then lets small uploads close immediately,
+/// rather than waiting for the polling interval before a later command can run.
+/// The final report covers bytes received after the last periodic sample. The
+/// caller still checks the file's digest; size reports prove progress, not content.
+pub(super) fn upload_script(remote: &Path) -> Result<String, BackendFailure> {
+    let path = shell_path(remote)?;
+    let interval = TRANSFER_PROGRESS_POLL.as_secs();
+    Ok(format!(
+        "report_size() {{ if test -e {path}; then stat -c %s -- {path} 2>/dev/null; fi; }}; \
+         (while :; do report_size; sleep {interval} >/dev/null 2>&1; done) & \
+         reporter=$!; \
+         trap 'kill \"$reporter\" 2>/dev/null; wait \"$reporter\" 2>/dev/null' 0; \
+         cat > {path}; result=$?; report_size; exit \"$result\""
+    ))
+}
+
+/// Retain only the latest complete size report while continuously draining stdout.
+///
+/// Invalid or overlong lines cannot arm or renew the stall deadline. A bounded
+/// partial line also keeps a peer that never writes a newline from growing helm
+/// memory indefinitely. A watch channel coalesces valid reports instead of queuing
+/// one allocation per sample while the supervisor is busy elsewhere.
+pub(super) async fn drain_transfer_sizes<R>(
+    mut stream: R,
+    sizes: tokio::sync::watch::Sender<Option<u64>>,
+    signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
+) -> Vec<u8>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buffer = [0_u8; 4096];
+    let mut line = Vec::new();
+    let mut overflow = false;
+    loop {
+        match stream.read(&mut buffer).await {
+            Ok(0) => return Vec::new(),
+            Ok(read) => {
+                for byte in &buffer[..read] {
+                    if *byte == b'\n' {
+                        if !overflow
+                            && let Some(bytes) = std::str::from_utf8(&line)
+                                .ok()
+                                .and_then(|text| text.trim().parse::<u64>().ok())
+                        {
+                            sizes.send_replace(Some(bytes));
+                        }
+                        line.clear();
+                        overflow = false;
+                    } else if line.len() < MAX_CHILD_STREAM_BYTES {
+                        line.push(*byte);
+                    } else {
+                        overflow = true;
+                    }
+                }
+            }
+            Err(error) => {
+                let _ = signal.send(DrainFailure {
+                    stream: "stdout",
+                    detail: error.to_string(),
+                    prefix: line,
+                });
+                return Vec::new();
+            }
+        }
+    }
+}
+
+/// Supervise remote-file growth without opening another command or blocking exit checks.
+///
+/// No transfer deadline runs before a complete size report proves the temporary
+/// exists. Thereafter only growth within the expected source size renews it;
+/// malformed output and local feeder activity do not. Closing stdout does not
+/// stop the deadline: ssh may still be draining buffered input or waiting for the
+/// remote command after the helm has written its final byte.
+pub(super) async fn capture_transfer_child(
     mut child: tokio::process::Child,
     source_bytes: u64,
-    mut remote_size: F,
     idle_timeout: Duration,
-    poll_interval: Duration,
-) -> Result<CommandResult, BackendFailure>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Option<u64>>,
-{
+) -> Result<CommandResult, BackendFailure> {
     let context = "the payload transfer";
     let stdout = child.stdout.take().expect("captured transfer stdout");
     let stderr = child.stderr.take().expect("captured transfer stderr");
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel();
     let _signal_guard = signal_tx.clone();
-    let stdout_task = tokio::spawn(drain_capped(stdout, "stdout", signal_tx.clone()));
+    let (sizes_tx, mut sizes_rx) = tokio::sync::watch::channel(None);
+    let stdout_task = tokio::spawn(drain_transfer_sizes(stdout, sizes_tx, signal_tx.clone()));
+    let mut sizes_open = true;
     let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx));
     let mut deadline: Option<tokio::time::Instant> = None;
     let mut observed_bytes = 0;
     let status = loop {
-        // A transfer that ended during a bounded size probe is complete even
-        // if its last observation interval crossed the idle deadline.
+        // Prefer an already completed child to a deadline that expired in the
+        // same scheduling turn, as the ordinary command supervisor does.
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {}
@@ -1726,8 +1769,13 @@ where
                 let _ = stderr_task.await;
                 return Err(BackendFailure::new(format!("{context} stalled"), ""));
             },
-            _ = tokio::time::sleep(poll_interval) => {
-                if let Some(bytes) = remote_size().await {
+            changed = sizes_rx.changed(), if sizes_open => {
+                if changed.is_err() {
+                    sizes_open = false;
+                    continue;
+                }
+                let bytes = *sizes_rx.borrow_and_update();
+                if let Some(bytes) = bytes {
                     deadline.get_or_insert_with(|| tokio::time::Instant::now() + idle_timeout);
                     if bytes > observed_bytes && bytes <= source_bytes {
                         observed_bytes = bytes;

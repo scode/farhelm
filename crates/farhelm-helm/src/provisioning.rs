@@ -67,6 +67,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
+    #[cfg(target_os = "linux")]
+    use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
 
@@ -145,7 +147,7 @@ mod tests {
     }
 
     /// Execute remote shell commands locally, except that the payload upload
-    /// (`cat > <temporary>` over ssh) discards the real payload and publishes
+    /// (the backend's own upload script over ssh) discards the real payload and publishes
     /// exact fixture bytes instead. This isolates digest and cleanup checks
     /// from SSH setup without replacing the backend's own shell command
     /// construction.
@@ -177,7 +179,7 @@ mod tests {
             let script = shell_words::split(&remote)
                 .ok()
                 .and_then(|words| words.get(2).cloned());
-            if script.as_deref() == Some(format!("cat > {temporary}").as_str()) {
+            if script.as_deref() == Some(upload_script(&self.temporary).unwrap().as_str()) {
                 child.arg("-c").arg(format!(
                     "cat >/dev/null; printf '%s' {} > {}; exit {}",
                     shell_words::quote(self.bytes),
@@ -187,6 +189,56 @@ mod tests {
             } else {
                 child.arg("-c").arg(remote);
             }
+            child
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut child);
+            child.spawn()
+        }
+    }
+
+    /// Hold the upload's command open after consuming stdin, while exposing any
+    /// additional launch. The gate models buffered-input drain without a second
+    /// sshd fixture: the production upload and its progress still run under sh.
+    /// Linux-only because that remote script relies on GNU stat.
+    #[cfg(target_os = "linux")]
+    struct GatedUploadLauncher {
+        temporary: PathBuf,
+        started: PathBuf,
+        release: PathBuf,
+        launches: Mutex<usize>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl CommandLauncher for GatedUploadLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            assert_eq!(command.as_std().get_program(), "ssh");
+            *self.launches.lock().unwrap() += 1;
+            let remote = command
+                .as_std()
+                .get_args()
+                .last()
+                .unwrap()
+                .to_string_lossy();
+            let words = shell_words::split(&remote).unwrap();
+            let upload = upload_script(&self.temporary).unwrap();
+            let script = if words[2] == upload {
+                format!(
+                    "({upload}); result=$?; printf '%s' $$ > {started}.pending && mv {started}.pending {started} || exit 1; \
+                     while [ ! -e {release} ]; do sleep 0.01; done; exit \"$result\"",
+                    started = shell_path(&self.started).unwrap(),
+                    release = shell_path(&self.release).unwrap(),
+                )
+            } else {
+                remote.into_owned()
+            };
+            let mut child = tokio::process::Command::new("sh");
+            child.args(["-c", &script]);
             child
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -4653,13 +4705,18 @@ mod tests {
 
     /// Remote byte growth keeps a transfer alive beyond one idle interval,
     /// while slow control setup cannot time out before a remote file exists.
+    /// The fixture emits its known one-byte write count with shell builtins;
+    /// external stat launches would add scheduling noise to these short intervals.
     #[farhelm_testtrace::test]
     async fn transfer_capture_uses_remote_bytes_after_slow_setup() {
         let root = tempfile::tempdir().unwrap();
         let remote = root.path().join("upload");
+        // Setup and total growth each exceed the idle budget, so premature
+        // arming or failure to renew still fails. Individual reports have enough
+        // headroom for real shell processes under the four-slot test runner.
         let script = format!(
-            "sleep 0.45; for i in a b c d e f g h i j; do printf x >> {}; sleep 0.08; done",
-            shell_words::quote(remote.to_str().unwrap())
+            "sleep 2.25; for i in 1 2 3 4 5 6 7 8 9 10; do printf x >> {path} || exit 1; printf '%s\\n' \"$i\"; sleep 0.3; done",
+            path = shell_words::quote(remote.to_str().unwrap())
         );
         let mut command = tokio::process::Command::new("sh");
         command.args(["-c", &script]);
@@ -4671,22 +4728,289 @@ mod tests {
         isolate_process_group(&mut command);
         let child = command.spawn().unwrap();
 
-        let result = capture_transfer_child(
-            child,
-            10,
-            || async {
-                tokio::fs::metadata(&remote)
-                    .await
-                    .ok()
-                    .map(|meta| meta.len())
-            },
-            Duration::from_millis(400),
-            Duration::from_millis(10),
-        )
-        .await
-        .expect("verified remote growth must renew the idle deadline");
+        let result = capture_transfer_child(child, 10, Duration::from_secs(2))
+            .await
+            .unwrap_or_else(|failure| panic!(
+                "verified remote growth must renew the idle deadline; {failure:?}; remote bytes: {:?}",
+                std::fs::read(&remote),
+            ));
         assert_eq!(result.code, Some(0));
         assert_eq!(tokio::fs::read(&remote).await.unwrap(), b"xxxxxxxxxx");
+    }
+
+    /// The production POSIX script must consume byte-exact stdin and close its
+    /// channel before the reporter's two-second sleep ends. This catches both
+    /// background-cat stdin loss on dash and inherited output pipes on small uploads.
+    /// Linux-only: the production command targets Linux hosts and uses GNU stat.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn remote_upload_script_preserves_stdin_and_closes_without_poll_delay() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("payload's bytes");
+        let sleeper = root.path().join("sleeper-started");
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let shim = bin.join("sleep");
+        // A child-only PATH shim establishes the inherited-pipe boundary before
+        // EOF. The long owned sleep cannot finish naturally during the capture
+        // bound, and is killed below on both success and failure.
+        std::fs::write(&shim, format!(
+            "#!/bin/sh\nprintf '%s' $$ > {marker}.pending && mv {marker}.pending {marker} || exit 1\nexec /bin/sleep 30\n",
+            marker = shell_path(&sleeper).unwrap(),
+        )).unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let payload = b"binary\0payload\xff\n";
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &upload_script(&remote).unwrap()]);
+        command.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        if !wait_for_fixture_file(&sleeper, Duration::from_secs(5)).await {
+            let exited = child.try_wait().unwrap();
+            terminate_child(&mut child).await;
+            panic!("reporter never entered its sleep; upload exit: {exited:?}");
+        }
+        let sleeper_pid: i32 = std::fs::read_to_string(&sleeper).unwrap().parse().unwrap();
+        // SAFETY: signal zero observes the shim's owned, deliberately long sleep.
+        if unsafe { libc::kill(sleeper_pid, 0) } != 0 || child.try_wait().unwrap().is_some() {
+            terminate_child(&mut child).await;
+            panic!("the upload and its sleeper must be alive before feeder EOF");
+        }
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        let result = tokio::time::timeout(Duration::from_millis(1500), async {
+            stdin.write_all(payload).await?;
+            stdin.shutdown().await?;
+            drop(stdin);
+            let status = child.wait().await?;
+            let mut output = Vec::new();
+            let mut diagnostic = Vec::new();
+            stdout.read_to_end(&mut output).await?;
+            stderr.read_to_end(&mut diagnostic).await?;
+            Ok::<_, std::io::Error>((status, output, diagnostic))
+        })
+        .await;
+        // SAFETY: the readiness marker names our 30-second sleeper, which cannot
+        // have ended naturally within the bounded observation above.
+        unsafe {
+            libc::kill(sleeper_pid, libc::SIGKILL);
+        }
+        terminate_child(&mut child).await;
+        let (status, output, diagnostic) = result
+            .expect("small uploads must close both output pipes without waiting for reporter sleep")
+            .expect("the owned script and its pipes must complete successfully");
+        assert!(status.success(), "{status:?}: {diagnostic:?}");
+        assert_eq!(tokio::fs::read(&remote).await.unwrap(), payload);
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .lines()
+                .any(|line| line.parse::<usize>() == Ok(payload.len())),
+            "the final report must describe the bytes cat actually received"
+        );
+    }
+
+    /// Failure to open the destination must retain cat's nonzero status even
+    /// though the final stat succeeds. Provisioning must not call that an upload.
+    /// This runs the Linux remote command, whose GNU stat is not local macOS stat.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn remote_upload_script_preserves_cat_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &upload_script(root.path()).unwrap()]);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let result = capture_child(
+            command.spawn().unwrap(),
+            Duration::from_millis(1500),
+            "failed upload script",
+        )
+        .await
+        .unwrap();
+        assert_ne!(
+            result.code,
+            Some(0),
+            "a directory cannot receive cat's bytes"
+        );
+        assert!(
+            !result.stderr.is_empty(),
+            "the failed redirection must remain visible"
+        );
+    }
+
+    /// An upload must occupy only its own command, including the interval after
+    /// local EOF. Holding it across the former polling interval distinguishes
+    /// same-session reports from launching a separate remote-size probe. The fixture
+    /// executes the Linux remote command locally, so it requires GNU stat.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn remote_upload_launches_no_other_command_until_transfer_exits() {
+        let root = tempfile::tempdir().unwrap();
+        let temporary = root.path().join(".farhelm.nonce");
+        let source = root.path().join("source");
+        tokio::fs::write(&source, b"payload").await.unwrap();
+        let prepared = stage_payload(&source).await.unwrap();
+        let launcher = Arc::new(GatedUploadLauncher {
+            temporary: temporary.clone(),
+            started: root.path().join("upload-started"),
+            release: root.path().join("release-upload"),
+            launches: Mutex::new(0),
+        });
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: launcher.clone(),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let destination = root.path().join("farhelm");
+        let upload_temporary = temporary.clone();
+        let task = tokio::spawn(async move {
+            backend
+                .upload_path(
+                    &ProvisioningTarget::Ssh {
+                        destination: "scripted.example".to_owned(),
+                    },
+                    PayloadKind::Farhelm,
+                    &prepared,
+                    &destination,
+                    &upload_temporary,
+                )
+                .await
+        });
+        let started = wait_for_fixture_file(&launcher.started, Duration::from_secs(5)).await;
+        if !started {
+            tokio::fs::write(&launcher.release, b"").await.unwrap();
+            let outcome = tokio::time::timeout(Duration::from_secs(5), task).await;
+            panic!("upload gate never became ready: {outcome:?}");
+        }
+        let received = tokio::fs::read(&temporary).await.unwrap();
+        let pid = tokio::fs::read_to_string(&launcher.started)
+            .await
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        // SAFETY: signal zero only observes the owned fixture's process.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        if !alive || received != b"payload" {
+            tokio::fs::write(&launcher.release, b"").await.unwrap();
+            let outcome = tokio::time::timeout(Duration::from_secs(5), task).await;
+            panic!(
+                "held-open upload premise failed: alive={alive}, bytes={received:?}, outcome={outcome:?}"
+            );
+        }
+        let before = *launcher.launches.lock().unwrap();
+        // sleep-ok: observe the held-open upload across the former two-second probe interval.
+        tokio::time::sleep(Duration::from_millis(2200)).await;
+        let after = *launcher.launches.lock().unwrap();
+        // SAFETY: the same owned peer must still be alive at the observed boundary.
+        let still_held = !task.is_finished() && unsafe { libc::kill(pid, 0) } == 0;
+        tokio::fs::write(&launcher.release, b"").await.unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("releasing the upload must let digest verification finish")
+            .unwrap();
+        assert!(
+            alive && still_held,
+            "the upload peer must stay alive throughout the observation"
+        );
+        assert_eq!(
+            before, after,
+            "a size probe launched another command during the upload"
+        );
+        assert!(matches!(result.unwrap(), ActionOutcome::Completed));
+        assert!(
+            *launcher.launches.lock().unwrap() > after,
+            "digest verification must resume command launches after the upload exits"
+        );
+    }
+
+    /// The idle deadline still runs after local input reaches EOF and after
+    /// stdout closes. Pipe completion alone cannot prove that the remote upload
+    /// has completed, so a stuck SSH process must be killed in this boundary too.
+    #[farhelm_testtrace::test]
+    async fn transfer_capture_stalls_after_input_and_progress_stream_close() {
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("drained-input");
+        let script = format!(
+            "cat > {}; printf '4\\n'; exec 1>/dev/null; exec sleep 60",
+            shell_words::quote(remote.to_str().unwrap())
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &script]);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the transfer peer exited before input"
+        );
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(b"data").await.unwrap();
+        stdin.shutdown().await.unwrap();
+        drop(stdin);
+        let failure = capture_transfer_child(child, 4, Duration::from_millis(200))
+            .await
+            .expect_err("the deadline must survive both feeder EOF and stdout EOF");
+        assert!(failure.context.contains("stalled"), "{failure:?}");
+        assert_eq!(
+            tokio::fs::read(&remote).await.unwrap(),
+            b"data",
+            "the peer must have consumed all input before its stall"
+        );
+    }
+
+    /// An unbounded stdout line must neither accumulate forever nor prevent
+    /// later valid reports. Retaining only the last size also avoids a queue
+    /// proportional to the number of samples a peer writes.
+    #[farhelm_testtrace::test]
+    async fn transfer_size_reader_recovers_after_overlong_and_invalid_lines() {
+        let (mut producer, consumer) = tokio::io::duplex(1024);
+        let (sizes, observed) = tokio::sync::watch::channel(None);
+        let (signal, mut failures) = tokio::sync::mpsc::unbounded_channel();
+        let writer = tokio::spawn(async move {
+            producer
+                .write_all(&vec![b'0'; MAX_CHILD_STREAM_BYTES + 4096])
+                .await
+                .unwrap();
+            producer
+                .write_all(b"\nnoise\n-1\n18446744073709551616\n12\n99\n")
+                .await
+                .unwrap();
+            producer.shutdown().await.unwrap();
+        });
+        let drained = tokio::time::timeout(
+            Duration::from_secs(2),
+            drain_transfer_sizes(consumer, sizes, signal),
+        )
+        .await
+        .expect("oversized lines must keep draining to EOF");
+        writer.await.unwrap();
+        assert!(
+            drained.is_empty(),
+            "progress lines are not retained command output"
+        );
+        assert_eq!(*observed.borrow(), Some(99));
+        assert!(
+            failures.try_recv().is_err(),
+            "invalid size reports are not transport failures"
+        );
     }
 
     /// Wait for a child-created file without assuming that spawn implies
@@ -4715,7 +5039,7 @@ mod tests {
         let marker = root.path().join("late-marker");
         let started = root.path().join("descendant-started");
         let script = format!(
-            "sh -c 'sleep 1.2; touch {}' & echo $! > {}; while :; do printf noise; sleep 0.02; done",
+            "sh -c 'sleep 1.2; touch {}' & echo $! > {}; printf '0\\n'; while :; do printf noise; sleep 0.02; done",
             shell_words::quote(marker.to_str().unwrap()),
             shell_words::quote(started.to_str().unwrap())
         );
@@ -4742,15 +5066,9 @@ mod tests {
             terminate_child(&mut child).await;
             panic!("the descendant exited before the stall observation");
         }
-        let failure = capture_transfer_child(
-            child,
-            10,
-            || async { Some(0) },
-            Duration::from_millis(300),
-            Duration::from_millis(10),
-        )
-        .await
-        .expect_err("pipe noise cannot renew a stalled transfer");
+        let failure = capture_transfer_child(child, 10, Duration::from_millis(300))
+            .await
+            .expect_err("pipe noise cannot renew a stalled transfer");
         assert!(failure.context.contains("stalled"), "{failure:?}");
         // sleep-ok: let a surviving descendant reach its delayed marker write.
         tokio::time::sleep(Duration::from_millis(1300)).await;

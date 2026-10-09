@@ -44,19 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Detect stalled payload uploads without a second ssh session.** While a payload uploads, provisioning polls the
-  remote file's size over a second ssh session every 2 seconds; the first successful reading arms the 60-second idle
-  deadline, and only observed growth renews it. On a host whose sshd allows one session per connection and needs an
-  interactive approval for every new login, the upload itself holds that session, so every poll is refused and falls
-  back to a fresh login that fails in batch mode (one after another, each bounded by the 30-second command timeout): the
-  deadline never arms, and a hung upload can hang indefinitely. (Without the approval requirement the fallback login
-  succeeds, at the cost of a full login every poll.) Replace the remote poll with counting the bytes the helm has pushed
-  into ssh's stdin as the progress signal, and remove the old remote-poll mechanism. Two things to settle: this reverses
-  the rule, documented in `crates/farhelm-helm/src/provisioning/backend.rs`, that pipe activity is not progress evidence
-  (local writes run ahead of the remote by the pipe, ssh and TCP buffers, a few MB, before they block), and nothing
-  local signals progress after the last byte is written while the remote drains those buffers. Plan:
-  `plans/queue/upload-stall-same-session.md`.
-
 - **Help users start the shared ssh connections themselves.** A host that needs an interactive approval for every new
   ssh connection (a second factor, say) only works if the user starts the helm's shared connections for it by hand, at
   the helm's socket paths, because the helm itself runs ssh non-interactively. Today that means knowing Farhelm's
