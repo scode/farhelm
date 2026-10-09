@@ -106,3 +106,31 @@ verdicts are executor observations.
 Commit and PR wording passed a separate fresh gpt-6.1-sol medium cold read. Implementation stayed with the executor
 under no-workhorse mode; only the required process reviews were delegated. Native model-reporting and usage counters
 were unavailable, with that gap recorded in private galaxy session evidence.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1728 (upload stalls are detected on hosts that allow one SSH session per connection), one
+squash commit on main.
+
+#### What else was on main, and what lands with it
+
+Between the commit the change was built on and the landing, main gained the repository-cache, desktop encoding and
+conversation-warning changes (#1720, #1724, #1722, #1723, #1725) and #1730, plus documentation and the planning queue's
+bookkeeping. None of it touches the helm's provisioning code, the protocol (beyond a comment) or a database schema. The
+drag-copy-notice plan is landing in the same round; the two share only TODO.md and SPEC_impl.md, in separate entries and
+sections, and merge without conflict.
+
+#### Review before merging
+
+A separate reviewer that had not worked on either plan read both against each other and main before anything merged and
+found nothing that breaks. This change is the helm's upload of Farhelm to a remote host, not the terminal's attachment
+upload, so the attachment tests are unaffected; nothing outside the two changed files used the removed size probe; and
+SPEC.md describes stall-only timeouts without the mechanism, so it stays accurate.
+
+#### Checks
+
+- Reused: the report's checks. Nothing that reached main since the change was built touches code it changes or depends
+  on.
+- Skipped: running anything again during the landing, for the same reason.
+
+Nothing in the report above was made untrue by the landing.
