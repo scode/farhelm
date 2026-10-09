@@ -178,7 +178,8 @@ pub use grok::{
 };
 pub use records::{RecordCorrelators, format_rfc3339, now_unix, parse_rfc3339, read_record};
 pub(crate) use records::{
-    read_complete as read_complete_bounded_regular_file, read_prefix as read_bounded_regular_file,
+    read_complete as read_complete_bounded_regular_file, read_first_line as read_record_header,
+    read_prefix as read_bounded_regular_file,
 };
 
 /// The launch placeholders, defined beside [`SessionLaunch`] because the
@@ -381,6 +382,13 @@ pub trait AgentIntegration: Send + Sync {
     /// verification return no record. Invalid required metadata is an error. The
     /// prefix can end mid-line, so parsers must tolerate an incomplete final line.
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>>;
+
+    /// Whether the first complete record is a supported prelude to the header.
+    ///
+    /// Only the integration may authorize reading a second line: OMP permits
+    /// one validated title slot, while Pi requires the session header first.
+    /// This is pure format recognition, not proof of a conversation identity.
+    fn record_header_has_prelude(&self, first_line: &str) -> bool;
 
     /// Command-line elements that make THIS launch report its conversation
     /// identity through `farhelm internal hook`, appended verbatim after the
@@ -828,6 +836,10 @@ struct OmpIntegration;
 struct GrokIntegration;
 
 impl AgentIntegration for GooseIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
     fn farhelm_args(&self, phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         goose::farhelm_args(phase, policy)
     }
@@ -842,6 +854,10 @@ impl AgentIntegration for GooseIntegration {
 }
 
 impl AgentIntegration for PiIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         reporter_extension_args(
             AgentKind::Pi,
@@ -884,6 +900,10 @@ impl AgentIntegration for PiIntegration {
 }
 
 impl AgentIntegration for GrokIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         hook_tail_args(self, AgentKind::Grok, policy)
     }
@@ -1060,13 +1080,45 @@ pub(crate) fn omp_flag_consumes_next(flag: &OmpFlagOccurrence<'_>, next: Option<
     }
 }
 
+/// The one record shape a leading title slot may take, checked field by
+/// field (type, v, title, updatedAt, pad, and the optional `source`)
+/// rather than by its type tag alone — a record that merely CLAIMS to be
+/// the title slot is not one. `source` mirrors OMP's own
+/// `parseTitleSlotObject`: it must be absent or exactly `auto`/`user`,
+/// because any other value makes OMP decline the record as a title slot
+/// and reject the whole file as an invalid session header — so a file
+/// Farhelm accepted here would fail inside OMP after the resume launched.
+fn is_omp_title_slot(record: &serde_json::Value) -> bool {
+    let Some(object) = record.as_object() else {
+        return false;
+    };
+    object.get("type").and_then(serde_json::Value::as_str) == Some("title")
+        && object.get("v").and_then(serde_json::Value::as_u64) == Some(1)
+        && object
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        && object
+            .get("updatedAt")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        && object
+            .get("pad")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        && match object.get("source") {
+            None => true,
+            Some(source) => matches!(source.as_str(), Some("auto") | Some("user")),
+        }
+}
+
 /// Read an OMP session file's header id out of its bounded prefix.
 ///
 /// OMP's own parser, deliberately separate from Pi's first-record rule: an
 /// OMP session file may open with ONE rewritable title-slot record —
 /// `{"type":"title","v":1,"title":...,"updatedAt":...,"pad":"..."}`, a fixed
 /// 256-byte line OMP overwrites in place (`OMP/session/session-title-slot.ts`)
-/// — before the real session header. The prefix reader hands this function a
+/// — before the real session header. The header reader hands this function a
 /// bounded, possibly mid-line-truncated text, so every malformed or truncated
 /// shape refuses (fail closed) rather than being skipped: verification must
 /// never accept a file it cannot fully parse as exactly the session it was
@@ -1078,45 +1130,13 @@ pub(crate) fn omp_flag_consumes_next(flag: &OmpFlagOccurrence<'_>, next: Option<
 /// missing or non-3 `version`, a missing/non-string/implausible id, and —
 /// implicitly — compressed bytes, which are not JSON at all.
 fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
-    /// The one record shape a leading title slot may take, checked field by
-    /// field (type, v, title, updatedAt, pad, and the optional `source`)
-    /// rather than by its type tag alone — a record that merely CLAIMS to be
-    /// the title slot is not one. `source` mirrors OMP's own
-    /// `parseTitleSlotObject`: it must be absent or exactly `auto`/`user`,
-    /// because any other value makes OMP decline the record as a title slot
-    /// and reject the whole file as an invalid session header — so a file
-    /// Farhelm accepted here would fail inside OMP after the resume launched.
-    fn is_title_slot(record: &serde_json::Value) -> bool {
-        let Some(object) = record.as_object() else {
-            return false;
-        };
-        object.get("type").and_then(serde_json::Value::as_str) == Some("title")
-            && object.get("v").and_then(serde_json::Value::as_u64) == Some(1)
-            && object
-                .get("title")
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-            && object
-                .get("updatedAt")
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-            && object
-                .get("pad")
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-            && match object.get("source") {
-                None => true,
-                Some(source) => matches!(source.as_str(), Some("auto") | Some("user")),
-            }
-    }
-
     let mut lines = text.lines().map(str::trim_start);
     let first = lines
         .next()
         .ok_or_else(|| anyhow::anyhow!("OMP session file has no header"))?;
     let first: serde_json::Value = serde_json::from_str(first)
         .map_err(|_| anyhow::anyhow!("OMP session prefix is not JSONL"))?;
-    let header = if is_title_slot(&first) {
+    let header = if is_omp_title_slot(&first) {
         let second = lines
             .next()
             .ok_or_else(|| anyhow::anyhow!("OMP session file ends after its title slot"))?;
@@ -1146,6 +1166,10 @@ fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
 }
 
 impl AgentIntegration for OmpIntegration {
+    fn record_header_has_prelude(&self, first_line: &str) -> bool {
+        serde_json::from_str(first_line.trim_start()).is_ok_and(|record| is_omp_title_slot(&record))
+    }
+
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         reporter_extension_args(
             AgentKind::Omp,
@@ -1170,6 +1194,10 @@ impl AgentIntegration for OmpIntegration {
 }
 
 impl AgentIntegration for ClaudeIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         hook_tail_args(self, AgentKind::Claude, policy)
     }
@@ -1222,6 +1250,10 @@ impl AgentIntegration for ClaudeIntegration {
 }
 
 impl AgentIntegration for CodexIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
     fn farhelm_args(&self, _phase: LaunchPhase, policy: &HookPolicy<'_>) -> FarhelmArgs {
         hook_tail_args(self, AgentKind::Codex, policy)
     }

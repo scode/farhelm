@@ -249,7 +249,7 @@ impl GrokLocator {
             path.file_name().and_then(|name| name.to_str()) == Some("updates.jsonl"),
             "Grok callback path is not updates.jsonl"
         );
-        let Some(updates) = super::read_bounded_regular_file(path).await? else {
+        let Some(updates) = super::read_record_header(path).await? else {
             return Ok(false);
         };
         let Some(first) = updates.lines().next() else {
