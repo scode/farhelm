@@ -450,38 +450,47 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
         // it, because the user retypes it from a hover: trailing
         // punctuation would read as part of it.
         tooltip: format!(
-            "this Farhelm can no longer verify its updates, so it cannot update itself ({}); \
-             reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
+            "This Farhelm can no longer verify its updates, so it cannot update itself. {} \
+             Reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
             readout.tooltip
         ),
         ..readout
     }
 }
 
-/// The readout for what the updater is doing, before the reinstall notice.
+/// Activity wording preserves a waiting update even after a failed check.
+///
+/// Checking and installing describe current work; an idle or up-to-date answer
+/// yields to the installed-version restart advice. The reinstall notice wraps
+/// this result without losing that activity or changing the readiness marker.
 fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
     let ready = state.update_ready();
     let installed = state.installed.as_deref().unwrap_or_default();
     let ready_text = format!(
-        "Farhelm {installed} is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
+        "Farhelm {installed} is installed. Restart Farhelm to finish the update. Select this to open the menu for Restart to update or What's new."
     );
     let tooltip = match &state.activity {
-        Activity::Checking => "checking for a newer Farhelm…".to_string(),
+        Activity::Checking => "Farhelm is checking for a newer version.".to_string(),
         Activity::Installing(version) => {
-            format!("installing Farhelm {version} in the background…")
+            format!("Farhelm {version} is being installed in the background.")
         }
         Activity::Failed(reason) if ready => {
-            format!("the update check failed: {reason}. {ready_text}")
+            format!(
+                "The update check failed: {}. {ready_text}",
+                reason.trim_end_matches('.')
+            )
         }
-        Activity::Failed(reason) => format!("the update check failed: {reason}"),
+        Activity::Failed(reason) => {
+            format!("The update check failed: {}.", reason.trim_end_matches('.'))
+        }
         Activity::RestartFailed => format!(
-            "Farhelm could not restart itself; quit and reopen it to finish updating to Farhelm {installed}"
+            "Farhelm could not restart itself. Quit and reopen it to finish updating to Farhelm {installed}."
         ),
         _ if ready => ready_text,
         Activity::UpToDate(latest) => {
-            format!("Farhelm is up to date ({latest} is the latest release)")
+            format!("Farhelm is up to date. Farhelm {latest} is the latest release.")
         }
-        Activity::Idle => crate::app_updater::idle_tooltip(&state.running),
+        Activity::Idle => crate::app_updater::idle_tooltip(&state.running, true),
     };
     crate::app_updater::Readout {
         update_ready: ready,
@@ -2270,6 +2279,9 @@ mod tests {
 
     // ---- the readout ----
 
+    /// An installed release with a controlled activity and Installed record.
+    /// Keeping these inputs independent exercises the rule that a hand-installed
+    /// update remains ready while a user-started check reports another outcome.
     fn state(installed: Option<&str>, activity: Activity) -> UpdaterState {
         UpdaterState {
             running: "1.0.0".to_string(),
@@ -2293,7 +2305,7 @@ mod tests {
         assert!(ready.update_ready);
         assert_eq!(
             ready.tooltip,
-            "Farhelm 1.1.0 is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
+            "Farhelm 1.1.0 is installed. Restart Farhelm to finish the update. Select this to open the menu for Restart to update or What's new."
         );
         assert_eq!(
             readout(&state(
@@ -2308,7 +2320,10 @@ mod tests {
         for installed in [Some("1.0.0"), Some("0.9.0"), None] {
             let plain = readout(&state(installed, Activity::Idle));
             assert!(!plain.update_ready, "{installed:?}");
-            assert_eq!(plain.tooltip, "this client was built as farhelm 1.0.0");
+            assert_eq!(
+                plain.tooltip,
+                "This is Farhelm 1.0.0. When a newer version has been installed, this turns red; select it then to restart into the new version."
+            );
         }
     }
 
@@ -2320,7 +2335,7 @@ mod tests {
         assert!(failed.update_ready);
         assert_eq!(
             failed.tooltip,
-            "Farhelm could not restart itself; quit and reopen it to finish updating to Farhelm 1.1.0"
+            "Farhelm could not restart itself. Quit and reopen it to finish updating to Farhelm 1.1.0."
         );
     }
 
@@ -2331,11 +2346,11 @@ mod tests {
     fn the_readout_hover_carries_a_user_started_check() {
         assert_eq!(
             readout(&state(None, Activity::Checking)).tooltip,
-            "checking for a newer Farhelm…"
+            "Farhelm is checking for a newer version."
         );
         assert_eq!(
             readout(&state(None, Activity::Installing("1.2.0".to_string()))).tooltip,
-            "installing Farhelm 1.2.0 in the background…"
+            "Farhelm 1.2.0 is being installed in the background."
         );
         assert_eq!(
             readout(&state(
@@ -2343,7 +2358,7 @@ mod tests {
                 Activity::UpToDate("1.0.0".to_string())
             ))
             .tooltip,
-            "Farhelm is up to date (1.0.0 is the latest release)"
+            "Farhelm is up to date. Farhelm 1.0.0 is the latest release."
         );
         assert_eq!(
             readout(&state(
@@ -2351,7 +2366,7 @@ mod tests {
                 Activity::Failed("offline".to_string())
             ))
             .tooltip,
-            "the update check failed: offline"
+            "The update check failed: offline."
         );
         let failed_with_update = readout(&state(
             Some("1.1.0"),
@@ -2360,7 +2375,35 @@ mod tests {
         assert!(failed_with_update.update_ready);
         assert_eq!(
             failed_with_update.tooltip,
-            "the update check failed: offline. Farhelm 1.1.0 is installed; restarting Farhelm finishes the update (select for restart to update or what's new)"
+            "The update check failed: offline. Farhelm 1.1.0 is installed. Restart Farhelm to finish the update. Select this to open the menu for Restart to update or What's new."
         );
+    }
+
+    /// Verification failure must remain actionable during every update activity.
+    /// Whole sentences avoid burying the current activity inside parentheses;
+    /// the command stays last so copying it cannot pick up sentence punctuation.
+    #[farhelm_testtrace::test]
+    fn the_reinstall_notice_keeps_each_activity_and_ends_with_the_command() {
+        for activity in [
+            Activity::Idle,
+            Activity::Checking,
+            Activity::Installing("1.2.0".to_owned()),
+            Activity::UpToDate("1.1.0".to_owned()),
+            Activity::Failed("offline.".to_owned()),
+            Activity::RestartFailed,
+        ] {
+            let mut state = state(Some("1.1.0"), activity);
+            let activity_text = readout(&state).tooltip;
+            state.needs_reinstall = true;
+            let shown = readout(&state);
+            assert!(shown.update_ready);
+            assert!(shown.needs_reinstall);
+            assert_eq!(
+                shown.tooltip,
+                format!(
+                    "This Farhelm can no longer verify its updates, so it cannot update itself. {activity_text} Reinstall it by running this in a terminal: {REINSTALL_COMMAND}"
+                )
+            );
+        }
     }
 }

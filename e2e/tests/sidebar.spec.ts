@@ -123,33 +123,58 @@ async function sharedSessionId(request: APIRequestContext): Promise<string> {
 }
 
 /**
+ * Establish the readout's rendered build before checking its hover wording.
+ * Navigation finishes before WASM startup and the first API replies; the
+ * sidebar's 20-second readiness budget covers that boundary in WebKit too.
+ * A failure reports whether the helm still serves the fixture's build, while
+ * the page and request context remain alive for those diagnostics.
+ */
+async function waitForVersionReadout(page: Page, request: APIRequestContext, stamp: string): Promise<Locator> {
+  const version = page.locator(".app-version");
+  try {
+    await expect(version).toHaveText(stamp, { timeout: 20_000 });
+  } catch (error) {
+    const premise = await request.get("/api/sessions", { timeout: 5_000 })
+      .then((response) => `helm listing HTTP ${response.status()}, build ${response.headers()["x-farhelm-build"] ?? "absent"}`)
+      .catch((probeError) => `helm listing unavailable: ${probeError}`);
+    throw new Error(`version readout did not render ${stamp}; ${premise}`, { cause: error });
+  }
+  return version;
+}
+
+/**
  * The sidebar's first bar identifies the build answering the page before a
  * user has to interpret the separate mismatch notice. The fixture helm and
  * the bundle are the same build, so an agreeing reply cannot tell whether the
  * readout is wired to the helm's stamp at all: the first half forces every
  * API reply to carry a different stamp and expects THAT in the bar while the
- * tooltip keeps naming the real client build; the second half is the healthy
- * case, where the two are the same string.
+ * tooltip names both builds and identifies the window as a development build;
+ * the second half is the healthy case, where the two are the same string.
  */
-test("the sidebar app bar shows the helm build and client tooltip", async ({ page, request }) => {
+test("the sidebar app bar explains the helm and window builds", async ({ page, request }) => {
   const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
-  expect(stamp, "the helm must stamp its replies").toBeTruthy();
+  expect(stamp, "the source-built fixture must be a development build").toBe("0.0.0-unreleased");
   const forced = "9.9.9-forced-helm";
   expect(forced).not.toBe(stamp);
 
   await forceBuildSkew(page, forced);
   await page.goto("/");
-  const version = page.locator(".app-version");
-  await expect(version).toHaveText(forced);
-  await expect(version).toHaveAttribute("data-tooltip", `this client was built as farhelm ${stamp}`);
+  const version = await waitForVersionReadout(page, request, forced);
+  await expect(version).toHaveAttribute(
+    "data-tooltip",
+    `The helm runs Farhelm ${forced}; this window is a development build of Farhelm.`,
+  );
 
   // Mounting host rows can leave provisioning reads inside route.fetch even
   // after the version is visible. Drain those handlers before removing the
   // interception pattern, or their later fulfill races an already handled route.
   await page.unrouteAll({ behavior: "wait" });
   await page.goto("/");
-  await expect(version).toHaveText(stamp);
-  await expect(version).toHaveAttribute("data-tooltip", `this client was built as farhelm ${stamp}`);
+  await waitForVersionReadout(page, request, stamp);
+  await expect(version).toHaveAttribute(
+    "data-tooltip",
+    "This is a development build of Farhelm, not a release.",
+  );
 });
 
 /**

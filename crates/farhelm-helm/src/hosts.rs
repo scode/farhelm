@@ -369,19 +369,9 @@ pub fn build_is_newer(peer: &str, ours: &str) -> bool {
     !is_development_build(ours) && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
 }
 
-/// Whether `version` is a development build: `0.0.0` with any prerelease.
-///
-/// Every build of main reports `0.0.0-unreleased` (root `Cargo.toml`) until a
-/// release sets the version. This is the predicate `build_is_newer` already
-/// applied before the payload default needed it too, and it accepts any
-/// prerelease on `0.0.0`, not just that literal. Such a build is in no
-/// release: it has no place in the release order ([`build_is_newer`]) and
-/// no published release carries its payloads
-/// (`provisioning::payloads::production_payloads_with_key`).
-pub fn is_development_build(version: &str) -> bool {
-    semver::Version::parse(version)
-        .is_ok_and(|v| v.major == 0 && v.minor == 0 && v.patch == 0 && !v.pre.is_empty())
-}
+// The browser's wording and the helm's release decisions share one predicate.
+// Re-export it here to preserve the helm's existing public API for native users.
+pub use farhelm_proto::is_development_build;
 
 /// Join the manager's live snapshots with helm.db's registry rows into the
 /// list `GET /api/hosts` answers with — see the module docs for why the
@@ -1153,29 +1143,6 @@ mod tests {
         assert!(!build_is_older("1.0.0", "1.0.0"));
         assert!(!build_is_older("peer-build", "1.0.0"));
         assert!(!build_is_older("1.0.0", "helm-build"));
-    }
-
-    /// Why: a development build has no place in the release order and no
-    /// release carrying its payloads, and both `build_is_newer` and the
-    /// payload default ask this one question. Spec: `0.0.0` with any
-    /// prerelease is a development build; `0.0.0` itself, any real release
-    /// or release candidate, and an unparsable version are not.
-    #[farhelm_testtrace::test]
-    fn a_development_build_is_zero_zero_zero_with_a_prerelease() {
-        use super::is_development_build;
-        for development in ["0.0.0-unreleased", "0.0.0-dev.1", "0.0.0-unreleased+abc"] {
-            assert!(is_development_build(development), "{development}");
-        }
-        for other in [
-            "0.0.0",
-            "0.1.1",
-            "0.14.0-rc.2",
-            "1.0.0-unreleased",
-            "garbage",
-            "",
-        ] {
-            assert!(!is_development_build(other), "{other}");
-        }
     }
 
     /// The newer-than order is the exact mirror of the older-than one, unknown

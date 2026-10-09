@@ -12,6 +12,7 @@ description = "Wire types and protocol version shared by helm and supervisor"
 dist = false
 
 [dependencies]
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true

@@ -124,7 +124,10 @@ pub mod text;
 
 /// UTC calendar arithmetic shared by the crates that print dates.
 pub mod time;
+/// Build classification shared by browser wording and native release decisions.
+pub mod version;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+pub use version::is_development_build;
 /// The launcher's shared rules: the model catalog, agent-type
 /// reconciliation and launch templates.
 pub mod launcher;

@@ -3602,6 +3602,12 @@ running version, and then a button that opens the update menu (Restart to update
 the updater's state, so a check the user started ends visibly there. The update menu and the `?` menu are one bar-menu
 component given different items.
 
+The bar's hover is selected by a pure function of the window build, any reported helm build and the updater's readout. A
+mismatch names both builds; a development window identifies itself as a development build rather than a release. Without
+an updater a release window only names its version. An idle installed app also explains that the readout turns red once
+a newer version is installed and offers the restart menu then. The development-build predicate lives in `farhelm-proto`,
+shared by web wording and the helm's native release decisions, so their classification cannot drift.
+
 ### What running sessions hold across versions
 
 A newer `farhelm` must accept everything a running or resumable session was handed and will hand back to whatever

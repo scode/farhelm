@@ -558,10 +558,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
         .as_ref()
         .map(crate::app_updater::readout_marks)
         .unwrap_or_default();
-    let version_tooltip = readout.map_or_else(
-        || crate::app_updater::idle_tooltip(skew::CLIENT_BUILD),
-        |readout| readout.tooltip,
-    );
+    let reported = match skew.as_ref() {
+        Some(Skew::Reported(stamp)) => Some(stamp.as_str()),
+        Some(Skew::Silent) | None => None,
+    };
+    let version_tooltip =
+        crate::app_updater::version_tooltip(skew::CLIENT_BUILD, reported, readout.as_ref());
 
     let help_menu = use_bar_menu(layout_epoch, "help");
     let update_menu = use_bar_menu(layout_epoch, "update");

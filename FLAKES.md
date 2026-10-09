@@ -1656,3 +1656,39 @@ Timeout:  5000ms
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-09 — sidebar version-readout startup (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar explains the helm and window builds` failed in WebKit before reaching its hover assertions in run
+`be42dc00-8cc4-4978-bcdc-8be93f9006d0`; Chromium passed. The pre-existing initial readout assertion (formerly in
+`the sidebar app bar shows the helm build and client tooltip`) gave rendering only five seconds after navigation. The
+exact WebKit case, unchanged, then failed two of three attempts in run `042d9e34-5ff8-4b24-ab7d-b3bda69c8c4a`. Both runs
+used clean feature commit `3598ae3cf9f9b5fdd62046518a47654f7f5a9210`, one worker, zero retries and the exact
+version-readout selection; the second repeated only `webkit-sidebar` three times. No original-product baseline was
+rebuilt, so these runs alone do not establish the failure rate before the hover change. The failed trace shows
+navigation ending at 34.15s, the assertion starting at 34.21s, preferences fulfillment at 39.16s and session-list
+fulfillment at 39.97s, after the assertion's 39.50s deadline. A later snapshot contains the expected readout. This
+establishes a startup-readiness failure; why startup took that long is unknown. Load average was observed around 21 on
+18 CPUs, but CPU causation was not established; contemporaneous process inventory, memory pressure and typical passing
+duration are unavailable. Linux x86_64, kernel 6.8.0-146-generic, Node 26.11.0, Playwright 1.62.0; browser build
+identities and compiler version were not extracted. Both recorded tmux 3.7c executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`, plus `FARHELM_PLAYWRIGHT_POLICY_FILE` in the first run. The
+reproduction used generic recording; its attachments were copied before another run could overwrite them. Full evidence
+is retained privately on the executing machine without hosted expiry. Disposition: fixed in #1733 by waiting for the
+exact rendered stamp with the existing sidebar's 20-second readiness budget at both navigations, with a live helm probe
+on failure; hover assertions retain their five-second budget. Corrected run `c7852c83-aefe-4964-9765-10af59ef9c0f`, the
+same feature source plus that test-only correction, passed one Chromium and one WebKit case without retries. Those two
+passes do not establish a long-term flake rate.
+
+```
+Error: expect(locator).toHaveText(expected) failed
+Locator: locator('.app-version')
+Expected: "9.9.9-forced-helm"
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: established
