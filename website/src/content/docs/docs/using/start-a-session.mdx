@@ -143,10 +143,20 @@ a subdirectory. The name starts as the source's name plus `-clone`, then `-clone
 Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **use existing
 folder** restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
 
-When you launch, the clone runs in the session's terminal, and the agent starts once it finishes. The clone is a plain
-`git clone` of the repository's default branch, using the host's own Git credentials, so anything Git asks for, such as
-a password, shows up in the terminal for you to answer. If the clone fails, the session's status shows error, the
-terminal says what went wrong, and the partial clone stays where it is.
+When you launch, Git brings the host's cache of the repository up to date, then clones the default branch in the
+session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
+Git asks for, such as a password, shows up in the terminal for you to answer. A private repository without a credential
+helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
+and any partial clone stays where it is.
+
+The cache makes repeated fresh checkouts faster and takes roughly the disk space of one extra copy of each repository
+on each host. It lives under Farhelm's state directory on that host, in `repo-cache/<owner>/<name>.git`, outside your
+checkout directory. Farhelm removes caches unused for more than 30 days when the host's supervisor, the program that
+keeps its sessions running, starts (see [The pieces](/docs/how-it-works/the-pieces/)). You can
+delete a cache directory by hand at any time; existing checkouts stay independent, and the next fresh checkout downloads
+it again. Avoid doing that while a checkout is being prepared, since it can make that launch fail, and leave the sibling
+`.lock` files in place so concurrent checkouts still take turns. A cache failure names its path in the terminal and
+stops the clone.
 
 Fresh checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that directory
 on each host you want to clone on, then run this on the machine that runs the helm (the program that serves the Farhelm
