@@ -3,8 +3,9 @@
 //! Only accepted reports introduce new identities. Historical stored identities
 //! remain usable regardless of their source; this module never selects a vendor
 //! record by searching a directory. Each refresh takes the session's report claim
-//! before reading its row and verifying any exact file its integration requires.
-//! The ticker and reply paths both refresh, so readiness converges even when no
+//! before copying the stored binding into its mirror. It never reads Codex or
+//! Grok vendor files; reports establish readiness and Restart checks it when used.
+//! The ticker and reply paths both refresh, so durable state converges even when no
 //! helm polls the supervisor.
 
 use super::core::{SessionEntry, Supervisor};
@@ -265,8 +266,8 @@ pub(crate) fn advance_capture(
 }
 
 /// Reconcile each reported row under the same claim used for admission.
-/// Startup reports can precede entry publication, and exact-file verification
-/// can withdraw readiness independently. Reloading only after taking the claim
+/// Startup reports can precede entry publication, and Restart can withdraw
+/// readiness independently. Reloading only after taking the claim
 /// prevents an older observation from overwriting a newer accepted report.
 /// Historical non-hook identities are left intact without re-verification.
 async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
@@ -288,7 +289,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             .expect("capture mutex poisoned")
             .committed_conversation()
             .map(str::to_string);
-        let mut row = match sup.store.session(&entry.info.id).await {
+        let row = match sup.store.session(&entry.info.id).await {
             Ok(Some(row)) => row,
             Ok(None) => continue,
             Err(error) => {
@@ -301,17 +302,6 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             || row.conversation_source.as_deref() != Some("hook")
         {
             continue;
-        }
-        // The `_claimed` variant: this loop already holds this session's
-        // capture claim (above), and the per-key mutex is not reentrant —
-        // calling the claiming wrapper here parks the pass against itself.
-        match sup.refresh_reported_capture_claimed(&mut row).await {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(error) => {
-                warn!(session = %entry.info.id, %error, "could not refresh the exact reported capture");
-                continue;
-            }
         }
         let kind = row.agent_kind();
         let Some(conversation) = row.captured_conversation else {

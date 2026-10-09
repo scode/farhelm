@@ -111,10 +111,11 @@ complete bounded JSON document with the same value at `info.id`. Resume substitu
 grok --no-leader --resume <conversation-id>
 ```
 
-The exact files are checked again while Farhelm builds the offer and immediately before Resume. Missing, moved,
-malformed, unreadable, unsafe, oversized, or mismatched evidence withdraws or refuses Resume. Farhelm never scans Grok
-history, chooses the latest saved session, substitutes a record path, or silently turns a Resume request into a fresh
-conversation.
+Farhelm checks the exact files when a report arrives and when you choose Resume, so the button can remain available
+after a file was deleted. A missing file withdraws Resume and adds a notification; a file holding a different
+conversation withdraws it without one. A passing read error refuses that attempt, leaves Resume available, and asks you
+to try again. Malformed, unsafe, or oversized evidence also refuses Resume. Farhelm never scans Grok history, chooses
+the latest saved session, substitutes a record path, or silently turns a Resume request into a fresh conversation.
 
 `/new` selects the replacement UUID as soon as its `SessionStart` report is accepted, withdrawing the old offer even
 when the replacement is still pending. Selection timestamps form a fail-closed ordering fence: another UUID must carry a

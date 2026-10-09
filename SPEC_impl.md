@@ -1719,22 +1719,23 @@ evidence, but cannot authorize another directory move.
   `agent_kind/records.rs` verify exact reported files; they never discover a conversation. The in-memory state holds
   either no identity or one stored identity with its ownership version. Reload preserves historical identities
   regardless of source, without re-verifying old scan locators. Each refresh takes the per-session capture claim before
-  reloading and verifying a reported row. Reply paths and the ticker both run this reconciliation, without a global pass
-  lock or coalescing. An injected launch holding no identity warns once after 65 seconds from the first input frame
-  delivered to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage return that is not preceded by
-  ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame
-  (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk tmux confirmed. The terminal's
-  automatic replies to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports)
-  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the
-  latest screen reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An
-  outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path. With no reading
-  yet, or no dedicated reader, the existing submitted-line rule applies. A paste large enough to span frames still has
-  its middle frames judged without their markers. The spawn records whether its argv received the hook before tmux
-  starts, fenced by launch generation. Reload restores that flag; older rows default unhooked and stay unchecked. The
-  anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch and supervisor restart, so
-  a picked-up launch starts its clock at the next qualifying Enter after reload rather than recovering the time of an
-  earlier Enter. A Resume carries its identity and therefore stays silent even if its new hook never reports. The
-  warning changes no offer or admission rule.
+  reloading the durable row into its mirror; it performs no Codex transcript or Grok record-pair verification. Reply
+  paths and the ticker both run this reconciliation, without a global pass lock or coalescing. An injected launch
+  holding no identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an
+  Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends
+  `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into
+  carriage returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's
+  own queries (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an
+  agent the user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery
+  is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock
+  to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
+  submitted-line rule applies. A paste large enough to span frames still has its middle frames judged without their
+  markers. The spawn records whether its argv received the hook before tmux starts, fenced by launch generation. Reload
+  restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant,
+  reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at
+  the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its
+  identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
+  rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -1761,16 +1762,26 @@ evidence, but cannot authorize another directory move.
   thread cannot replace the file's identity. Resume substitutes the persistent thread ID. No directory scan or home
   inference participates, so a configured custom home works without becoming a second source of truth.
 
-  Only an attributed `SessionStart` with a recognized source is accepted. A foreground `clear` may install a pending
-  locator before the exact file is available, withdrawing the discarded conversation immediately. Capture passes and
-  resume verification re-read that exact file; absent or mismatched evidence cannot advertise a usable resume target.
-  Report and refresh transactions share a capture-only per-session claim and read the current durable binding while
-  holding it. This is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher.
-  Promotion of the previous record cannot discard a legitimate clear, and a repeated report must preserve an established
-  thread binding. Both writes also compare the generation and complete prior locator, including an initially absent
-  capture. A report made before in-memory publication waits on disk and is applied on the first pass after publication,
-  which discovers the owned pane from tmux when the row has not recorded it yet. Historical bare Codex IDs are retained
-  but fail closed rather than being guessed into a new locator.
+  An attributed `SessionStart` with a recognized source selects the conversation. A foreground `clear` may install a
+  pending locator before the exact file is available, withdrawing the discarded conversation immediately. A source-less
+  `Stop` can confirm only an ownership-proven, unready locator with no established thread, for the same runtime and
+  compatible exact path; it may fill an absent path. Ready or previously withdrawn bindings return before vendor I/O.
+  Codex 0.162.0 was run for two actual turns around `/clear`: both Stop callbacks named existing root transcripts, clear
+  changed both runtime and path, and the old header remained intact. An opt-in real-agent test pins callback-time
+  availability; deterministic fixtures cover a clear whose first callback precedes the file.
+
+  Report transactions share a capture-only per-session claim and read the current durable binding while holding it. This
+  is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher. A repeated report
+  preserves an established thread binding. Writes compare the generation and complete prior locator, including an
+  initially absent capture. A report made before in-memory publication waits on disk and is applied on the first pass
+  after publication, which discovers the owned pane from tmux when the row has not recorded it yet. Historical bare
+  Codex IDs are retained but fail closed rather than being guessed into a new locator.
+
+  Admission and pending confirmation verify the exact file; passes, list/info snapshots and replayed creates use the
+  stored binding. Restart verifies once before any launch mutation. A missing file persists withdrawal through the
+  exact-locator/generation CAS and notifies only when that write wins; inconsistent metadata withdraws without a
+  notification. An OS read error refuses with a retry message without changing the binding. Grok uses the same verdict
+  policy for its exact pair. The existing final relaunch comparison still fences a conversation report racing Restart.
 
   **Grok attribution, ordering, and exact-record validation.** Grok uses the same recorded and anchored ancestry,
   capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
@@ -1793,11 +1804,11 @@ evidence, but cannot authorize another directory move.
 
   Readiness requires the bounded no-follow first record of the exact `updates.jsonl` to use the observed
   `_x.ai/session/update` method and carry the UUID at `params.sessionId`. Its sibling `summary.json` must be a complete,
-  bounded UTF-8 JSON document carrying the same UUID at `info.id`; a valid prefix is not enough. Reconciliation rechecks
-  that pair under the shared claim, persists readiness withdrawal without discarding UUID or timestamp, and publishes
-  only the matching generation. Resume rechecks immediately before launch and substitutes the verified UUID, never
-  either path. No history scan or path derivation participates. Grok's manual hook configuration is the deliberate
-  exception to per-launch injection: Farhelm invokes no editor and writes no vendor file.
+  bounded UTF-8 JSON document carrying the same UUID at `info.id`; a valid prefix is not enough. Report admission
+  verifies that pair under the shared claim and publishes only the matching generation. Resume rechecks immediately
+  before launch and substitutes the verified UUID, never either path. No history scan or path derivation participates.
+  Grok's manual hook configuration is the deliberate exception to per-launch injection: Farhelm invokes no editor and
+  writes no vendor file.
 
   **Shared attribution framework and the five-step admission.** Attribution is shared mechanics in two halves, not Codex
   code. Collection runs in the hook, when it makes its report: from the hook itself upwards, at most 64 `Running` edges,
@@ -1884,33 +1895,38 @@ evidence, but cannot authorize another directory move.
   inferred from the payload; the Goose helper supplies its own value internally so the persisted declaration keeps
   invoking the same command, while the Pi/OMP assets pass theirs on the spawned command line and keep their JSON
   `vendor` field purely as a consistency check. Claude takes it as `--settings <json>`; Codex takes
-  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`. Per-launch is the whole point:
-  nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set, `~/.codex`
-  otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which is what
-  keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted deliberately, and
-  both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
-  those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
-  that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own `.codex/`
-  hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's workspace-trust option, including for
-  fresh checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they then run without
-  Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex configuration, MCP
-  servers included, the ability to run commands, and because skipping injection there would drop conversation identity,
-  and so resume, for trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to
-  the user, where the user is told what is being installed and accepts specific hooks; after that, launches no longer
-  pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex
-  session's identity arrives only once the user has typed something, where Claude's arrives at startup. The flags go
-  where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing reads the rest of the
-  command. Only a legacy session, from before launch kinds, still gets the previous release's injection, appended after
-  its argv, and for it three invocation shapes disqualify a launch, which is skipped with a logged reason rather than
-  made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would
-  silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a
-  rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either
-  vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
-  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
-  once at supervisor start and carried as a seam value. Without an accepted report, a new session cannot be restarted;
-  no nearby record can supply a substitute identity. `website/src/content/docs/docs/agents/agent-hook-injection.md` is
-  the user-facing account of the same mechanism. The injected command line outlives the binary that wrote it, so it is
-  part of what newer binaries keep accepting (see "What running sessions hold across versions").
+  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Per-launch is the
+  whole point: nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set,
+  `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which
+  is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted
+  deliberately, and both are scoped to the launches that actually carry the injected flags rather than to Codex launches
+  in general: on those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the
+  user has in that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own
+  `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's workspace-trust option,
+  including for fresh checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they then
+  run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
+  configuration, MCP servers included, the ability to run commands, and because skipping injection there would drop
+  conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation becomes an
+  explicit step surfaced to the user, where the user is told what is being installed and accepts specific hooks; after
+  that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at
+  process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives at
+  startup. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing
+  reads the rest of the command. Only a legacy session, from before launch kinds, still gets the previous release's
+  injection, appended after its argv, and for it three invocation shapes disqualify a launch, which is skipped with a
+  logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only the last one, so
+  injecting ours would silently drop the user's), an argv already steering Codex's own hook configuration (a second
+  bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch
+  them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt text).
+  `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
+  wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted report, a new
+  session cannot be restarted; no nearby record can supply a substitute identity.
+  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
+  injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
+  "What running sessions hold across versions").
+
+  Codex's Stop hook carries no instructions announcement: only SessionStart adds that context. Sessions launched before
+  Stop was injected retain their old argv, so a pending clear in one of them cannot be confirmed until relaunch. No
+  polling or upgrade machinery compensates for that accepted breaking gap.
 
   **Report files.** The hook never talks to the supervisor and never waits for it. It reads the vendor's payload
   (bounded at 30 s, for a vendor that holds stdin open, under the 60 s outer timers Farhelm sets or documents; Pi and
@@ -1918,15 +1934,14 @@ evidence, but cannot authorize another directory move.
   `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
   complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
   directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
-  replaced by rename: `latest.json` for every vendor but Grok, and Grok's `selection.json` (`SessionStart`) and
-  `enrichment.json` (its later events), drained selection first. Every report but Grok's carries a complete identity
-  checked against the stored binding, so keeping only the latest gives the same result as applying them all; Grok's
-  enrichment is refused without its selection, and the separate slot keeps a long outage's enrichments from evicting it.
-  The directory is therefore bounded at two files with no queue, cap, or eviction rule. Two hooks firing at once still
-  race for a slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the
-  slot of a pending report from the session's own agent and then be refused; a nested runtime that carries no such
-  marker (a second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass
-  while the supervisor runs or across an outage, and is then refused, which is an accepted gap.
+  replaced by rename: `latest.json` for the single-report integrations; Codex and Grok use `selection.json`
+  (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's later events), drained selection first. Enrichment is
+  refused without its selection, and the separate slot keeps a long outage's enrichments from evicting it. The directory
+  is therefore bounded at two files with no queue, cap, or eviction rule. Two hooks firing at once still race for a
+  slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the slot of a
+  pending report from the session's own agent and then be refused; a nested runtime that carries no such marker (a
+  second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass while the
+  supervisor runs or across an outage, and is then refused, which is an accepted gap.
 
   The supervisor applies waiting reports at the start of every reconciliation pass (`capture_now`: the 2 s ticker, reply
   paths, startup, reload, Restart) and does nothing while it is not recording. It takes a slot by renaming it to a

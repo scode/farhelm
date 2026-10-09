@@ -1118,22 +1118,22 @@ dialog does not count either; an outdated dialog reading can defer the clock to 
 ordinary Enter rule applies), for an agent that reports by its first prompt (Pi and OMP report only after their first
 reply, which can take as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm
 could not add its conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok
-conversation record that Farhelm re-checks and finds missing or inconsistent, which withdraws the resume offer; and an
-OMP launch whose conversation reporter does not match the running Farhelm, the one refused conversation report that
-notifies. Every other refused report (from a subagent, from an agent process the session's agent started itself,
-overtaken by a relaunch or delete, or turned away by a passing error) is the system working and never notifies. A launch
-that still carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can.
-After a supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter;
-launches stored before this behavior was introduced stay unchecked. Each notification says what happened and what the
-user can do about it, or, when nothing can be done, what they lose; it never points at a log. The
-silent-conversation-hook warning names the agent and when it normally reports its conversation, using the same timing as
-Restart's explanation. It says Restart cannot resume until that report arrives, and asks users of custom commands to
-check that they pass on `{farhelm_args}`; otherwise it invites feedback from the help (?) menu. There is at most one
-notification of each problem per launch of the session's agent. The warning that the agent never reported its
-conversation and the warning that Restart stopped offering to resume are marked resolved when Restart can resume that
-launch's conversation again, including after a supervisor restart. The other two kinds and notifications from earlier
-launches stay as they are. If a resolved problem returns in the same launch, its existing notification reopens at the
-top as new and unread, even if the user had cleared it; repeated checks while it remains unresolved do not repeat it.
+conversation record that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation
+reporter does not match the running Farhelm, the one refused conversation report that notifies. Every other refused
+report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or delete, or
+turned away by a passing error) is the system working and never notifies. A launch that still carries a conversation
+Farhelm captured earlier is never told Restart cannot resume it, because Restart can. After a supervisor restart, a
+launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches stored before this
+behavior was introduced stay unchecked. Each notification says what happened and what the user can do about it, or, when
+nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning names the agent and
+when it normally reports its conversation, using the same timing as Restart's explanation. It says Restart cannot resume
+until that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it
+invites feedback from the help (?) menu. There is at most one notification of each problem per launch of the session's
+agent. The warning that the agent never reported its conversation and the warning that Restart stopped offering to
+resume are marked resolved when Restart can resume that launch's conversation again, including after a supervisor
+restart. The other two kinds and notifications from earlier launches stay as they are. If a resolved problem returns in
+the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it;
+repeated checks while it remains unresolved do not repeat it.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
@@ -1438,10 +1438,21 @@ process ancestry alone cannot distinguish threads sharing a process. The durable
 separate from persistent thread identity, and resume uses the latter. Custom Codex homes work through the exact reported
 path; Farhelm does not search another home or choose a newer file. A legitimate reported `/clear` switches the current
 identity even when its transcript is not yet persisted: the old conversation stops being offered, and only the new
-conversation's exact file may make it resumable. An unrelated rejected report leaves the foreground identity untouched.
-Compaction preserves the conversation, and a verified new conversation replaces it. Unverifiable historical bare IDs
-remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
-than silently launching fresh or selecting a different historical conversation.
+conversation's exact file may make it resumable. A later attributed `Stop` for that same runtime confirms a pending
+clear once the file exists; it cannot select another conversation or recheck an already resumable binding. Selection and
+confirmation both survive a supervisor outage and are applied in that order. Codex sessions launched before this
+subscription was added must be relaunched before conversations begun with `/clear` can become resumable. An unrelated
+rejected report leaves the foreground identity untouched. Compaction preserves the conversation, and a verified new
+conversation replaces it. Unverifiable historical bare IDs remain stored but are not offered as exact resume targets.
+Missing or changed transcript evidence refuses Resume rather than silently launching fresh or selecting a different
+historical conversation.
+
+Agent files on an execution host are trusted host state. Farhelm reads them only when a decision needs information the
+report does not provide: report admission, confirmation of a pending conversation, or Restart's exact-target check.
+Periodic capture passes, session lists and info, and replayed creates do not inspect admitted Codex transcripts or Grok
+record pairs. Arbitrary later file changes are noticed at Restart rather than through defensive polling. A missing file
+withdraws Resume and records its notification then; a different conversation withdraws silently. An I/O read failure
+refuses that Restart with a retry message and preserves Resume. None of these refusals launches an agent.
 
 Claude reports must come from a hook run by the session's pane process or by that process's direct child, so a `claude`
 started underneath the foreground one — a shelled-out sub-agent that inherited the session credential and loaded a
@@ -1464,12 +1475,12 @@ supervisor restart, without a general event log or clock-recovery protocol.
 
 The selected UUID is resumable only while the exact reported absolute `updates.jsonl` begins with a supported record
 whose method and `params.sessionId` match, and its sibling `summary.json` is a complete bounded JSON document with the
-same UUID at `info.id`. Farhelm checks that pair during reconciliation and again before Resume. Missing or mismatched
-evidence withdraws the offer while preserving the selected UUID and timestamp; Farhelm never derives a path, scans Grok
-history, or chooses another conversation. A fresh `/new` normally remains pending until a later subscribed event
-supplies its path. If Grok exits or crashes before the replacement `SessionStart` callback arrives, the previous UUID
-can remain Farhelm's last known selection; this accepted delivery race does not weaken validation of callbacks that do
-arrive.
+same UUID at `info.id`. Farhelm checks that pair at report admission and immediately before Resume. At Restart, missing
+or mismatched evidence withdraws the offer while preserving the selected UUID and timestamp; Farhelm never derives a
+path, scans Grok history, or chooses another conversation. A fresh `/new` normally remains pending until a later
+subscribed event supplies its path. If Grok exits or crashes before the replacement `SessionStart` callback arrives, the
+previous UUID can remain Farhelm's last known selection; this accepted delivery race does not weaken validation of
+callbacks that do arrive.
 
 OMP reports must come from the foreground OMP runtime under the session's owned pane — the Bun-executed bundle or
 source-tree entry, or the compiled target — reached through the launch's own launcher and trampoline shapes and nothing

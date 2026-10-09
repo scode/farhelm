@@ -24,6 +24,17 @@ pub(crate) fn is_foreground_source(source: &str) -> bool {
     matches!(source, "startup" | "resume" | "clear" | "compact")
 }
 
+/// Selecting reports name a foreground transition; Stop only enriches its binding.
+/// Codex supplies no source on Stop. The event must therefore be checked beside
+/// source, rather than admitting every source-less callback as a transition.
+pub(crate) fn is_foreground_report(source: &str, event: Option<&str>) -> bool {
+    match event {
+        Some("SessionStart") => is_foreground_source(source),
+        Some("Stop") => source.is_empty(),
+        _ => false,
+    }
+}
+
 /// Runtime session identity and persistent thread identity are not interchangeable.
 /// A pending clear retains its exact path without offering the discarded thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,8 +57,11 @@ impl CodexLocator {
         hook_event_name: Option<Value>,
     ) -> anyhow::Result<Self> {
         ensure!(
-            hook_event_name.as_ref().and_then(Value::as_str) == Some("SessionStart"),
-            "Codex requires a foreground SessionStart report"
+            hook_event_name
+                .as_ref()
+                .and_then(Value::as_str)
+                .is_some_and(|event| matches!(event, "SessionStart" | "Stop")),
+            "Codex requires a supported conversation report"
         );
         let session_file = match transcript_path {
             None | Some(Value::Null) => None,

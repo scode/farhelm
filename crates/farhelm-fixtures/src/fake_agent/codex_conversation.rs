@@ -88,9 +88,12 @@ fn root_conversation(
             "nested-shell-persisted" => nested_shell_from_root(root, hook_binary, true, &mut out)?,
             "nested-shell-fileless" => nested_shell_from_root(root, hook_binary, false, &mut out)?,
             "nested-shell-native" => nested_shell_native(root, hook_binary, &mut out)?,
-            "clear-pending" => {
+            "clear-pending" | "clear-fileless" => {
                 current = pending_clear(root)?;
-                report(hook_binary, &current, "clear", Some(&current.path))?;
+                // A later Stop may fill a missing path, but only for this
+                // selected runtime. The two commands exercise both shapes.
+                let path = (line.trim() == "clear-pending").then_some(current.path.as_path());
+                report(hook_binary, &current, "clear", path)?;
                 writeln!(
                     out,
                     "CODEX-CLEAR-PENDING:{}:{}\r",
@@ -100,7 +103,20 @@ fn root_conversation(
             }
             "persist" => {
                 persist(&current)?;
+                report_event(hook_binary, &current, "", Some(&current.path), "Stop")?;
                 writeln!(out, "CODEX-PERSISTED:{}\r", current.runtime)?;
+            }
+            "stop-other" => {
+                let other = pending_clear(root)?;
+                // A valid record makes runtime ownership the only reason this
+                // completion cannot confirm the currently pending clear.
+                persist(&other)?;
+                report_event(hook_binary, &other, "", Some(&other.path), "Stop")?;
+                writeln!(out, "CODEX-OTHER-STOP:{}\r", other.runtime)?;
+            }
+            "stop" => {
+                report_event(hook_binary, &current, "", Some(&current.path), "Stop")?;
+                writeln!(out, "CODEX-STOP:{}\r", current.runtime)?;
             }
             "compact" => {
                 report(hook_binary, &current, "compact", Some(&current.path))?;
@@ -566,8 +582,9 @@ fn reopen(root: &Path, id: &str) -> anyhow::Result<Conversation> {
     Ok(record)
 }
 
-/// Materialize the exact transcript a preceding clear report named, without
-/// emitting another report that could hide a broken refresh path.
+/// Materialize the exact transcript a preceding clear report named.
+/// The command emits Stop afterwards, matching the vendor's end-of-turn
+/// confirmation; writing the file alone must never promote a pending clear.
 fn persist(conversation: &Conversation) -> anyhow::Result<()> {
     persist_with_cwd(
         conversation,
@@ -672,13 +689,32 @@ fn report(
     source: &str,
     transcript_path: Option<&Path>,
 ) -> anyhow::Result<()> {
+    report_event(
+        hook_binary,
+        conversation,
+        source,
+        transcript_path,
+        "SessionStart",
+    )
+}
+
+/// Keep event evidence explicit while sharing the real silent hook process.
+/// Stop carries no source and confirms only the foreground selection; selecting
+/// callbacks retain their transition vocabulary and use the separate disk slot.
+fn report_event(
+    hook_binary: &Path,
+    conversation: &Conversation,
+    source: &str,
+    transcript_path: Option<&Path>,
+    event: &str,
+) -> anyhow::Result<()> {
     // `None` is the observed ephemeral shape. A clear deliberately supplies
     // `Some` even before its file exists, because that exact future path is
-    // what capture refresh may later promote.
+    // what a later Stop can confirm.
     let payload = serde_json::json!({
         "session_id": conversation.runtime,
         "transcript_path": transcript_path,
-        "hook_event_name": "SessionStart",
+        "hook_event_name": event,
         "source": source,
     })
     .to_string();

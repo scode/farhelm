@@ -434,7 +434,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     let waiting = farhelm_supervisor::hook_report::session_dir(h.state.path(), &id)
         .expect("a session id names a drop directory")
-        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+        .join(farhelm_supervisor::hook_report::Slot::Selection.file_name());
     assert!(
         waiting.exists(),
         "the pre-publication report must wait on disk for the supervisor that publishes \
@@ -830,9 +830,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     )
     .await;
 
-    // A valid clear must also survive refresh winning first. The discarded
-    // pending conversation gets its file while the next clear report is paused;
-    // promoting that old file must not make the supervisor throw away the clear.
+    // A file arriving by itself cannot promote a pending conversation, even
+    // while the next selecting report is paused. Only the subscribed callback
+    // confirms it, and the next clear must still replace that pending binding.
     let hook_log = h
         .state
         .path()
@@ -850,7 +850,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     report_armed.store(true, std::sync::atomic::Ordering::SeqCst);
     let clear_from = seen.len();
     h.client
-        .send_input(channel, b"clear-pending\r".to_vec())
+        .send_input(channel, b"clear-fileless\r".to_vec())
         .await;
     tokio::time::timeout(Duration::from_secs(5), report_entered.notified())
         .await
@@ -862,13 +862,17 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         format!("{root}\n"),
     )
     .expect("publish the discarded conversation's delayed transcript");
-    wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::NotCaptured,
+        "a delayed transcript alone must not be verified by a listing"
+    );
     report_release.notify_one();
     wait_for_after_from(
         &mut stream,
         &mut seen,
         clear_from,
-        "clear-pending",
+        "clear-fileless",
         "CODEX-CLEAR-PENDING:",
         30,
     )
@@ -882,7 +886,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::NotCaptured,
-        "promoting the discarded conversation must not cause a legitimate clear to be lost"
+        "the next clear must displace the pending conversation"
     );
     assert_hook_reply_since(
         &h.sup,
@@ -894,12 +898,63 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     )
     .await;
 
-    // Pause a real compact report before its capture transaction. Publish B's
-    // file and let the public listing bind it, then replace only the persistent
-    // ID. The report must read and preserve the established binding rather than
-    // bless the replacement under its unchanged runtime ID and path.
+    let pending_binding = durable_binding(h.state.path(), &session.id).await;
+    let other_offset = std::fs::read(&hook_log).unwrap().len();
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "stop-other",
+        "CODEX-OTHER-STOP:",
+    )
+    .await;
+    let other_text = String::from_utf8_lossy(&seen);
+    let other = complete_marker(&other_text, "CODEX-OTHER-STOP:").unwrap();
+    assert_ne!(
+        other, cleared_b,
+        "the rejected Stop must name another runtime"
+    );
+    let other_record = records.path().join(format!("{other}.jsonl"));
+    let other_meta: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(&other_record)
+            .expect("other Stop has a persisted record")
+            .lines()
+            .next()
+            .expect("other Stop has a header"),
+    )
+    .unwrap();
+    assert_eq!(other_meta["payload"]["session_id"], other);
+    let other_reply = supervisor_verdict(&h.sup, &hook_log, other_offset, other, None).await;
+    assert!(other_reply.contains(" acked "), "{other_reply}");
+    assert_eq!(
+        durable_binding(h.state.path(), &session.id).await,
+        pending_binding,
+        "Stop cannot select another runtime while the real clear is pending"
+    );
+
+    // Confirm B through a real Stop report before pausing compact. Mutating
+    // the file after the offer is established cannot rebind the compact report
+    // to a different persistent thread under its unchanged runtime and path.
     let race_record = records.path().join(format!("{cleared_b}.jsonl"));
     assert!(!race_record.exists(), "B must still lack its exact record");
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "persist",
+        &format!("CODEX-PERSISTED:{cleared_b}"),
+    )
+    .await;
+    wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+    // Persist creates B's own timestamp. Preserve the admitted bytes rather
+    // than synthesizing B from A's earlier header, which may cross a second.
+    let bound_b = std::fs::read_to_string(&race_record).unwrap();
+    let mut root: serde_json::Value = serde_json::from_str(&bound_b).unwrap();
+    assert_eq!(root["payload"]["id"], cleared_b);
+    assert_eq!(root["payload"]["session_id"], cleared_b);
+    assert_eq!(root["payload"]["source"], "cli");
     report_armed.store(true, std::sync::atomic::Ordering::SeqCst);
     let race_from = seen.len();
     let race_log_offset = std::fs::read(&hook_log)
@@ -933,14 +988,14 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     tokio::time::timeout(Duration::from_secs(5), report_entered.notified())
         .await
         .expect("the report drain must reach the pre-transaction boundary");
-    root["payload"]["id"] = serde_json::json!(cleared_b);
-    root["payload"]["session_id"] = serde_json::json!(cleared_b);
-    let bound_b = format!("{root}\n");
-    std::fs::write(&race_record, &bound_b).expect("publish B's exact root record");
-    wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+    assert_eq!(
+        std::fs::read_to_string(&race_record).unwrap(),
+        bound_b,
+        "the Stop fixture already published B before the compact gate"
+    );
     root["payload"]["id"] = serde_json::json!("concurrent-replacement-thread");
     std::fs::write(&race_record, format!("{root}\n"))
-        .expect("replace the persistent ID after refresh bound B");
+        .expect("replace the persistent ID after Stop bound B");
     report_release.notify_one();
     gated_pass
         .await
@@ -970,8 +1025,8 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::NotCaptured,
-        "the report must preserve the B binding established before its capture transaction"
+        farhelm_proto::RestartOffer::Resume,
+        "a refused selecting report must preserve the established B binding"
     );
     std::fs::write(&race_record, bound_b).expect("restore B's owned root record");
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
@@ -1005,9 +1060,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     )
     .await;
 
-    // Keep the reported runtime and exact path while substituting a different
-    // persistent thread. Refresh must withdraw Resume, and a subsequent compact
-    // report must not forget the old binding and bless the replacement.
+    // A changed persistent thread is discovered at Restart. Listing retains
+    // its admitted offer, and compact must not bless the replacement. Restart
+    // refuses without relaunching; a later selecting report can restore B.
     let record_path = records.path().join(format!("{cleared_b}.jsonl"));
     let original_record = std::fs::read_to_string(&record_path).expect("read B's owned transcript");
     let (header, history) = original_record
@@ -1019,12 +1074,11 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     header["payload"]["id"] = serde_json::json!("replacement-thread");
     std::fs::write(&record_path, format!("{header}\n{history}"))
         .expect("replace only the owned fixture's persistent identity");
-    wait_for_offer(
-        &h.client,
-        &session.id,
-        farhelm_proto::RestartOffer::NotCaptured,
-    )
-    .await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "list must not verify a changed transcript"
+    );
     send_and_wait(
         &h.client,
         channel,
@@ -1036,9 +1090,17 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .await;
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::NotCaptured,
-        "a repeated report must not rebind B's file to a different persistent thread"
+        farhelm_proto::RestartOffer::Resume,
+        "a refused report must preserve B's admitted binding until Restart"
     );
+    let mismatch_notifications = listed(&h.client, &session.id).await.notifications;
+    let mismatch_generation = h
+        .sup
+        .session_snapshot(&session.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .generation;
     let refusal = h
         .client
         .restart_session(&session.id, true)
@@ -1051,7 +1113,31 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
             .kind,
         farhelm_proto::ErrorKind::Conflict
     );
+    assert_eq!(
+        listed(&h.client, &session.id).await.notifications,
+        mismatch_notifications,
+        "a different persistent conversation withdraws silently"
+    );
+    assert_eq!(
+        h.sup
+            .session_snapshot(&session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .generation,
+        mismatch_generation,
+        "a mismatched record launches no generation"
+    );
     std::fs::write(&record_path, original_record).expect("restore B's original owned transcript");
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "compact",
+        &format!("CODEX-COMPACT:{cleared_b}"),
+    )
+    .await;
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
 
     h.client
@@ -1099,6 +1185,176 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     assert_eq!(
         version, 1,
         "relaunch must preserve the proven binding's provenance"
+    );
+    // Stop must not recheck an already admitted target. A malformed header
+    // would be refused by verification; an acknowledgement without changing
+    // the durable binding proves the confirmation exited before that read.
+    let path = records.path().join(format!("{cleared_b}.jsonl"));
+    let intact = std::fs::read(&path).unwrap();
+    let before = listed(&h.client, &session.id).await;
+    let generation = h
+        .sup
+        .session_snapshot(&session.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .generation;
+    let stop_offset = std::fs::read(&hook_log).unwrap().len();
+    std::fs::write(&path, b"not JSON\n").unwrap();
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "stop",
+        &format!("CODEX-STOP:{cleared_b}"),
+    )
+    .await;
+    let stop_reply = supervisor_verdict(&h.sup, &hook_log, stop_offset, &cleared_b, None).await;
+    assert!(stop_reply.contains(" acked "), "{stop_reply}");
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "Stop for a ready binding reads no header"
+    );
+    assert_eq!(
+        durable_binding(h.state.path(), &session.id)
+            .await
+            .0
+            .as_deref(),
+        Some(saved.as_str())
+    );
+    std::fs::remove_file(&path).unwrap();
+    let failure = h
+        .client
+        .restart_session(&session.id, true)
+        .await
+        .expect_err("missing transcript refuses Restart");
+    assert!(
+        failure.to_string().contains("missing or inconsistent"),
+        "{failure:#}"
+    );
+    let after = listed(&h.client, &session.id).await;
+    assert_eq!(
+        h.sup
+            .session_snapshot(&session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .generation,
+        generation,
+        "refusal launches no generation"
+    );
+    assert_eq!(
+        after.restart_offer,
+        farhelm_proto::RestartOffer::NotCaptured
+    );
+    assert_eq!(
+        after.notifications.len(),
+        before.notifications.len() + 1,
+        "only Restart finding a missing file records the withdrawal"
+    );
+    std::fs::write(&path, intact).unwrap();
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "compact",
+        &format!("CODEX-COMPACT:{cleared_b}"),
+    )
+    .await;
+    wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+
+    // No supervisor exists while the foreground clears and completes a turn.
+    // Its two actual hooks must leave independent slots, then reload must
+    // select the replacement before judging the later confirmation.
+    serving.stop().await;
+    drop(stream);
+    let Harness {
+        client,
+        sup,
+        _tmux,
+        state,
+        _slot,
+    } = h;
+    drop(client);
+    let retiring = tokio::time::Instant::now() + Duration::from_secs(10);
+    while Arc::strong_count(&sup) > 1 {
+        assert!(
+            tokio::time::Instant::now() < retiring,
+            "connection still holds the supervisor"
+        );
+        // sleep-ok: observe owned connection drain before dropping the state-directory owner.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    drop(sup);
+    let socket = state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let peer = tmux_query(&socket, &["has-session", "-t", &tmux_name]).await;
+    assert!(
+        peer.status.success(),
+        "the owned vendor survives the supervisor outage"
+    );
+    let sent = tmux_query(
+        &socket,
+        &[
+            "send-keys",
+            "-t",
+            &tmux_name,
+            "clear-pending",
+            "Enter",
+            "persist",
+            "Enter",
+        ],
+    )
+    .await;
+    assert!(sent.status.success());
+    let dir = farhelm_supervisor::hook_report::session_dir(state.path(), &session.id).unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if dir.join("selection.json").exists() && dir.join("enrichment.json").exists() {
+            break;
+        }
+        let pane = tmux_query(&socket, &["capture-pane", "-p", "-t", &tmux_name]).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both outage slots missing; pane={pane:?}"
+        );
+        // sleep-ok: poll independent hook slots while the owned vendor finishes both commands.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let selecting: farhelm_supervisor::hook_report::HookReport =
+        serde_json::from_slice(&std::fs::read(dir.join("selection.json")).unwrap()).unwrap();
+    let enriching: farhelm_supervisor::hook_report::HookReport =
+        serde_json::from_slice(&std::fs::read(dir.join("enrichment.json")).unwrap()).unwrap();
+    assert_ne!(selecting.conversation, cleared_b);
+    assert_eq!(selecting.conversation, enriching.conversation);
+    assert_eq!(
+        selecting.hook_event_name,
+        Some(serde_json::json!("SessionStart"))
+    );
+    assert_eq!(enriching.hook_event_name, Some(serde_json::json!("Stop")));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        SupervisorSeams::default(),
+    )
+    .await
+    .unwrap();
+    assert!(sup.owns_state_dir());
+    let serving = ServeTask::spawn(&sup, state.path()).await;
+    let client = connect_client(&sup).await;
+    wait_for_offer(&client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+    let restored = durable_binding(state.path(), &session.id).await.0.unwrap();
+    assert!(
+        restored.contains(&selecting.conversation),
+        "outage must recover the replacement: {restored}"
+    );
+    assert!(
+        !dir.join("selection.json").exists() && !dir.join("enrichment.json").exists(),
+        "both reports must settle"
     );
     serving.stop().await;
 }
