@@ -236,7 +236,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   header's `source` does), and noticing the new transcript after a `/clear` whose hook fired before the file existed
   (until it exists, or via a later hook event). Decide whether Restart needs a check at all, and if so do it there
   rather than on the sweep. Any read that remains stops at the first line. Findings, data, and the options weighed:
-  `lore/2026-10-08-supervisor-idle-cpu.md`.
+  `lore/2026-10-08-supervisor-idle-cpu.md`. Plan: `plans/queue/transcript-reads-on-need.md`.
 
 - **Sweep on the timer only, and stop re-deriving known state.** The per-session sweep runs on the 2 s ticker and again
   at the start of every session-list and session-info request, including the lists the helm sends after every
@@ -255,7 +255,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   depends on. Drop the second read of the same session row in the Codex and Grok refresh. Use cached prepared statements
   for the hot store reads (the crate has none; statement parsing dominates the session-row read). Run the
   notification-resolve write transaction only when a notification it could resolve exists (SPEC_impl.md currently
-  accepts the unconditional call, so that part is a spec edit). Details: `lore/2026-10-08-supervisor-idle-cpu.md`.
+  accepts the unconditional call, so that part is a spec edit). Details: `lore/2026-10-08-supervisor-idle-cpu.md`. Plan:
+  `plans/queue/transcript-reads-on-need.md`.
 
 - **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
   win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
