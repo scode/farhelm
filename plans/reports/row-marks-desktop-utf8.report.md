@@ -65,3 +65,31 @@ measured failure. Runtime observations were independently made by the executor; 
 and PR-title wording passed a separate fresh gpt-6.1-sol medium cold read after one plain-language rewrite. The PR body
 is empty. Implementation and investigation stayed local; native model-reporting and usage counters were unavailable, and
 private galaxy session evidence records that gap.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as #1724 (the desktop app declares UTF-8 for its page and text assets), one squash commit on
+main.
+
+#### What else was on main
+
+Between the commit the change was built on and the landing, main gained the save-as-template change to the launcher
+(#1717), the repository-cache change landed just before this one (#1720), documentation and TODO entries, and the
+planning queue's bookkeeping. None of it touches the desktop app's asset handling. The only conflict on the way was in
+TODO.md, where #1720 and this change removed neighbouring entries; both are gone.
+
+#### Review before merging
+
+A separate reviewer that had not worked on the plan read it against main and the other two plans in the same round
+before anything merged and found nothing that breaks. The desktop asset check compares only which files are bundled, and
+the desktop smoke test does not check content types, so neither is affected.
+
+#### Checks
+
+- Run now, with this change stacked between #1720 and the conversation-warning plan: the compile, lint and format checks
+  listed in #1720's landing notes, all clean, including `cargo check -p farhelm-ui --features desktop`; and the desktop
+  UI's unit tests through the test-run recorder (run `b9f0a31b`, 545 passed).
+- Reused: the report's checks, including its before-and-after desktop smoke runs.
+- Skipped: a Mac window, which still needs a Mac.
+
+Nothing in the report above was made untrue by the landing.
