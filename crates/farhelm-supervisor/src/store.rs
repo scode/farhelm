@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 28;
+const SCHEMA_VERSION: i64 = 29;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1269,6 +1269,13 @@ pub struct StoredSession {
     /// already collected costs nothing but a fall through to the sweep.
     /// `false` is never a degradation — it is exactly M2's stop.
     pub launch_scoped: bool,
+    /// Whether this launch's argv received Farhelm's conversation hook.
+    ///
+    /// Recorded before tmux starts, fenced by generation, and reset when a
+    /// relaunch opens its new generation. Reload restores this fact so the
+    /// silent-hook warning can start at the next qualifying Enter. Rows from
+    /// before schema 29 default false; their argv cannot be reconstructed.
+    pub launch_hooked: bool,
     /// Provenance of the stored identity: `hook` for accepted reports, absent
     /// for historical identities or an empty binding. Resume does not reject an
     /// identity because its source is absent. This column also serves as launch
@@ -1523,7 +1530,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  capture_ownership_version INTEGER NOT NULL DEFAULT 0,
                  omp_reporter_asset TEXT,
                  omp_launch_program TEXT,
-                 session_launch     TEXT
+                 session_launch     TEXT,
+                 launch_hooked      INTEGER NOT NULL DEFAULT 0
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1583,7 +1591,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 28;
+             PRAGMA user_version = 29;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2225,6 +2233,18 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 27 to 28")?;
         version = 28;
     }
+    if version == 28 {
+        // An older launch's hook policy is unknowable. The false default
+        // preserves its unchecked behavior; only new spawns record this fact.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN launch_hooked INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 29;
+             COMMIT;",
+        )
+        .context("migrating schema from version 28 to 29")?;
+        version = 29;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2451,9 +2471,9 @@ fn insert_session_row(
           canonical_cwd, captured_conversation, \
           generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, session_launch, \
-          capture_ownership_version, omp_reporter_asset, omp_launch_program) \
+          capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2479,6 +2499,7 @@ fn insert_session_row(
             row.capture_ownership_version,
             row.omp_reporter_asset,
             row.omp_launch_program,
+            i64::from(row.launch_hooked),
         ],
     )
     .context("inserting session row")?;
@@ -2504,7 +2525,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, tmux_name, pane, \
                                parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, \
                                session_launch, \
-                               capture_ownership_version, omp_reporter_asset, omp_launch_program";
+                               capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2545,6 +2566,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             capture_ownership_version: r.get(20)?,
             omp_reporter_asset: r.get(21)?,
             omp_launch_program: r.get(22)?,
+            launch_hooked: r.get::<_, i64>(23)? != 0,
         },
         (r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?),
         r.get::<_, i64>(15)?,
@@ -3514,6 +3536,8 @@ impl SessionStore {
     /// an empty pane, which the launch-evidence predicates read as
     /// NOT-launch-evidence for Error rows (see `reserved_launch_evidence`):
     /// a separately written Error must never imply Created.
+    /// The hook diagnostic clears with that refusal: no launch was confirmed,
+    /// so a later supervisor must not expect a report from this retained row.
     /// Returns the exact row committed by this transaction so the caller can
     /// publish its live Delete handle without another fallible database read.
     pub async fn settle_create_refusal_retaining_session(
@@ -3534,7 +3558,7 @@ impl SessionStore {
                         .context("beginning the retained-create-refusal transaction")?;
                     let updated = tx
                         .execute(
-                            "UPDATE sessions SET outcome_state = 'error', error_detail = ?2 \
+                            "UPDATE sessions SET outcome_state = 'error', error_detail = ?2, launch_hooked = 0 \
                      WHERE id = ?1 AND outcome_state IN ('launching', 'interrupted')",
                             rusqlite::params![session_id, refusal_detail],
                         )
@@ -3854,6 +3878,7 @@ impl SessionStore {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         created_at: preserved_created_at,
                         // Carried for `created_at`'s reason and with the same
                         // reach: the replaced row provably never launched (an
@@ -4040,11 +4065,12 @@ impl SessionStore {
                     // The capture columns are left alone: the relaunch resumes the
                     // conversation they name. The OMP launch-provenance columns
                     // clear — they describe the launch, not the conversation, so a
-                    // resume must not inherit them.
+                    // resume must not inherit them. Its hook flag clears for
+                    // the same reason: the new spawn decides injection afresh.
                     tx.execute(
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
-                 omp_reporter_asset = NULL, omp_launch_program = NULL \
+                 omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0 \
                  WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -4872,6 +4898,34 @@ impl SessionStore {
                         rusqlite::params![id, generation, asset, program],
                     )
                     .context("recording the launch's OMP provenance")?;
+                    Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Record this generation's hook policy before its process can start.
+    ///
+    /// This is a diagnostic fact about the argv, not a claim that the agent
+    /// started or that its hook works. A stale spawn cannot overwrite the next
+    /// launch's policy; a missing or replaced row makes this a no-op. Recording
+    /// false also withdraws diagnostics for an ambiguously retained create.
+    pub async fn record_launch_hooked(
+        &self,
+        id: &str,
+        generation: i64,
+        hooked: bool,
+    ) -> anyhow::Result<()> {
+        let id = id.to_string();
+        self.conn
+            .call(
+                "launch hook record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET launch_hooked = ?3 WHERE id = ?1 AND generation = ?2",
+                        rusqlite::params![id, generation, i64::from(hooked)],
+                    )
+                    .context("recording the launch's conversation hook policy")?;
                     Ok(())
                 },
             )
@@ -5929,6 +5983,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -7138,6 +7193,167 @@ mod tests {
         );
     }
 
+    /// Schema 28 rows have no evidence of their launch's hook policy.
+    /// Upgrading must preserve the session while defaulting that flag false;
+    /// fabricating true would warn about an agent that received no hook.
+    #[farhelm_testtrace::test]
+    async fn launch_hook_migration_keeps_preexisting_launches_unhooked() {
+        let (dir, store) = fresh_store().await;
+        let mut row = launching_row("old-launch");
+        row.launch_hooked = true;
+        store.insert_session(row, None).await.unwrap();
+        assert!(
+            store
+                .session("old-launch")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+        drop(store);
+        let path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
+            )
+            .unwrap();
+            assert!(
+                conn.prepare("SELECT launch_hooked FROM sessions").is_err(),
+                "the fixture must lack the new column"
+            );
+        }
+        let migrated = SessionStore::open(&path, true).await.unwrap();
+        let row = migrated.session("old-launch").await.unwrap().unwrap();
+        assert!(!row.launch_hooked);
+        assert_eq!(row.generation, 0);
+        drop(migrated);
+        let reopened = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(reopened.session("old-launch").await.unwrap().unwrap(), row);
+    }
+
+    /// A hook belongs to one launch, even when Restart preserves its identity.
+    /// New generations clear the flag atomically, and late writes from the old
+    /// spawn must not re-arm it. The next spawn can record either policy.
+    #[farhelm_testtrace::test]
+    async fn launch_hook_policy_is_fenced_and_reset_on_relaunch() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("hook-policy");
+        row.launch_hooked = true;
+        store.insert_session(row, None).await.unwrap();
+        assert!(
+            store
+                .session("hook-policy")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+        let claim = claimed(
+            store
+                .begin_relaunch("hook-policy", uncaptured_basis(), false)
+                .await
+                .unwrap(),
+        );
+        let reset = store.session("hook-policy").await.unwrap().unwrap();
+        assert_eq!(reset.generation, claim.generation);
+        assert!(!reset.launch_hooked);
+        store
+            .record_launch_hooked("hook-policy", 0, true)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .session("hook-policy")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked,
+            "the old generation must not overwrite the reset"
+        );
+        store
+            .record_launch_hooked("hook-policy", claim.generation, true)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .session("hook-policy")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+        store
+            .record_launch_hooked("hook-policy", claim.generation, false)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .session("hook-policy")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+    }
+
+    /// A pending-create retry inserts an unhooked decision before spawning
+    /// again, rather than inheriting the interrupted attempt's policy. Its
+    /// successful spawn can then record the hook in that retained generation.
+    #[farhelm_testtrace::test]
+    async fn a_create_retry_rewrites_its_launch_hook_policy() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("hook-retry");
+        row.launch_hooked = true;
+        store
+            .insert_session(
+                row.clone(),
+                Some(IntentClaim {
+                    intent_key: "hook-retry-intent".into(),
+                    fingerprint: "hook-retry-fingerprint".into(),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .session("hook-retry")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+        let retry = store
+            .restart_pending_launch(row, "hook-retry-intent")
+            .await
+            .unwrap();
+        let RetryClaim::Acquired { snapshot, .. } = retry else {
+            panic!("the retry must acquire the interrupted create");
+        };
+        assert!(!snapshot.launch_hooked);
+        assert!(
+            !store
+                .session("hook-retry")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+        store
+            .record_launch_hooked("hook-retry", snapshot.generation, true)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .session("hook-retry")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_hooked
+        );
+    }
+
     /// A relaunch opens its generation with UNKNOWN OMP launch provenance
     /// even when it preserves the captured conversation: the asset marker
     /// and the program describe the LAUNCH (which argv started, which
@@ -7326,6 +7542,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "demo".to_string(),
@@ -7378,6 +7595,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -7984,6 +8202,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     title: "demo".to_string(),
@@ -8062,6 +8281,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "structured".to_string(),
@@ -8147,6 +8367,7 @@ mod tests {
                         id: "s-structured".to_string(),
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         parent: None,
                         title: "structured launch".to_string(),
                         created_at: now_unix(),
@@ -8796,7 +9017,7 @@ mod tests {
         let path = dir.path().join("supervisor.db");
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
+            conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
             assert!(
                 conn.prepare("SELECT resolved_at FROM session_notifications")
                     .is_err(),
@@ -9010,6 +9231,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -9087,6 +9309,7 @@ mod tests {
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            launch_hooked: false,
             canonical_cwd: None,
             id: id.to_string(),
             parent: None,
@@ -10330,6 +10553,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -10352,6 +10576,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -10408,6 +10633,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     last_work_started_at: 0,
@@ -10528,6 +10754,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -10988,6 +11215,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    launch_hooked: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -11112,9 +11340,9 @@ mod tests {
     /// command launch's command, a legacy launch's fields as they were.
     fn restore_pre_v26_launch_columns(conn: &Connection) {
         // These fixtures rewind a current database, unlike raw historical
-        // schemas. Remove the later resolution column so rung 27 -> 28 tests
-        // the same additive upgrade a real older database requires.
-        conn.execute_batch("ALTER TABLE session_notifications DROP COLUMN resolved_at;")
+        // schemas. Remove later additive columns so the resolution and hook
+        // migrations exercise the same upgrade a real older database requires.
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
             .expect("restore pre-resolution notifications");
         let rows: Vec<(String, String)> = conn
             .prepare("SELECT id, session_launch FROM sessions")
@@ -11702,6 +11930,7 @@ mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        launch_hooked: false,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         last_work_started_at: 0,
@@ -12403,6 +12632,7 @@ mod tests {
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            launch_hooked: false,
             id: "s1".to_string(),
             parent: None,
             title: title.to_string(),

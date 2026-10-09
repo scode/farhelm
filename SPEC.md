@@ -1112,16 +1112,17 @@ OMP launch whose conversation reporter does not match the running Farhelm, the o
 notifies. Every other refused report (from a subagent, from an agent process the session's agent started itself,
 overtaken by a relaunch or delete, or turned away by a passing error) is the system working and never notifies. A launch
 that still carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can.
-Each notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
-never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
-conversation, using the same timing as Restart's explanation. It says Restart cannot resume until that report arrives,
-and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it invites feedback from the
-help (?) menu. There is at most one notification of each problem per launch of the session's agent. The warning that the
-agent never reported its conversation and the warning that Restart stopped offering to resume are marked resolved when
-Restart can resume that launch's conversation again, including after a supervisor restart. The other two kinds and
-notifications from earlier launches stay as they are. If a resolved problem returns in the same launch, its existing
-notification reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains
-unresolved do not repeat it.
+After a supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter;
+launches stored before this behavior was introduced stay unchecked. Each notification says what happened and what the
+user can do about it, or, when nothing can be done, what they lose; it never points at a log. The
+silent-conversation-hook warning names the agent and when it normally reports its conversation, using the same timing as
+Restart's explanation. It says Restart cannot resume until that report arrives, and asks users of custom commands to
+check that they pass on `{farhelm_args}`; otherwise it invites feedback from the help (?) menu. There is at most one
+notification of each problem per launch of the session's agent. The warning that the agent never reported its
+conversation and the warning that Restart stopped offering to resume are marked resolved when Restart can resume that
+launch's conversation again, including after a supervisor restart. The other two kinds and notifications from earlier
+launches stay as they are. If a resolved problem returns in the same launch, its existing notification reopens at the
+top as new and unread, even if the user had cleared it; repeated checks while it remains unresolved do not repeat it.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
