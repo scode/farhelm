@@ -127,7 +127,7 @@ impl FleetEvents {
     /// counting.
     pub fn admit(self: &Arc<Self>, capacity: usize) -> Option<FeedSeat> {
         self.subscribers
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::Relaxed,
                 std::sync::atomic::Ordering::Relaxed,
                 |held| (held < capacity).then_some(held + 1),
