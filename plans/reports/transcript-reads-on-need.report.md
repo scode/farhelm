@@ -91,3 +91,55 @@ stale website statement, and verified both corrections. The timestamp test corre
 remain. A separate documentation pass covered every touched file. The final valid blind wording reader understood the
 performance motivation and breaking caveat without contradictions or convention violations. Exact native model telemetry
 and token usage were not exposed; requested routing and evidence gaps are retained privately.
+
+### Landing
+
+Landed on 2026-10-09 (UTC) as three squash commits on main, in order: #1734 (less data read to verify a conversation),
+#1736 (less idle supervisor overhead) and #1738 (the supervisor stops polling Codex and Grok transcripts). The plan ran
+again after the maintainer's answer to its blocked question (run Codex directly rather than relying on a login check).
+
+#### What else was on main
+
+Between the commit the stack was built on and the landing, the other four plans in this round landed, along with
+documentation, test cleanups and a Rust 1.99 Clippy cleanup. The rebase met only the TODO.md conflict that ran through
+the round: this plan removes its two entries ("Read agent transcripts only when functionally needed" and "Cut the
+supervisor's remaining per-sweep overhead") and the other idle-CPU entries stay.
+
+#### A fix made while landing
+
+The combined test run failed one end-to-end test, `hook_identity::hooks_can_be_disabled_by_kind` (run `30c797ad`). #1738
+adds a Stop hook to the flags Farhelm injects into Codex, and each injected hook names the absolute path of the
+`farhelm` binary under test, so the command line the test reads back grew with the checkout's path. The test harness
+reads it from a 500-column pane: enough for the executor's checkout path (33 characters), not for a 43-character one,
+and any longer path (a CI runner's, say) fails the same way. The harness's own message names the fix, raising the pane
+width; the landing raised it to 1000 columns and explained why in its comment, in #1738 before it merged. The Codex,
+Grok and hook identity tests then passed, 22 of 22. No product code changed.
+
+#### Review before merging
+
+A separate reviewer that had not worked on any of the five plans landing in this round (version-hover-text,
+enter-launches-anywhere, drag-copy-notice, preview-lock-identity, transcript-reads-on-need) read them against each other
+and main before anything merged. They share no code that conflicts; the only textual conflicts were TODO.md, where each
+plan removed only its own entries, and FLAKES.md, where entries were appended. No protocol, supervisor or helm database
+version changes. The reviewer confirmed the real Codex audit the maintainer asked for was done: Codex 0.162.0 ran two
+turns around `/clear`, and the end-of-turn Stop hook named an existing, matching transcript both times, while `/clear`
+changed the conversation and file without rewriting the old one; #1738 adds that check as a deliberately-run real-vendor
+test. It also noted what that audit does not cover: it used a probe as the hook rather than Farhelm's own hook program,
+so the full real-Codex path into the supervisor is covered only by the fake Codex fixture; the supervisor accepts a Stop
+report only without a `source` field, which the audit records but does not assert; and running Codex sessions must be
+relaunched, as the breaking changelog entry says.
+
+#### Checks
+
+- Run now, on all five plans stacked together in landing order: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` (again after main gained
+  a Rust 1.99 lint cleanup, still clean), `cargo check -p farhelm-ui --features desktop`, the web build check,
+  `dprint
+  check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format` and the UI
+  JavaScript tests (203 passed), all clean; the supervisor and protocol unit tests in full with the Codex, Grok and hook
+  identity end-to-end tests (run `30c797ad`: 1205 of 1206; the one failure is described in transcript-reads-on-need's
+  notes and passed after its fix, 22 of 22 identity tests); and, through the recorder on Chromium and WebKit, the
+  GitHub-checkout composer, GitHub checkouts, destination authority, create idempotency, clone, replace, mouse modes,
+  launcher Enter and Restart with specs (run `cd71dca0`, 196 of 196 passed).
+
+Nothing in the report above was made untrue by the landing.
