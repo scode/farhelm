@@ -72,7 +72,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   process started no later than the lock file was last written (`ps -o etimes=` against the lock's mtime), and leave it
   alone otherwise. Two premises are unverified, so check them against Astro's source when fixing: that Astro writes the
   lock after its server process exists, and whether a foreground server rewrites the lock as non-background, which would
-  make the scenario unreachable. From review feedback `preview-lock-identity.md`, triaged 2026-10-05.
+  make the scenario unreachable. From review feedback `preview-lock-identity.md`, triaged 2026-10-05. Plan:
+  `plans/queue/preview-lock-identity.md`.
 
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
@@ -97,7 +98,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the user is looking. Show it at the mouse cursor, keep it up for a long time, and give it a quick dismiss button. It
   was also seen showing when selecting text where copy and paste do work; make it show only when a drag really copies
   nothing, and check that the release note's description of it holds. Discuss the details with the maintainer when
-  planning this for execution.
+  planning this for execution. Plan: `plans/queue/drag-copy-notice.md`.
 
 - **Deep end-to-end upgrade tests before a release ships.** Catch a release that bricks an existing installation before
   it goes out: upgrade from real released artifacts (the previous release, and older ones users may still run) to the
@@ -137,13 +138,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm detects there is a newer version available, this will turn red and you can click it to restart and upgrade."
   Check that this is actually true before using it: what the readout looks like when an update is ready, whether
   clicking it is how the user restarts to update, and what the web UI, which has no updater, and a desktop app that is
-  not the installed release should say instead.
+  not the installed release should say instead. Plan: `plans/queue/version-hover-text.md`.
 
 - **Enter should launch from anywhere in the session launcher.** Pressing Enter launches the session while the cursor is
   in the launcher's text box, but after clicking a button or another control in the launcher, Enter no longer launches.
   Make Enter launch a complete, valid setup wherever focus is in the launcher, keeping SPEC.md's rules for Enter in the
   text box (a non-empty query with no result never launches). Decide what Enter does on a focused button, where browsers
-  press the button itself.
+  press the button itself. Plan: `plans/queue/enter-launches-anywhere.md`.
 
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
