@@ -50,11 +50,11 @@ jobs:
     if: inputs.suite == 'uninstall-macos'
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -82,7 +82,7 @@ jobs:
             -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
       - name: Retain failure evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uninstall-macos-failure
           path: |
@@ -115,7 +115,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # merge-base against the PR's target needs real history.
           fetch-depth: 0
@@ -143,7 +143,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubicloud
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           components: rustfmt
@@ -165,8 +165,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubicloud
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -214,8 +214,8 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubicloud
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -261,7 +261,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubicloud
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # python3 backs test-install-sh.sh's fixture HTTP server (stdlib
       # only, no pip install needed).
       - run: sudo apt-get install -y shellcheck python3
@@ -303,7 +303,7 @@ jobs:
     # Draft PRs run nothing (see the trigger comment at the top).
     if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Bun installs the packages, but `astro build` runs under Node through
       # the astro binary's shebang, and Astro 7 refuses Node older than
       # 22.12. Pinning Node here keeps the build independent of whatever
@@ -330,7 +330,7 @@ jobs:
     # Draft PRs run nothing (see the trigger comment at the top).
     if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check formatting with dprint
         uses: dprint/check@9cb3a2b17a8e606d37aae341e49df3654933fc23 # v2.3
 
@@ -349,7 +349,7 @@ jobs:
     # Draft PRs run nothing (see the trigger comment at the top).
     if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the pinned dist
         # The same installer line release.yml itself uses; `bash` for
         # pipefail so a failed download is a failure, not an empty script.
@@ -378,8 +378,8 @@ jobs:
     if: false
     runs-on: ubicloud
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -447,7 +447,7 @@ jobs:
         run: cd e2e && npx playwright test
       - name: Upload Playwright artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: e2e/test-results/
