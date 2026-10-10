@@ -155,6 +155,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   checkout folder setting that is being planned there, keeping the existing meaning of an empty command (explicitly
   disabled) versus no command. Per-host overrides stay command-line only unless decided otherwise.
 
+- **Fix the four UI problems the release-notes preview showed.** A screenshot preview of the next release's notes
+  showed: the launcher's "no checkout root is configured" note in large unstyled text with literal backticks, with no
+  way to set the folder from the app; an approval card wrapping a session name mid-name; the save-as-template panel
+  putting each checkbox above its label; and the Settings dialog using checkboxes where host settings now uses switches.
+  Decided 2026-10-10: the checkout folder becomes an all-hosts setting in Settings, can be entered on the spot from the
+  launcher, and is created on first checkout; the whole Settings dialog uses switches. Plan:
+  `plans/queue/checkout-folder-and-ui-fixes.md`.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
