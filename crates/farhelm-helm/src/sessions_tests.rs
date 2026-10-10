@@ -9362,6 +9362,8 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
 /// scan and partial results remain distinguishable from a complete empty scan;
 /// malformed remote identities are never reflected into suggestions. Recent
 /// intent ranks before scan results, dedupes with them and survives scan failure.
+/// Setup eligibility follows the effective root: a command-line host override
+/// works while the global setting is empty and must suppress inline setup.
 #[farhelm_testtrace::test]
 async fn github_repository_rest_routes_config_and_preserves_incomplete_status() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -9458,6 +9460,7 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
     let missing: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(missing["truncated"], true);
+    assert_eq!(missing["needs_checkout_root"], true);
     let expected = serde_json::json!([
         { "owner": "acme", "name": "zebra" },
         { "owner": "acme", "name": "bar" }
@@ -9469,13 +9472,23 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
     assert!(missing["scan_error"].as_str().unwrap().contains("Settings"));
     harness
         .store
-        .set_checkout_root(None, "~/target-checkouts")
+        .set_checkout_root(Some(claim.host), "~/target-checkouts")
         .await
         .unwrap();
     let (status, text) = post_text(&harness, route, body.clone()).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
     let result: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(result["repos"], expected);
+    assert_eq!(result["needs_checkout_root"], false);
+    assert!(
+        harness
+            .store
+            .checkout_config_snapshot(None)
+            .await
+            .unwrap()
+            .global_root
+            .is_none()
+    );
     assert_eq!(
         result["truncated"], true,
         "discarded invalid identity makes the result incomplete"
@@ -9485,10 +9498,21 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
     assert_eq!(result["incarnation"], claim.incarnation);
     assert_eq!(result["host"], claim.host.to_string());
     assert!(!text.contains("secret"));
+    harness
+        .store
+        .clear_checkout_root(Some(claim.host))
+        .await
+        .unwrap();
+    harness
+        .store
+        .set_checkout_root(None, "~/target-checkouts")
+        .await
+        .unwrap();
     let (status, text) = post_text(&harness, route, body.clone()).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
     let failed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(failed["repos"], expected);
+    assert_eq!(failed["needs_checkout_root"], false);
     assert_eq!(failed["truncated"], true);
     assert!(
         failed["scan_error"]
@@ -9564,6 +9588,7 @@ async fn github_repository_rest_preserves_recents_offline() {
     assert_eq!(response["installation_identity"], "repo-installation");
     assert_eq!(response["incarnation"], incarnation);
     assert_eq!(response["truncated"], true);
+    assert_eq!(response["needs_checkout_root"], false);
     assert!(response["scan_error"].as_str().unwrap().contains("offline"));
 }
 

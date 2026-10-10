@@ -3393,23 +3393,45 @@ pub(super) fn CreateSessionForm(
     };
     let mut live_repository_authority = use_signal(|| None::<RepositoryAuthority>);
     let mut repository_generation = use_signal(|| 0_u64);
-    // A selected repository needs previews, not discovery. Keep scans confined
-    // to choosing so editing the session name cannot rescan the host's disk.
-    let choosing_repository =
-        matches!(destination_draft(), DestinationDraft::GithubInput { .. }) || repository_open();
-    let mut proposed_repository_authority = (choosing_repository || search_owns_repositories)
-        .then(|| {
-            let host = hosts.iter().find(|host| Some(host.id) == selected)?;
-            Some(RepositoryAuthority {
-                generation: 0,
-                host: host.id,
-                incarnation: host.connection,
-                installation_identity: host.identity.clone()?,
-                destination_generation: preview_generation(),
-                query: repo_query.to_string(),
+    // A selected repository still needs its host's first setup check, including
+    // when Clone or a template supplies the selection before discovery runs.
+    // Retain both answers for the exact host connection/installation: false
+    // lets ordinary selected-repository discovery stop, while true keeps the
+    // remedy visible and allows its explicit save to refresh discovery.
+    let mut checkout_root_observation = use_signal(|| None::<(RepositoryAuthority, bool)>);
+    let observed_root_required = checkout_root_observation
+        .read()
+        .as_ref()
+        .filter(|(claim, _)| {
+            hosts.iter().any(|host| {
+                Some(host.id) == selected
+                    && host.id == claim.host
+                    && host.connection == claim.incarnation
+                    && host.identity.as_deref() == Some(claim.installation_identity.as_str())
             })
         })
-        .flatten();
+        .map(|(_, required)| *required);
+    let needs_checkout_root = observed_root_required == Some(true);
+    // Unknown eligibility keeps the same discovery worker alive until the helm
+    // answers. Query and destination authority still reject obsolete replies;
+    // editing a selected repository's title cannot restart a configured scan.
+    let choosing_repository =
+        matches!(destination_draft(), DestinationDraft::GithubInput { .. }) || repository_open();
+    let mut proposed_repository_authority = (choosing_repository
+        || search_owns_repositories
+        || (checkout_mode && observed_root_required != Some(false)))
+    .then(|| {
+        let host = hosts.iter().find(|host| Some(host.id) == selected)?;
+        Some(RepositoryAuthority {
+            generation: 0,
+            host: host.id,
+            incarnation: host.connection,
+            installation_identity: host.identity.clone()?,
+            destination_generation: preview_generation(),
+            query: repo_query.to_string(),
+        })
+    })
+    .flatten();
     let mut previous_repository_authority = live_repository_authority.peek().clone();
     if let Some(previous) = &mut previous_repository_authority {
         previous.generation = 0;
@@ -3426,7 +3448,7 @@ pub(super) fn CreateSessionForm(
         live_repository_authority.set(proposed_repository_authority);
     }
     let repository_base = base.clone();
-    let repository_response = use_resource(move || {
+    let mut repository_response = use_resource(move || {
         let authority = live_repository_authority();
         let base = repository_base.clone();
         async move {
@@ -3461,6 +3483,16 @@ pub(super) fn CreateSessionForm(
                     Err(error) => Some(Err(error)),
                 }
             });
+    if let Some(Ok(reply)) = &repository_result {
+        let observation = live_repository_authority
+            .peek()
+            .clone()
+            .map(|claim| (claim, reply.needs_checkout_root));
+        if *checkout_root_observation.peek() != observation {
+            checkout_root_observation.set(observation);
+        }
+    }
+    let show_checkout_root_setup = checkout_mode && needs_checkout_root;
     let repository_note = match &repository_result {
         Some(Ok(reply)) => reply.scan_error.clone().or_else(|| {
             reply.truncated.then(|| {
@@ -5225,7 +5257,7 @@ pub(super) fn CreateSessionForm(
             // The two columns preserve the form's destination-first tab
             // order in every mode. Only the launch-specific controls in the
             // choices column change with the launch-kind tab.
-            if search_owns_repositories {
+            if search_owns_repositories && !show_checkout_root_setup {
                 if let Some(note) = &repository_note {
                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
                 }
@@ -5287,6 +5319,18 @@ pub(super) fn CreateSessionForm(
                                 }
                             }
                             {host_notes.clone()}
+                            if show_checkout_root_setup {
+                                crate::checkout_root::CheckoutRootField {
+                                    note: "Managed checkouts use this folder on every host. ~ means each host's home folder. You can change it later in Settings. Hosts with a command-line folder keep it.",
+                                    on_saved: move |_| {
+                                        // Configuration history feeds only preview authority;
+                                        // it does not restart discovery. Explicit setup must
+                                        // make both usable without reopening this launcher.
+                                        repository_response.restart();
+                                        preview_revision.with_mut(|revision| *revision = revision.wrapping_add(1));
+                                    },
+                                }
+                            }
                             if checkout_mode {
                                 label { class: "launch-composer-repository-field",
                                     span { class: "launch-composer-section-label", "repository" }
@@ -5345,7 +5389,7 @@ pub(super) fn CreateSessionForm(
                                         }
                                     }
                                 }
-                                if choosing_repository && !search_owns_repositories && let Some(note) = &repository_note {
+                                if choosing_repository && !search_owns_repositories && !show_checkout_root_setup && let Some(note) = &repository_note {
                                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(note)}" }
                                 }
                                 if let DestinationDraft::Github { repo, preview_state } = destination_draft() {

@@ -488,6 +488,14 @@ dismissal; its outcome and callback touch component-owned state only while the f
 only the global folder, so neither host overrides nor the executable post-clone command enter its reply. The field keeps
 its refused draft and reports success.
 
+The repository-discovery REST reply carries `needs_checkout_root`, derived from the selected host's effective
+configuration, without changing the supervisor protocol. The launcher retains an accepted setup observation, including
+either answer, for that host connection and installation so selecting a repository cannot hide inline setup or prevent
+its first check. It continues discovery while choosing, awaiting that first answer, or needing setup; a successful save
+restarts discovery and advances preview authority explicitly. Once a reply confirms a folder is in effect, selected
+repositories return to preview-only behavior. Global-root reads and message text never decide host setup eligibility, so
+command-line overrides remain authoritative.
+
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
 outcomes, and setup confirmation live in a modal dialog; a permanent setup answer is shared through the helm preference
