@@ -815,6 +815,49 @@ mod tests {
         }
     }
 
+    /// An unsupported executable path must refuse both add and update before
+    /// there is an executable plan to confirm. The backend failure keeps the
+    /// renderer's actionable explanation for the host-setup response.
+    #[farhelm_testtrace::test]
+    fn provisioning_plan_refuses_dollar_program_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let mut layout = layout(root.path());
+        let executable = root.path().join("dollar$install/farhelm");
+        layout.override_farhelm_path = Some(executable.clone());
+        let reach = Reach {
+            home: root.path().join("home"),
+            user_unit_dir: root.path().join("units"),
+            arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
+            needs_tmux: true,
+            host_tmux: None,
+        };
+        assert!(!root.path().join("lib").exists() && !root.path().join("units").exists());
+        for operation in [ProvisioningOperation::Add, ProvisioningOperation::Update] {
+            let error = layout
+                .plan(
+                    operation,
+                    ProvisioningTarget::Ssh {
+                        destination: "host".to_string(),
+                    },
+                    &reach,
+                    "nonce",
+                )
+                .expect_err("dollar paths cannot produce a plan");
+            let failure = error
+                .downcast_ref::<BackendFailure>()
+                .expect("renderer refusal survives planning");
+            let message = failure.rendered();
+            assert!(message.contains(executable.to_str().unwrap()), "{message}");
+            assert!(
+                message.contains("contains '$'")
+                    && message.contains("install farhelm at a path without '$'"),
+                "{message}"
+            );
+            assert!(!root.path().join("lib").exists() && !root.path().join("units").exists());
+        }
+    }
+
     /// A stored executable value with no file name must fail planning rather
     /// than reach the old temporary-name expectation and panic the request.
     #[farhelm_testtrace::test]

@@ -11,13 +11,8 @@ triage.
 
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 
-- `executable-read-back-collapses-dollars-select-another-installations.md` — Uninstall can mistake a service with
-  literal dollars for another installation's service.
-- `multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md` — A service running commands from multiple
-  installations could be assigned to only one.
 - `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
   misleading unchecked checkbox.
-- `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
 
 ## High priority: material UX degradation
 

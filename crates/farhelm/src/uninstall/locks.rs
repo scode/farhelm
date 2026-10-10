@@ -90,15 +90,27 @@ impl InstallLock {
                      to finish, or re-run the installer, which restores the previous installation \
                      from the interrupted run's journal, then retry uninstall"
                         .to_string()
-                } else {
+                } else if let Some(path) = dir
+                    .to_str()
+                    .filter(|text| !text.chars().any(char::is_control))
+                {
                     format!(
                         "an install, update or uninstall may be running, or one was interrupted; once \
                          the recorded process is not running, remove the lock with `rm -f {pid} && \
                          rmdir {dir}` (or re-run the installer, which clears it), then retry \
                          uninstall",
-                        pid = super::path_text(&dir.join("pid")),
-                        dir = super::path_text(&dir),
+                        pid = farhelm_proto::text::shell_quote(&format!("{path}/pid")),
+                        dir = farhelm_proto::text::shell_quote(path),
                     )
+                } else {
+                    // Diagnostic byte escapes are not shell arguments. When
+                    // the path cannot be printed faithfully on one line,
+                    // leave recovery manual rather than offer a command that
+                    // could remove a different path or execute substitutions.
+                    "an install, update or uninstall may be running, or one was interrupted; once \
+                     the recorded process is not running, remove the lock directory shown above \
+                     by hand (or re-run the installer, which clears it), then retry uninstall"
+                        .to_string()
                 };
                 bail!(
                     "the install lock {} exists{recorded}: {advice}",
@@ -300,6 +312,82 @@ mod tests {
         assert!(refusal.contains(".farhelm-install.lock") && refusal.contains("may be running"));
         drop(lock);
         assert!(!dir.exists(), "the lock is released");
+    }
+
+    /// Recovery advice must act on the literal lock, even when its parent
+    /// has spaces, shell substitutions, quotes or non-ASCII text. Executing
+    /// the emitted command against a stale owned fixture catches quoting
+    /// that looks plausible but expands or selects another path.
+    #[test]
+    fn stale_install_lock_advice_is_safe_to_paste() {
+        let root = tempfile::tempdir().expect("fixture root");
+        let install = root.path().join("space $HOME `touch escaped` 'café'");
+        let dir = install.join(INSTALL_LOCK);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("pid"), "stale-fixture\n").unwrap();
+        assert!(dir.is_dir() && dir.join("pid").is_file());
+
+        let error = InstallLock::acquire(&install)
+            .err()
+            .expect("stale lock refuses")
+            .to_string();
+        let command = error
+            .split_once("remove the lock with `")
+            .expect("command advice")
+            .1
+            .split_once("` (or re-run")
+            .expect("end of command")
+            .0;
+        assert_eq!(
+            command,
+            format!(
+                "rm -f {} && rmdir {}",
+                farhelm_proto::text::shell_quote(dir.join("pid").to_str().unwrap()),
+                farhelm_proto::text::shell_quote(dir.to_str().unwrap())
+            )
+        );
+        let status = std::process::Command::new("sh")
+            .args(["-c", command])
+            .current_dir(root.path())
+            .status()
+            .expect("run the printed command");
+        assert!(status.success(), "{error}");
+        assert!(!dir.exists(), "the literal stale lock was removed");
+        assert!(install.is_dir(), "the installation remains");
+        assert!(
+            !root.path().join("escaped").exists(),
+            "no command substitution ran"
+        );
+    }
+
+    /// A display-only encoding cannot promise a lossless shell command.
+    /// Unsupported bytes and controls must retain the lock and give manual
+    /// advice, so pasting diagnostics cannot act on an invented pathname.
+    #[test]
+    fn stale_install_lock_advice_omits_commands_for_unprintable_paths() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let root = tempfile::tempdir().expect("fixture root");
+        for name in [
+            std::ffi::OsString::from("control\npath"),
+            std::ffi::OsString::from_vec(b"invalid-\xff".to_vec()),
+        ] {
+            let install = root.path().join(name);
+            let dir = install.join(INSTALL_LOCK);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("pid"), "stale-fixture\n").unwrap();
+            assert!(dir.is_dir() && dir.join("pid").is_file());
+            let error = InstallLock::acquire(&install)
+                .err()
+                .expect("stale lock refuses")
+                .to_string();
+            assert!(error.contains(&super::super::path_text(&dir)), "{error}");
+            assert!(error.contains("by hand"), "{error}");
+            assert!(
+                !error.contains("rm -f") && !error.contains("rmdir"),
+                "{error}"
+            );
+            assert!(dir.join("pid").is_file(), "the refusal changes nothing");
+        }
     }
 
     /// The app lock refuses when held, is released on drop, and is skipped

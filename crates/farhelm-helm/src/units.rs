@@ -123,9 +123,12 @@ pub struct HelmUnitInputs<'a> {
 /// started through this unit; SPEC_impl.md records the limit.
 ///
 /// Fails when any path cannot cross a text boundary faithfully (see
-/// [`path_text`]) or when a `PATH` component contains `:`, which systemd's
-/// `Environment=` grammar cannot represent.
+/// [`path_text`]), the Farhelm program path contains `$`, or a `PATH`
+/// component contains `:`, which systemd's `Environment=` grammar cannot
+/// represent. Dollars remain supported in arguments and environment values;
+/// the program position does not decode the `$$` used for arguments.
 pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<String> {
+    let farhelm = systemd_program(inputs.farhelm)?;
     let mut search: Vec<&Path> = Vec::new();
     for program in [inputs.farhelm, inputs.tmux] {
         if let Some(dir) = program.parent().filter(|dir| !dir.as_os_str().is_empty())
@@ -149,7 +152,7 @@ pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<S
     Ok(render_template(
         SUPERVISOR_UNIT_TEMPLATE,
         &[
-            ("@FARHELM@", &systemd_arg(inputs.farhelm)?),
+            ("@FARHELM@", &farhelm),
             ("@STATE_DIR@", &systemd_arg(inputs.state_dir)?),
             ("@PATH@", &environment_value(&components.join(":"))),
             ("@TMUX@", &environment_value(&path_text(inputs.tmux)?)),
@@ -165,7 +168,12 @@ pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<S
 /// only when pinned, and the two always appear in the same order, so an
 /// unchanged configuration renders byte-identically and setup's
 /// write-if-changed check stays meaningful.
+///
+/// Refuses a Farhelm program path containing `$`: unlike arguments, the
+/// program position does not decode `$$`. Other text-boundary refusals are
+/// the same as [`render_supervisor_unit`]'s.
 pub fn render_helm_unit(inputs: &HelmUnitInputs) -> anyhow::Result<String> {
+    let farhelm = systemd_program(inputs.farhelm)?;
     let mut args = String::new();
     args.push_str(" --state-dir ");
     args.push_str(&systemd_arg(inputs.state_dir)?);
@@ -174,10 +182,7 @@ pub fn render_helm_unit(inputs: &HelmUnitInputs) -> anyhow::Result<String> {
     }
     Ok(render_template(
         HELM_UNIT_TEMPLATE,
-        &[
-            ("@FARHELM@", &systemd_arg(inputs.farhelm)?),
-            ("@HELM_ARGS@", &args),
-        ],
+        &[("@FARHELM@", &farhelm), ("@HELM_ARGS@", &args)],
     ))
 }
 
@@ -207,14 +212,19 @@ pub fn is_managed(unit_text: &str) -> bool {
 /// direction means the hosts panel overwriting a unit somebody wrote by
 /// hand, which is exactly the outcome the ownership rule exists to prevent.
 ///
-/// Three pieces of systemd's assignment semantics matter here and are
-/// implemented:
+/// Only the effective `Type=simple` is recognized; an absent `Type=` uses
+/// that default, and an empty `Type=` is refused (see [`is_simple_service`]).
+/// A `oneshot` unit can run several commands, so reading one program from it
+/// cannot establish which installation owns the unit. Type assignments use
+/// exact section scope and last-assignment-wins.
+///
+/// Command selection is deliberately narrower than systemd's list parser:
 ///
 /// - Section scoping. Only `[Service]` counts. `ExecStart=` under
 ///   `[Unit]`, `[Install]`, or a `[X-…]` section is not a command.
-/// - LAST assignment wins. Systemd overwrites a non-list directive with
-///   each later assignment in the same section (only an empty value has
-///   list semantics), so an earlier line is not the effective one.
+/// - The last nonempty command is selected. Farhelm writes one command,
+///   and systemd rejects several commands for the supported `simple` type;
+///   this does not validate every possible malformed unit.
 /// - An empty `ExecStart=` RESETS the list. A file that sets a command and
 ///   then clears it has no effective command, and reporting the cleared
 ///   one would name a binary that never runs.
@@ -227,6 +237,9 @@ pub fn is_managed(unit_text: &str) -> bool {
 /// are not joined either; a continued first line still yields its program,
 /// which is all this answers.
 pub fn exec_start_program(unit_text: &str) -> Option<PathBuf> {
+    if !is_simple_service(unit_text) {
+        return None;
+    }
     let mut in_service = false;
     let mut effective: Option<Option<PathBuf>> = None;
     for line in unit_text.lines() {
@@ -254,6 +267,36 @@ pub fn exec_start_program(unit_text: &str) -> Option<PathBuf> {
     effective.flatten()
 }
 
+/// Whether the effective service type is the one Farhelm supports.
+///
+/// Only exact `[Service]` sections count. The last `Type` assignment wins;
+/// an absent one uses the `simple` default, and whitespace around `=` is
+/// accepted as systemd accepts it. An empty `Type=` is refused: systemd logs
+/// it as invalid and keeps the EARLIER type, so a unit with `Type=oneshot`
+/// then `Type=` still runs as oneshot, and reading it as simple would let a
+/// second command stand for the whole unit. Refusing is the safe direction. This checks only the type, not
+/// command validity or installation ownership, so local setup can refuse
+/// unsupported edits without adopting the reader's command restrictions.
+pub fn is_simple_service(unit_text: &str) -> bool {
+    let mut in_service = false;
+    let mut service_type = "simple";
+    for line in unit_text.lines().map(str::trim) {
+        if let Some(section) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
+            in_service = section == "Service";
+        } else if in_service
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim() == "Type"
+        {
+            // An empty value is not "simple": see the doc comment above.
+            service_type = value.trim();
+        }
+    }
+    service_type == "simple"
+}
+
 /// The program named by one `ExecStart=` value.
 fn exec_start_value_program(value: &str) -> Option<PathBuf> {
     // Systemd allows a set of modifier characters ahead of the program:
@@ -276,9 +319,9 @@ fn exec_start_value_program(value: &str) -> Option<PathBuf> {
 /// project wrote and the honest answer for the ownership check above is
 /// "unrecognized".
 ///
-/// `$$` is decoded because [`systemd_arg`] emits it: without that, reading
-/// back our own render of a path containing a dollar would report a
-/// doubled one and fail to match the binary it names.
+/// The existing `$$` decoder is retained, matching [`systemd_arg`]'s
+/// argument encoding. It is not systemd's program-position dollar behavior;
+/// our renderers refuse dollars there through [`systemd_program`].
 fn first_systemd_token(value: &str) -> Option<String> {
     let mut chars = value.chars().peekable();
     let mut token = String::new();
@@ -362,7 +405,24 @@ pub fn user_unit_dir_for(
     Ok(config.join("systemd").join("user"))
 }
 
-/// Quote one path for systemd's `ExecStart=` grammar.
+/// Quote a supported program path without applying argument-only semantics.
+///
+/// Both setup and provisioning must refuse dollars before publishing a unit:
+/// systemd preserves dollars in the program position, while [`systemd_arg`]
+/// doubles them for argument expansion. Keeping this check separate preserves
+/// supported dollar spellings in the state directory and environment values.
+fn systemd_program(path: &Path) -> anyhow::Result<String> {
+    let text = path_text(path)?;
+    if text.contains('$') {
+        bail!(
+            "farhelm executable path {text:?} contains '$', which is unsupported in a systemd \
+             service's program path; install farhelm at a path without '$' and retry"
+        );
+    }
+    systemd_arg(path)
+}
+
+/// Quote one path for systemd's `ExecStart=` argument grammar.
 ///
 /// Four characters mean something to systemd inside a command line and all
 /// four have to be doubled or escaped, or the unit names something other
@@ -372,9 +432,9 @@ pub fn user_unit_dir_for(
 /// - `%` introduces a unit specifier anywhere in the line.
 /// - `$` introduces variable expansion: `${NAME}` expands inside an
 ///   argument and `$NAME` expands to a WHOLE-WORD split, so an unescaped
-///   one can silently select a different executable, redirect the state
-///   directory, or turn one argument into several. A literal dollar is
-///   spelled `$$`.
+///   one can redirect the state directory or turn one argument into several.
+///   A literal dollar is spelled `$$`. This rule does not apply to the
+///   program position; [`systemd_program`] refuses dollars there.
 pub(crate) fn systemd_arg(path: &Path) -> anyhow::Result<String> {
     Ok(format!(
         "\"{}\"",
@@ -758,57 +818,103 @@ mod tests {
         assert!(no_port.contains("ExecStart=\"/bin/farhelm\" helm run --state-dir \"/state\"\n"));
     }
 
-    /// Every character systemd reads as syntax inside a command line has
-    /// to survive rendering as a literal, and the DOLLAR is the dangerous
-    /// one: `${NAME}` expands inside an argument and `$NAME` expands to a
-    /// whole-word split, so an unescaped one turns a valid directory into
-    /// a different executable, a different state tree, or several
-    /// arguments. Read-back matters as much as rendering — the ownership
-    /// check compares a parsed `ExecStart` against a real path, and a
-    /// doubled dollar surviving that round trip would make a unit that IS
-    /// ours look like somebody else's.
+    /// Dollar arguments must still survive the new program-path refusal.
+    /// Systemd expands arguments and leaves Environment values literal;
+    /// applying the program restriction to either would reject supported
+    /// state directories or change which tmux the supervisor runs.
     #[farhelm_testtrace::test]
     fn dollars_are_escaped_in_commands_and_decoded_on_read_back() {
         for path in [
-            "/home/u/$NAME/farhelm",
-            "/home/u/${NAME}/farhelm",
-            "/home/u/$/farhelm",
-            "/home/u/$$literal/farhelm",
+            "/state/$NAME",
+            "/state/${NAME}",
+            "/state/$",
+            "/state/$$literal",
         ] {
             let unit = render_supervisor_unit(&SupervisorUnitInputs {
-                farhelm: Path::new(path),
-                state_dir: Path::new("/state/$HOME"),
+                farhelm: Path::new("/usr/bin/farhelm"),
+                state_dir: Path::new(path),
                 tmux: Path::new("/usr/bin/tmux"),
             })
             .unwrap();
             assert!(
-                unit.contains(&format!(
-                    "ExecStart=\"{}\" supervisor",
-                    path.replace('$', "$$")
-                )),
+                unit.contains(&format!("--state-dir \"{}\"", path.replace('$', "$$"))),
                 "{unit}"
             );
-            assert!(unit.contains("--state-dir \"/state/$$HOME\""), "{unit}");
-            assert_eq!(exec_start_program(&unit), Some(PathBuf::from(path)));
+            assert_eq!(
+                exec_start_program(&unit),
+                Some(PathBuf::from("/usr/bin/farhelm"))
+            );
+            assert_eq!(
+                first_systemd_token(&systemd_arg(Path::new(path)).unwrap()),
+                Some(path.to_string())
+            );
+            let helm = render_helm_unit(&HelmUnitInputs {
+                farhelm: Path::new("/usr/bin/farhelm"),
+                state_dir: Path::new(path),
+                port: None,
+            })
+            .unwrap();
+            assert!(
+                helm.contains(&format!("--state-dir \"{}\"", path.replace('$', "$$"))),
+                "{helm}"
+            );
+            assert_eq!(
+                exec_start_program(&helm),
+                Some(PathBuf::from("/usr/bin/farhelm"))
+            );
         }
 
         // `Environment=` is NOT expanded by systemd, so a dollar stays
         // single there. Doubling it would hand the supervisor a literal
         // `$$` in its PATH.
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/opt/$NAME/farhelm"),
+            farhelm: Path::new("/usr/bin/farhelm"),
             state_dir: Path::new("/state"),
             tmux: Path::new("/opt/$NAME/tmux"),
         })
         .unwrap();
         assert!(
-            unit.contains("Environment=\"PATH=/opt/$NAME:/usr/local/bin:/usr/bin:/bin\""),
+            unit.contains("Environment=\"PATH=/usr/bin:/opt/$NAME:/usr/local/bin:/usr/bin:/bin\""),
             "{unit}"
         );
         assert!(
             unit.contains("Environment=\"FARHELM_TMUX=/opt/$NAME/tmux\""),
             "{unit}"
         );
+    }
+
+    /// Both local units must refuse the path before writing an unusable
+    /// service. The shared argument formatter must remain permissive for
+    /// dollar-bearing state paths, so this belongs at the program input.
+    #[farhelm_testtrace::test]
+    fn both_units_refuse_dollars_in_the_program_path() {
+        for path in [
+            "/opt/$NAME/farhelm",
+            "/opt/${NAME}/farhelm",
+            "/opt/$$literal/farhelm",
+        ] {
+            let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
+                farhelm: Path::new(path),
+                state_dir: Path::new("/state"),
+                tmux: Path::new("/usr/bin/tmux"),
+            })
+            .unwrap_err();
+            let helm = render_helm_unit(&HelmUnitInputs {
+                farhelm: Path::new(path),
+                state_dir: Path::new("/state"),
+                port: None,
+            })
+            .unwrap_err();
+            for error in [supervisor, helm] {
+                let message = error.to_string();
+                assert!(message.contains(path), "{message}");
+                assert!(
+                    message.contains("contains '$'")
+                        && message.contains("install farhelm at a path without '$'"),
+                    "{message}"
+                );
+            }
+        }
     }
 
     /// `Environment=` has its own escape branch, so the characters that
@@ -1013,11 +1119,10 @@ mod tests {
         assert_eq!(exec_start_program("[Service]\nExecStart=\n"), None);
     }
 
-    /// Which assignment is the EFFECTIVE one decides whether the panel
-    /// believes a unit runs this farhelm. Systemd's own rules — section
-    /// scoping, last-assignment-wins, and the empty reset — have to be
-    /// the ones this parser follows, because a unit that exercises any of
-    /// them is still a unit systemd runs.
+    /// Ownership reads only exact Service sections and discards commands
+    /// before an empty reset. The last command selection is retained for
+    /// malformed simple units; valid multi-command oneshot units are refused
+    /// separately rather than assigned to one of their installations.
     #[farhelm_testtrace::test]
     fn only_the_effective_service_assignment_is_reported() {
         // An assignment outside [Service] is not a command at all.
@@ -1038,7 +1143,8 @@ mod tests {
             ),
             Some(PathBuf::from("/real/farhelm"))
         );
-        // Last one wins: a later assignment overwrites the earlier.
+        // Retained selection for a malformed simple unit; systemd itself
+        // rejects multiple commands for that type.
         assert_eq!(
             exec_start_program(
                 "[Service]\nExecStart=/first/farhelm run\nExecStart=/second/farhelm run\n"
@@ -1066,6 +1172,59 @@ mod tests {
         assert_eq!(
             exec_start_program(
                 "[Service]\nExecStart=/real/farhelm run\n[service]\nExecStart=/decoy/farhelm run\n"
+            ),
+            Some(PathBuf::from("/real/farhelm"))
+        );
+    }
+
+    /// Other service types cannot establish ownership from one start
+    /// command. Type can appear after the command, reset to the default,
+    /// or occur in repeated Service sections; only its effective value counts.
+    #[farhelm_testtrace::test]
+    fn exec_start_program_requires_the_effective_simple_type() {
+        for service_type in ["oneshot", "forking", "notify", "exec", "Simple"] {
+            let unit = format!(
+                "[Service]\nExecStart=/first/farhelm run\nExecStart=/second/farhelm run\nType={service_type}\n"
+            );
+            assert_eq!(exec_start_program(&unit), None, "{unit}");
+        }
+        for assignment in [
+            "Type = oneshot",
+            "Type\t=oneshot",
+            "Type=simple\nType = oneshot",
+            // systemd ignores an empty Type= and keeps oneshot.
+            "Type=oneshot\nType=",
+            "Type=oneshot\nType = ",
+        ] {
+            let unit = format!(
+                "[Service]\n{assignment}\nExecStart=/first/farhelm\nExecStart=/second/farhelm\n"
+            );
+            assert!(!is_simple_service(&unit), "{unit}");
+            assert_eq!(exec_start_program(&unit), None, "{unit}");
+        }
+        for prefix in [
+            "",
+            "Type=simple\n",
+            "Type=oneshot\nType=simple\n",
+            "Type=oneshot\nType\t= simple\n",
+        ] {
+            let unit = format!("[Service]\n{prefix}ExecStart=/real/farhelm run\n");
+            assert!(is_simple_service(&unit), "{unit}");
+            assert_eq!(
+                exec_start_program(&unit),
+                Some(PathBuf::from("/real/farhelm")),
+                "{unit}"
+            );
+        }
+        assert_eq!(
+            exec_start_program(
+                "[Service]\nType=simple\nExecStart=/real/farhelm\n[Service]\nType=oneshot\n"
+            ),
+            None
+        );
+        assert_eq!(
+            exec_start_program(
+                "[Service]\nExecStart=/real/farhelm\n[Unit]\nType=oneshot\n[service]\nType=oneshot\n"
             ),
             Some(PathBuf::from("/real/farhelm"))
         );

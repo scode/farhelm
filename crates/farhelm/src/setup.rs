@@ -33,8 +33,8 @@
 use anyhow::{Context as _, bail};
 use farhelm_helm::units::{
     HELM_UNIT_NAME, HelmUnitInputs, SUPERVISOR_UNIT_NAME, SupervisorUnitInputs, exec_start_program,
-    is_managed, managed, render_helm_unit, render_supervisor_unit, user_unit_dir,
-    user_unit_dir_for,
+    is_managed, is_simple_service, managed, render_helm_unit, render_supervisor_unit,
+    user_unit_dir, user_unit_dir_for,
 };
 use farhelm_supervisor::tmux::{
     TMUX_FLOOR, TmuxProbeError, TmuxSupport, candidates_on_path, probe_tmux,
@@ -1096,7 +1096,7 @@ fn settle_the_restart(unit_dir: &Path, unit: &str) -> anyhow::Result<()> {
 /// The text of a unit file setup is allowed to touch, or `None` when there
 /// is no such file.
 ///
-/// Two failures, told apart because they call for different things from
+/// Failures are told apart because they call for different things from
 /// the operator:
 ///
 /// - The file is not setup's — a directory, a symlink, a socket, or a
@@ -1106,6 +1106,10 @@ fn settle_the_restart(unit_dir: &Path, unit: &str) -> anyhow::Result<()> {
 ///   are not UTF-8. Those get the underlying error and the path, because
 ///   asserting ownership (and recommending deletion) over a file nobody
 ///   managed to open would be a conclusion this code has not earned.
+/// - A marked file was changed to an unsupported service type. Its commands
+///   may belong to several installations, so neither setup nor its legacy
+///   uninstall may overwrite or remove it merely because the marker remains.
+///   Other command spellings retain the existing marker-based contract.
 fn existing_managed_text(path: &Path) -> anyhow::Result<Option<String>> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -1127,6 +1131,14 @@ fn existing_managed_text(path: &Path) -> anyhow::Result<Option<String>> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading the existing unit file {}", path.display()))?;
     if is_managed(&text) {
+        if !is_simple_service(&text) {
+            bail!(
+                "{} is marked as written by farhelm helm setup, but its service type is not \
+                 simple; refusing to overwrite or remove it. Restore a unit with Type=simple \
+                 and one start command, or move the unit aside, then retry",
+                path.display()
+            );
+        }
         Ok(Some(text))
     } else {
         Err(foreign())
@@ -1877,6 +1889,44 @@ mod tests {
         }
     }
 
+    /// A dollar-bearing executable must fail before publishing either unit
+    /// or changing the manager. Covering helm-only setup separately keeps
+    /// the supervisor renderer from being the only refusal boundary.
+    #[farhelm_testtrace::test]
+    fn setup_refuses_dollar_program_paths_before_writing_units() {
+        let fixture = Fixture::new();
+        let tmux = fixture.tmux_dir("tmux 3.7c");
+        let executable = fixture.root.path().join("dollar$install/farhelm");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, b"fixture executable").unwrap();
+        assert!(executable.is_file());
+        assert!(!fixture.unit_dir().exists());
+        let mut ctx = fixture.context(&[tmux]);
+        ctx.exe = executable.clone();
+        for no_supervisor in [false, true] {
+            let mut manager = fixture.manager();
+            let (_, error) = run(
+                &ctx,
+                &SetupOptions {
+                    no_supervisor,
+                    ..Default::default()
+                },
+                &mut manager,
+            );
+            assert!(error.contains(executable.to_str().unwrap()), "{error}");
+            assert!(
+                error.contains("contains '$'")
+                    && error.contains("install farhelm at a path without '$'"),
+                "{error}"
+            );
+            assert!(
+                !fixture.unit_dir().exists(),
+                "refusal publishes no units or setup lock"
+            );
+            assert_eq!(manager.commands, ["show-environment"]);
+        }
+    }
+
     /// The whole point of the command: a first run writes both units,
     /// reloads, enables, and starts them. The command sequence is asserted
     /// exactly because its ORDER is the contract — reload before enable,
@@ -2323,6 +2373,53 @@ mod tests {
         assert_eq!(units.commands, ["show-environment"]);
     }
 
+    /// A changed second service must refuse the whole paired operation.
+    /// Checking only the executable reader leaves local setup and its legacy
+    /// uninstall able to replace or remove a marked multi-installation unit.
+    #[farhelm_testtrace::test]
+    fn setup_and_legacy_uninstall_refuse_a_non_simple_second_unit() {
+        let fixture = Fixture::new();
+        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
+        assert!(error.is_empty(), "{error}");
+        let supervisor_path = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        let supervisor = std::fs::read_to_string(&supervisor_path).unwrap();
+        assert!(is_managed(&supervisor) && is_simple_service(&supervisor));
+        let helm_path = fixture.unit_dir().join(HELM_UNIT_NAME);
+        let helm = managed(format!(
+            "[Service]\nType = oneshot\nExecStart=/other/farhelm run\nExecStart={} helm run\n",
+            ctx.exe.display()
+        ));
+        std::fs::write(&helm_path, &helm).unwrap();
+        assert!(is_managed(&helm) && !is_simple_service(&helm));
+        for uninstall in [false, true] {
+            for dry_run in [false, true] {
+                let mut manager = fixture.manager();
+                let (_, error) = run(
+                    &ctx,
+                    &SetupOptions {
+                        uninstall,
+                        dry_run,
+                        ..Default::default()
+                    },
+                    &mut manager,
+                );
+                assert!(
+                    error.contains(&helm_path.display().to_string())
+                        && error.contains("service type is not simple")
+                        && error.contains("Type=simple and one start command"),
+                    "{error}"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(&supervisor_path).unwrap(),
+                    supervisor
+                );
+                assert_eq!(std::fs::read_to_string(&helm_path).unwrap(), helm);
+                assert_eq!(manager.commands, ["show-environment"]);
+            }
+        }
+    }
+
     /// Uninstall is the other half of ownership: it disables and removes
     /// exactly what setup wrote, reports what was already gone, and
     /// leaves the operator's own drop-in directory alone while saying so
@@ -2588,6 +2685,33 @@ mod tests {
             "refusal must leave its evidence intact"
         );
         assert_eq!(units.commands, ["show-environment"]);
+    }
+
+    /// A marked oneshot service may run more than one installation. Refusal
+    /// must reach standalone uninstall's preflight before any manager mutation
+    /// or file removal, even when its last command names the selected binary.
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_refuses_a_oneshot_unit() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let path = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        let text = managed(format!(
+            "[Service]\nType=oneshot\nExecStart=/other/farhelm run\nExecStart={} run\n",
+            selected.display()
+        ));
+        std::fs::write(&path, &text).unwrap();
+        assert!(is_managed(&std::fs::read_to_string(&path).unwrap()));
+        let mut manager = fixture.manager();
+        let error = preflight_selected_services(&[selected], &fixture.unit_dir(), &mut manager)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(&path.display().to_string()) && error.contains("refusing to guess"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(manager.commands, ["show-environment"]);
     }
 
     /// Removal must leave systemd able to undo enablement: each selected file
