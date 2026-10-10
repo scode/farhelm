@@ -1531,17 +1531,24 @@ mod tests {
         const ALLOWED_GROWTH: u64 = 16 * 1024 * 1024;
 
         /// Resident bytes of this process, from `/proc/self/statm` (field
-        /// 2 is resident pages) — the same probe the supervisor's
-        /// stalled-viewer memory test uses.
+        /// 2 is resident pages), using the running kernel's page size.
+        /// A fixed 4 KiB conversion would undercount growth on large-page
+        /// Linux kernels and admit the whole-upload buffering regression.
         fn rss_bytes() -> u64 {
             let statm = std::fs::read_to_string("/proc/self/statm")
-                .expect("this crate is Linux-only; /proc/self/statm must be readable");
+                .expect("the RSS fixture requires readable /proc/self/statm");
             let pages: u64 = statm
                 .split_whitespace()
                 .nth(1)
                 .and_then(|field| field.parse().ok())
                 .expect("statm's second field is the resident page count");
-            pages * 4096
+            // SAFETY: sysconf has no pointer arguments or side effects here.
+            let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            let page_size = u64::try_from(page_size).expect("the kernel reports a valid page size");
+            assert!(page_size > 0, "the kernel page size must be positive");
+            pages
+                .checked_mul(page_size)
+                .expect("resident bytes fit u64")
         }
 
         if std::env::var(CHILD_MARKER).is_ok() {

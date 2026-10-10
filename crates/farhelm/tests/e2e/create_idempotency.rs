@@ -802,6 +802,13 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
     let accepted = home.path().join("ws").to_string_lossy().into_owned();
+    // Display spelling survives replay, but directory identity follows any
+    // symlink in the fixture's home path (including macOS temp roots).
+    let canonical_accepted = home
+        .path()
+        .join("ws")
+        .canonicalize()
+        .expect("canonical workdir");
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -828,7 +835,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     assert_eq!(first.cwd, accepted);
     assert_eq!(
         first.canonical_cwd.as_deref(),
-        Some(accepted.as_str()),
+        canonical_accepted.to_str(),
         "the accepted expanded display path still carries its separately recorded identity"
     );
 

@@ -9470,7 +9470,9 @@
 - Completion criteria: Use a portable liveness check (signal 0 returning no-such-process), confirmed to see the live
   process first. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
   user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## eof-replacement-test-cannot-detect-overlap-macos.md
 
@@ -9486,7 +9488,9 @@
 - Completion criteria: The same portable liveness check, inside the replacement callback. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## replacement-open-shutdown-test-assumes-procfs.md
 
@@ -9501,7 +9505,9 @@
   triage."
 - Completion criteria: The same portable liveness check. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## checkout-validation-test-cannot-construct-fixture-apfs.md
 
@@ -9517,7 +9523,9 @@
 - Completion criteria: Gate or split out the invalid-name part so the portable checks still run on macOS. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## rss-measurement-undercounts-larger-page-linux-systems.md
 
@@ -9533,7 +9541,9 @@
   triage."
 - Completion criteria: Multiply by the system page size. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## birth-oracle.md
 
@@ -9550,7 +9560,9 @@
 - Completion criteria: Make the probe distinguish supported, unavailable and failed, use the BSD `stat` form on macOS,
   and fail on probe errors. If that turns out significantly more complicated than expected, leave it unfixed and return
   it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## failed-upload-regression-fails-native-macos-tools.md
 
@@ -9565,7 +9577,9 @@
   triage."
 - Completion criteria: Gate it to Linux like the sibling. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## orphan-cleanup-regression-requires-gnu-tools-platform-guard.md
 
@@ -9579,7 +9593,9 @@
   triage."
 - Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## tampering-regression-fails-reaching-tampering-boundary-macos.md
 
@@ -9594,7 +9610,9 @@
   triage."
 - Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## tilde-replay-test-equates-display-canonical-paths.md
 
@@ -9610,7 +9628,9 @@
 - Completion criteria: Canonicalize the expected value for the canonical-path assertion only. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## checkout-recovery-compares-canonical-roots-unresolved-fixture.md
 
@@ -9625,7 +9645,9 @@
   triage."
 - Completion criteria: Canonicalize the fixture roots before comparing. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md
 
@@ -9640,7 +9662,9 @@
   triage."
 - Completion criteria: Canonicalize the fixture path before comparing. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/test-portability-fixes.md`.
+- Execution: complete in jj change `olnmmsyvrmyorwkxmywxvmmozrnyrusl`, bookmark
+  `plan/test-portability-fixes/01-test-portability-fixes`,
+  [PR #1834](https://github.com/scode/farhelm/pull/1834/changes).
 
 ## cgroup-cleanup-masks-dead-pane-sweep-regression.md
 

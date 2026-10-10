@@ -3361,6 +3361,26 @@ mod tests {
         SessionSink::from_child_for_tests(child)
     }
 
+    /// Observe the owned client's lifetime without assuming a Linux procfs.
+    ///
+    /// Signal zero changes nothing and still sees an exited, unreaped child.
+    /// Only ESRCH proves disappearance; permission denial means the process
+    /// exists, and other errors must not turn a broken oracle into a pass.
+    fn sink_process_exists(pid: u32) -> bool {
+        let pid = libc::pid_t::try_from(pid).expect("the client pid fits the platform pid type");
+        assert!(pid > 0, "the lifetime probe must name one process");
+        // SAFETY: kill validates the positive pid; signal zero sends no signal.
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return true;
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => false,
+            Some(libc::EPERM) => true,
+            _ => panic!("cannot observe sink process {pid}: {error}"),
+        }
+    }
+
     /// A client whose output closes while its process stays alive.
     ///
     /// This is the exceptional EOF shape the supervisor must kill before
@@ -3515,6 +3535,10 @@ mod tests {
     async fn orderly_sink_shutdown_reaps_the_client_before_returning() {
         let sink = living_fake_sink();
         let pid = sink.pid().expect("the fake sink has a process id");
+        assert!(
+            sink_process_exists(pid),
+            "the oracle must see the live client"
+        );
         let (state, _rx) = watch::channel(Some(pid));
         let (shutdown, shutdown_rx) = oneshot::channel();
         let handle = SessionSinkHandle {
@@ -3537,7 +3561,7 @@ mod tests {
             .expect("orderly sink shutdown succeeds");
 
         assert!(
-            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            !sink_process_exists(pid),
             "orderly shutdown returned while the sink process still existed"
         );
     }
@@ -3551,11 +3575,13 @@ mod tests {
     async fn a_live_sink_after_eof_is_reaped_before_replacement_opens() {
         let sink = output_closed_fake_sink();
         let pid = sink.pid().expect("the fake sink has a process id");
-        let process = Arc::new(format!("/proc/{pid}"));
+        assert!(
+            sink_process_exists(pid),
+            "the EOF fixture must still be alive"
+        );
         let (state, _rx) = watch::channel(Some(pid));
         let (_shutdown, shutdown_rx) = oneshot::channel();
         let (observed, mut observed_rx) = tokio::sync::mpsc::unbounded_channel();
-        let process_for_task = Arc::clone(&process);
         let task = tokio::spawn(run_session_sink(
             "fh-test".to_string(),
             sink,
@@ -3564,9 +3590,8 @@ mod tests {
             None,
             move |_| {
                 let observed = observed.clone();
-                let process = Arc::clone(&process_for_task);
                 async move {
-                    let gone = !std::path::Path::new(process.as_str()).exists();
+                    let gone = !sink_process_exists(pid);
                     let _ = observed.send(gone);
                     anyhow::bail!("stop after observing the replacement boundary")
                 }
@@ -3666,7 +3691,12 @@ mod tests {
                     entered.notify_one();
                     release.notified().await;
                     let sink = living_fake_sink();
-                    returned_pid.store(u64::from(sink.pid().unwrap_or(0)), Ordering::Relaxed);
+                    let pid = sink.pid().expect("the replacement has a process id");
+                    assert!(
+                        sink_process_exists(pid),
+                        "the returned client must be alive"
+                    );
+                    returned_pid.store(u64::from(pid), Ordering::Relaxed);
                     Ok(sink)
                 }
             },
@@ -3707,7 +3737,7 @@ mod tests {
         let pid = returned_pid.load(Ordering::Relaxed);
         assert_ne!(pid, 0, "the opener must return a real client");
         assert!(
-            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            !sink_process_exists(u32::try_from(pid).expect("the recorded client pid fits u32")),
             "shutdown returned while the replacement process still existed"
         );
     }

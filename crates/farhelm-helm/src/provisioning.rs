@@ -7661,6 +7661,9 @@ mod tests {
     /// remove the nonce temporary without replacing the installed binary.
     /// The second case proves that a zero transfer exit is not proof of
     /// payload integrity.
+    /// This local remote-shell stand-in executes GNU metadata commands;
+    /// native macOS tools cannot establish its upload fixture.
+    #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn failed_remote_upload_removes_partial_temporary() {
         let root = tempfile::tempdir().unwrap();
@@ -7715,6 +7718,9 @@ mod tests {
     /// Remote cleanup runs before the split upload action creates its current
     /// nonce. An older Farhelm nonce is removed, while the new upload remains
     /// available for the following install action to consume.
+    /// The local remote-shell stand-in needs Linux's GNU metadata tools to
+    /// reach the cleanup and install boundaries this test observes.
+    #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn remote_upload_sweeps_orphaned_temporary_before_creating_nonce() {
         let root = tempfile::tempdir().unwrap();
@@ -7784,6 +7790,9 @@ mod tests {
     /// The install step cannot trust the upload step's earlier digest: bytes
     /// at the nonce path may change between separately reported actions.
     /// A mismatch must preserve the installed binary and clean the nonce.
+    /// The local remote-shell stand-in uses GNU metadata tools, so this
+    /// fixture must run on Linux to reach the tampering boundary.
+    #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn remote_install_rejects_tampering_after_upload() {
         let root = tempfile::tempdir().unwrap();

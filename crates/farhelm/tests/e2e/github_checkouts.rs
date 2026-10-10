@@ -963,6 +963,18 @@ async fn a_fresh_checkout_creates_the_missing_root_and_parents_on_first_use() {
 #[farhelm_testtrace::test]
 async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart() {
     let mut stack = CheckoutStack::start().await;
+    // Preview binds canonical roots; raw temp-directory spellings can contain
+    // symlinks and must not become an accidental recovery requirement.
+    let canonical_root_a = stack
+        .root_a
+        .path()
+        .canonicalize()
+        .expect("canonical root A");
+    let canonical_root_b = stack
+        .root_b
+        .path()
+        .canonicalize()
+        .expect("canonical root B");
     let selectors = [
         ("raw-recovery", Selector::Raw),
         (
@@ -981,7 +993,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         let accepted = preview(&stack, label).await;
         assert_eq!(
             accepted.binding.canonical_root,
-            stack.root_a.path().to_string_lossy()
+            canonical_root_a.to_string_lossy()
         );
         let body = create_body(
             &stack.claim,
@@ -1077,7 +1089,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
     let fresh_preview = preview(&stack, fresh_title).await;
     assert_eq!(
         fresh_preview.binding.canonical_root,
-        stack.root_b.path().to_string_lossy()
+        canonical_root_b.to_string_lossy()
     );
     let fresh_selector = Selector::Raw;
     let fresh_body = create_body(
