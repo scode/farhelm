@@ -75,3 +75,36 @@ The final fresh gpt-6.1-sol medium wording reader understood the problems and re
 accurate and conventions satisfied. An earlier reader violated the blind-read ordering and was interrupted; that report
 was not accepted. Requested native model identities and usage counters were not independently exposed. Implementation
 remained local under no-workhorse mode. The executor left the PR in draft and did not merge it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1809, one squash commit on main. Since the plan was based, main gained this day's other
+landings; none touches the files it changes, and the rebase was clean.
+
+#### Review before merging
+
+A separate reviewer read the change by reading the files only and found all six triage outcomes carried out as their
+ledger entries require. The capture scripts' new target-directory guard compares resolved paths and runs before any
+build or deletion; the publisher's self-test now uses an inverted second image so its replacement check no longer
+depends on timestamps, and no longer exports variables into its own process; the uninstall guide's claims match the
+uninstaller's checks; the light-theme heading color is about 8.4:1 against its background.
+
+#### A fix made while landing
+
+The desktop build recipe in `crates/farhelm-desktop/README.md` now exported `CARGO_TARGET_DIR` into the shell it was
+pasted into, so later builds of other projects in that shell would land in Farhelm's target directory. The landing
+wrapped the recipe in a subshell and said why. A one-paragraph line-wrapping mismatch that change introduced was fixed
+in a follow-up commit right after the merge.
+
+Smaller notes left as they are: the uninstall guide now names the checked file types and ownership twice in a row; the
+changelog fragment's "uninstall guide" is a repository document no user-facing page links to; the light-theme override
+of the shared heading color would also recolor an unused panel component's border; and the two capture scripts carry the
+same target-directory guard, which, like the docs screenshot script's, checks only `CARGO_TARGET_DIR`.
+
+#### Checks
+
+- Run now: `shellcheck` on the three scripts, the README hero publisher's `--self-test` (its whole validation), the
+  changelog lint, and the website build (32 pages, internal links).
+- Reused from the executor: its recorded self-test run with a deliberate failing mutation, and its script checks.
+
+Nothing in the report above was made untrue by the landing.
