@@ -44,8 +44,9 @@ after the change; the checker must retain compatibility with older sections so a
 retroactive edits. When a new format is introduced, update the checker and its fixtures to recognize both the new format
 and the older formats that remain in the file.
 
-The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`. It is a record of
-already-curated sections, not permission to use that layout in a new release.
+The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, and the single
+`### 🔧 Fixed` category in every section up to and including `v0.25.0`. It is a record of already-curated sections, not
+permission to use those layouts in a new release.
 
 ## Format
 
@@ -60,18 +61,38 @@ sections; the checker accepts the historical formats that are already present.
   picking up half-written notes.
 - Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
 
-  | Heading           | Holds                                                                       |
-  | ----------------- | --------------------------------------------------------------------------- |
-  | `### 💥 Breaking` | `feat!` and any other type marked `!`; anything a user must act on          |
-  | `### 🚀 Added`    | `feat`                                                                      |
-  | `### 🔄 Changed`  | `style`, and `feat` or `perf` that alters existing behavior                 |
-  | `### 🔧 Fixed`    | `fix`, `perf` that fixes a performance problem                              |
-  | `### 🗑️ Removed`   | removals that are not breaking in practice; breaking ones go under Breaking |
+  | Heading                           | Holds                                                                       |
+  | --------------------------------- | --------------------------------------------------------------------------- |
+  | `### 💥 Breaking`                 | `feat!` and any other type marked `!`; anything a user must act on          |
+  | `### 🚀 Added`                    | `feat`                                                                      |
+  | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                 |
+  | `### 🔧 Fixes worth highlighting` | the fixes a reader should not miss (see below)                              |
+  | `### 🗑️ Removed`                   | removals that are not breaking in practice; breaking ones go under Breaking |
+  | `### 🩹 Misc fixes`               | every other fix                                                             |
 
-  Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, and 🔄 rather than ♻️
-  for Changed because recycling reads as refactoring. Category headings sit below the release level, so the parser never
-  looks at them and the emoji stay out of the release name.
-- Every category is bullets: one `-` item per entry, one paragraph, ending in its PR reference as `(#N)` or `(#N, #M)`.
+  Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, 🔄 rather than ♻️ for
+  Changed because recycling reads as refactoring, and 🩹 for Misc fixes because a bandage reads as a small repair.
+  Category headings sit below the release level, so the parser never looks at them and the emoji stay out of the release
+  name.
+- Fixes are split in two. Fixes worth highlighting holds a fix (a `fix`, or a `perf` that fixes a performance problem)
+  when a non-trivial share of users is likely to notice it, meaning user-facing behavior on a path people commonly take
+  rather than an obscure corner, or when it fixes a genuinely serious bug: lost or corrupted state or sessions, killed
+  agents, a helm or host that will not start or connect, a security problem. A serious bug that only an extremely rare
+  edge case could ever hit does not qualify. Everything else goes under Misc fixes, which is the kind of thing most
+  projects sum up as one "various bug fixes" bullet; the maintainer wants the complete list published anyway, for
+  transparency. The curating agent makes the initial split on its own judgment and the maintainer reviews it with the
+  rest of the draft. Fragments do not decide it: `kind: fixed` covers both categories, because whether a fix stands out
+  depends on the rest of the release.
+- Misc fixes always opens with exactly this paragraph, then its bullets, and like every category it is omitted when it
+  has nothing:
+
+  ```
+  *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+  ```
+
+  The wording is fixed so that it is not one more thing to review per release; the checker holds the canonical copy.
+- Every category is bullets, after Misc fixes' fixed opening paragraph: one `-` item per entry, one paragraph, ending in
+  its PR reference as `(#N)` or `(#N, #M)`.
 - One paragraph per physical line, however long. `CHANGELOG.md`, the fragments, and local curation drafts are excluded
   from dprint in `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every
   newline as a line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker
@@ -137,11 +158,11 @@ conversation and cannot resume one.
 The front matter is a leading `---` block, YAML-style, because a `---` line directly under text is a setext heading to
 Markdown (the first draft of this format had dprint rewrite `kind: added` over a `---` into `## kind: added`); a leading
 block is the one shape every Markdown tool treats as metadata. `kind:` is one of `breaking`, `added`, `changed`,
-`fixed`, `removed`, or `none`, naming the category the entry lands in. `none` records a required commit that was
-considered and has nothing user-facing; its body says why, so curation can tell an omission from a decision. An optional
-`pr: 123` (or `pr: 123, 456`) line claims PR numbers when the fragment is written after its change merged, or covers
-several PRs at once; a fragment added in the change's own commit needs no `pr:` because the sweep pairs it with the
-commit that added it.
+`fixed`, `removed`, or `none`, naming the category the entry lands in (`fixed` lands in one of the two fix categories,
+chosen at curation). `none` records a required commit that was considered and has nothing user-facing; its body says
+why, so curation can tell an omission from a decision. An optional `pr: 123` (or `pr: 123, 456`) line claims PR numbers
+when the fragment is written after its change merged, or covers several PRs at once; a fragment added in the change's
+own commit needs no `pr:` because the sweep pairs it with the commit that added it.
 
 The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
 accumulated wording rules: the first paragraph is the entry candidate, and further paragraphs supply context for
@@ -197,15 +218,16 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    Start the risk report ("The release risk report" below) now too. It must reach the maintainer before the tag is
    pushed in step 7.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
-   agent agree on in conversation, following that guidance. Write the whole proposed `## vX.Y.Z - YYYY-MM-DD` section to
-   `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path. This ignored local Markdown file is the
-   review surface. Unlike `CHANGELOG.md`, the draft is hard-wrapped at 120 columns, with each continuation line of an
-   entry indented two spaces under its `-`, so the maintainer can read and edit it as raw Markdown. Keep that wrapping
-   through every editing round, and rewrap an entry the maintainer's edits push past 120 columns only by moving line
-   breaks, never by changing words. The maintainer edits it in a text editor and tells the agent when to read it back.
-   Read the file again after each editing round; do not reconstruct its contents from conversation or an earlier read.
-   Continue until the maintainer approves the text. Keep the file until the changelog section is committed, then delete
-   it.
+   agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
+   by the criteria under the format; the split is the agent's first call and the maintainer's to change. Write the whole
+   proposed `## vX.Y.Z - YYYY-MM-DD` section to `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path.
+   This ignored local Markdown file is the review surface. Unlike `CHANGELOG.md`, the draft is hard-wrapped at 120
+   columns, with each continuation line of an entry indented two spaces under its `-`, so the maintainer can read and
+   edit it as raw Markdown. Keep that wrapping through every editing round, and rewrap an entry the maintainer's edits
+   push past 120 columns only by moving line breaks, never by changing words. The maintainer edits it in a text editor
+   and tells the agent when to read it back. Read the file again after each editing round; do not reconstruct its
+   contents from conversation or an earlier read. Continue until the maintainer approves the text. Keep the file until
+   the changelog section is committed, then delete it.
 
    Treat the file's text and any wording the maintainer supplies as authoritative. Reproduce supplied wording and file
    edits exactly: do not summarize, paraphrase, polish, reorder, or silently correct them. If the agent proposes wording
