@@ -211,7 +211,7 @@ pub(crate) fn ssh_base_args(
     connection: SharedConnection,
 ) -> anyhow::Result<Vec<String>> {
     let Some(control_path) = control_socket(control_dir, connection) else {
-        // Too long to bind: connection sharing is an optimization, so ssh
+        // Too long to bind or unsafe to represent: sharing is an optimization, so ssh
         // runs without it rather than failing every connection. Both
         // options are needed: `ControlMaster=no` only stops ssh creating a
         // master, and without `ControlPath=none` it would still use (or
@@ -308,7 +308,7 @@ const MASTER_TEMP_SUFFIX: usize = 17;
 
 /// The connection-sharing socket for `connection` inside `control_dir`, as a
 /// ControlPath still holding OpenSSH's `%C` token, or `None` when its
-/// expansion would be too long for OpenSSH to bind.
+/// expansion would be too long to bind or would interpret literal `${...}`.
 ///
 /// `%C` is kept because it is a hash of the resolved connection (local
 /// host, remote host, port, user), so a master is only ever reused for the
@@ -343,6 +343,11 @@ fn control_socket_within(
 ) -> Option<std::path::PathBuf> {
     // What `%C` expands to: 40 hex digits of a SHA-1.
     const EXPANDED_TOKEN: usize = 40;
+    // OpenSSH expands ${...} even inside its quoted ControlPath. A literal
+    // directory with that spelling cannot safely name a shared socket.
+    if control_dir.to_str().is_some_and(|path| path.contains("${")) {
+        return None;
+    }
     let name = connection.socket_name();
     let literal = name.len() - "%C".len();
     let expanded = control_dir.as_os_str().len() + 1 + literal + EXPANDED_TOKEN;
@@ -463,7 +468,7 @@ mod tests {
         );
     }
 
-    /// Connection sharing is used whenever OpenSSH could bind its socket,
+    /// Connection sharing is used whenever OpenSSH can represent and bind its socket,
     /// and a state directory too deep for that gets plain connections with
     /// sharing explicitly off.
     ///
@@ -510,6 +515,27 @@ mod tests {
                 "{args:?}"
             );
         }
+    }
+
+    /// Literal environment-reference syntax must not redirect a shared socket.
+    /// These short paths otherwise fit, so both connection purposes must use
+    /// the no-sharing fallback rather than hand OpenSSH an expandable value.
+    #[farhelm_testtrace::test]
+    fn literal_environment_references_disable_connection_sharing() {
+        let path = std::path::Path::new("/state/${FARHELM_SOCKET}");
+        for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let args = super::ssh_base_args("user@host", path, connection).unwrap();
+            assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
+            assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
+            assert!(!args.iter().any(|arg| arg.contains("${")), "{args:?}");
+        }
+        assert!(
+            super::control_socket(
+                std::path::Path::new("/state/$ordinary"),
+                SharedConnection::Supervisor
+            )
+            .is_some()
+        );
     }
 
     /// The default state directory for a username of `user_len` characters

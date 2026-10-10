@@ -947,7 +947,10 @@ impl ProvisioningService {
     /// With no local plan reachable at all, there is no stale local plan
     /// for a newly written unit to lose a race against — see the note in
     /// [`Self::start_update`].
-    pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
+    pub(super) async fn plan_update(
+        self: &Arc<Self>,
+        host: HostId,
+    ) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_updates() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
@@ -971,15 +974,27 @@ impl ProvisioningService {
     /// panel cannot reach it, which is the whole point of the rule above.
     #[cfg(test)]
     pub(super) async fn plan_update_for_local_executor_tests(
-        &self,
+        self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
         self.plan_update_unguarded(host).await
     }
 
-    /// The UPDATE planner itself. See [`Self::plan_update`] for the local
-    /// row's refusal, which is deliberately NOT part of this.
-    async fn plan_update_unguarded(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
+    /// Own UPDATE's bounded probe through its process-group cleanup.
+    /// The local-executor test entry shares this boundary but bypasses the
+    /// panel's local-row refusal; neither path lets a dropped request cancel it.
+    async fn plan_update_unguarded(
+        self: &Arc<Self>,
+        host: HostId,
+    ) -> anyhow::Result<HostPlanResponse> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move { service.plan_update_owned(host).await }).await
+    }
+
+    /// Finish UPDATE planning even if its requester disappears during the probe.
+    /// The backend reaps its process group only when its bounded probe finishes;
+    /// keeping this work owned prevents SSH helpers and pipe readers being orphaned.
+    async fn plan_update_owned(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
         let _slot = self
             .plan_slots
             .acquire()
@@ -1159,7 +1174,19 @@ impl ProvisioningService {
     /// Unlike UPDATE, the user sees this plan and confirms it: the response
     /// carries the rendered confirmation, and only posting its id back to
     /// [`Self::start_uninstall`] removes anything.
-    pub(super) async fn plan_uninstall(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
+    /// Like discovery and UPDATE planning, this owns the probe through cleanup:
+    /// a closed confirmation panel loses the answer, not the probe's SSH helpers.
+    pub(super) async fn plan_uninstall(
+        self: &Arc<Self>,
+        host: HostId,
+    ) -> anyhow::Result<HostPlanResponse> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move { service.plan_uninstall_owned(host).await }).await
+    }
+
+    /// Retain the removal proposal on the helm-owned planning task.
+    /// This still changes no host files: execution needs the later confirmation.
+    async fn plan_uninstall_owned(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_uninstalls() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(

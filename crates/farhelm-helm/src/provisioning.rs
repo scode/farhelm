@@ -6602,6 +6602,23 @@ mod tests {
     #[cfg(unix)]
     #[farhelm_testtrace::test]
     async fn a_dropped_probe_request_still_reaps_its_process_group() {
+        dropped_planning_reaps_group(false).await;
+    }
+
+    /// UPDATE planning must own the same bounded probe cleanup as discovery.
+    /// The existing local-executor entry bypasses only the panel refusal, so
+    /// this exercises the production planner's ownership boundary without SSH.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn a_dropped_update_plan_still_reaps_its_process_group() {
+        dropped_planning_reaps_group(true).await;
+    }
+
+    /// Drop one accepted planner while its real child and helper are alive.
+    /// Both entry points share the process fixture and the group-exit oracle;
+    /// cancellation must not substitute killing only the direct child.
+    #[cfg(unix)]
+    async fn dropped_planning_reaps_group(update: bool) {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
         let go = root.path().join("go");
@@ -6620,14 +6637,23 @@ mod tests {
             layout(root.path()),
             farhelm,
         );
+        let host = local_row(&harness).await;
         let request = tokio::spawn(async move {
-            service
-                .probe(ProbeRequest {
-                    target: ProbeDestination::Local,
-                    remote_farhelm: None,
-                    remote_state_dir: None,
-                })
-                .await
+            if update {
+                service
+                    .plan_update_for_local_executor_tests(host)
+                    .await
+                    .map(|_| ())
+            } else {
+                service
+                    .probe(ProbeRequest {
+                        target: ProbeDestination::Local,
+                        remote_farhelm: None,
+                        remote_state_dir: None,
+                    })
+                    .await
+                    .map(|_| ())
+            }
         });
         let group =
             KillGroupOnDrop(stand_in_pid(&root.path().join("group.pid"), "its group").await);

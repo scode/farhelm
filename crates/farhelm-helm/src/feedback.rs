@@ -150,7 +150,7 @@ pub(crate) fn client_builder() -> reqwest::ClientBuilder {
 }
 
 /// `POST /api/feedback` — check the submission against the shared caps and
-/// send it on.
+/// send it on a helm-owned task, so closing the page loses only the reply.
 ///
 /// 204 when the endpoint accepted it; 400 when a field does not fit (the
 /// dialog enforces the same caps, so this is a client bug or a hand-made
@@ -169,7 +169,9 @@ pub(crate) async fn send_feedback(
         )
             .into_response();
     }
-    match state.feedback.forward(&submission).await {
+    // Validation accepts the send; the requesting page no longer owns its lifetime.
+    let forwarder = state.feedback.clone();
+    match crate::run_owned(async move { forwarder.forward(&submission).await }).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(reason) => {
             // The reason is ours and fixed; the submission's text and

@@ -8613,7 +8613,8 @@
 - Completion criteria: Run the forward on a helm-owned task through the helm's existing `run_owned` helper, so a
   disconnect loses only the reply. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## grok-trust.md
 
@@ -8699,7 +8700,8 @@
 - Completion criteria: Run the queued-question check only on lines above the last input prompt line, with test cases for
   a draft and a real question. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## uninstall-cancel.md
 
@@ -8717,7 +8719,8 @@
 - Completion criteria: Run the update and uninstall planners through `run_owned`, as discovery does. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## cancellation-protection-starts-too-late.md
 
@@ -8734,7 +8737,8 @@
 - Completion criteria: Create the abort guard before spawning the supervising task and move it into the future. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## token-recovery-path.md
 
@@ -8751,7 +8755,8 @@
 - Completion criteria: Refuse a non-UTF-8 state directory at the start of `rotate`, before anything changes. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## template-dot-name.md
 
@@ -8785,7 +8790,8 @@
 - Completion criteria: When the path contains `${`, fall back to the existing arguments that turn off connection
   sharing. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## setups-sign-in-command-ignores-selected-state-directory.md
 
@@ -8801,7 +8807,8 @@
 - Completion criteria: Append the shell-quoted `--state-dir` when one was chosen, as the rotate recovery command already
   does. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-cli-fixes.md`.
+- Execution: complete in jj change `vrstwyym`, bookmark `plan/helm-cli-fixes/01-helm-cli-fixes`;
+  https://github.com/scode/farhelm/pull/1813/changes.
 
 ## update-popup-stops-following-current-step-opening.md
 
