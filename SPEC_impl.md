@@ -1596,6 +1596,18 @@ reuse: queued frames can outlive an aborted producer. The production helm alread
 no upload staging, publication phase, admission cap or progress timer. Session-authenticated connections remain behind
 the restricted operation allowlist and cannot stat or read files.
 
+The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field.
+Both use session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is
+public. Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download
+reopens independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
+Content-Length: a file may change within the cap, and a later stream failure invalidates the whole body.
+
+The desktop supplies its platform Downloads directory to the embedded helm. A download request with
+`save_to_downloads: true` stages privately on that filesystem and publishes only after successful EOF, returning the
+destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `report (1).pdf`, and so on, preserving the
+final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A standalone
+helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or webview fallback.
+
 ## Supervisor internals
 
 ### Owned checkout admission and lifetime
