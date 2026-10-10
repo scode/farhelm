@@ -1014,12 +1014,20 @@ pub(crate) fn search_results(
 /// narrows exact matching to its corresponding group; an exact host name wins
 /// within host results. Paths, names, recent descriptions, and GitHub
 /// suggestions use their offered order.
+/// Template names use the filter's Unicode lowercasing so a full name keeps
+/// exact priority regardless of case; other groups keep their existing rules.
 pub(crate) fn default_search_index(
     grouped_results: &[(ComposerSearchGroup, Vec<ComposerSearchResult>)],
     query: &str,
 ) -> usize {
     let (scope, query) = scoped_query(query);
-    let folded_query = query.to_ascii_lowercase();
+    let folded_query = if scope == SearchScope::Template {
+        // Template filtering already uses Unicode lowercasing. Exact priority
+        // must agree with it without changing the other scopes' matching rules.
+        query.to_lowercase()
+    } else {
+        query.to_ascii_lowercase()
+    };
     if folded_query.is_empty() {
         return 0;
     }
@@ -1064,6 +1072,8 @@ pub(crate) fn default_search_index(
 /// kind compares by the same spelling the search offered it under —
 /// [`harness_word`], the model id, [`effort_value`] — so a row that matched
 /// as a substring can always also match exactly.
+/// Templates compare Unicode-lowercased names; the scoped caller supplies the
+/// same folding for their query.
 fn exact_word_group(
     result: &ComposerSearchResult,
     folded_query: &str,
@@ -1078,7 +1088,7 @@ fn exact_word_group(
         ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
             Some(ComposerSearchGroup::Harnesses)
         }
-        ComposerSearchResult::Template(name) if name.eq_ignore_ascii_case(folded_query) => {
+        ComposerSearchResult::Template(name) if name.to_lowercase() == folded_query => {
             Some(ComposerSearchGroup::Templates)
         }
         ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
@@ -3306,6 +3316,21 @@ mod tests {
         let groups = grouped_search_results(template_search_results("tl:my-codex", &names));
         assert_eq!(groups[0].0, ComposerSearchGroup::Templates);
         assert_eq!(default_search_index(&groups, "tl:my-codex"), 0);
+    }
+
+    /// Exact template priority must share the filter's Unicode case handling;
+    /// otherwise Enter applies the first partial name rather than the full name
+    /// the user typed. Test both directions so folding the query alone is insufficient.
+    #[test]
+    fn template_exact_priority_uses_unicode_lowercase() {
+        for (query, exact) in [("écrire", "Écrire"), ("ÉCRIRE", "écrire")] {
+            let names = vec![format!("{exact}-project"), exact.to_string()];
+            let query = format!("tl:{query}");
+            let results = template_search_results(&query, &names);
+            assert_eq!(results.len(), 2, "both names match the filter");
+            let groups = grouped_search_results(results);
+            assert_eq!(default_search_index(&groups, &query), 1);
+        }
     }
 
     /// Search never turns its text into a command, and offers no result for

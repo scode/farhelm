@@ -572,15 +572,20 @@ fn command_basename(invocation: &str) -> String {
 /// A session title as the sidebar shows it: escaped with `display_peer` and
 /// direction-isolated in a `.peer-value` span with `dir="ltr"`.
 ///
-/// Titles are peer text (agents may rename any session), and the row and
-/// both confirmations must show them the same safe way: escaping keeps
+/// Titles are peer text (agents may rename any session). The row,
+/// confirmations and rename dialog show them the same safe way: escaping keeps
 /// invisible and override characters from making two titles look alike,
 /// and isolation keeps a title's own strong-RTL text from reordering the
-/// sentence around it (see `peer.rs`). One component for all three surfaces
+/// sentence around it (see `peer.rs`). One component for these surfaces
 /// means none can drift. The attributes are formatted values on purpose, so
 /// they reach the DOM as dynamic attributes a headless test can observe.
 #[component]
-fn PeerTitle(class: &'static str, title: String, quoted: bool, tooltip: bool) -> Element {
+pub(crate) fn PeerTitle(
+    class: &'static str,
+    title: String,
+    quoted: bool,
+    tooltip: bool,
+) -> Element {
     let shown = display_peer(&title);
     let text = if quoted {
         format!("\"{shown}\"")

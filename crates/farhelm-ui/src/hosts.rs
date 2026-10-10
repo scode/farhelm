@@ -2498,9 +2498,10 @@ fn UpdateProgressPopup(
             }
         });
     });
-    // Once placed (and so at its final height), bring the current step into
-    // the list's own view. A no-op when the whole list fits.
-    use_effect(move || {
+    // Placement and progress both require a scroll: this popup cannot be
+    // scrolled by hand, so an already-open popup must follow each new step.
+    let current = steps.iter().position(|step| step.current);
+    use_effect(use_reactive((&current,), move |(_current,)| {
         if placed().is_some() {
             document::eval(
                 "const list = document.querySelector('.host-update-popup .host-update-popup-steps');
@@ -2511,7 +2512,7 @@ fn UpdateProgressPopup(
                  }",
             );
         }
-    });
+    }));
     // `visibility` is spelled out in both states: dropping a style property
     // from the string does not reliably clear it from the element, so a
     // placed popup says `visible` rather than merely not saying `hidden`.

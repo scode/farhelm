@@ -2029,6 +2029,10 @@ pub(crate) fn ProvisioningPanel(
         // uncertainty survives: only this attempt's correlated success
         // supersedes that.
         pending.set(None);
+        // Setup/uninstall diagnostics share the Update display slots. A new
+        // Update must not hide its own result behind a previous action's error.
+        action_error.set(None);
+        action_warning.set(None);
         if update_error
             .peek()
             .as_ref()

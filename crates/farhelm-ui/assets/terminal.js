@@ -2761,23 +2761,25 @@
      * option alone only re-measures the font). Hidden tabs are mounted
      * and sized like visible ones, so they change too. Terminals that
      * mount later are constructed at the new size. At either end of the
-     * range this does nothing.
+     * range the size stays unchanged, but a clicked button still hands
+     * keyboard focus back to the terminal.
      *
      * Called by the shortcut above and by the tab strip's A-/A+ buttons.
      */
     stepFontSize(delta) {
       const next = clampFontSize(terminalFontSize + delta);
-      if (next === terminalFontSize) return;
-      terminalFontSize = next;
-      try {
-        window.localStorage.setItem(FONT_SIZE_KEY, String(next));
-      } catch (_error) {
-        // Unavailable storage costs only the memory across reloads; the
-        // size still applies to this page.
-      }
-      for (const island of islands.values()) {
-        island.term.options.fontSize = next;
-        island.fit.fit();
+      if (next !== terminalFontSize) {
+        terminalFontSize = next;
+        try {
+          window.localStorage.setItem(FONT_SIZE_KEY, String(next));
+        } catch (_error) {
+          // Unavailable storage costs only the memory across reloads; the
+          // size still applies to this page.
+        }
+        for (const island of islands.values()) {
+          island.term.options.fontSize = next;
+          island.fit.fit();
+        }
       }
       // A click on the A-/A+ buttons leaves focus on the button, and
       // nothing else moves it back (the session view only refocuses a
@@ -3512,6 +3514,10 @@
           linkHandler: {
             allowNonHttpProtocols: true,
             activate(_event, uri) {
+              // A selection means this release finished a drag, just as in
+              // the plain-link adapter below. Neither navigation nor a file
+              // download belongs to a gesture made to copy terminal text.
+              if (term.getSelection()) return;
               const target = window.farhelmTerminalFiles.oscTarget(uri);
               if (target?.kind === 'web') window.farhelmTerminalLinks.openTerminalUrl(uri);
               else if (target?.kind === 'file') fileLinks.download(target.path);
@@ -3598,8 +3604,8 @@
             // plain click never trips this — mousedown clears the old
             // selection before mouseup runs — so clicking a link right
             // after selecting text still opens. Both halves are pinned by
-            // e2e/tests/terminal-links.spec.ts, in both engines. Scoped to
-            // this adapter only: OSC 8 gestures are untouched.
+            // e2e/tests/terminal-links.spec.ts, in both engines. OSC 8
+            // activation applies the same guard before web/file dispatch.
             if (term.getSelection()) return;
             // The second boundary (the addon's default matcher is the
             // first): http(s) with a host, or nothing opens — printed

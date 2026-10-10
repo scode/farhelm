@@ -87,6 +87,91 @@ test.describe("session notifications", () => {
     await resetPreferences(request);
   });
 
+  /** A failed best-effort read mark must be repairable on the next close.
+   * The warning is the completion oracle: HTTP receipt alone precedes the
+   * client's failure handling, whose cached mark this test needs to observe. */
+  test("a failed notification read mark retries on the next close", async ({ page, request }) => {
+    const session = await createSession(request, { title: `read-retry-${Date.now()}` });
+    created.push(session.id);
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: "retry this mark" }]);
+    await serveNotifications(page, session.id, stub);
+    let attempts = 0;
+    await page.route(`**/api/sessions/${session.id}/notifications/read`, async (route) => {
+      attempts++;
+      if (attempts === 1) {
+        const response = await route.fetch();
+        await route.fulfill({ response, status: 500, body: "injected read mark refusal" });
+      } else {
+        await route.fallback();
+      }
+    });
+    await page.goto("/");
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await expect(bell).toHaveClass(/\bloud\b/);
+    await bell.click();
+    const entry = page.locator('.session-bell-entry[data-notification-seq="1"]');
+    await expect(entry).toHaveClass(/\bnew\b/);
+    const failed = page.waitForEvent("console", (message) => message.text().includes("could not mark the session's notifications read"));
+    await bell.click();
+    await failed;
+    expect(attempts).toBe(1);
+    expect(stub.readThrough).toBe(0);
+    await bell.click();
+    await expect(entry).toHaveClass(/\bnew\b/);
+    await bell.click();
+    await expect.poll(() => stub.readThrough).toBe(1);
+    expect(attempts).toBe(2);
+  });
+
+  /** A delayed failure of mark 1 must not erase a newer completed mark 2.
+   * Keep the listing's durable mark old to expose the local cache on reopen. */
+  test("an older failed notification mark preserves a newer completed mark", async ({ page, request }) => {
+    const session = await createSession(request, { title: `read-race-${Date.now()}` });
+    created.push(session.id);
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: "first" }]);
+    await serveNotifications(page, session.id, stub);
+    const feed = await stubFeed(page);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const marks: number[] = [];
+    await page.route(`**/api/sessions/${session.id}/notifications/read`, async (route) => {
+      const through = route.request().postDataJSON().through as number;
+      marks.push(through);
+      const response = await route.fetch();
+      if (through === 1) {
+        await gate;
+        await route.fulfill({ response, status: 500, body: "injected older mark failure" });
+      } else {
+        await route.fulfill({ response, json: {} });
+      }
+    });
+    try {
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      const bell = row(page, session.id).locator(".session-row-bell");
+      await expect(bell).toHaveClass(/\bloud\b/);
+      await bell.click();
+      await expect(page.locator(".session-bell-entry")).toHaveCount(1);
+      await bell.click();
+      await expect.poll(() => marks).toEqual([1]);
+      stub.notifications.push({ seq: 2, at: NOW, text: "second" });
+      feed.notify(1);
+      await bell.click();
+      await expect(page.locator('.session-bell-entry[data-notification-seq="2"]')).toHaveClass(/\bnew\b/);
+      const newer = page.waitForResponse((response) => response.url().endsWith(`/api/sessions/${session.id}/notifications/read`) && response.request().postDataJSON().through === 2);
+      await bell.click();
+      expect((await newer).ok()).toBe(true);
+      const failed = page.waitForEvent("console", (message) => message.text().includes("could not mark the session's notifications read"));
+      release();
+      await failed;
+      await bell.click();
+      await expect(page.locator('.session-bell-entry[data-notification-seq="2"]')).not.toHaveClass(/\bnew\b/);
+      expect(marks).toEqual([1, 2]);
+    } finally {
+      release();
+    }
+  });
+
   /** Recovery is read without opening the list or moving its shared marks.
    * Keep resolved history visible, then simulate a recurrence above a clear
    * mark to prove it reappears as new and unread rather than staying silent. */

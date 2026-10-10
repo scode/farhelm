@@ -8634,7 +8634,8 @@
 - Completion criteria: Clear the workspace-trust choice in the Grok early-return branch as well. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## font-focus.md
 
@@ -8651,7 +8652,8 @@
 - Completion criteria: Hand focus back to the terminal even when the size does not change; keep the font update and
   refit only for a real change. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## selecting-osc-hyperlink-open-it-unintentionally.md
 
@@ -8669,7 +8671,8 @@
 - Completion criteria: Add the same non-empty-selection guard to the OSC 8 handler's `activate`. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## older-listing-replace-newly-opened-session-another.md
 
@@ -8686,7 +8689,8 @@
 - Completion criteria: Fence earlier listing reads on the create and replace success paths, as delete already does. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## codex-draft-mistaken-for-question.md
 
@@ -8776,7 +8780,8 @@
 - Completion criteria: Refuse dot-only names in the template shape check with a clear message. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## literal-helm-state-path-breaks-ssh-connections.md
 
@@ -8828,7 +8833,8 @@
 - Completion criteria: Make the scroll effect also re-run when the current step changes. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## non-ascii-template-names-lose-exact-match-priority.md
 
@@ -8846,7 +8852,8 @@
 - Completion criteria: Use the same Unicode lowercasing for the exact-match check as the filter. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## failed-notification-read-mark-suppresses-subsequent-retries.md
 
@@ -8863,7 +8870,8 @@
 - Completion criteria: On failure, roll back the cached mark for that session if it still holds the mark that failed, so
   a newer successful mark is not undone. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## earlier-setup-uninstall-error-hides-later-update.md
 
@@ -8880,7 +8888,8 @@
 - Completion criteria: When an Update starts, also clear the setup/uninstall error and warning. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## rename-refusal-text-bypasses-peer-text-rendering.md
 
@@ -8897,7 +8906,8 @@
 - Completion criteria: Render the error through the existing peer-text rendering, as the row error line does. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## restart-refusal-text-bypasses-peer-text-rendering.md
 
@@ -8912,7 +8922,8 @@
 - Completion criteria: Render the error through the existing peer-text rendering. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## rename-original-title-display-conceals-title-characters-original-title-original-title-display.md
 
@@ -8929,7 +8940,8 @@
 - Completion criteria: Show the current title through the existing peer-title rendering; the stored title is not
   touched. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## ime-confirmation-save-template-prematurely.md
 
@@ -8946,7 +8958,8 @@
 - Completion criteria: Add the same composition check before saving on Enter. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
+- Execution: complete in jj change `ysrlozvwyxuwrokvktsyzrmroonzmmmu`, bookmark
+  `plan/ui-correctness-fixes/01-ui-correctness-fixes`, [draft PR](https://github.com/scode/farhelm/pull/1832/changes).
 
 ## uninstall-documentation-promises-protection-modified-mac-app.md
 

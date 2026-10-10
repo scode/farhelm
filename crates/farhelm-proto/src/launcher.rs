@@ -105,11 +105,12 @@ pub fn reconcile_harness_selection(
     }
     selection.harness = harness;
     if !harness.offers_model() {
-        // Grok exposes neither field. Clear retained values at the harness
+        // Grok exposes no model, effort or workspace-trust choice. Clear retained values at the harness
         // boundary so a recent setup or prior selection cannot manufacture a
         // launch shape that the helm must reject later.
         selection.model = None;
         selection.effort = None;
+        selection.workspace_trust = None;
         selection.permissions = harness.effective_permission(selection.permissions);
         return (selection, None);
     }
@@ -319,11 +320,18 @@ pub struct LaunchTemplate {
 /// single-line editor cannot show or preserve them. Every save path shares
 /// this check; applying an already stored template does not run it, so legacy
 /// commands remain usable until the user edits the template (SPEC.md).
+/// Names must also survive use as a URL segment: `.` and `..` navigate instead
+/// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     let name = &template.name;
     if name.is_empty() {
         return Err("a template needs a name".to_string());
+    }
+    // Template names travel as the last URL segment. Both spellings are
+    // navigation even when percent-encoded, so neither can identify a template.
+    if name == "." || name == ".." {
+        return Err("a template name cannot be . or ..".to_string());
     }
     if name.len() > TEMPLATE_NAME_CAP {
         return Err(format!(
@@ -894,6 +902,45 @@ mod tests {
         assert_eq!(applied.effort, Some(LaunchEffort::Low), "left out, kept");
     }
 
+    /// Stacking a Grok choice after a trusted harness must clear unsupported
+    /// trust, model and effort choices. The shared launcher also serves CLI
+    /// templates, whose retained trust used to make the resulting launch fail.
+    #[test]
+    fn a_grok_template_clears_retained_workspace_trust() {
+        let catalog = catalog();
+        for trust in [false, true] {
+            let trusted = template(
+                "trusted",
+                TemplateFields {
+                    agent: Some(LaunchHarness::Codex),
+                    model: Some(Some("gpt-6-luna".into())),
+                    effort: Some(Some(LaunchEffort::High)),
+                    workspace_trust: Some(Some(trust)),
+                    ..TemplateFields::default()
+                },
+            );
+            let grok = template(
+                "grok",
+                TemplateFields {
+                    agent: Some(LaunchHarness::Grok),
+                    ..TemplateFields::default()
+                },
+            );
+            let seeded = apply_template(
+                &LauncherState::default(),
+                &trusted,
+                &context(&catalog, &[], false),
+            )
+            .unwrap();
+            assert_eq!(seeded.workspace_trust, Some(trust));
+            let applied = apply_template(&seeded, &grok, &context(&catalog, &[], false)).unwrap();
+            assert_eq!(applied.harness, Some(LaunchHarness::Grok));
+            assert_eq!(applied.workspace_trust, None);
+            assert_eq!(applied.model, None);
+            assert_eq!(applied.effort, None);
+        }
+    }
+
     /// Spec: a field that does not apply refuses the whole template, naming
     /// the field: a command field on the agent kind, an agent choice on the
     /// command kind or with no agent type, a model another agent type owns,
@@ -1182,6 +1229,22 @@ mod tests {
             },
         );
         assert!(check_template_shape(&huge).is_err());
+    }
+
+    /// Dot path segments cannot survive template request URL normalization.
+    /// Refuse those exact names at save validation; three dots is an ordinary
+    /// name and must not be rejected by an overbroad dot-only rule.
+    #[test]
+    fn template_names_refuse_url_navigation_segments() {
+        for name in [".", ".."] {
+            assert_eq!(
+                check_template_shape(&template(name, TemplateFields::default())),
+                Err("a template name cannot be . or ..".into())
+            );
+        }
+        for name in ["...", "a.b", ".hidden"] {
+            assert!(check_template_shape(&template(name, TemplateFields::default())).is_ok());
+        }
     }
 
     /// Single-line editors cannot preserve hidden command characters. Every
