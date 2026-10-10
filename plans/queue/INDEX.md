@@ -8,4 +8,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 561535] `git-env-isolation.md` — an inherited GIT_DIR no longer steers checkout preparation or the discovery test fixtures into another repository
 - [in-flight 8dafad] `os-readback-fixes.md` — the service-file reader refuses escapes and section spellings systemd reads differently, and macOS reads large hook argument blocks whole
 - [pending] `ui-interaction-fixes.md` — menu arrow keys follow the selected item when items change, plain clicks stop re-copying old selections, and Replace on a failed session warns about the conversation
-- [pending] `harness-tooling-fixes.md` — quoted fixture paths, a per-run spawn-test workspace, deflake stop checks process start time, full hostname scrubbing, and release advice that never reuses a tag
+- [in-flight b5845d] `harness-tooling-fixes.md` — quoted fixture paths, a per-run spawn-test workspace, deflake stop checks process start time, full hostname scrubbing, and release advice that never reuses a tag
