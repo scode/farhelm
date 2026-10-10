@@ -32,9 +32,10 @@ applied; a field you remove with **✕** is left alone. A **default** value rese
 which is different from leaving it out. An empty model input means the default model; otherwise you can type any model,
 with suggestions when the template sets an **agent type**. Approvals and other offered choices follow that agent type.
 
-The destination can be a directory or a
-[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout). A model or a destination can
-stand on its own: another template can supply the agent or host.
+The destination can be a directory or a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
+chosen with the same **folder** and **managed checkout** control as the launcher. The editor explains that each session
+gets its own checkout and that its directory moves to the trash when its last session is deleted. A model or a
+destination can stand on its own: another template can supply the agent or host.
 
 Templates belong to the helm, the program that shows you every host's sessions
 ([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
@@ -45,8 +46,8 @@ a command still needs that command to exist on the host you launch on.
 When you have set up a launch in **new** or **clone**, choose **save as template**. Give it a new name and check the
 choices you want to keep. Agent, model and effort choices are checked when set, as are command choices. Approvals and
 workspace trust are checked when you chose them; a host, directory and session name only when you picked or typed them.
-A managed checkout's repository is checked too. Remembered defaults and a cloned session's host and directory
-stay available, but unchecked.
+A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
+a cloned session's host and directory stay available, but unchecked.
 
 The template keeps the current **agent** or **command** tab and only the choices you check. Saving closes the launcher
 and opens the new template for editing in the Templates panel. A name already in use is refused; choose another name.

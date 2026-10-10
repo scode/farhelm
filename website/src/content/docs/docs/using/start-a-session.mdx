@@ -131,20 +131,20 @@ machine you are using.
 
 A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
 managed checkout: it makes the directory for the session and moves it into the trash when its last session is deleted
-(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). Type `gh:` followed by the repository as
-`owner/repo` in the search box, then choose **Managed checkout: owner/repo**. Farhelm suggests repositories you have
-launched or cloned before, but it does not search GitHub, so type a new one in full.
+(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). Choose **managed checkout** under destination,
+enter the repository as `owner/repo`, and select its suggestion. You can also type `gh:owner/repo` in the search box and
+choose **Managed checkout: owner/repo**. Farhelm suggests repositories you have launched or cloned before, but it does
+not search GitHub, so type a new one in full.
 
 Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
-on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **use existing
-folder** switches back to an ordinary directory.
+on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **folder** switches
+back to an ordinary directory.
 
 **Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
 in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
-taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **use
-existing folder** restores the source's directory and name. **Replace with** and **Replace** keep the existing
-directory.
+taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **folder**
+restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
 
 When you launch, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything

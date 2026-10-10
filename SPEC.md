@@ -644,14 +644,17 @@ path and explains that the directory moves to the trash when its last session is
 same mark beside its directory. Sessions using another session's checkout, including its subdirectories, carry the mark
 too; requesting a checkout at launch does not establish current membership.
 
-Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with both
-launch kinds. Selecting a folder or editing the ordinary directory returns to an existing-directory launch without
-changing the agent choice. Clone of a session in a managed checkout starts on a managed checkout of that repository,
-preferring its current checkout association over its launch provenance. This includes sessions opened in an existing
-checkout and replacements of the session that created it. A source in a checkout subdirectory clones to the new
-checkout's top level. Clone of other sessions, Replace with, and plain Replace start from the source's actual directory;
-a managed checkout then requires an explicit repository selection, a saved repository setup, or a template that sets
-one. `farhelm agent clone` keeps its existing-directory behavior.
+The launcher and template editor use the same segmented destination control: folder or managed checkout, with a folder
+glyph or branch glyph. Selecting managed checkout reveals a repository field and explains the directory's lifetime.
+Empty, invalid or unselected repository input cannot launch using a previous folder. Selecting a repository from the
+field's suggestions, or selecting `gh:owner/repo` in the composer, explicitly requests a new checkout on the selected
+host. It works with both launch kinds. Selecting a folder or editing the ordinary directory returns to an
+existing-directory launch without changing the agent choice. Clone of a session in a managed checkout starts on a
+managed checkout of that repository, preferring its current checkout association over its launch provenance. This
+includes sessions opened in an existing checkout and replacements of the session that created it. A source in a checkout
+subdirectory clones to the new checkout's top level. Clone of other sessions, Replace with, and plain Replace start from
+the source's actual directory; a managed checkout then requires an explicit repository selection, a saved repository
+setup, or a template that sets one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
 root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
@@ -706,9 +709,9 @@ the preview and requires another explicit submission. An ordinary conflict witho
 request and key.
 
 In managed-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
-or error state while no path is available. An ambiguous retry keeps displaying the original request's path. Browse and
-recent folders remain available; `use existing folder` deliberately leaves checkout mode and restores an editable path.
-Typing into the checkout path cannot turn a managed checkout into an existing-folder launch.
+or error state while no path is available. An ambiguous retry keeps displaying the original request's path. The folder
+segment deliberately leaves checkout mode and restores the prior editable path, Browse and recent folders. Typing into
+the checkout path cannot turn a managed checkout into an existing-folder launch.
 
 An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
 visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved

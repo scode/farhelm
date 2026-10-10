@@ -73,6 +73,65 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   return body.templates.find((template: any) => template.name === name);
 }
 
+/** Destination type is a presentation choice over the existing stored schema.
+ * Saving each type proves the editor does not confuse a repository with a
+ * directory or silently change the template's other fields. */
+test("template destination uses the shared folder and managed checkout control", async ({ page, request }) => {
+  const name = `e2e-destination-${Date.now()}`;
+  try {
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-new").click();
+    await dialog.locator(".templates-name").fill(name);
+    await addField(dialog, "destination");
+    const types = dialog.getByRole("group", { name: "destination type", exact: true });
+    await expect(types.locator('[data-glyph="branch"]')).toHaveCount(1);
+    await expect(types.locator('[data-glyph="folder"]')).toHaveCount(1);
+    await expect(types.getByRole("button", { name: "folder", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await types.getByRole("button", { name: "managed checkout", exact: true }).click();
+    await dialog.getByLabel("repository", { exact: true }).fill("acme/bar");
+    await expect(dialog.locator(".templates-hint", { hasText: "Each session from this template" })).toContainText("moves to the trash");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.destination).toEqual({ github: "acme/bar" });
+    await types.getByRole("button", { name: "folder", exact: true }).click();
+    await dialog.getByLabel("folder path", { exact: true }).fill("/tmp/project");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.destination).toEqual({ folder: "/tmp/project" });
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
+/** An unselected repository is search text, even when it parses as owner/repo.
+ * Saving the other launch choices must omit it rather than create a template
+ * that later fails to apply or silently accepts a destination never selected. */
+for (const query of ["", "invalid!", "acme/bar"]) {
+  test(`save as template omits an unselected repository ${JSON.stringify(query)}`, async ({ page, request }) => {
+    const name = `e2e-unselected-${Date.now()}`;
+    try {
+      const form = await openNew(page);
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      await form.getByRole("group", { name: "destination type", exact: true }).getByRole("button", { name: "managed checkout", exact: true }).click();
+      await form.getByRole("combobox", { name: "repository", exact: true }).fill(query);
+      await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
+      await expect(form.locator(".create-session-submit")).toBeDisabled();
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('[data-field="destination"]')).toHaveCount(0);
+      await panel.locator(".save-template-name").fill(name);
+      await panel.locator(".save-template-save").click();
+      await expect(page.locator('.templates-dialog[role="dialog"]')).toBeVisible();
+      const stored = await storedTemplate(request, name);
+      expect(stored.fields.agent).toBe("codex");
+      expect(stored.fields.destination).toBeUndefined();
+    } finally {
+      await deleteTemplate(request, name);
+    }
+  });
+}
+
 /**
  * The selected row stays reachable, saves retain the editor, and rename writes
  * the new name before removing the old. Delete/undo must restore the actual
