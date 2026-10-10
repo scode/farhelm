@@ -10,8 +10,8 @@ use dioxus::prelude::*;
 
 use crate::hosts::gui_host_name;
 use crate::icons::{
-    EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, LocalHostIcon, PermissionGlyph,
-    PermissionIcon, QualifierGlyph, QualifierIcon, RemoteHostIcon,
+    EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, HostMark, LocalHostIcon,
+    PermissionGlyph, PermissionIcon, QualifierGlyph, QualifierIcon,
 };
 use crate::launch_composer::{selection_explicit_before_permissions, selection_permission_value};
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -879,6 +879,8 @@ pub(super) fn SessionRow(
         composer_transfer_open,
         selected,
         locality,
+        host_icon,
+        host_color,
         activity,
         deleting,
         bell_open,
@@ -1532,7 +1534,7 @@ pub(super) fn SessionRow(
                                 span { class: "visually-hidden", "local" }
                             },
                             HostLocality::Remote => rsx! {
-                                RemoteHostIcon {}
+                                HostMark { icon: host_icon, color: host_color }
                                 span { class: "visually-hidden", "remote" }
                             },
                             HostLocality::Unknown => rsx! {},
@@ -2586,6 +2588,8 @@ mod tests {
                         composer_transfer_open: false,
                         selected: false,
                         locality: HostLocality::Unknown,
+                        host_icon: Default::default(),
+                        host_color: Default::default(),
                         activity: None,
                         deleting: false,
                         bell_open: None,
@@ -2731,6 +2735,8 @@ mod tests {
                         composer_transfer_open: false,
                         selected: false,
                         locality: HostLocality::Unknown,
+                        host_icon: Default::default(),
+                        host_color: Default::default(),
                         activity: None,
                         deleting: false,
                         bell_open: None,
@@ -2826,6 +2832,8 @@ mod tests {
                             composer_transfer_open: false,
                             selected: selected == id,
                             locality: HostLocality::Unknown,
+                            host_icon: Default::default(),
+                            host_color: Default::default(),
                             activity: None,
                             deleting: false,
                             bell_open: None,
@@ -2908,6 +2916,8 @@ mod tests {
                         composer_transfer_open: false,
                         selected: false,
                         locality: HostLocality::Unknown,
+                        host_icon: Default::default(),
+                        host_color: Default::default(),
                         activity: None,
                         deleting: false,
                         bell_open: open.then_some(read_through),

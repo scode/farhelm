@@ -30,7 +30,7 @@
 // reset and restoration hooks.
 // =====================================================================
 
-import { expect, test } from "./helpers/evidence";
+import { expect, test, newObservedContext } from "./helpers/evidence";
 import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
   createResumableSession,
@@ -721,7 +721,7 @@ test.describe("multi-host", () => {
     await expect(remote).toHaveAttribute("data-host-phase", "connected");
     await expect(remote).toHaveAttribute("data-host-kind", "ssh");
     await expect(remote.locator(".host-kind-icon")).toHaveCount(1);
-    await expect(remote.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "remote");
+    await expect(remote.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "cloud");
     await expect(remote.locator(".host-kind-icon + .visually-hidden")).toHaveText("remote");
     await openHostMenu(remote);
     await expect(remote.locator(".host-remove")).toHaveCount(1);
@@ -1253,6 +1253,169 @@ test.describe("multi-host", () => {
     await expect(retry).toBeFocused();
   });
 
+  /**
+   * Identity is a helm-kept setting, not one client's decoration. A real
+   * remote session and a second already-open client must receive both
+   * choices through the feed, keep them after reload, and preserve the
+   * local laptop. The shared fleet is restored even when an assertion fails.
+   */
+  test("host-appearance: choices persist and redraw rows in two open clients", async ({ page, browser, timeline, request }) => {
+    test.setTimeout(150_000);
+    requireFleet();
+    const hostsResponse = await request.get("/api/hosts");
+    expect(hostsResponse.ok()).toBe(true);
+    const hosts = (await hostsResponse.json()).hosts;
+    const remote = hosts.find((host: { destination: string }) => host.destination === stackInfo().remote_ssh);
+    const local = hosts.find((host: { kind: string }) => host.kind === "local");
+    expect(remote?.state.phase, "the owned SSH fixture must be connected").toBe("connected");
+    expect(local?.kind).toBe("local");
+    const route = `/api/hosts/${remote.id}/appearance`;
+    const session = await createSession(request, { title: `host-appearance-${Date.now()}`, host: remote.id });
+    let observerContext: Awaited<ReturnType<typeof newObservedContext>> | undefined;
+    try {
+      observerContext = await newObservedContext(browser, timeline, { storageState: await page.context().storageState() });
+      await page.goto("/");
+      const row = page.locator(`[data-session-id="${session.id}"]`);
+      await expect(row).toBeVisible({ timeout: 20_000 });
+      const observer = await observerContext.newPage();
+      await observer.goto("/");
+      const observerRow = observer.locator(`[data-session-id="${session.id}"]`);
+      await expect(observerRow).toBeVisible({ timeout: 20_000 });
+      await expect(observerRow.locator(".host-kind-icon")).toHaveAttribute("data-glyph", remote.icon);
+      await expect(observerRow.locator(".host-kind-icon")).toHaveAttribute("data-host-color", remote.color);
+      await openHostMenu(page.locator(`.host-row[data-host-id="${remote.id}"]`));
+      await page.locator(".host-settings").click();
+      const dialog = page.locator(".host-settings-dialog");
+      await expect(dialog.locator(".host-settings-appearance")).toBeVisible();
+      const icons = dialog.getByRole("group", { name: "icon", exact: true });
+      const colors = dialog.getByRole("group", { name: "color", exact: true });
+      await expect(icons.getByRole("button")).toHaveCount(15);
+      await expect(colors.getByRole("button")).toHaveCount(7);
+      await icons.getByRole("button", { name: "rocket", exact: true }).click();
+      await expect(icons.getByRole("button", { name: "rocket", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(colors.getByRole("button", { name: "teal", exact: true })).toBeEnabled();
+      // Establish keyboard focus before Space: pointer history is not a
+      // premise for the color buttons' native keyboard activation.
+      const teal = colors.getByRole("button", { name: "teal", exact: true });
+      await teal.focus();
+      await expect(teal).toBeFocused();
+      await teal.press("Space");
+      await expect(teal).toHaveAttribute("aria-pressed", "true");
+      await expect(teal).toBeEnabled();
+      await expect(teal).toBeFocused();
+      await expect(dialog.locator(".host-settings-mark .host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
+      await expect(dialog.locator(".host-appearance-preview .host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+      await test.info().attach("host-appearance-dialog", { body: await dialog.screenshot(), contentType: "image/png" });
+      await dialog.locator(".host-settings-close").click();
+      for (const client of [page, observer]) {
+        const sessionMark = client.locator(`[data-session-id="${session.id}"] .session-locality-slot .host-kind-icon`);
+        const hostMark = client.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`);
+        await expect(sessionMark).toHaveAttribute("data-glyph", "rocket", { timeout: 20_000 });
+        await expect(sessionMark).toHaveCSS("color", "rgb(79, 200, 192)");
+        await expect(hostMark).toHaveAttribute("data-glyph", "rocket");
+        await expect(hostMark).toHaveCSS("color", "rgb(79, 200, 192)");
+      }
+      // Selection supplies the surface this assertion measures. Both clients
+      // may auto-attach this session, so the second client's last-attach-wins
+      // takeover is unrelated to whether the selected row keeps its tint.
+      await row.locator(".session-row-open").click();
+      await expect(row).toHaveAttribute("data-session-selected", "true");
+      await expect(row.locator(".host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+      await test.info().attach("host-appearance-selected-row", { body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png" });
+      await page.reload();
+      await expect(page.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`)).toHaveAttribute("data-glyph", "rocket");
+      await expect(page.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`)).toHaveAttribute("data-host-color", "teal");
+      const refused = await request.post(route, { data: { icon: "spaceship", color: "teal" } });
+      expect(refused.status()).toBe(422);
+      const savedResponse = await request.get("/api/hosts");
+      expect(savedResponse.ok()).toBe(true);
+      const saved = (await savedResponse.json()).hosts.find((host: { id: number }) => host.id === remote.id);
+      expect([saved.icon, saved.color]).toEqual(["rocket", "teal"]);
+      await openHostMenu(page.locator(`.host-row[data-host-id="${local.id}"]`));
+      await page.locator(".host-settings").click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.locator(".host-settings-appearance")).toHaveCount(0);
+      await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toBeVisible();
+    } finally {
+      await observerContext?.close();
+      const reset = await request.post(route, { data: { icon: remote.icon, color: remote.color } });
+      expect(reset.ok(), "restore the shared fleet's original appearance").toBe(true);
+      await cleanupSession(request, session.id);
+    }
+  });
+
+  /**
+   * A completed appearance write must supply the unchanged half of the next
+   * choice before the hosts GET catches up. Holding that GET exposes the
+   * POST-to-refresh gap; holding the first reply also proves all settings
+   * remain disabled for the write itself. The real helm decides what saved.
+   */
+  test("host-appearance: a second choice preserves the first while refresh is held", async ({ page, request }) => {
+    requireFleet();
+    const hosts = await apiHosts(request);
+    const remote = hosts.find((host: { destination: string }) => host.destination === stackInfo().remote_ssh);
+    expect(remote?.state.phase, "the owned SSH fixture must be connected").toBe("connected");
+    const routePath = `/api/hosts/${remote.id}/appearance`;
+    let releaseReads!: () => void;
+    const readsReleased = new Promise<void>((resolve) => (releaseReads = resolve));
+    let releaseWrite!: () => void;
+    const writeReleased = new Promise<void>((resolve) => (releaseWrite = resolve));
+    let holdReads = false;
+    let heldReads = 0;
+    const submitted: Array<{ icon: string; color: string }> = [];
+    await page.route("**/api/hosts", async (route) => {
+      if (holdReads) {
+        heldReads += 1;
+        await readsReleased;
+      }
+      await route.continue();
+    });
+    await page.route(`**${routePath}`, async (route) => {
+      submitted.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      if (submitted.length === 1) await writeReleased;
+      await route.fulfill({ response });
+    });
+    try {
+      // Start from a known opposite pair, independent of preceding cases.
+      const reset = await request.post(routePath, { data: { icon: "cloud", color: "default" } });
+      expect(reset.ok()).toBe(true);
+      await page.goto("/");
+      const hostRow = page.locator(`.host-row[data-host-id="${remote.id}"]`);
+      await openHostMenu(hostRow);
+      await hostRow.locator(".host-settings").click();
+      const dialog = page.locator(".host-settings-dialog");
+      const rocket = dialog.getByRole("button", { name: "rocket", exact: true });
+      const teal = dialog.getByRole("button", { name: "teal", exact: true });
+      await expect(dialog.getByRole("button", { name: "cloud", exact: true })).toHaveAttribute("aria-pressed", "true");
+      holdReads = true;
+      await rocket.click();
+      await expect.poll(() => submitted.length).toBe(1);
+      await expect(teal).toBeDisabled();
+      await expect(dialog.locator(".host-edit")).toBeDisabled();
+      await expect(dialog.locator(".host-yolo-without-asking-toggle")).toBeDisabled();
+      releaseWrite();
+      await expect(teal).toBeEnabled();
+      await expect.poll(() => heldReads, { message: "the post-write hosts refresh is held" }).toBeGreaterThan(0);
+      // Do not wait for a refreshed selected icon. This is the vulnerable
+      // boundary: the first POST is over, but no following GET can complete.
+      await teal.click();
+      await expect.poll(() => submitted.length).toBe(2);
+      await expect(teal).toBeEnabled();
+      expect(submitted).toEqual([{ icon: "rocket", color: "default" }, { icon: "rocket", color: "teal" }]);
+      const stored = (await apiHosts(request)).find((host: { id: number }) => host.id === remote.id);
+      expect([stored.icon, stored.color]).toEqual(["rocket", "teal"]);
+      await expect(rocket).toHaveAttribute("aria-pressed", "true");
+      await expect(teal).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      releaseWrite();
+      releaseReads();
+      holdReads = false;
+      const reset = await request.post(routePath, { data: { icon: remote.icon, color: remote.color } });
+      expect(reset.ok(), "restore the shared fleet's original appearance").toBe(true);
+    }
+  });
+
   // The YOLO-launch setting round-trips through the helm from the host's settings dialog.
   // Every host starts asking before YOLO launches, so the checkbox starts clear; the local
   // row is used because it always exists. The setting is restored to asking first whatever
@@ -1408,7 +1571,7 @@ test.describe("multi-host", () => {
     await expect(dialog.locator(".host-settings-title")).toHaveText(destination);
     await expect(dialog.locator(".host-settings-summary")).toContainText("connected");
     await expect(dialog.locator(".host-settings-version")).toHaveText("Farhelm 0.1.0");
-    await expect(dialog.locator(".host-settings-mark [data-glyph=remote]")).toHaveCount(1);
+    await expect(dialog.locator(".host-settings-mark [data-glyph=cloud]")).toHaveCount(1);
     await test.info().attach("host-settings-remote", { body: await dialog.screenshot(), contentType: "image/png" });
     // A short window must scroll the complete dialog to its footer rather
     // than shrink the grouped sections into overlapping controls. The long
@@ -2223,7 +2386,7 @@ test.describe("multi-host", () => {
       // attribute proves the VERDICT, not which svg component actually
       // rendered — a `HostLocality::Remote` arm that called `LocalHostIcon`
       // by mistake would still satisfy every other assertion here.
-      await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "remote");
+      await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "cloud");
       // Adjacent-sibling, not a bare `.visually-hidden` lookup: a live
       // status badge (this session is `running`) hides its own word the
       // same way, and a loose selector would be ambiguous between the two

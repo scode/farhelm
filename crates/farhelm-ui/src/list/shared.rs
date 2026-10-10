@@ -133,6 +133,11 @@ pub(super) struct RowState {
     /// every row and still re-renders exactly the rows a selection change
     /// touched.
     pub(super) locality: HostLocality,
+    /// Identity from the existing hosts read. Compared with the other row
+    /// state so a host appearance change redraws its memoized session rows.
+    pub(super) host_icon: farhelm_proto::host_appearance::HostIcon,
+    /// Compared alongside the silhouette so color-only saves redraw the row.
+    pub(super) host_color: farhelm_proto::host_appearance::HostColor,
     /// How long ago this session was last active, already FORMATTED, or
     /// `None` for a helm that sends no activity stamp at all.
     ///
@@ -869,6 +874,8 @@ pub(super) mod tests {
             incarnation: 3,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         }];
         let options = host_options(&catalog);
         assert_eq!(options[0].id, 7);
@@ -1005,6 +1012,8 @@ pub(super) mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         }
     }
 

@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 43;
+const SCHEMA_VERSION: i64 = 44;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -639,6 +639,11 @@ pub struct HostRow {
     /// without asking the user (SPEC.md, Agent-spawned sessions). `false` (asks first) for
     /// every host until [`HelmStore::set_commands_without_asking`] says otherwise.
     pub commands_without_asking: bool,
+    /// Durable decorative identity. Null columns decode to cloud/default;
+    /// the local host cannot be assigned either field.
+    pub icon: farhelm_proto::host_appearance::HostIcon,
+    /// Identity tint only; null retains the ordinary foreground.
+    pub color: farhelm_proto::host_appearance::HostColor,
 }
 
 /// One `hosts` row's columns, read positionally by [`HelmStore::list_hosts`]
@@ -659,6 +664,8 @@ type RawHostRow = (
     bool,
     bool,
     bool,
+    Option<String>,
+    Option<String>,
 );
 
 /// One decodable row of the session cache as [`HelmStore::cached_rows`]
@@ -1226,6 +1233,9 @@ pub enum HostStoreError {
     /// identity the same way" — PLAN_M6.md item 3).
     #[error("the local host's destination cannot be changed and it cannot be removed")]
     LocalHostImmutable,
+    /// The local laptop is a fixed locality cue, never a chosen identity.
+    #[error("the local host keeps its red laptop; icon and color are remote-host settings")]
+    LocalHostAppearanceFixed,
     /// The stored identity no longer matches what a caller assumed it still
     /// was. Two distinct callers hit this: [`HelmStore::adopt_identity`]'s
     /// compare-and-swap, when `expected_old` no longer names the currently
@@ -1781,6 +1791,8 @@ pub struct HelmStore {
 ///   on its host by the request the agent sent (SPEC.md, Agent-spawned
 ///   sessions), so nothing needs the stored resolution any more.
 /// - 43: the nullable feedback contact joins the shared preferences row.
+/// - 44: nullable stable icon/color words on hosts; null preserves cloud/default
+///   and the local host keeps both null.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1863,6 +1875,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- without the user's approval (added in schema 40); 0 asks
                  -- first. Last for the reason `yolo_without_asking` is.
                  commands_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (commands_without_asking IN (0, 1)),
+                 -- Stable decorative words; appended in schema 44, so the
+                 -- fresh path and the migration ladder retain column order.
+                 icon TEXT CHECK (kind = 'ssh' OR icon IS NULL),
+                 color TEXT CHECK (kind = 'ssh' OR color IS NULL),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2073,7 +2089,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 43;",
+              PRAGMA user_version = 44;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3038,6 +3054,28 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 43;")
             .context("migrating helm.db to schema version 43")?;
         version = 43;
+    }
+    if version == 43 {
+        // Ladder fixtures may rewind a current database's version. Genuine
+        // schema-43 files lack both columns and acquire the default mark.
+        for column in ["icon", "color"] {
+            let present: bool = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name = ?1",
+                    [column],
+                    |row| row.get::<_, i64>(0),
+                )
+                .context("checking host appearance columns")?
+                > 0;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE hosts ADD COLUMN {column} TEXT CHECK (kind = 'ssh' OR {column} IS NULL);"
+                )).context("migrating host appearance")?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 44;")
+            .context("migrating helm.db to schema version 44")?;
+        version = 44;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4320,7 +4358,7 @@ impl HelmStore {
                     let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
-                     host_identity, cache_truncated, yolo_without_asking, commands_without_asking \
+                     host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -4337,6 +4375,8 @@ impl HelmStore {
                                 r.get(7)?,
                                 r.get(8)?,
                                 r.get(9)?,
+                                r.get(10)?,
+                                r.get(11)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -4355,6 +4395,8 @@ impl HelmStore {
                                 cache_truncated,
                                 yolo_without_asking,
                                 commands_without_asking,
+                                icon,
+                                color,
                             )| {
                                 Ok(HostRow {
                                     id,
@@ -4367,6 +4409,10 @@ impl HelmStore {
                                     cache_truncated,
                                     yolo_without_asking,
                                     commands_without_asking,
+                                    icon: icon.as_deref().unwrap_or("cloud").parse()
+                                        .map_err(anyhow::Error::msg)?,
+                                    color: color.as_deref().unwrap_or("default").parse()
+                                        .map_err(anyhow::Error::msg)?,
                                 })
                             },
                         )
@@ -4954,6 +5000,57 @@ impl HelmStore {
                     .context("updating commands-without-asking")?;
                     tx.commit().context("committing commands-without-asking")?;
                     Ok(true)
+                },
+            )
+            .await
+    }
+
+    /// Save a remote host's identity atomically, returning whether it changed.
+    ///
+    /// Defaults use null columns so an untouched host and an explicitly reset
+    /// one have the same durable shape. The local row is refused even for
+    /// defaults: its fixed laptop is not part of this choice surface.
+    pub async fn set_appearance(
+        &self,
+        host: HostId,
+        icon: farhelm_proto::host_appearance::HostIcon,
+        color: farhelm_proto::host_appearance::HostColor,
+    ) -> anyhow::Result<bool> {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        self.conn
+            .call(
+                "set host appearance task panicked",
+                move |conn: &mut Connection| {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning host appearance write")?;
+                    let current: Option<(String, Option<String>, Option<String>)> = tx
+                        .query_row(
+                            "SELECT kind, icon, color FROM hosts WHERE id = ?1",
+                            [host],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                        )
+                        .optional()
+                        .context("looking up host appearance")?;
+                    let Some((kind, current_icon, current_color)) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if HostKind::from_column(&kind)? == HostKind::Local {
+                        return Err(anyhow::Error::new(HostStoreError::LocalHostAppearanceFixed));
+                    }
+                    let next_icon = (icon != HostIcon::Cloud).then_some(icon.as_str());
+                    let next_color = (color != HostColor::Default).then_some(color.as_str());
+                    let changed = current_icon.as_deref() != next_icon
+                        || current_color.as_deref() != next_color;
+                    if changed {
+                        tx.execute(
+                            "UPDATE hosts SET icon = ?2, color = ?3 WHERE id = ?1",
+                            rusqlite::params![host, next_icon, next_color],
+                        )
+                        .context("saving host appearance")?;
+                    }
+                    tx.commit().context("committing host appearance")?;
+                    Ok(changed)
                 },
             )
             .await
@@ -7285,6 +7382,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 27;",
@@ -9800,6 +9899,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 28;",
@@ -10661,6 +10762,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -10784,6 +10887,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -10839,7 +10944,9 @@ mod tests {
                 .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
-                ALTER TABLE hosts DROP COLUMN commands_without_asking;
+                ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts DROP COLUMN commands_without_asking;
                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
@@ -11112,6 +11219,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -12592,6 +12701,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
@@ -15085,5 +15196,96 @@ mod tests {
                 .unwrap()
         );
         assert!(stored(&store).await.is_empty());
+    }
+
+    /// Upgrading the preceding schema gives old hosts the existing cloud,
+    /// preserves their alias, and stores later choices as words across a
+    /// close/reopen. This catches a default or column-order mistake that a
+    /// fresh database alone cannot exercise.
+    #[farhelm_testtrace::test]
+    async fn schema_44_migrates_and_persists_host_appearance_words() {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let host = store
+            .add_ssh_host("user@appearance-migration", None, None)
+            .await
+            .unwrap();
+        store.update_alias(host, Some("Kept alias")).await.unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE hosts DROP COLUMN icon; ALTER TABLE hosts DROP COLUMN color; PRAGMA user_version = 43;").unwrap();
+        let columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name IN ('icon', 'color')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 0, "the fixture must really lack the new fields");
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.alias.as_deref(), Some("Kept alias"));
+        assert_eq!((row.icon, row.color), (HostIcon::Cloud, HostColor::Default));
+        assert!(
+            store
+                .set_appearance(host, HostIcon::Castle, HostColor::Copper)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_appearance(host, HostIcon::Castle, HostColor::Copper)
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        let words: (String, String) = conn
+            .query_row(
+                "SELECT icon, color FROM hosts WHERE id = ?1",
+                [host],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(words, ("castle".into(), "copper".into()));
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!((row.icon, row.color), (HostIcon::Castle, HostColor::Copper));
+        assert!(
+            store
+                .set_appearance(host, HostIcon::Cloud, HostColor::Default)
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        let words: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT icon, color FROM hosts WHERE id = ?1",
+                [host],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            words,
+            (None, None),
+            "reset restores the unset durable shape"
+        );
     }
 }

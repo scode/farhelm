@@ -143,3 +143,16 @@ single even-odd ring, the small-size simplification OpenCode itself uses, so the
    and looks worse.
 4. Compute the transform from the exact bounding box using the rule above, and record the box in the comment beside it.
    Never use an SVG `text` element.
+
+## Host marks
+
+Host identity uses a separate 16-unit, stroke-only box at weight 1.3, rendered at 12px in session and host rows. The
+local laptop is a fixed red locality cue. A remote host chooses among cloud, house, flask, database, chip, rocket, gear,
+gem, hexagon, triangle, ring, square, bug, factory and castle; these drawings were made for Farhelm and carry no
+third-party brand provenance. Keep their silhouette and stroke weight when adding callers, rather than applying the
+harness marks' 12-unit normalization rule.
+
+The helm stores stable icon and color words. The six host color tokens identify a host and carry no connection,
+permission or activity state; default uses the ordinary foreground. The SVG is decorative, with the caller's accessible
+locality word beside it and the mark's SSH explanation on hover. Its `data-glyph` is the icon word, so tests distinguish
+an actual drawing from a locality label that could agree with the wrong picture.

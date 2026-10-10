@@ -3256,6 +3256,14 @@ pub(crate) fn ListView(
             host_menu_open,
             session_menu_open: menu_open,
             on_changed: refresh_hosts,
+            on_appearance_committed: move |(id, icon, color)| {
+                // This successful write is newer than every GET already in
+                // flight. Publish its known pair before controls re-enable;
+                // the normal refresh still supplies all connection facts.
+                let generation = hosts_reads.write().start();
+                hosts_reads.write().accept_success(generation);
+                hosts.write().record_appearance(id, icon, color);
+            },
         }
         // The session list's own header: count, compact preference, and the
         // creation action share one line so neither former control row costs
@@ -3766,6 +3774,10 @@ pub(crate) fn ListView(
                                     selected: selected.read().as_deref()
                                         == Some(session.id.as_str()),
                                     locality: session_locality(session.host, local_host),
+                                    host_icon: hosts.read().hosts().unwrap_or_default().iter()
+                                        .find(|host| Some(host.id) == session.host).map(|host| host.icon).unwrap_or_default(),
+                                    host_color: hosts.read().hosts().unwrap_or_default().iter()
+                                        .find(|host| Some(host.id) == session.host).map(|host| host.color).unwrap_or_default(),
                                     // Formatted HERE, not in the row: see
                                     // `RowState::activity` for why the
                                     // clock's tick must not reach a row

@@ -1,5 +1,5 @@
-//! The host settings dialog: one host's destination, alias, and whether YOLO
-//! launches on it need a confirmation, in a modal over the whole page.
+//! The host settings dialog: connection details, remote identity appearance,
+//! and permission choices, in a modal over the whole page.
 //!
 //! It replaced a panel that expanded inline inside the host's sidebar row.
 //! The sidebar is too narrow for that: the destination was cut off, the edit
@@ -7,8 +7,8 @@
 //! The dialog shows every value in full and edits one field at a time, in
 //! place, saving each change on its own (there is no dialog-wide Save).
 //! A host-specific header identifies the peer and its reported connection
-//! state, while Connection and Permissions group the existing controls. The
-//! refresh has its own CSS class because the base dialog styles also serve
+//! state, while Connection, remote-only Appearance and Permissions group
+//! the controls. The refresh has its own CSS class because the base dialog styles also serve
 //! unrelated modals. The switches remain native checkboxes, including their
 //! write-disable, refused-write reset and keyboard contracts.
 //!
@@ -49,7 +49,7 @@
 use dioxus::prelude::*;
 
 use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
-use crate::icons::{LocalHostIcon, RemoteHostIcon};
+use crate::icons::{HostMark, LocalHostIcon};
 use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
@@ -60,7 +60,7 @@ const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
 const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
 
 /// One setting the dialog can change, as the key its last write's outcome is
-/// filed under. A superset of [`EditField`]: the two checkboxes write through
+/// filed under. A superset of [`EditField`]: checkboxes and appearance write through
 /// the same `run` path but have no text editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SettingsField {
@@ -68,6 +68,16 @@ pub(super) enum SettingsField {
     Alias,
     YoloWithoutAsking,
     CommandsWithoutAsking,
+    Appearance,
+}
+
+/// One explicit appearance choice; the panel supplies the other current word.
+/// Carrying a complete render-time pair would let a queued click restore a
+/// value from before the preceding write's confirmed response.
+#[derive(Clone, Copy)]
+pub(super) enum AppearanceChoice {
+    Icon(farhelm_proto::host_appearance::HostIcon),
+    Color(farhelm_proto::host_appearance::HostColor),
 }
 
 impl From<EditField> for SettingsField {
@@ -372,6 +382,7 @@ pub(super) fn HostSettingsDialog(
     on_edit_cancel: EventHandler<()>,
     on_yolo_without_asking: EventHandler<(HostId, bool)>,
     on_commands_without_asking: EventHandler<(HostId, bool)>,
+    on_appearance: EventHandler<(HostId, AppearanceChoice)>,
     on_close: EventHandler<()>,
 ) -> Element {
     let id = host.id;
@@ -472,7 +483,7 @@ pub(super) fn HostSettingsDialog(
                     div { class: "host-settings-mark", "aria-hidden": "true",
                         match host.kind {
                             HostKind::Local => rsx! { LocalHostIcon {} },
-                            HostKind::Ssh => rsx! { RemoteHostIcon {} },
+                            HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
                             HostKind::Unrecognized => rsx! {},
                         }
                     }
@@ -570,6 +581,48 @@ pub(super) fn HostSettingsDialog(
                     }
                 }
                 }
+                }
+                if manageable {
+                    section { class: "host-settings-section host-settings-appearance", aria_label: "Appearance",
+                        h3 { class: "host-settings-section-title", "Appearance" }
+                        span { class: "host-settings-label", "icon" }
+                        div { class: "host-appearance-icons", role: "group", aria_label: "icon",
+                            for icon in farhelm_proto::host_appearance::HostIcon::ALL {
+                                button {
+                                    r#type: "button", class: "host-icon-choice",
+                                    aria_label: icon.as_str(), aria_pressed: host.icon == icon,
+                                    "data-tooltip": "icon: {icon.as_str()}",
+                                    disabled: busy || editing.is_some(),
+                                    onclick: move |_| on_appearance.call((id, AppearanceChoice::Icon(icon))),
+                                    HostMark { icon, color: host.color }
+                                }
+                            }
+                        }
+                        span { class: "host-settings-label", "color" }
+                        div { class: "host-appearance-colors", role: "group", aria_label: "color",
+                            for color in farhelm_proto::host_appearance::HostColor::ALL {
+                                button {
+                                    r#type: "button", class: "host-color-choice",
+                                    aria_label: color.as_str(), aria_pressed: host.color == color,
+                                    "data-tooltip": "color: {color.as_str()}",
+                                    "data-host-color": color.as_str(),
+                                    disabled: busy || editing.is_some(),
+                                    onclick: move |_| on_appearance.call((id, AppearanceChoice::Color(color))),
+                                    span { "aria-hidden": "true" }
+                                }
+                            }
+                            span { class: "host-color-name", "{host.color.as_str()}" }
+                        }
+                        div { class: "host-appearance-preview",
+                            span { class: "host-settings-help", "in the session list" }
+                            div { class: "host-appearance-preview-row",
+                                span { class: "status-dot", "aria-hidden": "true" }
+                                span { class: "session-locality-slot", HostMark { icon: host.icon, color: host.color } }
+                                span { "session" }
+                            }
+                        }
+                        {outcome_for(Some(SettingsField::Appearance))}
+                    }
                 }
                 section { class: "host-settings-section", aria_label: "Permissions",
                     h3 { class: "host-settings-section-title", "Permissions" }

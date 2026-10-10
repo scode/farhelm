@@ -132,6 +132,15 @@
 :root {
   /* A fresh profile keeps the old geometry before the width asset loads. */
   --sidebar-width: 340px;
+  /* Host identity colors carry no state. They tint only a remote host's
+     mark, away from status and accent hues, on chrome, menus and dialogs.
+     Each clears 4.5:1 on the surfaces bound by the contrast harness. */
+  --host-icon-lavender: #b8a4f0;
+  --host-icon-orchid: #e090d8;
+  --host-icon-teal: #4fc8c0;
+  --host-icon-steel: #93aec4;
+  --host-icon-sand: #c8b48e;
+  --host-icon-copper: #d0906a;
   /* Surfaces. THREE levels are in use, and which level a thing sits on
      is a decision recorded here rather than something each rule picks
      for itself: ground for content, one step up for the chrome around
@@ -3498,9 +3507,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* Local sessions need a persistent caution cue, including selected rows.
-   Scope it to the session locality slot so host controls and
-   remote glyphs keep their existing meaning. Classification still comes from
-   confirmed host identity, never the host's displayed name. */
+   This rule once scoped the red to the session locality slot. The laptop mark
+   (`LocalHostIcon`) now carries the red inline, so it is red wherever it is
+   drawn, the hosts panel included, and this rule and the host-settings one
+   only restate it. Classification still comes from confirmed host identity,
+   never the host's displayed name. */
 .session-locality-slot .host-kind-icon[data-glyph="local"] {
   color: var(--danger);
 }
@@ -6704,3 +6715,34 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .quick-switcher-templates-hint { color: var(--fg-1); font-size: 12px; }
 .quick-switcher-templates-hint { border-top: 1px solid var(--border-dialog); padding-top: 10px; }
 .quick-switcher-templates-hint p { margin: 4px 0 0; }
+
+/* Appearance is an explicit click-to-save choice, not a radio group whose
+   arrow navigation would save and disable itself at each intermediate icon. */
+.host-appearance-icons { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.host-icon-choice {
+  display: grid; place-items: center; min-width: 0; width: 100%; max-width: 36px;
+  aspect-ratio: 1; padding: 0; border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm); background: var(--well); cursor: pointer;
+}
+/* The named choice owns hover; the mark's SSH tooltip belongs to real rows. */
+.host-icon-choice .host-kind-icon { width: 14px; height: 14px; pointer-events: none; }
+.host-icon-choice[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent); }
+.host-icon-choice:hover:not(:disabled) { background: var(--control-hover-bg); }
+.host-icon-choice:disabled, .host-color-choice:disabled { opacity: .5; cursor: default; }
+.host-appearance-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.host-color-choice {
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 3px;
+  border: 1px solid transparent; border-radius: 50%; background: transparent; cursor: pointer;
+}
+.host-color-choice span { width: 100%; height: 100%; border-radius: 50%; background: var(--fg-0); }
+.host-color-choice[aria-pressed="true"] { border-color: var(--accent); }
+.host-color-choice[data-host-color="lavender"] span { background: var(--host-icon-lavender); }
+.host-color-choice[data-host-color="orchid"] span { background: var(--host-icon-orchid); }
+.host-color-choice[data-host-color="teal"] span { background: var(--host-icon-teal); }
+.host-color-choice[data-host-color="steel"] span { background: var(--host-icon-steel); }
+.host-color-choice[data-host-color="sand"] span { background: var(--host-icon-sand); }
+.host-color-choice[data-host-color="copper"] span { background: var(--host-icon-copper); }
+.host-color-name { color: var(--fg-1); font-size: 12px; }
+.host-appearance-preview { display: grid; gap: 10px; padding: 12px; background: var(--bg-1); border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
+.host-appearance-preview-row { display: flex; align-items: center; gap: 8px; }
+.host-appearance-preview-row .status-dot { background: var(--fg-1); }

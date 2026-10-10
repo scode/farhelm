@@ -688,6 +688,13 @@ pub struct Host {
     /// card's "Always allow" turns it on.
     #[serde(default)]
     pub commands_without_asking: bool,
+    /// Durable remote identity read from the helm; defaults preserve an
+    /// untouched host's cloud and ordinary foreground.
+    #[serde(default)]
+    pub icon: farhelm_proto::host_appearance::HostIcon,
+    /// Identity tint only; connection and permission colors stay separate.
+    #[serde(default)]
+    pub color: farhelm_proto::host_appearance::HostColor,
 }
 
 /// Which kind of registry row a host is (farhelm-helm's `HostKind`, as the

@@ -104,6 +104,8 @@ pub(crate) use enum_with_all;
 /// Acting `farhelm` commands waiting for the user's approval, as the helm
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
+/// Stable remote-host identity choices shared with the browser UI.
+pub mod host_appearance;
 /// Tokens the UI branches on in the helm's HTTP replies (see the module's own
 /// docs).
 pub mod http;
