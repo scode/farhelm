@@ -676,9 +676,12 @@ the source's actual directory; a managed checkout then requires an explicit repo
 setup, or a template that sets one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
-root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
-captured home. Clearing an override restores inheritance; an empty hook override disables the inherited hook.
-Configuration changes affect new attempts, not an already accepted attempt or its retries.
+root. The all-hosts checkout folder can be set or cleared in Settings or with the command line; per-host overrides and
+the post-clone command remain command-line only. Settings explicitly saves the field, shows a refused value's reason,
+and clears it when an empty field is saved. Browser-readable configuration replies contain only the all-hosts folder,
+never hook text or host overrides. The root must already exist on the target host; `~` expands there, using the
+supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
+hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
@@ -987,8 +990,10 @@ of the sidebar version opens a settings dialog with the host switches `set up ne
 `remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
 confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
 immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
-points to the gear as the place to undo it. Sounds has three device switches (see Status). The installed desktop app's
-dialog also has a switch for installing updates automatically (see
+points to the gear as the place to undo it. Sounds has three device switches (see Status). The dialog also holds the
+explicitly saved all-hosts checkout folder (see [Managed checkouts](#managed-checkouts)). Its help explains expansion on
+each host, first-use folder creation, and that command-line host overrides keep their folder. The installed desktop
+app's dialog also has a switch for installing updates automatically (see
 [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
 installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
 apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client

@@ -4701,8 +4701,12 @@ impl Supervisor {
             )
             .into());
         }
-        let root = root.ok_or_else(|| RequestError::new(ErrorKind::InvalidRequest,
-            "repository discovery needs a checkout root; configure one with `farhelm helm checkout-config set-root`"))?;
+        let root = root.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                "repository discovery needs a checkout folder; set one in Settings",
+            )
+        })?;
         // Root resolution belongs to the same work budget as scanning. On
         // expiry the scanner's cancellation guard retains any child permit
         // until kill/reap completes; timing out never makes a live child free.
@@ -4740,8 +4744,7 @@ impl Supervisor {
         let Some(root) = root else {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
-                "preview needs the resolved checkout root; configure one with \
-                 `farhelm helm checkout-config set-root`",
+                "preview needs a checkout folder; set one in Settings",
             )
             .into());
         };
@@ -7467,8 +7470,8 @@ impl Supervisor {
                 RequestError::new(
                     ErrorKind::InvalidRequest,
                     format!(
-                        "the checkout root is not usable on this host: {error}; create it or fix \
-                 the configured root with `farhelm helm checkout-config set-root`"
+                        "the checkout folder is not usable on this host: {error}; create it or \
+                         change the folder in Settings"
                     ),
                 )
             })?;

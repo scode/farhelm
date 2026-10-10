@@ -11,6 +11,8 @@
 //! to the app's own state file through the updater, never the helm.
 //! Sound switches belong to this device's webview storage and remain live
 //! even if a storage write fails; the sound asset owns those controls.
+//! The checkout folder is helm configuration, not a preference: its shared
+//! field explicitly saves validated text and shows the outcome beside it.
 
 use dioxus::prelude::*;
 
@@ -44,11 +46,13 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose helm preferences, device sounds and desktop updates without a save step.
+/// Expose host choices, device sounds, updates and the all-hosts checkout folder.
 ///
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
 /// surface, and closing the dialog must not cancel a queued preference write.
+/// The folder is the exception: its separate explicit save exposes validation
+/// refusals rather than treating arbitrary text like a switch preference.
 #[component]
 pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -132,6 +136,10 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                             "Farhelm asks before forgetting a host. Its sessions keep running."
                         }
                     }
+                }
+                crate::checkout_root::CheckoutRootField {
+                    note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
+                    on_saved: move |_| {},
                 }
                 crate::sounds::SoundSettings {}
                 if let Some(updater) = updater {

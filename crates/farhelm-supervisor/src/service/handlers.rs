@@ -5961,8 +5961,8 @@ mod tests {
         assert_eq!(req_id, 64);
         // The preview backend exists in unit 2; THIS request carries no
         // resolved root, so the refusal is the actionable
-        // root-not-configured message, not the old not-supported-yet one.
-        assert!(message.contains("checkout root"));
+        // folder-not-configured message, not the old not-supported-yet one.
+        assert!(message.contains("needs a checkout folder"));
         assert!(!message.contains("not supported yet"));
 
         handle_control(

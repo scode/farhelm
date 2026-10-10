@@ -298,10 +298,7 @@ pub(crate) async fn github_repositories(
             // bounded actionable status, including when the scan itself fails.
             .map_err(|error| repository_discovery_failure(&error))
     } else if config.root.is_none() {
-        Err(
-            "no checkout root is configured; set one with `farhelm helm checkout-config set-root`"
-                .to_string(),
-        )
+        Err("no checkout folder is configured; set one in Settings".to_string())
     } else {
         Err("repository discovery is unavailable while this host is offline; recent repositories are still available".to_string())
     };
@@ -387,9 +384,7 @@ pub(crate) async fn github_checkout_preview(
         return http_error(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
-            message: "no checkout root is configured; set one with \
-                      `farhelm helm checkout-config set-root`"
-                .to_string(),
+            message: "no checkout folder is configured; set one in Settings".to_string(),
         }));
     };
     let request = farhelm_proto::GithubPreviewRequest {
@@ -1160,9 +1155,7 @@ async fn github_checkout_resolution(
         return Some(Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
-            message: "no checkout root is configured; set one with \
-                      `farhelm helm checkout-config set-root`"
-                .to_string(),
+            message: "no checkout folder is configured; set one in Settings".to_string(),
         })));
     };
     let repo = farhelm_proto::parse_github_repo(&checkout.repo)
