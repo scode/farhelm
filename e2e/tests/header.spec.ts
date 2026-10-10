@@ -31,9 +31,7 @@ function row(page: Page, id: string) {
 // when Delete joined the row: the actions end at a 598px pane in Chromium and
 // a 608px pane in WebKit, and 650 keeps the same ~40px of platform font slack
 // the old five-action 580 had over its own WebKit measurement.
-const SIDEBAR_WIDTH = 340;
 const SUPPORTED_MAIN_PANE_WIDTH = 650;
-const VIEWPORT_WIDTH = SIDEBAR_WIDTH + SUPPORTED_MAIN_PANE_WIDTH;
 const VIEWPORT_HEIGHT = 600;
 
 test(
@@ -54,8 +52,11 @@ test(
       invocationSuffix: ` #${"x".repeat(200)}`,
     });
     try {
-      await page.setViewportSize({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT });
       await page.goto("/");
+      await expect(page.locator(".app-sidebar")).toBeVisible();
+      const VIEWPORT_WIDTH = Math.ceil((await page.locator(".app-sidebar").boundingBox())!.width) +
+        SUPPORTED_MAIN_PANE_WIDTH;
+      await page.setViewportSize({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT });
       await row(page, session.id).locator(".session-row-open").click();
       await waitForSessionRevealed(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");

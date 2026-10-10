@@ -926,11 +926,16 @@ to every host and client of this helm; existing controls with a natural place in
 its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a browser
 tab and the desktop app open in the same order and on the same session. Per-client persistence — browser storage, a
 desktop state file, anything that lets two clients remember different answers — is not wanted for these shared
-preferences (terminal text size, by contrast, is deliberately per device; see Terminal experience). A client that asks
-the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
-reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
-is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
-the asking session.
+preferences (sidebar width and terminal text size, by contrast, are deliberately per device; see Terminal experience). A
+client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an
+optional parent reference usable by the API, but parentage does not nest the list and implies nothing about VCS state.
+Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone`
+need not record the asking session.
+
+The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
+the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
+like terminal text size: it is about the screen in front of the user, rather than a preference all clients should share.
+The main pane keeps its 320px floor; a narrower window scrolls horizontally.
 
 The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
 idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed

@@ -945,7 +945,7 @@ async function waitForFixtureStates(
 
 /**
  * Selecting a session keeps BOTH panes on screen, non-overlapping, at the
- * agreed geometry: sidebar at its fixed 340px, main pane with real width
+ * agreed geometry: sidebar at its remembered width, main pane with real width
  * and the full shell height.
  *
  * This is the shell's core promise ("the agent list stays visible while a
@@ -980,10 +980,9 @@ test("selecting a session leaves the sidebar and the session view visible side b
     const shellBox = (await page.locator(".app-shell").boundingBox())!;
     const sideBox = (await sidebar.boundingBox())!;
     const mainBox = (await main.boundingBox())!;
-    // 340 content + the 1px right border (content-box sizing puts the
-    // border in the measured box).
-    expect(sideBox.width).toBeGreaterThanOrEqual(340);
-    expect(sideBox.width).toBeLessThanOrEqual(342);
+    // The content width is per-device; the measured box also holds the border.
+    const contentWidth = await sidebar.evaluate((element) => parseFloat(getComputedStyle(element).width));
+    expect(sideBox.width).toBeCloseTo(contentWidth + 1, 0);
     // Side by side and non-overlapping: the main pane starts at or right
     // of the sidebar's right edge (the 1px border may round either way).
     expect(mainBox.x).toBeGreaterThanOrEqual(sideBox.x + sideBox.width - 1);

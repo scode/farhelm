@@ -1095,17 +1095,19 @@
 
   /**
    * Whether something other than a terminal owns the keyboard: an open modal
-   * dialog (above), or focus on one of the agent approval cards (approvals.rs).
+   * dialog (above), focus on one of the agent approval cards (approvals.rs),
+   * or the sidebar separator while the user adjusts its width with arrows.
    * The cards are not modal, so they are not covered by the selector above,
    * but a user who has focused a card's answer button is about to answer it:
    * a terminal taking focus on a replay finishing or a tab closing would turn
    * the Enter meant for the card into agent input and leave the agent's
-   * request unanswered.
+   * request unanswered. Taking focus from the separator would similarly
+   * turn an intended width adjustment into agent input.
    */
   function keyboardHeldElsewhere() {
     if (document.querySelector(OPEN_MODAL_SELECTOR)) return true;
     const active = document.activeElement;
-    return !!(active && active.closest && active.closest(".approval-cards"));
+    return !!(active && active.closest && active.closest(".approval-cards, .sidebar-resize-handle"));
   }
 
   const islands = new Map();
