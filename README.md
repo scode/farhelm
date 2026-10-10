@@ -1,9 +1,3 @@
-> [!WARNING]
-> **This repository is public, but you probably should not use it.** I use farhelm as my daily driver, and it is public
-> so that I can work on it in the open, not because it is ready for anyone else. It is not recommended for general use
-> at this time, for a variety of reasons. Do not expect user-friendliness, do not expect the documentation to be correct
-> or helpful, and do not expect anything else either. This notice goes away when that changes.
-
 <!-- The header, the pillars, and the how-it-works drawing are SVG files rendered by website/scripts/render-svgs.mjs; edit
      that script and re-run it rather than the SVGs. They belong to the docs website, whose landing page shows the same
      introduction, and this file borrows them from there. GitHub shows an SVG only through <img>, which cannot see
@@ -71,32 +65,6 @@ nothing goes through a relay, and every box in the diagram can restart without l
 
 </details>
 
-## Install
+## Docs and installation
 
-The installer currently installs the desktop app on Apple silicon Macs only. Linux remains supported for helms and
-session hosts; this temporary limitation applies only to the installer.
-
-```
-curl -fsSL https://get.farhelm.io/install.sh | sh
-```
-
-See [installation and uninstall](docs/install_uninstall.md) for more detail about what installation does and how to
-uninstall.
-
-Installs `~/Applications/Farhelm.app`, which is the whole installation, and a `~/.local/bin/farhelm` link into it for
-the terminal. The app keeps itself up to date, installing new stable releases in the background and offering a restart
-when one is ready; re-running the same command also updates it, and that is safe while Farhelm is open.
-
-To uninstall, stop local sessions and their additional terminals, quit the desktop app, and stop manually started
-Farhelm processes. Run `farhelm uninstall` and confirm once, or use `farhelm uninstall --dry-run` to preview removal.
-The command removes this installation's files and its setup-owned Linux services, preserving all user data and custom
-service configuration. On macOS, releases without the command need one installer update first; the installer cannot
-provide that upgrade on Linux. Keep installation, updates, setup and Farhelm startup stopped until uninstall finishes.
-
-## More info
-
-See [fresh GitHub checkouts](docs/github-checkouts.md) to configure `gh:owner/repo` launches and checkout retention
-after deletion.
-
-Setup and development instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while this README is
-being rebuilt.
+See [farhelm.io](https://farhelm.io) for documentation and installation instructions.
