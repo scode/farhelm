@@ -7061,7 +7061,9 @@
   part. Add the principle above to SPEC_impl.md where the acknowledged no-output teardown is described (and adjust that
   section's "part of the handoff contract" framing so it no longer invites unbounded defense), naming the evidence that
   would reopen it: an observed abort on 3.7c or later. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/shutdown-expiry-quiesce.md`.
+- Execution: complete in jj change `rrrzowlylxlwrxszxlmppuwstoukxvzu`, bookmark
+  `plan/shutdown-expiry-quiesce/01-shutdown-expiry-quiesce`,
+  [PR #1780](https://github.com/scode/farhelm/pull/1780/changes).
 
 ## installer-startup-prune.md
 

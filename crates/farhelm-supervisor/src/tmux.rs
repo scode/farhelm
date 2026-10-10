@@ -2236,6 +2236,48 @@ impl TmuxDriver {
         Ok(reaped)
     }
 
+    /// Make one bounded attempt to quiet control clients before process exit.
+    ///
+    /// This is the planned-stop budget's fallback, independent of the attachment
+    /// lock that may have spent that budget. Private-server control clients belong
+    /// to the supervisor, so one roster snapshot suffices; no client is killed,
+    /// retried or verified afterwards. Two seconds leaves room inside the successor's
+    /// state-directory claim margin. Failure still permits process exit and does
+    /// not promise protection against a tmux abort on abrupt client closure.
+    pub(crate) async fn quiet_control_clients_before_exit(&self) -> anyhow::Result<()> {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            // A client can exit between the snapshot and its command: the
+            // ordinary teardown keeps closing attachments after its budget
+            // expired. That failure must not skip the clients listed after
+            // it, which may still be sending output, so each one is tried
+            // and the failures are reported together at the end.
+            let mut failed = Vec::new();
+            if let Some(clients) = self.list_client_pids_and_flags().await? {
+                for (pid, flags) in clients {
+                    if !flags.contains("control-mode") {
+                        continue;
+                    }
+                    if let Err(error) = self
+                        .disable_control_client_output(&format!("client-{pid}"))
+                        .await
+                    {
+                        failed.push(format!("client-{pid}: {error:#}"));
+                    }
+                }
+            }
+            if failed.is_empty() {
+                Ok(())
+            } else {
+                bail!(
+                    "some control clients were not quieted: [{}]",
+                    failed.join("; ")
+                )
+            }
+        })
+        .await
+        .context("planned-stop output quiet-down timed out")?
+    }
+
     /// One bounded `list-clients` snapshot as `(pid, flags)` rows, with
     /// the clientless-server error shape mapped to `None`.
     ///
@@ -2243,8 +2285,8 @@ impl TmuxDriver {
     /// target"), not an empty listing — the ordinary fresh-start case
     /// must read as "nothing attached", while every other failure still
     /// propagates. Bounded with its own kill-on-drop process rather than
-    /// [`Self::run`] because the reap runs during startup, where a
-    /// wedged tmux server must fail construction instead of hanging it.
+    /// [`Self::run`] because startup reaping and the stop-expiry fallback
+    /// must both return when the private tmux server is wedged.
     async fn list_client_pids_and_flags(&self) -> anyhow::Result<Option<Vec<(u32, String)>>> {
         let mut query = self.command();
         query
@@ -2253,14 +2295,14 @@ impl TmuxDriver {
             .kill_on_drop(true);
         let out = tokio::time::timeout(CONTROL_EXCHANGE_TIMEOUT, query.output())
             .await
-            .context("list-clients timed out during the stale-control-client reap")?
-            .context("running list-clients for the stale-control-client reap")?;
+            .context("control-client listing timed out")?
+            .context("running control-client listing")?;
         if !out.status.success() {
             let error = anyhow::Error::new(TmuxCommandFailure::new(out.stderr, &[]));
             if self.is_definitively_empty(&error) {
                 return Ok(None);
             }
-            return Err(error.context("listing clients for the stale-control-client reap"));
+            return Err(error.context("listing control clients"));
         }
         let mut rows = Vec::new();
         for line in String::from_utf8_lossy(&out.stdout).lines() {
@@ -3945,6 +3987,97 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
 mod tests {
     use super::test_support::{ScratchServer, tail_containing};
     use super::*;
+
+    /// The stop-expiry fallback must turn a real output-bearing client quiet
+    /// without reaping it. Pin the flag itself: silence alone could mean the
+    /// client died, and cannot prove the no-output boundary process exit needs.
+    #[farhelm_testtrace::test]
+    async fn stop_expiry_quiets_a_live_control_client_without_killing_it() {
+        use tokio::io::AsyncBufReadExt;
+
+        let server = ScratchServer::start().await;
+        server
+            .driver
+            .run(&["new-session", "-d", "-s", "expiry", "sleep 60"])
+            .await
+            .expect("create private session");
+        let mut child = server
+            .driver
+            .command()
+            .args(["-C", "attach-session", "-t", "expiry"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("attach control client");
+        let pid = child.id().expect("client pid");
+        let mut reader = BufReader::new(child.stdout.take().expect("client stdout"));
+        // The attach acknowledgement establishes readiness before roster checks.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let mut line = String::new();
+                assert_ne!(
+                    reader.read_line(&mut line).await.expect("attach reply"),
+                    0,
+                    "client exited before attach acknowledgement"
+                );
+                if line.starts_with("%end ") {
+                    break;
+                }
+                assert!(!line.starts_with("%error "), "attach refused: {line}");
+            }
+        })
+        .await
+        .expect("control attach must acknowledge");
+        let before = server
+            .driver
+            .list_client_pids_and_flags()
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, flags) = before
+            .iter()
+            .find(|(id, _)| *id == pid)
+            .expect("attached client");
+        assert!(
+            flags.contains("control-mode") && !flags.contains("no-output"),
+            "fixture flags: {flags}"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "fixture client must be live"
+        );
+
+        server
+            .driver
+            .quiet_control_clients_before_exit()
+            .await
+            .expect("quiet-down");
+
+        let after = server
+            .driver
+            .list_client_pids_and_flags()
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, flags) = after
+            .iter()
+            .find(|(id, _)| *id == pid)
+            .expect("client retained");
+        assert!(
+            flags.contains("no-output"),
+            "client output remained enabled: {flags}"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "quiet-down must not kill the client"
+        );
+        child
+            .kill()
+            .await
+            .expect("reap the now-quiet fixture client");
+    }
 
     /// Start-directory normalization must remove the spelling that produces
     /// `~/` prompts without changing roots, symlinks, or tmux format escaping.

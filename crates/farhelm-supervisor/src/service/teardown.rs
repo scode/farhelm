@@ -1117,11 +1117,13 @@ impl Supervisor {
     ///
     /// ONE budget covers all of it, including waiting for `attachments`
     /// itself, which an in-flight attach holds across tmux commands.
-    /// Returns whether everything settled inside it; errors from individual
-    /// clients are recorded in the registries as usual, and at exit there
-    /// is nothing further to do about them.
+    /// Returns whether everything settled inside it. On expiry, one independent
+    /// best-effort attempt switches the private server's control clients to
+    /// no-output, with at most two additional seconds. It does not wait for
+    /// their cleanup or turn an expired stop into a successful one. Errors from
+    /// individual clients are recorded in the registries as usual.
     pub(crate) async fn shutdown_output_clients(&self, budget: std::time::Duration) -> bool {
-        tokio::time::timeout(budget, async {
+        let settled = tokio::time::timeout(budget, async {
             let mut forwarders = tokio::task::JoinSet::new();
             {
                 let mut attachments = self.attachments.lock().await;
@@ -1152,7 +1154,11 @@ impl Supervisor {
             self.wait_for_all_output_cleanup().await;
         })
         .await
-        .is_ok()
+        .is_ok();
+        if !settled && let Err(error) = self.tmux.quiet_control_clients_before_exit().await {
+            warn!(error = %error, "planned-stop output quiet-down failed; exiting anyway");
+        }
+        settled
     }
 }
 
