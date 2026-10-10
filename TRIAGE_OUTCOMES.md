@@ -9985,7 +9985,9 @@
 - Completion criteria: Flush the shim and assert the later message was actually sent, as neighbouring tests do. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## title-retry-test-changes-folder-too-masking.md
 
@@ -10076,7 +10078,9 @@
 - Completion criteria: Require the reveal before the empty-frame injection ends. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## reconnect-deadline-test-permits-deadline-reset-regression.md
 
@@ -10092,7 +10096,9 @@
 - Completion criteria: Keep switching until the remount is seen, with a cap, or bound recovery against the original
   deadline. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## outstanding-heartbeat-test-accept-probe-answered-wedge.md
 
@@ -10107,7 +10113,9 @@
   triage."
 - Completion criteria: Count only heartbeats sent after silencing. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## link-drag-fixture-mistake-wrapped-url-single-row-url.md
 
@@ -10122,7 +10130,9 @@
   triage."
 - Completion criteria: Assert the whole URL is on the head row. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## resize-teardown-accepts-refused-deletion-success.md
 
@@ -10155,7 +10165,9 @@
   triage."
 - Completion criteria: Match on the URL's pathname. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## exited-session-test-bypasses-delete-gate.md
 
@@ -10171,7 +10183,9 @@
 - Completion criteria: Match on the pathname and release the hold in the cleanup block. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## remote-browse-witness-accept-earlier-tests-request.md
 
@@ -10224,7 +10238,9 @@
 - Completion criteria: Wait for a session-detail response that started after the close, then check once without
   retrying. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## yolo-refusal-fixture-unintentionally-puts-page-into.md
 
@@ -10258,7 +10274,9 @@
 - Completion criteria: Assert the exact report bytes from the known click coordinates. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
+- Execution: complete; jj change `wpuoknvz`; bookmark
+  `plan/browser-terminal-test-oracles/01-browser-terminal-test-oracles`;
+  [PR diff](https://github.com/scode/farhelm/pull/1819/changes).
 
 ## failed-add-host-assertions-leave-extra-registered-host.md
 

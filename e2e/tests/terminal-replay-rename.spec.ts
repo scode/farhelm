@@ -185,12 +185,14 @@ async function injectReplayFrames(
 }
 
 /**
- * Deliver `count` ZERO-LENGTH frames to one island, `gapMs` apart.
+ * Start bounded empty-frame traffic that remains active through the reveal.
  *
  * An empty frame is a legal WebSocket message and a supervisor that is a
  * different machine can send as many as it likes; the island must not
  * treat one as progress. Kept separate from `injectReplayFrames` because
- * the point is the absence of a payload, not a payload of size zero.
+ * the point is the absence of a payload, not a payload of size zero. The
+ * page-local record witnesses traffic after reveal and owns cancellation;
+ * the caller must stop it in finally before deleting the session.
  */
 async function injectEmptyFrames(
   page: Page,
@@ -200,17 +202,19 @@ async function injectEmptyFrames(
   await page.evaluate(
     ({ el, count, gapMs }) => {
       const island = (window as any).__farhelmIslands[el];
-      return new Promise<void>((resolve) => {
-        let sent = 0;
-        const tick = () => {
-          island.ws.onmessage({ data: new ArrayBuffer(0) });
-          sent += 1;
-          // sleep-ok: exercise the no-progress timer with empty frames spread over time instead of one synchronous burst.
-          if (sent < count) setTimeout(tick, gapMs);
-          else resolve();
-        };
-        tick();
-      });
+      const state = { sent: 0, afterReveal: 0, active: true, timer: 0 };
+      (window as any).__farhelmEmptyFrameInjection = state;
+      const tick = () => {
+        if (!state.active) return;
+        const alreadyRevealed = island.test.replay.revealed;
+        island.ws.onmessage({ data: new ArrayBuffer(0) });
+        state.sent += 1;
+        if (alreadyRevealed) state.afterReveal += 1;
+        // sleep-ok: exercise the no-progress timer with empty frames spread over time instead of one synchronous burst.
+        if (state.sent < count) state.timer = window.setTimeout(tick, gapMs);
+        else state.active = false;
+      };
+      tick();
     },
     { el: elementId, count, gapMs },
   );
@@ -1246,8 +1250,9 @@ test("replay-degrades-on-chunks: crossing the frame bound flushes once, keeping 
 // The discriminator is the shape of the test rather than an assertion in
 // it: one real frame arms the (shortened) window, then empty frames arrive
 // faster than that window for longer than it. An implementation that
-// re-armed on them would push the deadline out with every one and never
-// reveal, timing out below.
+// re-armed on them would reveal only after traffic stopped. This test
+// requires the reveal while traffic remains active and observes another
+// delivered empty frame afterward, then stops the bounded injector.
 test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as silence", async ({
   page,
   request,
@@ -1271,11 +1276,16 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
     await setReplayLimits(page, "terminal", { idleMs });
     await injectReplayFrames(page, "terminal", { prefix: "EMPTY-PROBE-", size: 64 });
 
-    // Ten empty frames at 300 ms — three windows' worth of "activity" that
-    // carries nothing.
-    await injectEmptyFrames(page, "terminal", { count: 10, gapMs: 300 });
+    // The cap outlasts the reveal deadline; it cannot make a reset watchdog
+    // look correct by becoming silent before the assertion.
+    await injectEmptyFrames(page, "terminal", { count: 60, gapMs: 300 });
 
     const replay = await waitForReplayReveal(page, "terminal", 15_000);
+    expect(await page.evaluate(() => (window as any).__farhelmEmptyFrameInjection.active),
+      "the watchdog must reveal before empty-frame traffic ends").toBe(true);
+    await expect.poll(() => page.evaluate(() => (window as any).__farhelmEmptyFrameInjection.afterReveal), {
+      message: "an empty frame must still be delivered after reveal",
+    }).toBeGreaterThan(0);
     expect(
       replay.revealReason,
       "frames carrying nothing cannot keep a catch-up alive",
@@ -1286,6 +1296,13 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
       "the real frame that did arrive is written, whatever the empties did",
     ).toContain("EMPTY-PROBE-0");
   } finally {
+    await page.evaluate(() => {
+      const state = (window as any).__farhelmEmptyFrameInjection;
+      if (state) {
+        state.active = false;
+        clearTimeout(state.timer);
+      }
+    }).catch(() => {});
     if (id) await cleanupSession(request, id);
   }
 });

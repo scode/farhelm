@@ -15,7 +15,7 @@
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
-import { stubFeed } from "./helpers/fleet";
+import { renameSession, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
@@ -2050,13 +2050,14 @@ test("the close confirmation shows its exact consequence sentence", async ({
 
 // A tab opened and then closed before any poll ever observed it must not
 // come back. The optimistic entry that renders it immediately is retired
-// by the close itself; without that, `closed_tabs` — which is pruned as
-// soon as the server stops listing the id, and for a never-listed tab that
-// is at once — would stop suppressing it and the strip would show a tab
-// that attaches to nothing for the rest of the view's life.
+// by the close itself. A read started before open cannot retire that entry,
+// but its empty server list prunes the closed-tab suppression. Without
+// close retirement it would revive a tab that attaches to nothing, until a
+// newer read independently retires the optimistic open and masks the bug.
 //
-// The poll interval is waited out deliberately: the bug only appears once
-// a reconciliation runs, so asserting immediately would pass either way.
+// Apply a held pre-open read after close before allowing newer reads to
+// retire the optimistic open independently. Then witness a post-close read
+// too: both applications must leave the strip empty without retrying absence.
 test("a tab opened and closed before any poll observes it does not come back", async ({
   page,
   request,
@@ -2064,22 +2065,68 @@ test("a tab opened and closed before any poll observes it does not come back", a
   test.setTimeout(120_000);
   const title = `tab-phantom-local-${Date.now()}`;
   let id: string | undefined;
+  let releaseDetail: () => void = () => {};
+  let releaseLaterDetail: () => void = () => {};
   try {
     const session = await createTabSession(request, title);
     id = session.id;
     await page.goto("/");
     await attachSession(page, id);
 
+    let closed = false;
+    let opened = false;
+    let preOpenReadArrived = false;
+    const staleTitle = `${title}-pre-open-applied`;
+    const appliedTitle = `${title}-reconciled`;
+    const detailHeld = new Promise<void>((resolve) => { releaseDetail = resolve; });
+    const laterDetailHeld = new Promise<void>((resolve) => { releaseLaterDetail = resolve; });
+    await page.route((url) => url.pathname === `/api/sessions/${id}`, async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      const startedBeforeOpen = !opened;
+      const startedAfterClose = closed;
+      if (startedBeforeOpen) preOpenReadArrived = true;
+      await (startedBeforeOpen ? detailHeld : laterDetailHeld);
+      const response = await route.fetch();
+      const detail = await response.json();
+      expect(detail.tabs ?? [], "the closed tab must not be in this reconciliation").toEqual([]);
+      // The title and tab corrections commit from the same detail record.
+      // This marker witnesses application, not merely response arrival.
+      if (startedBeforeOpen) detail.title = staleTitle;
+      else if (startedAfterClose) detail.title = appliedTitle;
+      await fulfillAsHelm(route, {
+        status: response.status(),
+        contentType: "application/json",
+        body: JSON.stringify(detail),
+      });
+    });
+    // A healthy feed disables fallback polling. A real rename requests a
+    // detail read, and handler arrival establishes its pre-open read index.
+    await renameSession(request, id, `${title}-trigger`);
+    await expect.poll(() => preOpenReadArrived, { timeout: 15_000, message: "a pre-open detail read must reach its hold" }).toBe(true);
+    opened = true;
     const tabId = await addTab(page, 0);
     await page.locator(`.tab-slot[data-tab-id="${tabId}"] .tab-close`).click();
     await page.locator(".confirm-close-tab").click();
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 30_000 });
 
-    // Several poll intervals later, still gone — and the server agrees.
-    await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 12_000 });
+    closed = true;
+    releaseDetail();
+    // A pre-open read cannot retire an unseen optimistic open. Missing
+    // retirement on close therefore resurfaces here, before a newer reply
+    // could erase the bug and make the eventual zero count look correct.
+    await expect(page.locator(".titlebar .title")).toHaveText(staleTitle, { timeout: 15_000 });
+    expect(await page.locator(".tab-slot").count(), "a held pre-open read must not revive the closed tab").toBe(0);
+    releaseLaterDetail();
+    await expect(page.locator(".titlebar .title")).toHaveText(appliedTitle, { timeout: 15_000 });
+    expect(await page.locator(".tab-slot").count(), "post-close reconciliation must not revive the optimistic tab").toBe(0);
     const detail = await (await request.get(`/api/sessions/${id}`)).json();
     expect(detail.tabs ?? []).toEqual([]);
   } finally {
+    releaseDetail();
+    releaseLaterDetail();
     if (id) await cleanupSession(request, id);
   }
 });

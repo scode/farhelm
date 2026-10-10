@@ -103,20 +103,19 @@ function countReportWindows(bytes: number[], prefix: readonly [number, number, n
 }
 
 /**
- * The three DATA bytes (button, column, row for a legacy report)
- * immediately following the FIRST occurrence of `prefix` in `bytes`.
- * Used only for the legacy leg's byte-fidelity assertion, where "the
- * first occurrence" is unambiguous — it happens before any other click in
- * this test has produced a report of this shape, so there is no earlier
- * occurrence it could be confused with.
+ * Retain the entire first legacy click's stream, including both reports.
+ *
+ * Slicing three body bytes would accept an expanded UTF-8 coordinate while
+ * hiding its extra byte. No earlier legacy click exists at this boundary,
+ * so every byte from the first prefix belongs to the measured press/release.
  */
-function firstReportBody(
+function firstReportStream(
   bytes: number[],
   prefix: readonly [number, number, number],
 ): number[] | undefined {
   for (let i = 0; i + 5 < bytes.length; i++) {
     if (bytes[i] === prefix[0] && bytes[i + 1] === prefix[1] && bytes[i + 2] === prefix[2]) {
-      return bytes.slice(i + 3, i + 6);
+      return bytes.slice(i);
     }
   }
   return undefined;
@@ -225,8 +224,9 @@ async function chooseClickColumn(page: Page): Promise<number> {
 
 /**
  * Click the CENTER of a specific (1-based) terminal cell, computed from
- * real pixel geometry (`box.width`/`term.cols`, `box.height`/`term.rows`)
- * rather than a fixed pixel offset — the terminal's on-screen size
+ * xterm's screen geometry (`box.width`/`term.cols`, `box.height`/`term.rows`)
+ * rather than the outer terminal box, whose padding and scrollbar are not
+ * cells. A fixed pixel offset also cannot work: the terminal's on-screen size
  * depends on the viewport and font metrics, neither of which this test
  * controls directly. A real click (`page.mouse.click` performs a genuine
  * mousedown then mouseup) always yields TWO reports under button
@@ -234,7 +234,7 @@ async function chooseClickColumn(page: Page): Promise<number> {
  * `waitForReportCount`'s exact targets rather than assuming a count of 1.
  */
 async function clickTerminalCell(page: Page, col: number, row: number) {
-  const box = (await page.locator("#terminal").boundingBox())!;
+  const box = (await page.locator("#terminal .xterm-screen").boundingBox())!;
   const geometry = await page.evaluate(() => {
     const t = (window as any).__farhelmTerm;
     return { cols: t.cols, rows: t.rows };
@@ -335,12 +335,14 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       2,
       "a legacy mouse report must reach the agent via onBinary",
     );
-    const legacyBody = firstReportBody(hexEchoBytes(await termText(page)), LEGACY_REPORT_PREFIX);
-    expect(legacyBody, "the full three-byte report body must have arrived").toHaveLength(3);
-    expect(
-      legacyBody![1],
-      "the column byte must survive onBinary as the genuine high byte this click's column encodes to, not a mangled or truncated one",
-    ).toBeGreaterThan(0x7f);
+    // The second prefix can arrive before its body in another PTY read.
+    // Settle on the entire byte sequence, never on a truncated body slice.
+    await expect.poll(async () => firstReportStream(hexEchoBytes(await termText(page)), LEGACY_REPORT_PREFIX), {
+      message: "press and release must retain exact binary coordinate bytes and length",
+    }).toEqual([
+      ...LEGACY_REPORT_PREFIX, 32, clickCol + 32, clickRow + 32,
+      ...LEGACY_REPORT_PREFIX, 35, clickCol + 32, clickRow + 32,
+    ]);
 
     // --- Detach and reattach through the list/back UI — the same
     // mechanism terminal.spec.ts's own "back tears down the mounted

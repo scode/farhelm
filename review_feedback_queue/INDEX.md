@@ -252,17 +252,6 @@ triage.
   listing read.
 - `constructor-font-regression-observes-mutable-value-construction.md` — The constructor-font test observes a value that
   can already have been corrected.
-- `link-drag-fixture-mistake-wrapped-url-single-row-url.md` — The link-drag test could drag outside the link while
-  claiming a single-row fixture.
-- `reconnect-deadline-test-permits-deadline-reset-regression.md` — The reconnect test could pass even when switching
-  restarts its deadline.
-- `empty-frame-test-stops-stimulus-checking-watchdog.md` — The empty-frame test permits a watchdog reset on every frame.
-- `outstanding-heartbeat-test-accept-probe-answered-wedge.md` — The heartbeat test could count a probe answered before
-  the intended wedge.
-- `multi-session-test-hold-delete-request.md` — The multi-session test's DELETE gate does not match the real request.
-- `exited-session-test-bypasses-delete-gate.md` — The exited-session test separately bypasses its deletion hold.
-- `phantom-tab-regression-test-never-waits-claimed-later.md` — The phantom-tab test checks absence before witnessing
-  later reconciliation.
 - `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
@@ -273,8 +262,6 @@ triage.
   background.
 - `classification-counts-runner-failures-deterministic-test-failures.md` — The failure classifier treats runner errors
   as proof of deterministic test failure.
-- `mouse-fidelity-assertion-accepts-utf-corrupted-reports.md` — The mouse-fidelity test accepts the encoding corruption
-  it claims to reject.
 - `history-fixture-enables-yolo-installing-restoration-guard.md` — History-test setup can leak its changed confirmation
   policy.
 - `keyboard-launch-fixture-has-same-separate-setup-ownership.md` — Keyboard-launch setup independently leaves changed
@@ -329,8 +316,6 @@ triage.
 - `sink-healing-witness-consume-queued-output.md` — The healed-sink test could consume output queued before the failure.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
-- `client-log-test-establish-claimed-later-capture.md` — The client-log test could pass with later capture permanently
-  disabled.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
   file.
 - `legacy-launch-validation-could-prevent-startup.md` — A historical launch shape could make the whole supervisor refuse
