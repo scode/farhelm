@@ -1,7 +1,7 @@
 # Plans queue
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
-- [complete] `ui-correctness-fixes.md` — launcher, terminal, sidebar and dialog fixes: Grok trust, dot template names, Unicode template match, IME save, A+/A- focus, OSC 8 drag, listing fence, read-mark retry, update-popup scroll, stale setup errors, escaped refusals and titles (after `gui-text-safety.md`)
+- [landing 8e5c72] `ui-correctness-fixes.md` — launcher, terminal, sidebar and dialog fixes: Grok trust, dot template names, Unicode template match, IME save, A+/A- focus, OSC 8 drag, listing fence, read-mark retry, update-popup scroll, stale setup errors, escaped refusals and titles (after `gui-text-safety.md`)
 - [complete] `test-portability-fixes.md` — tests stop passing vacuously on macOS (/proc liveness, stat flags) or large-page Linux, stop failing on symlinked temp paths, and GNU-only provisioning tests are gated to Linux
 - [landing 3a9fff] `browser-terminal-test-oracles.md` — terminal browser tests for empty frames, reconnect deadlines, heartbeats, link drags, delete holds, phantom tabs and mouse reports, and the client-log JS test, assert what they claim
 - [landing 8e5c72] `checkout-folder-and-ui-fixes.md` — the managed-checkout folder becomes a Settings setting that the launcher can also set on the spot and that is created on first checkout, plus approval-card, save-as-template and Settings-switch layout fixes
