@@ -86,3 +86,51 @@ identified as redundant was removed. The final commit and PR use that reviewed w
 Native tools did not expose actual model identity or usage counters. Requested routes are recorded as requests, not
 runtime attribution. Private routing evidence is retained under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf`. The
 executor leaves the PR in draft and does not merge it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1815. The rebase met only the review queue index, where each plan removes its own
+entries.
+
+#### Review before merging
+
+A separate reviewer read the plans queue and watcher changes in depth against `plans/AGENTS.md`: the queue's state
+machine, publish and exit codes are unchanged; the watcher resolves main's commit once per poll and uses it for both the
+tree read and the wake check, which fixes the race this plan targeted; the recorder changes keep its documented
+contracts.
+
+#### A fix made while landing
+
+The watcher looked up main's commit through GitHub's commit endpoint, which also returns the commit's whole file list
+and patches; a very large commit on main could make every poll fail, and after three failures the executors and the
+lander would stop waiting with an error. The landing switched it to the branch-ref endpoint, which returns only the id,
+and updated the watcher test's stand-in. In #1815 before it merged.
+
+#### Things to know
+
+The watcher's own test script fails now and then under heavy load, in the case that expects a change found on the last
+poll before the deadline: 2 of 8 runs on main's copy and 4 of 16 with this change, at load averages around 12 to 20 on
+18 CPUs. One branch run also failed once with an "unbound variable" message that did not recur. Neither was logged as a
+flake. Smaller notes left as they are: when the commit lookup fails, the error message still names the tree request; a
+malformed commit answer has no test; and the queue's heading check now also refuses a `---` or `===` line right after an
+ATX heading, a quote or a list item, where Markdown would read it as a separator, so a decision text may need rewording
+before `answer` or `follow-up` accept it.
+
+#### Checks
+
+These six plans were landed together, stacked in landing order on main after gui-text-safety, ui-interaction-fixes and
+helm-cli-fixes merged; browser-terminal-test-oracles landed after them in the same round.
+
+- Run now, on the six stacked: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the plans-queue tests,
+  the test-recorder tests, the installer tests (517 checks), `sh -n scripts/install.sh`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  UI, protocol and CLI unit tests with the agent-relay, upload, boot-outcome, hook-identity, restart-with-resume and
+  session-lifecycle end-to-end tests, through the recorder with pinned tmux 3.7c, four slots and no retries (run
+  `8bc6001f`, 3064 of 3064); the UI JavaScript tests (230 of 230); and on Chromium and WebKit with one worker and no
+  retries the notifications, sidebar-resize, sidebar, terminal-attachments, terminal-create-idempotency,
+  terminal-multihost, yolo-guard, templates and quick-switcher specs (run `77ec2061`, 472 passed). `shellcheck` reports
+  the same warnings for `scripts/build-private-tmux.sh` and `scripts/desktop-smoke.sh` on main as with these changes.
+- These plans were claimed while an earlier round was still landing, which delayed their merge; the landing instructions
+  were changed the same day (#1829) so that a round's plans are fixed when it starts.
+
+Nothing in the report above was made untrue by the landing.
