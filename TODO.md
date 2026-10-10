@@ -252,6 +252,16 @@ Deferred work, with its original triggers:
   release gate still excludes the e2e target; evaluate any concurrency experiment using the then-current runner budget
   rather than reviving the old libtest thread setting.
 
+- **Shallow pause resets under load.** The e2e test
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` in
+  `crates/farhelm/tests/e2e/terminal_backpressure.rs` saw a catch-up reset after a 500 ms pause in deflake run
+  `cba04f06-39b5-4fd9-bfa7-3b2dcb1df22c` (failed run `4d3f498f-ae89-4925-b95f-f313bf716980`; reruns
+  `24210386-9d75-4b28-a0ca-5ffda7955268`, `b45bc530-d343-458c-8de0-2481a6a8e2ca` and
+  `61bfb8d8-ccdf-4e54-a7b2-61df5fba317f` passed) on a machine at load average about 20 (FLAKES.md, 2026-10-09).
+  Hypothesis: the reset check spans the whole 10-second drain after resume, so a load stall past tmux's `pause-after`
+  window anywhere in that drain produces a correct reset that the test reads as a shallow-pause failure. First step:
+  find in the failed run's traces when the `%pause` arrived relative to the resume.
+
 ## Broken tests
 
 ## Code review
