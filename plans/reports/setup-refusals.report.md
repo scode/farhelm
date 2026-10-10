@@ -82,3 +82,45 @@ The second fresh gpt-6.1-sol/medium wording reader understood the problems and f
 convention violations. Implementation remained local under no-workhorse mode. Actual native model attribution and usage
 counters were unavailable; requested routes are recorded as requests. Private evidence remains under session UUID
 `babea5b4-d5fc-4824-9a71-faa36bdd96dd` and the plan's working log beside the checkouts.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1817. The rebase met only the review queue index. Its unit-file reading builds on
+os-readback-fixes, landed earlier today, and stays consistent with it (exact `[Service]` sections; unsupported escapes
+refuse).
+
+#### A fix made while landing
+
+The new service-type check treated an empty `Type=` line as `simple`. systemd instead ignores an empty `Type=` as
+invalid and keeps the earlier type, so a hand-edited unit with `Type=oneshot` followed by `Type=` still runs as oneshot,
+with every start command, while Farhelm would read one of them as the whole unit and could let uninstall remove a
+service that also runs another installation. The landing makes an empty `Type=` refuse, moved the two test cases that
+pinned the old reading to the refusal side, and corrected the two doc comments. In #1817 before it merged.
+
+#### Things to know
+
+Left as they are: standalone uninstall refusing a non-simple unit says its start command could not be parsed rather than
+naming the type; one lock-recovery message says "shown above" for a path printed earlier on the same line; and the
+paste-safety test uses `$HOME` in a fixture path, so a quoting regression would hand the real home directory to `rm -f`
+and `rmdir`, both of which fail harmlessly on a directory. The review also found an older, separate gap: an
+`ExecStart = ` line written with spaces around the equals sign is not recognized, so a unit that clears and replaces its
+start command that way could be misread by uninstall. That predates this plan and is not changed here.
+
+#### Checks
+
+These six plans were landed together, stacked in landing order on main after gui-text-safety, ui-interaction-fixes and
+helm-cli-fixes merged; browser-terminal-test-oracles landed after them in the same round.
+
+- Run now, on the six stacked: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the plans-queue tests,
+  the test-recorder tests, the installer tests (517 checks), `sh -n scripts/install.sh`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  UI, protocol and CLI unit tests with the agent-relay, upload, boot-outcome, hook-identity, restart-with-resume and
+  session-lifecycle end-to-end tests, through the recorder with pinned tmux 3.7c, four slots and no retries (run
+  `8bc6001f`, 3064 of 3064); the UI JavaScript tests (230 of 230); and on Chromium and WebKit with one worker and no
+  retries the notifications, sidebar-resize, sidebar, terminal-attachments, terminal-create-idempotency,
+  terminal-multihost, yolo-guard, templates and quick-switcher specs (run `77ec2061`, 472 passed). `shellcheck` reports
+  the same warnings for `scripts/build-private-tmux.sh` and `scripts/desktop-smoke.sh` on main as with these changes.
+- These plans were claimed while an earlier round was still landing, which delayed their merge; the landing instructions
+  were changed the same day (#1829) so that a round's plans are fixed when it starts.
+
+Nothing in the report above was made untrue by the landing.
