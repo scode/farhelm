@@ -400,9 +400,9 @@ mod tests {
         symlinks: Mutex<HashMap<PathBuf, Option<PathBuf>>>,
         /// The supervisor's default state directory the inspection reports.
         default_state_dir: Mutex<PathBuf>,
-        /// The unit's `ActiveState` and loaded `KillMode`, as an inspection
-        /// reports them; a running provisioned unit by default.
-        unit_state: Mutex<(String, String)>,
+        /// The unit's `ActiveState`, as an inspection reports it; a running
+        /// provisioned unit by default.
+        unit_state: Mutex<String>,
         /// Where an inspection says systemd loaded the unit from, when not
         /// from the planned unit path (the first path asked about).
         unit_fragment: Mutex<Option<PathBuf>>,
@@ -450,7 +450,7 @@ mod tests {
                 canonical: Mutex::new(HashMap::new()),
                 symlinks: Mutex::new(HashMap::new()),
                 default_state_dir: Mutex::new(PathBuf::from("/home/test/.local/state/farhelm")),
-                unit_state: Mutex::new(("active".to_string(), "process".to_string())),
+                unit_state: Mutex::new("active".to_string()),
                 unit_fragment: Mutex::new(None),
             })
         }
@@ -716,13 +716,12 @@ mod tests {
                     },
                 }
             };
-            let (unit_active_state, unit_kill_mode) = self.unit_state.lock().unwrap().clone();
+            let unit_active_state = self.unit_state.lock().unwrap().clone();
             let fragment = self.unit_fragment.lock().unwrap().clone();
             Ok(UninstallInspection {
                 paths: paths.iter().map(|path| host_path(path)).collect(),
                 default_state_dir: host_path(&self.default_state_dir.lock().unwrap().clone()),
                 unit_active_state,
-                unit_kill_mode,
                 // By default the unit loaded from the planned path.
                 unit_fragment: match fragment {
                     Some(path) => Some(host_path(&path)),
@@ -751,6 +750,8 @@ mod tests {
             &self,
             _target: &ProvisioningTarget,
             _unit: &str,
+            _tmux_program: &Path,
+            _tmux_socket: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
             self.record("stop-supervisor")
         }
@@ -3562,10 +3563,11 @@ mod tests {
     /// what stays, and producing it must not change anything.
     ///
     /// Spec: a connected host with no running sessions plans, in order,
-    /// disabling the unit, removing its unit file, stopping the unit while
-    /// its loaded kill policy still keeps the sessions' tmux server out of
-    /// the stop, reloading the user manager, removing the lib directory,
-    /// and forgetting the host. The confirmation names the unit, the unit file
+    /// disabling the unit, removing its unit file, reloading the user manager
+    /// so the stop ends the private tmux server too, stopping the unit and
+    /// any server retained at the private socket, removing the lib directory,
+    /// and forgetting the host. Cleanup freezes the accepted host tmux client,
+    /// or the private fallback when none is available, and the host's socket. The confirmation names the unit, the unit file
     /// and the lib directory by their concrete paths, says it is an
     /// uninstall from that destination, and ends by naming the kept state
     /// directory. Planning only inspects: the registry row is unchanged and
@@ -3583,14 +3585,22 @@ mod tests {
             [
                 "disable-supervisor",
                 "remove-unit",
-                "stop-supervisor",
                 "daemon-reload",
+                "stop-supervisor",
                 "remove-directory",
                 "forget-host",
             ]
         );
         let lib = root.path().join("lib");
         let state = root.path().join("state");
+        assert!(
+            matches!(
+                &preview.plan.actions[3],
+                ProvisioningAction::StopSupervisor { tmux_program, tmux_socket, .. }
+                    if tmux_program == Path::new("/usr/bin/tmux") && tmux_socket == &state.join("tmux.sock")
+            ),
+            "the cleanup uses the accepted client and this host's frozen state socket"
+        );
         let confirmation = &preview.confirmation;
         assert!(
             confirmation.starts_with("Farhelm will uninstall from uninstall.example"),
@@ -3605,6 +3615,10 @@ mod tests {
             "{confirmation}"
         );
         assert!(
+            confirmation.contains("and its private tmux server"),
+            "{confirmation}"
+        );
+        assert!(
             confirmation.contains(&format!(
                 "Kept: the host's Farhelm data in {}",
                 state.display()
@@ -3614,6 +3628,19 @@ mod tests {
         assert_eq!(preview.plan.state_dir, state);
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        if let ReachOutcome::Supported(reach) = &mut *backend.reach.lock().unwrap() {
+            reach.needs_tmux = true;
+            reach.host_tmux = None;
+        }
+        let private = service.plan_uninstall(host).await.unwrap();
+        assert!(
+            matches!(
+                &private.plan.actions[3],
+                ProvisioningAction::StopSupervisor { tmux_program, tmux_socket, .. }
+                    if tmux_program == &lib.join("tmux") && tmux_socket == &state.join("tmux.sock")
+            ),
+            "the private fallback remains in the same installation layout"
+        );
     }
 
     /// Why this matters: the host may only leave the list once Farhelm is
@@ -3648,8 +3675,8 @@ mod tests {
                 "inspect-uninstall",
                 "disable-supervisor",
                 "remove-unit",
-                "stop-supervisor",
                 "daemon-reload",
+                "stop-supervisor",
                 "remove-directory",
             ]
         );
@@ -3660,8 +3687,9 @@ mod tests {
         assert!(!memory.plans.contains_key(&second.probe_id));
     }
 
-    /// Why this matters: uninstalling never kills anything; the user stops
-    /// their sessions first, and needs to be told which ones.
+    /// Live sessions and tabs refuse uninstall before confirmation, so the
+    /// user needs to know which ones to end. A session started during removal
+    /// may still be ended with the private server; this check is sufficient.
     ///
     /// Spec: planning refuses with a 409 naming, by title, every session
     /// that has not ended (an unknown status counts) and every session with
@@ -3728,7 +3756,7 @@ mod tests {
     /// Spec: an unconnected host whose unit file is still there is refused
     /// with "get it connected first". Once the unit file is gone, and the
     /// probe shows no supervisor answering, the same host plans only what is
-    /// left: stop, reload, remove the lib directory if it is still there,
+    /// left: reload, stop, remove the lib directory if it is still there,
     /// and forget the host; confirming that plan runs it to the end.
     #[farhelm_testtrace::test]
     async fn an_unconnected_host_is_refused_unless_its_unit_file_is_gone() {
@@ -3758,8 +3786,8 @@ mod tests {
         assert_eq!(
             step_labels(&retry.plan),
             [
-                "stop-supervisor",
                 "daemon-reload",
+                "stop-supervisor",
                 "remove-directory",
                 "forget-host"
             ]
@@ -3777,8 +3805,8 @@ mod tests {
             .unwrap();
         wait_forgotten(&harness, host).await;
         assert!(backend.operations.lock().unwrap().ends_with(&[
-            "stop-supervisor".to_string(),
             "daemon-reload".to_string(),
+            "stop-supervisor".to_string(),
             "remove-directory".to_string()
         ]));
     }
@@ -3794,8 +3822,7 @@ mod tests {
     /// Farhelm's lib directory, a state directory that really lies inside
     /// the lib directory that would be removed (through a symlink, so
     /// spelling alone would not show it), a connected supervisor that its
-    /// unit is not running (one started by hand), and a running unit that
-    /// has lost its process-only kill policy.
+    /// unit is not running (one started by hand).
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_hosts_whose_removal_farhelm_does_not_own() {
         let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
@@ -3848,13 +3875,9 @@ mod tests {
         assert!(data_inside.contains("keeps the data"), "{data_inside}");
         backend.canonical.lock().unwrap().clear();
 
-        *backend.unit_state.lock().unwrap() = ("inactive".to_string(), "process".to_string());
+        *backend.unit_state.lock().unwrap() = "inactive".to_string();
         let hand_started = refusal_text(service.plan_uninstall(host).await.unwrap_err());
         assert!(hand_started.contains("not running under"), "{hand_started}");
-
-        *backend.unit_state.lock().unwrap() = ("active".to_string(), "control-group".to_string());
-        let kill_mode = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-        assert!(kill_mode.contains("KillMode=control-group"), "{kill_mode}");
 
         assert_eq!(
             backend
@@ -4126,7 +4149,7 @@ mod tests {
     ///
     /// Spec: an unconnected host whose row records an absolute binary inside
     /// the lib directory, with neither the unit file nor the lib directory
-    /// left, plans stop, reload and forget, and confirming that plan forgets
+    /// left, plans reload, stop and forget, and confirming that plan forgets
     /// the host.
     #[farhelm_testtrace::test]
     async fn a_retry_after_the_lib_directory_is_gone_still_finishes() {
@@ -4151,7 +4174,7 @@ mod tests {
         let retry = service.plan_uninstall(host).await.unwrap();
         assert_eq!(
             step_labels(&retry.plan),
-            ["stop-supervisor", "daemon-reload", "forget-host"]
+            ["daemon-reload", "stop-supervisor", "forget-host"]
         );
         assert_eq!(retry.plan.state_dir, state);
         service
@@ -4223,13 +4246,15 @@ mod tests {
     /// finish the job by choosing uninstall again.
     ///
     /// Spec: a step failure leaves the host registered with the run marked
-    /// failed and every completed step recorded; planning again after the
-    /// unit file was removed plans only the remaining steps, and running
+    /// failed and every completed step recorded. A failed stop after reload
+    /// must still be retryable, even though the loaded unit has lost its
+    /// process-only policy: planning omits the already removed unit file,
+    /// repeats reload before stop, and running
     /// that plan forgets the host.
     #[farhelm_testtrace::test]
     async fn a_failed_uninstall_keeps_the_host_and_a_retry_finishes_it() {
         let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
-        *backend.fail.lock().unwrap() = Some("daemon-reload".to_string());
+        *backend.fail.lock().unwrap() = Some("stop-supervisor".to_string());
         let preview = service.plan_uninstall(host).await.unwrap();
         service
             .start_uninstall(
@@ -4252,8 +4277,8 @@ mod tests {
             [
                 ("disable-supervisor", StepStatus::Completed),
                 ("remove-unit", StepStatus::Completed),
-                ("stop-supervisor", StepStatus::Completed),
-                ("daemon-reload", StepStatus::Failed),
+                ("daemon-reload", StepStatus::Completed),
+                ("stop-supervisor", StepStatus::Failed),
             ]
         );
         assert!(
@@ -4279,8 +4304,8 @@ mod tests {
         assert_eq!(
             step_labels(&retry.plan),
             [
-                "stop-supervisor",
                 "daemon-reload",
+                "stop-supervisor",
                 "remove-directory",
                 "forget-host"
             ]
@@ -5626,10 +5651,9 @@ mod tests {
             "1",
             "0",
             "/h/.local/state/farhelm",
-            // The unit's state, kill mode and (empty) fragment path, then
+            // The unit's state and (empty) fragment path, then
             // the placeholder fields for no fragment.
             "active",
-            "process",
             "",
             "0",
             "0",
@@ -5675,7 +5699,6 @@ mod tests {
             "1",
             "/h/.local/state/farhelm",
             "active",
-            "process",
             "",
             "0",
             "",
@@ -5703,13 +5726,13 @@ mod tests {
     /// a symlinked parent is not), and its canonical location in order (a
     /// symlink resolved to its target, none for one the host cannot
     /// resolve), the default state directory under the host's HOME, and the
-    /// unit's run state and kill policy; `remove_unit` refuses a unit whose
+    /// unit's run state; `remove_unit` refuses a unit whose
     /// first line is setup's marker (with or without a trailing newline) and
     /// keeps it, removes an unmarked one, and skips an absent one; `stop`
-    /// refuses a running unit whose loaded `KillMode` is not `process`,
-    /// stops one whose is, and skips one that is inactive without calling
-    /// `stop`; `disable` never reloads the user manager itself
-    /// (`--no-reload`) and passes `--runtime` exactly when the backend links
+    /// stops a running unit before private socket cleanup, and still cleans
+    /// up tmux for an inactive unit. Exact absence is a skip, other tmux
+    /// errors fail, and an absent socket needs no client binary; `disable` passes
+    /// `--runtime` exactly when the backend links
     /// units for this boot only; `remove_directory` refuses a path that is
     /// itself a symlink and leaves both the link and its target, removes the
     /// real tree under a symlinked parent, and removes a tree and then skips
@@ -5723,18 +5746,15 @@ mod tests {
         tokio::fs::create_dir_all(&bin).await.unwrap();
         let log = root.path().join("systemctl.log");
         let active = root.path().join("active-state");
-        let kill_mode = root.path().join("kill-mode");
-        tokio::fs::write(&kill_mode, "process\n").await.unwrap();
         write_fake_tool(
             &bin,
             "systemctl",
             &format!(
                 "printf '%s\\n' \"$*\" >> {log}\n\
                  case \"$*\" in *'show -p ActiveState'*) cat {active} ;; \
-                 *'show -p KillMode'*) cat {kill_mode} ;; esac",
+                 esac",
                 log = shell_words::quote(&log.display().to_string()),
                 active = shell_words::quote(&active.display().to_string()),
-                kill_mode = shell_words::quote(&kill_mode.display().to_string()),
             ),
         )
         .await;
@@ -5800,7 +5820,6 @@ mod tests {
             home.join(".local/state/farhelm")
         );
         assert_eq!(inspection.unit_active_state, "active");
-        assert_eq!(inspection.unit_kill_mode, "process");
         // The fake systemctl reports no fragment, which is systemd's answer
         // for a unit it knows no file for.
         assert_eq!(inspection.unit_fragment, None);
@@ -5896,24 +5915,16 @@ mod tests {
             ActionOutcome::Skipped(_)
         ));
 
-        // A running unit that lost its process-only kill policy is refused
-        // without a stop; with the policy it is stopped.
-        tokio::fs::write(&kill_mode, "control-group\n")
-            .await
-            .unwrap();
-        let refusal = system
-            .stop(&target, "farhelm-supervisor.service")
-            .await
-            .expect_err("a unit that would kill its whole control group must not be stopped");
-        assert!(
-            refusal.rendered().contains("KillMode is control-group"),
-            "{}",
-            refusal.rendered()
-        );
-        tokio::fs::write(&kill_mode, "process\n").await.unwrap();
+        // Reload deliberately removes process-only policy. The command must
+        // stop a running unit without that obsolete prerequisite.
         assert!(matches!(
             system
-                .stop(&target, "farhelm-supervisor.service")
+                .stop(
+                    &target,
+                    "farhelm-supervisor.service",
+                    &lib.join("tmux"),
+                    &root.path().join("tmux.sock")
+                )
                 .await
                 .unwrap(),
             ActionOutcome::Completed
@@ -5921,7 +5932,12 @@ mod tests {
         tokio::fs::write(&active, "inactive\n").await.unwrap();
         assert!(matches!(
             system
-                .stop(&target, "farhelm-supervisor.service")
+                .stop(
+                    &target,
+                    "farhelm-supervisor.service",
+                    &lib.join("tmux"),
+                    &root.path().join("tmux.sock")
+                )
                 .await
                 .unwrap(),
             ActionOutcome::Skipped(_)
@@ -5940,15 +5956,153 @@ mod tests {
             calls,
             [
                 "--user show -p ActiveState --value -- farhelm-supervisor.service",
-                "--user show -p KillMode --value -- farhelm-supervisor.service",
-                "--user show -p ActiveState --value -- farhelm-supervisor.service",
-                "--user show -p KillMode --value -- farhelm-supervisor.service",
                 "--user stop -- farhelm-supervisor.service",
                 "--user show -p ActiveState --value -- farhelm-supervisor.service",
-                "--user disable --no-reload -- farhelm-supervisor.service",
-                "--user --runtime disable --no-reload -- farhelm-supervisor.service",
+                "--user disable -- farhelm-supervisor.service",
+                "--user --runtime disable -- farhelm-supervisor.service",
             ]
         );
+
+        // A socket left behind is not evidence of absence. Exercise the
+        // remote shell with exact diagnostics, including a path that itself
+        // contains the tolerated phrase, so substring matching cannot pass.
+        let socket = root.path().join("no server running on fixture.sock");
+        tokio::fs::write(&socket, b"fixture socket placeholder")
+            .await
+            .unwrap();
+        let tmux = lib.join("tmux");
+        for (diagnostic, absent) in [
+            (format!("no server running on {}", socket.display()), true),
+            (
+                format!(
+                    "error connecting to {} (No such file or directory)",
+                    socket.display()
+                ),
+                true,
+            ),
+            (
+                format!(
+                    "error connecting to {} (Permission denied)",
+                    socket.display()
+                ),
+                false,
+            ),
+        ] {
+            write_fake_tool(
+                &lib,
+                "tmux",
+                &format!(
+                    "printf '%s\\n' {} >&2; exit 1",
+                    shell_words::quote(&diagnostic),
+                ),
+            )
+            .await;
+            let result = system
+                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                .await;
+            if absent {
+                assert!(matches!(result.unwrap(), ActionOutcome::Skipped(_)));
+            } else {
+                assert!(result.unwrap_err().rendered().contains("Permission denied"));
+            }
+        }
+        tokio::fs::write(&active, "active\n").await.unwrap();
+        tokio::fs::write(&log, "").await.unwrap();
+        write_fake_tool(
+            &lib,
+            "tmux",
+            &format!(
+                "printf 'private-tmux-kill\\n' >> {}",
+                shell_words::quote(&log.display().to_string()),
+            ),
+        )
+        .await;
+        assert!(matches!(
+            system
+                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                .await
+                .unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert_eq!(
+            tokio::fs::read_to_string(&log)
+                .await
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "--user show -p ActiveState --value -- farhelm-supervisor.service",
+                "--user stop -- farhelm-supervisor.service",
+                "private-tmux-kill",
+            ]
+        );
+        tokio::fs::remove_file(&socket).await.unwrap();
+        tokio::fs::remove_file(&tmux).await.unwrap();
+        tokio::fs::write(&active, "inactive\n").await.unwrap();
+        assert!(
+            matches!(
+                system
+                    .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                    .await
+                    .unwrap(),
+                ActionOutcome::Skipped(_)
+            ),
+            "a lib-gone retry must not execute a missing client for an absent socket"
+        );
+
+        // EACCES makes both shell existence predicates false. A missing
+        // private client must not turn that unknown server state into a skip.
+        // Root bypasses directory modes, so it cannot establish this premise.
+        let blocked = root.path().join("blocked-socket-parent");
+        tokio::fs::create_dir(&blocked).await.unwrap();
+        tokio::fs::write(
+            blocked.join("tmux.sock"),
+            b"protected fixture socket placeholder",
+        )
+        .await
+        .unwrap();
+        set_mode(&blocked, 0o600).await.unwrap();
+        let searchable = std::process::Command::new("test")
+            .arg("-x")
+            .arg(&blocked)
+            .status()
+            .unwrap();
+        if !searchable.success() {
+            let hidden = std::process::Command::new("test")
+                .arg("-e")
+                .arg(blocked.join("tmux.sock"))
+                .status()
+                .unwrap();
+            assert!(
+                !hidden.success(),
+                "fixture premise: search denial hides an existing socket child"
+            );
+            let failure = system
+                .stop(
+                    &target,
+                    "farhelm-supervisor.service",
+                    &tmux,
+                    &blocked.join("tmux.sock"),
+                )
+                .await
+                .expect_err("unknown socket state must retain the host");
+            assert!(failure.rendered().contains("Permission denied"));
+        } else {
+            eprintln!(
+                "SKIPPED directory-permission subcase: runner bypasses the fixture directory mode"
+            );
+        }
+        set_mode(&blocked, 0o700).await.unwrap();
+        // A searchable filesystem can still refuse a child lookup. Inject
+        // that diagnostic at the existing stat boundary: an I/O failure is
+        // not the missing-path evidence a no-client retry needs.
+        write_fake_tool(&bin, "stat", "printf '%s\\n' \"stat: cannot statx 'fixture No such file or directory': Input/output error\" >&2; exit 1").await;
+        let failure = system
+            .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+            .await
+            .expect_err("lookup errors must keep the host listed");
+        assert!(failure.rendered().contains("Input/output error"));
+        tokio::fs::remove_file(bin.join("stat")).await.unwrap();
 
         // A lib directory that became a symlink after planning is refused by
         // the removal command itself, dangling or not, and neither the link
@@ -6010,7 +6164,12 @@ mod tests {
         assert!(system.remove_unit(&local, &unit).await.is_err());
         assert!(
             system
-                .stop(&local, "farhelm-supervisor.service")
+                .stop(
+                    &local,
+                    "farhelm-supervisor.service",
+                    &lib.join("tmux"),
+                    &root.path().join("tmux.sock")
+                )
                 .await
                 .is_err()
         );
@@ -8576,6 +8735,173 @@ mod tests {
         client.detach(channel).await;
     }
 
+    /// Prove server absence through tmux's exact socket diagnostic before
+    /// fixture teardown can hide a leak. kill-server can return before the
+    /// server finishes exiting; unrelated command failures must not pass.
+    async fn wait_private_tmux_gone(program: &Path, socket: &Path) {
+        let observed = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let output = tokio::process::Command::new(program)
+                    .arg("-S").arg(socket).arg("has-session")
+                    .env("LC_ALL", "C").output().await.unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !output.status.success() && matches!(stderr.trim(), message
+                    if message == format!("no server running on {}", socket.display())
+                    || message == format!("error connecting to {} (No such file or directory)", socket.display())) {
+                    return;
+                }
+                assert!(output.status.success(), "unexpected tmux absence probe: {stderr}");
+                tokio::time::sleep(Duration::from_millis(50)).await; // sleep-ok: bounded polling of the exact private-server disappearance oracle
+            }
+        }).await;
+        assert!(
+            observed.is_ok(),
+            "the fixture's private tmux still answers after stop"
+        );
+    }
+
+    /// An inactive process-only service can leave its ended pane alive even
+    /// after its unit is removed. Retry must end that private server through
+    /// the production SSH stop path before teardown, then tolerate another
+    /// retry with no server or private executable left.
+    #[farhelm_testtrace::test]
+    async fn uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit() {
+        if !user_manager_available().await || !ssh_available("localhost").await {
+            eprintln!(
+                "SKIPPED uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit: systemd user manager or passwordless localhost SSH unavailable"
+            );
+            return;
+        }
+        let tmux =
+            debug_tmux().expect("the recorded tmux substrate provides an absolute executable");
+        let root = tempfile::tempdir().unwrap();
+        let unit = format!("farhelm-provisioning-test-{}.service", uuid::Uuid::new_v4());
+        let unit_path = root.path().join(&unit);
+        let socket = root.path().join("tmux.sock");
+        let config = root.path().join("tmux.conf");
+        tokio::fs::write(&config, "set -g remain-on-exit on\n")
+            .await
+            .unwrap();
+        let script = root.path().join("start-service.sh");
+        tokio::fs::write(&script, format!(
+            "#!/bin/sh\n{} -S {} -f {} new-session -d -s ended true || exit 1\nexec /usr/bin/sleep 300\n",
+            shell_words::quote(tmux.to_str().unwrap()),
+            shell_words::quote(socket.to_str().unwrap()),
+            shell_words::quote(config.to_str().unwrap()),
+        )).await.unwrap();
+        set_mode(&script, 0o755).await.unwrap();
+        tokio::fs::write(
+            &unit_path,
+            format!(
+                "[Service]\nType=exec\nKillMode=process\nExecStart={}\n",
+                script.display(),
+            ),
+        )
+        .await
+        .unwrap();
+        let mut guard = UnitGuard {
+            unit: unit.clone(),
+            unit_path: unit_path.clone(),
+            state_dir: root.path().to_path_buf(),
+            cleaned: false,
+        };
+        let start = tokio::process::Command::new("systemctl")
+            .args(["--user", "--runtime", "enable", "--now", "--"])
+            .arg(&unit_path)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            start.status.success(),
+            "nonce service start: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        let settled = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let pane = tokio::process::Command::new(&tmux)
+                    .arg("-S")
+                    .arg(&socket)
+                    .args(["list-panes", "-a", "-F", "#{pane_dead}"])
+                    .output()
+                    .await
+                    .unwrap();
+                if pane.status.success() && pane.stdout == b"1\n" {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await; // sleep-ok: polling until the fixture's retained pane reports dead
+            }
+        })
+        .await;
+        assert!(settled.is_ok(), "fixture did not retain an ended pane");
+        let policy = tokio::process::Command::new("systemctl")
+            .args(["--user", "show", "-p", "KillMode", "--value", "--", &unit])
+            .output()
+            .await
+            .unwrap();
+        assert!(policy.status.success());
+        assert_eq!(policy.stdout, b"process\n");
+        let stopped = tokio::process::Command::new("systemctl")
+            .args(["--user", "stop", "--", &unit])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            stopped.status.success(),
+            "nonce process-only stop: {stopped:?}"
+        );
+        let backend = SystemBackend::with_simulated_linger(root.path().to_path_buf(), Ok(()), true);
+        let target = ProvisioningTarget::Ssh {
+            destination: "localhost".to_string(),
+        };
+        backend.remove_unit(&target, &unit_path).await.unwrap();
+        backend.daemon_reload(&target).await.unwrap();
+        let state = backend
+            .inspect_uninstall(&target, &unit, &[&unit_path])
+            .await
+            .unwrap();
+        assert!(
+            !state.unit_running() && !state.paths[0].exists,
+            "fixture must be inactive with its unit file gone: {state:?}"
+        );
+        let pane = tokio::process::Command::new(&tmux)
+            .arg("-S")
+            .arg(&socket)
+            .args(["list-panes", "-a", "-F", "#{pane_dead}"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            pane.status.success(),
+            "fixture tmux vanished before retry: {pane:?}"
+        );
+        assert_eq!(
+            pane.stdout, b"1\n",
+            "the retained ended pane must survive process-only stop and reload"
+        );
+        assert!(matches!(
+            backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
+            ActionOutcome::Completed
+        ));
+        wait_private_tmux_gone(&tmux, &socket).await;
+        // tmux can leave a stale socket; use the real client for that repeat,
+        // then remove only this fixture's socket to model a lib-gone retry.
+        assert!(matches!(
+            backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+        if socket.exists() {
+            tokio::fs::remove_file(&socket).await.unwrap();
+        }
+        assert!(matches!(
+            backend
+                .stop(&target, &unit, &root.path().join("removed-tmux"), &socket)
+                .await
+                .unwrap(),
+            ActionOutcome::Skipped(_)
+        ));
+        guard.cleanup().unwrap();
+    }
+
     /// Exercise the complete installer against a real user manager, through
     /// direct local process/file operations, through ssh to localhost, or
     /// through ssh to a genuinely different machine.
@@ -9001,11 +9327,10 @@ mod tests {
         if use_ssh {
             // An ENDED session keeps its dead pane, and with it the private
             // tmux server, alive. Uninstall accepts ended sessions, and its
-            // stop must leave that server running: the unit's
-            // `KillMode=process` is what spares it, and systemd forgets that
-            // setting if the user manager reloads after the unit file is
-            // removed. Checking the server afterwards is the regression test
-            // for stopping before reloading.
+            // stop must end that server as well. Removing the unit and
+            // reloading restores control-group termination; the ended pane
+            // distinguishes that mechanism from a server exiting when its
+            // last pane disappears.
             let ended = client
                 .create_session_with_key(
                     &cwd,
@@ -9064,7 +9389,7 @@ mod tests {
             for action in &planned.plan.actions {
                 match action {
                     ProvisioningAction::DisableSupervisor { unit: named }
-                    | ProvisioningAction::StopSupervisor { unit: named } => {
+                    | ProvisioningAction::StopSupervisor { unit: named, .. } => {
                         assert_eq!(
                             named, &unit,
                             "uninstall named a unit that is not the fixture's"
@@ -9155,10 +9480,7 @@ mod tests {
                 "uninstall left the supervisor running"
             );
             if !remote {
-                assert!(
-                    tmux_alive(),
-                    "stopping the supervisor took the sessions' tmux server with it"
-                );
+                wait_private_tmux_gone(&payloads.tmux, &tmux_socket).await;
             }
         }
 
@@ -9193,8 +9515,8 @@ mod tests {
         );
     }
 
-    /// The CI-shaped transport proof: real ssh, then an SSH UPDATE
-    /// that preserves and operates a tmux-held session.
+    /// Real SSH UPDATE preserves a tmux-held session; UNINSTALL then ends
+    /// the private server while retaining the host's data.
     ///
     /// Destination-agnostic on purpose. By default it dials `localhost` into
     /// fixture-owned paths, which is what a laptop and the Ubuntu CI runner

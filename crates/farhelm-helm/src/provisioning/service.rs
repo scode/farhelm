@@ -1396,14 +1396,6 @@ impl ProvisioningService {
                  only removes a supervisor set up from the hosts panel"
             )));
         }
-        if inspection.unit_running() && inspection.unit_kill_mode != "process" {
-            return Err(refused(format!(
-                "{unit} is running with KillMode={}, so stopping it would also end the sessions' \
-                 tmux server, and uninstall does not stop it that way. An Update from the hosts \
-                 panel rewrites the unit; choose uninstall again after that",
-                inspection.unit_kill_mode
-            )));
-        }
         // The "no unit file left" rule and the removal both look at the
         // planned unit path; a unit systemd loads from anywhere else is not
         // provisioning's and could start the supervisor again.
@@ -2196,8 +2188,14 @@ impl ProvisioningService {
             ProvisioningAction::RemoveUnit { destination, .. } => {
                 self.backend.remove_unit(&plan.target, destination).await
             }
-            ProvisioningAction::StopSupervisor { unit } => {
-                self.backend.stop(&plan.target, unit).await
+            ProvisioningAction::StopSupervisor {
+                unit,
+                tmux_program,
+                tmux_socket,
+            } => {
+                self.backend
+                    .stop(&plan.target, unit, tmux_program, tmux_socket)
+                    .await
             }
             ProvisioningAction::RemoveDirectory { path } => {
                 self.backend.remove_directory(&plan.target, path).await

@@ -171,10 +171,6 @@ pub(super) struct UninstallInspection {
     /// The unit's `ActiveState` (`active`, `inactive`, `failed`, ...).
     /// systemd reports `inactive` for a unit it does not know.
     pub(super) unit_active_state: String,
-    /// The unit's loaded `KillMode`. Provisioning's unit says `process`;
-    /// after its file is removed and the user manager reloaded, systemd
-    /// forgets that and reports its default, `control-group`.
-    pub(super) unit_kill_mode: String,
     /// Where systemd loaded the unit from (`FragmentPath`), with its
     /// canonical form, or `None` when systemd knows no file for it. A
     /// unit loaded from anywhere but the plan's unit path is not the one
@@ -313,7 +309,7 @@ pub(super) trait ProvisioningBackend: Send + Sync {
     /// the installation on the target: which of `paths` exist, whether each
     /// is itself a symlink, and where they really lead, the state directory
     /// a supervisor started without `--state-dir` would use there, and the
-    /// supervisor unit's run state and loaded kill policy. See [`UninstallInspection`].
+    /// supervisor unit's run state and loaded unit-file location. See [`UninstallInspection`].
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
@@ -333,13 +329,16 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         destination: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
-    /// Stop the supervisor unit; one that is not running is a skip, and one
-    /// whose loaded kill policy is not `process` is refused, because
-    /// stopping it would end every process it started.
+    /// Stop the supervisor, then end its private tmux server at the frozen
+    /// socket. Planning removes and reloads the unit first; an inactive unit
+    /// skips only the systemd command, since its private server may survive.
+    /// Failure to end a reachable server fails the step and permits retry.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        tmux_program: &Path,
+        tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
     /// Delete one directory tree; an absent one is a skip, and one that is
     /// itself a symlink is refused rather than unlinked, because removing
@@ -2420,7 +2419,7 @@ impl ProvisioningBackend for SystemBackend {
     /// The output is NUL-separated: an existence flag, a symlink flag and a
     /// canonical path (empty when unresolvable) per asked path, then the
     /// default state directory and its three fields, then the unit's
-    /// `ActiveState`, `KillMode` and `FragmentPath`, and the fragment's
+    /// `ActiveState` and `FragmentPath`, and the fragment's
     /// three fields (no fragment prints two `0` flags and an empty path,
     /// through `%s` because a literal `\00` would read the second flag's
     /// digit as part of an octal escape). A failing `systemctl show` fails
@@ -2445,9 +2444,8 @@ impl ProvisioningBackend for SystemBackend {
                *) state=\"$HOME/.local/state/farhelm\" ;; esac; \
              printf '%s\\0' \"$state\"; resolve \"$state\"; \
              active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
-             mode=$(systemctl --user show -p KillMode --value -- {unit}) || exit 1; \
              fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
-             printf '%s\\0%s\\0%s\\0' \"$active\" \"$mode\" \"$fragment\"; \
+             printf '%s\\0%s\\0' \"$active\" \"$fragment\"; \
              if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0' 0 0; fi",
             unit = crate::ssh::shell_quote(unit),
         ));
@@ -2470,17 +2468,14 @@ impl ProvisioningBackend for SystemBackend {
         require_remote(target, "disabling the supervisor unit")?;
         // `--runtime` mirrors `enable_now`: the real-transport fixture links
         // its unit for this boot only, and only a runtime disable removes
-        // that link. `--no-reload` because `disable` otherwise reloads the
-        // user manager itself, and any reload before the stop step can make
-        // systemd forget the unit's `KillMode=process` (it did for the
-        // fixture's linked unit, whose file the disable takes out of the
-        // search path); uninstall's only reload is its own step after the
-        // stop.
+        // that link. An implicit reload is harmless: uninstall deliberately
+        // forgets process-only termination before stopping the unit. Its
+        // explicit reload follows file removal for units still on disk.
         let runtime = if self.runtime_units { " --runtime" } else { "" };
         let unit = crate::ssh::shell_quote(unit);
         self.require_shell(
             target,
-            &format!("systemctl --user{runtime} disable --no-reload -- {unit}"),
+            &format!("systemctl --user{runtime} disable -- {unit}"),
             "disabling the supervisor unit",
         )
         .await?;
@@ -2521,38 +2516,60 @@ impl ProvisioningBackend for SystemBackend {
         })
     }
 
-    /// A unit that is not running, including one systemd no longer knows
-    /// (its file removed and the manager reloaded), reports `inactive` or
-    /// `failed` here, and stopping it would fail with "not loaded"; that is
-    /// a step already done, so it is skipped.
+    /// End both the service and any server that outlived its process-only
+    /// policy. A retry may find the unit forgotten but its tmux still alive,
+    /// or both gone and the private client binary already removed.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
+        tmux_program: &Path,
+        tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        require_remote(target, "stopping the supervisor unit")?;
-        let unit = crate::ssh::shell_quote(unit);
-        // The kill-policy check runs in the same shell as the stop. A unit
-        // whose file is gone loses `KillMode=process` at the next reload of
-        // the user manager, and stopping it then ends its whole control
-        // group: the private tmux server and every session in it. Uninstall
-        // stops the unit before it reloads, so this only fires when
-        // something else reloaded between a failed run and its retry.
+        require_remote(target, "stopping the supervisor and private tmux server")?;
+        // Stop the supervisor before ending its tmux server directly. The
+        // daemon-reload before this step has already dropped the removed
+        // unit's process-only stop policy, so this stop signals the
+        // supervisor and the private tmux server in its group together; the
+        // orderly terminal shutdown no longer runs ahead of tmux here. The
+        // kill-server below ends a private server that outlived the
+        // supervisor, such as one already stopped under the old policy.
+        // Only exact socket-bound absence diagnostics excuse a failed tmux
+        // command; permission, executable and protocol failures retain the host.
+        // stat reports the lookup failure instead of collapsing all errors
+        // into false, as shell existence predicates do. It receives one path
+        // in the C locale: only its missing-path diagnostic excuses bypassing
+        // a client that may already have been removed on a lib-gone retry.
         let script = format!(
-            "state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
-             case \"$state\" in inactive|failed) printf 'not-running'; exit 0 ;; esac; \
-             mode=$(systemctl --user show -p KillMode --value -- {unit}) || exit 1; \
-             if [ \"$mode\" != process ]; then \
-               printf '%s\\n' \"refusing to stop the supervisor: its unit's loaded KillMode is $mode, so \
-             stopping it would also end the sessions' tmux server; an Update from the hosts panel \
-             rewrites the unit, after which uninstall can stop it\" >&2; exit 80; fi; \
-             systemctl --user stop -- {unit}"
+            "export LC_ALL=C; socket={socket}; tmux={tmux}; changed=no; \
+             state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
+             case \"$state\" in inactive|failed) ;; \
+               *) systemctl --user stop -- {unit} || exit 1; changed=yes ;; esac; \
+             if inspection=$(stat -L -c '%F' -- \"$socket\" 2>&1); then :; \
+               else status=$?; case \"$inspection\" in \
+                 'stat: cannot stat'*': No such file or directory') \
+                   if [ \"$changed\" = no ]; then printf absent; fi; exit 0 ;; \
+                 *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
+             if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then exit 0; else status=$?; fi; \
+             case \"$error\" in \
+               \"no server running on $socket\"|\"error connecting to $socket (No such file or directory)\") \
+                 if [ \"$changed\" = no ]; then printf absent; fi ;; \
+               *) printf '%s\\n' \"$error\" >&2; exit \"$status\" ;; esac",
+            unit = crate::ssh::shell_quote(unit),
+            tmux = shell_path(tmux_program)?,
+            socket = shell_path(tmux_socket)?,
         );
         let output = self
-            .require_shell(target, &script, "stopping the supervisor unit")
+            .require_shell(
+                target,
+                &script,
+                "stopping the supervisor and private tmux server",
+            )
             .await?;
-        Ok(if output.stdout == b"not-running" {
-            ActionOutcome::Skipped("the supervisor was not running".to_string())
+        Ok(if output.stdout == b"absent" {
+            ActionOutcome::Skipped(
+                "the supervisor and private tmux server were already gone".to_string(),
+            )
         } else {
             ActionOutcome::Completed
         })
@@ -2562,7 +2579,7 @@ impl ProvisioningBackend for SystemBackend {
     /// confirmation plans again, so a link made before the user confirmed
     /// is caught there. The test is repeated here, in the same shell as the
     /// `rm`, for a link made after that re-check, while the earlier steps
-    /// (disable, unit removal, stop, reload) ran. A dangling link refuses
+    /// (disable, unit removal, reload, stop) ran. A dangling link refuses
     /// too: `-L` sees it where `-e` does not.
     async fn remove_directory(
         &self,
@@ -2671,7 +2688,6 @@ pub(super) fn parse_uninstall_inspection(
     let default_state = bytes_path(fields.next()?).ok()?;
     let default_state_dir = host_path(&mut fields, default_state)?;
     let unit_active_state = String::from_utf8(fields.next()?.to_vec()).ok()?;
-    let unit_kill_mode = String::from_utf8(fields.next()?.to_vec()).ok()?;
     let fragment = bytes_path(fields.next()?).ok()?;
     let unit_fragment = host_path(&mut fields, fragment.clone())?;
     let unit_fragment = (!fragment.as_os_str().is_empty()).then_some(unit_fragment);
@@ -2683,7 +2699,6 @@ pub(super) fn parse_uninstall_inspection(
         paths,
         default_state_dir,
         unit_active_state,
-        unit_kill_mode,
         unit_fragment,
     })
 }

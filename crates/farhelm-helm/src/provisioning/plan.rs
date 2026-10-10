@@ -175,11 +175,14 @@ pub(crate) enum ProvisioningAction {
         unit: String,
         destination: PathBuf,
     },
-    /// Stop the supervisor. Its unit's `KillMode=process` means only the
-    /// supervisor process goes; nothing else was running there, because
-    /// uninstall refuses while any session or terminal tab is alive.
+    /// Stop the supervisor and its unit's remaining processes, including
+    /// the private tmux server. The exact socket cleanup also reaches a server
+    /// left behind after systemd has forgotten an inactive unit. Both client
+    /// and socket are frozen before confirmation, like the removal paths.
     StopSupervisor {
         unit: String,
+        tmux_program: PathBuf,
+        tmux_socket: PathBuf,
     },
     /// Delete Farhelm's private lib directory: the `farhelm` binary and any
     /// private tmux provisioning put beside it. Planning refuses a layout in
@@ -275,7 +278,9 @@ impl ProvisioningAction {
             Self::RemoveUnit { destination, .. } => {
                 Some(format!("remove its unit file {}", destination.display()))
             }
-            Self::StopSupervisor { unit } => Some(format!("stop {unit}")),
+            Self::StopSupervisor { unit, .. } => {
+                Some(format!("stop {unit} and its private tmux server"))
+            }
             Self::RemoveDirectory { path } => Some(format!(
                 "remove {} with the Farhelm binary and any private tmux in it",
                 path.display()
@@ -625,17 +630,17 @@ impl PlanLayout {
     /// always planned, because each tolerates having happened already. That
     /// is what makes a failed run retryable from wherever it stopped.
     ///
-    /// The order is disable, remove the unit file, stop, reload. Removing
+    /// The order is disable, remove the unit file, reload, stop. Removing
     /// the file before stopping keeps the supervisor answering until nothing
     /// can start it again: until then the host stays connected and a retry
     /// goes through the ordinary checks, and after it the service lets a
-    /// retry proceed without a connection. Stopping before reloading is what
-    /// keeps the unit's `KillMode=process`: systemd forgets a removed unit's
-    /// settings when the manager reloads, and stopping it then would end its
-    /// whole control group, the sessions' tmux server included. (Verified
-    /// against a real user manager while this was written: after removing
-    /// the file and reloading, `KillMode` reads `control-group` and a stop
-    /// empties the group.)
+    /// retry proceed without a connection. Reloading first makes systemd
+    /// forget the removed unit's `KillMode=process`, so stopping ends its
+    /// whole control group, including the private tmux server and retained
+    /// panes. This default control-group behavior was verified against a
+    /// real user manager when uninstall was built. The stop then ends any
+    /// server still reachable at the host's private socket: an inactive unit
+    /// can leave tmux behind even after systemd has forgotten the unit.
     ///
     /// Two refusals guard the `rm -rf` of the lib directory, both on the
     /// host's canonical paths rather than their spelling. The binary the
@@ -692,10 +697,15 @@ impl PlanLayout {
                 destination: paths.unit_path.clone(),
             });
         }
+        actions.push(ProvisioningAction::DaemonReload);
         actions.push(ProvisioningAction::StopSupervisor {
             unit: self.unit_name.clone(),
+            tmux_program: reach
+                .host_tmux
+                .clone()
+                .unwrap_or_else(|| paths.lib_dir.join("tmux")),
+            tmux_socket: facts.state_dir.named.join("tmux.sock"),
         });
-        actions.push(ProvisioningAction::DaemonReload);
         if facts.lib_dir.is_some() {
             actions.push(ProvisioningAction::RemoveDirectory {
                 path: paths.lib_dir.clone(),
