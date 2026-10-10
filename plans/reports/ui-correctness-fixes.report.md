@@ -106,3 +106,34 @@ listing responses and exercise the ordinary restart refusal after an admitted ed
 
 Commit and PR wording received fresh cold reads. Actual native model attribution and usage were not exposed by the
 harness; requested routes are recorded separately from that evidence gap in the private galaxy-brain session records.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1832. The rebase met no conflicts.
+
+#### Review before merging
+
+No findings. The fresh review found no functional conflict with the checkout-folder stack that landed on top of it: the
+stack only changes the save-template checkboxes' styling where this plan changes the save-template Enter handling, and
+this plan adds no launcher controls. Changing the rename and Restart with error lines from paragraphs to blocks breaks
+nothing, because the existing styling and tests find them by class.
+
+#### Checks
+
+These two plans were landed together, ui-correctness-fixes first with the checkout-folder stack on top, on main after
+browser-terminal-test-oracles merged.
+
+- Run now, on the two stacked, after the fixes below: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  UI, protocol and CLI unit tests with the GitHub-checkout end-to-end tests, through the recorder with pinned tmux 3.7c,
+  four slots and no retries (run `7b43b961`, 2891 of 2891); the UI JavaScript tests (230 of 230); on Chromium and WebKit
+  with one worker and no retries the approval-layout, feedback, github-checkout-composer, settings, templates,
+  listing-mutation-fence, notifications, provisioning, restart-with, terminal-font, terminal-links,
+  terminal-replay-rename and mouse-modes specs (run `bf94c1ca`, 374 passed); and the sidebar's launcher Tab-order test
+  on both engines (run `aeda93f9`, 2 passed).
+- The terminal-links, terminal-replay-rename and mouse-modes specs were run on top of browser-terminal-test-oracles,
+  which changed the link tests that ui-correctness-fixes' link-selection change has to pass.
+- An earlier run of the same Rust selection, before the test fix below, stopped at that test's failure; it is not
+  counted as a pass.
+
+Nothing in the report above was made untrue by the landing.
