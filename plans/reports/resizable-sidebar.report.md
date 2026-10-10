@@ -59,3 +59,49 @@ The required fresh-context gpt-6.1-sol high review found one terminal pointer ov
 existing gutter and a first-column hit-target check was added. A fresh final correctness, design, idiom and scope review
 found no remaining issues or unnecessary complexity. Both reviews received the acceptance criteria and the full
 test-authoring checklist. The commit/PR wording cold read also passed.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1759 (make the sidebar resizable), one squash commit on main, directly after
+approval-card-layout's #1760. Both plans changed the stylesheet, SPEC.md and SPEC_impl.md; those merged without
+conflicts, and the only textual conflict was TODO.md, where each plan removed only its own entry.
+
+#### Review before merging
+
+The same separate reviewer as approval-card-layout's read #1759 and the two plans together. Neither plan's browser tests
+assume something the other changes: the approval spec sets the sidebar's width itself where it needs to and otherwise
+starts from the 340px default every fresh browser profile has, and the sidebar specs never involve approvals. The resize
+handle and the approval card never overlap (the handle reaches at most 4px into the main pane, the card starts at least
+12px inside it), and dialogs make the handle inert while the approval card stays answerable, as before.
+
+#### A fix made while landing
+
+The reviewer found that the sidebar spec's last check could pass without testing anything: after resetting the width
+with a double-click and reloading, it read the width before the page had applied the stored value, and the stylesheet's
+own default is the same 340px, so a reset that failed to persist would still have passed. The landing made the test wait
+for the width script to bind first (as the test already does at its start), assert that the reset stored 340, and assert
+focus before the arrow-key check at the maximum width, which a keypress landing elsewhere would otherwise also pass.
+That was in #1759 before it merged; the sidebar-resize spec passed with it on both engines (below).
+
+The reviewer's smaller notes were left as they are: the handle's mount script polls every 25ms without a bound if the
+width script never loads, its layer (3) is not listed in the stylesheet's list of layers (which was already incomplete),
+and SPEC.md's per-device sentence points to Terminal experience while the sidebar-width text is under Session list.
+
+#### Checks
+
+- Run now, on the two UI plans stacked in landing order and before the landing fixes, through the recorder on Chromium
+  and WebKit with pinned tmux 3.7c, one worker and no retries: the approval-layout, spawn, sidebar-resize, sidebar,
+  header, shell-scroll and terminal specs (run `8ef60593`, 364 passed; the two skipped are the real-Claude spawn cases,
+  which need vendor credentials).
+- Run now, after the landing fixes: `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, the approval content
+  tests (run `0fbf5ce6`, 4 of 4), and the approval-layout, spawn and sidebar-resize specs on both engines (run
+  `4343dfea`, 16 passed, the same two real-Claude cases skipped); `cargo fmt --all -- --check` and the test-delay check
+  (276 delays, none without a reason).
+- Run now, on all three plans stacked together: `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and the supervisor's unit tests in full (run `75969832`, 1059 of
+  1059).
+- Reused from the executors: the UI JavaScript tests, the desktop compile check, the desktop asset comparison, the
+  changelog lint and the website build. The landing changed no JavaScript, desktop code, asset list, changelog fragment
+  or documentation page, and main gained only plan bookkeeping and TODO entries in between.
+
+Nothing in the report above was made untrue by the landing.
