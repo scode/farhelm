@@ -1270,7 +1270,11 @@ test.describe("multi-host", () => {
       const help = dialog.locator(".host-settings-yolo .host-settings-help");
       await expect(help).toContainText("Farhelm asks you to confirm each YOLO launch on this host.");
       await expect(toggle).not.toBeChecked();
-      await toggle.click();
+      // Styling the switch must not replace checkbox semantics. Establish
+      // focus before Space, then prove the real helm stored the change.
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press("Space");
       await expect(toggle).toBeChecked();
       await expect
         .poll(async () =>
@@ -1278,6 +1282,10 @@ test.describe("multi-host", () => {
         )
         .toBe(true);
       await expect(help).toContainText("YOLO sessions start on this host without asking you to confirm.");
+      await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toHaveCount(1);
+      await expect(dialog.locator('[data-setting="destination"]')).toHaveCount(0);
+      await expect(dialog.locator(".host-settings-footer")).toContainText("changes save as you make them");
+      await test.info().attach("host-settings-local", { body: await dialog.screenshot(), contentType: "image/png" });
       await toggle.click();
       await expect(toggle).not.toBeChecked();
       await expect
@@ -1397,6 +1405,24 @@ test.describe("multi-host", () => {
     const edit = dialog.locator(".host-edit");
     await expect(edit, "focus moves to the dialog's first control").toBeFocused();
     await expect(dialog.locator('[data-setting="destination"] .host-settings-value')).toHaveText(destination);
+    await expect(dialog.locator(".host-settings-title")).toHaveText(destination);
+    await expect(dialog.locator(".host-settings-summary")).toContainText("connected");
+    await expect(dialog.locator(".host-settings-version")).toHaveText("Farhelm 0.1.0");
+    await expect(dialog.locator(".host-settings-mark [data-glyph=remote]")).toHaveCount(1);
+    await test.info().attach("host-settings-remote", { body: await dialog.screenshot(), contentType: "image/png" });
+    // A short window must scroll the complete dialog to its footer rather
+    // than shrink the grouped sections into overlapping controls. The long
+    // destination still fits without a horizontal scroll at narrow width.
+    const originalViewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 360, height: 420 });
+    expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const close = dialog.locator(".host-settings-close");
+    await close.scrollIntoViewIfNeeded();
+    const footerBox = (await close.boundingBox())!;
+    expect(footerBox.y).toBeGreaterThanOrEqual(0);
+    expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(420);
+    await test.info().attach("host-settings-short", { body: await page.screenshot(), contentType: "image/png" });
+    await page.setViewportSize(originalViewport);
     // Everything behind the backdrop is inert, so nothing there can take
     // focus or input while the dialog is up.
     expect(

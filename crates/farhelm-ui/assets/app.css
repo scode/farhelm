@@ -2752,7 +2752,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: flex;
   gap: 8px;
 }
-/* Indented to sit under the label text, past the checkbox. */
+/* Shared help's original indentation follows a leading checkbox. Refreshed
+   host settings places its switches on the right and removes this indent
+   under its own class; the other dialogs retain their existing spacing. */
 .host-settings-help {
   color: var(--fg-1);
   font-size: 12px;
@@ -2766,6 +2768,117 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: flex;
   justify-content: flex-end;
 }
+
+/* Only host settings gets the grouped refresh. The base dialog and row
+   classes also serve app settings, feedback, host removal and provisioning;
+   changing those shared rules would silently restyle unrelated workflows. */
+.host-settings-refreshed {
+  padding: 0;
+  gap: 0;
+}
+.host-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  background: var(--control-hover-bg);
+  border-bottom: 1px solid var(--border-dim);
+}
+.host-settings-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-0);
+}
+.host-settings-mark .host-kind-icon { width: 24px; height: 24px; }
+.host-settings-mark .host-kind-icon[data-glyph="local"] { color: var(--danger); }
+.host-settings-heading { flex: 1; min-width: 0; }
+.host-settings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+.host-settings-summary .host-status { margin: 0; gap: 6px; }
+.host-settings-version { overflow-wrap: anywhere; }
+.host-settings-dismiss {
+  flex-shrink: 0;
+  align-self: flex-start;
+  border: 0;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+.host-settings-dismiss:hover { color: var(--fg-0); }
+.host-settings-body { display: grid; gap: 20px; padding: 20px 24px; }
+.host-settings-section { display: grid; gap: 14px; min-width: 0; }
+.host-settings-section + .host-settings-section { border-top: 1px solid var(--border-dim); padding-top: 20px; }
+.host-settings-section-title {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.host-settings-refreshed .host-settings-row .btn {
+  padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+}
+.host-settings-refreshed .host-settings-row .btn:hover { border-color: var(--border); }
+.host-settings-refreshed .host-settings-yolo,
+.host-settings-refreshed .host-settings-commands { border: 0; padding: 0; }
+.host-settings-refreshed .host-yolo-without-asking,
+.host-settings-refreshed .host-commands-without-asking { justify-content: space-between; gap: 16px; }
+.host-settings-refreshed .host-settings-help,
+.host-settings-refreshed .host-settings-outcome { margin-left: 0; }
+/* These remain native checkboxes: labels, Space activation, disabled writes
+   and refused-write reset all use the existing input and focus lifecycle. */
+.host-settings-switch {
+  appearance: none;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--well);
+  cursor: pointer;
+}
+.host-settings-switch::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 3px;
+  border-radius: 50%;
+  background: var(--fg-1);
+}
+.host-settings-switch:checked { background: var(--accent-fill); border-color: var(--accent); }
+.host-settings-switch:checked::before { transform: translateX(14px); background: var(--fg-0); }
+.host-settings-switch:disabled { opacity: .5; cursor: default; }
+.host-settings-footer {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-dim);
+}
+.host-settings-footer > span { color: var(--fg-1); font-size: 11px; }
+/* The dialog owns vertical scrolling; flex children must retain their full
+   height so a short window scrolls to the footer instead of overlapping it. */
+.host-settings-refreshed > * { flex-shrink: 0; }
 
 /* ===== Rename editor ============================================== */
 
