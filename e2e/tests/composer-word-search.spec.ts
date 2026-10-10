@@ -204,10 +204,11 @@ test("name and host labels apply one draft choice without launching", async ({ p
 /**
  * An empty search is a launch shortcut only after the dialog has a valid
  * complete selection; an incomplete draft must keep the dialog open and make
- * no create request. The launch itself is asynchronous on the page side (the
- * key hands off to the browser's implicit submission), so the negative
- * assertions are made only after a later UI round-trip through the same
- * input has completed, which orders them after anything the Enter started.
+ * no create request. Launch is only aria-disabled, so the Enter still reaches
+ * the form's submit handler, which refuses it and says why beside Launch
+ * (SPEC.md, launch composer). That visible refusal is rendered only after the
+ * page has processed the Enter, so the negative assertions that follow it are
+ * ordered after anything the Enter started.
  */
 test("empty composer search does not launch an incomplete selection", async ({ page, request }) => {
   const before = new Set((await listedSessions(request)).map((session) => session.id));
@@ -223,30 +224,18 @@ test("empty composer search does not launch an incomplete selection", async ({ p
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await expect(search).toBeFocused();
   const launchButton = form.locator(".create-session-submit");
-  await expect(launchButton, "the incomplete selection must disable the empty-box launch shortcut").toBeDisabled();
-  // The in-page observable that distinguishes "no submit event fired" from
-  // "a POST was not observed yet": the browser declining to click a disabled
-  // default button means the form never receives `submit` at all, and a
-  // listener on the form sees that synchronously, where the route counter
-  // and the listing read below are only the outer belt.
-  await page.evaluate(() => {
-    const form = document.querySelector<HTMLFormElement>(".create-session-form")!;
-    form.dataset.submitWitness = "0";
-    form.addEventListener("submit", () => {
-      form.dataset.submitWitness = "1";
-    }, { once: true });
-  });
+  await expect(launchButton, "the incomplete selection must refuse the empty-box launch shortcut")
+    .toHaveAttribute("aria-disabled", "true");
+  await expect(form.locator(".launch-composer-refusal"), "an unfinished draft is not an error until an attempt")
+    .toHaveCount(0);
   await search.press("Enter");
 
-  // Ordering round-trip: a query typed after the Enter opens the result
-  // surface, and the page cannot have rendered that before it processed the
-  // Enter and whatever submission it did or did not start.
-  await search.fill("no-result-after-empty-enter");
-  await expect(search).toHaveAttribute("aria-expanded", "true");
-
+  await expect(
+    form.locator(".launch-composer-refusal"),
+    "the refused Enter must say why beside Launch",
+  ).toContainText("choose a structured harness before launching");
   await expect(form).toBeVisible();
-  await expect(form, "no submit event may fire for a disabled launch button").toHaveAttribute("data-submit-witness", "0");
-  expect(creates, "a disabled Launch button must not receive the empty-search shortcut").toBe(0);
+  expect(creates, "a refused empty-search Enter must post no create").toBe(0);
   const after = await listedSessions(request);
   expect(after.map((session) => session.id).sort(), "no session may have been created by the empty Enter")
     .toEqual([...before].sort());
