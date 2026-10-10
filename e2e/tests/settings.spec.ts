@@ -3,6 +3,7 @@
  * that changes only its own appearance cannot satisfy the round trip.
  */
 import { expect, test } from "./helpers/evidence";
+import type { APIRequestContext, Request, Route } from "@playwright/test";
 import {
   forceBuildSkew,
   hostRowByName,
@@ -10,6 +11,135 @@ import {
   patchPreferences,
   readPreferences,
 } from "./helpers/fleet";
+
+/** Read the protected public shape to verify persistence independently of the
+ * mounted field's local draft or success line. */
+async function readCheckoutRoot(request: APIRequestContext): Promise<{ root: string | null }> {
+  const reply = await request.get("/api/checkout-root");
+  expect(reply.ok(), await reply.text()).toBe(true);
+  return await reply.json() as { root: string | null };
+}
+
+/** Editing a folder is an explicit configuration write, not a switch or a
+ * local-only draft. Real route readback and reopening distinguish persisted
+ * save/clear from appearance; refusal must preserve both draft and saved root.
+ */
+test("settings saves and clears the all-hosts checkout folder", async ({ page, request }, testInfo) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "settings", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  await expect(dialog).toBeVisible();
+  const read = () => readCheckoutRoot(request);
+  const previous = await read();
+  const field = dialog.locator(".checkout-root-field");
+  const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
+  const save = field.getByRole("button", { name: "save", exact: true });
+  const chosen = "~/managed-checkouts";
+  try {
+    await expect(folder).toHaveValue(previous.root ?? "");
+    await expect(folder).toBeEditable();
+    await dialog.screenshot({ path: testInfo.outputPath("checkout-settings-loaded.png") });
+    await folder.fill("relative-folder");
+    await save.click();
+    await expect(field.getByRole("alert")).toContainText("not the relative path 'relative-folder'");
+    expect(await read()).toEqual(previous);
+    await expect(folder).toHaveValue("relative-folder");
+
+    await folder.fill(chosen);
+    // Editing alone must not write; a separate click commits configuration.
+    expect(await read()).toEqual(previous);
+    // The mounted field must refetch without waiting for the revision watcher.
+    // Independent route readback and reopening cannot prove this client action.
+    const refetched = page.waitForResponse((response) =>
+      response.url().endsWith("/api/checkout-root") && response.request().method() === "GET"
+    );
+    await save.click();
+    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    const refreshed = await refetched;
+    expect(refreshed.ok(), await refreshed.text()).toBe(true);
+    expect(await refreshed.json()).toEqual({ root: chosen });
+    expect(await read()).toEqual({ root: chosen });
+    await expect(field.getByRole("alert")).toHaveCount(0);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await field.screenshot({ path: testInfo.outputPath(`checkout-settings-saved-${width}.png`) });
+      const inputBounds = await folder.boundingBox();
+      const fieldBounds = await field.boundingBox();
+      expect(inputBounds).not.toBeNull();
+      expect(fieldBounds).not.toBeNull();
+      expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
+    }
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(folder).toHaveValue(chosen);
+    await expect(folder).toBeEditable();
+    await folder.fill("");
+    await save.click();
+    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    expect(await read()).toEqual({ root: null });
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue("");
+  } finally {
+    const restored = await request.put("/api/checkout-root", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    expect(await read()).toEqual(previous);
+  }
+});
+
+/** Save is a submitted operation even if Settings closes while it is pending.
+ * Hold the real PUT before forwarding it, dismiss the mounted field, then
+ * release it and inspect persistent state. Component-owned cancellation would
+ * leave the old folder, so the success line alone cannot satisfy this test. */
+test("a pending checkout folder save survives closing settings", async ({ page, request }) => {
+  const previous = await readCheckoutRoot(request);
+  let release!: () => void;
+  let signalSubmitted!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const submitted = new Promise<void>((resolve) => { signalSubmitted = resolve; });
+  let submittedRequest: Request | undefined;
+  const intercept = async (route: Route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    submittedRequest = route.request();
+    signalSubmitted();
+    await held;
+    await route.continue();
+  };
+  await page.route("**/api/checkout-root", intercept);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const folder = dialog.getByRole("textbox", { name: "checkout folder", exact: true });
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue(previous.root ?? "");
+    await folder.fill("~/save-survives-close");
+    await dialog.locator(".checkout-root-field").getByRole("button", { name: "save", exact: true }).click();
+    await submitted;
+    const pendingSave = dialog.getByRole("button", { name: "saving…", exact: true });
+    await expect(pendingSave).toBeFocused();
+    await expect(pendingSave).toHaveAttribute("aria-disabled", "true");
+    expect(await readCheckoutRoot(request)).toEqual(previous);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    release();
+    await expect.poll(() => readCheckoutRoot(request)).toEqual({ root: "~/save-survives-close" });
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue("~/save-survives-close");
+  } finally {
+    release();
+    // A failed assertion can leave the released PUT in flight. Wait for its
+    // response or cancellation before restoring, or it can overwrite cleanup.
+    const reply = await submittedRequest?.response();
+    if (reply) await reply.finished();
+    await page.unroute("**/api/checkout-root", intercept);
+    const restored = await request.put("/api/checkout-root", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    expect(await readCheckoutRoot(request)).toEqual(previous);
+  }
+});
 
 test("settings reverses a permanent removal answer without reloading", async ({ page, request }, testInfo) => {
   const previous = await readPreferences(request);

@@ -135,6 +135,7 @@ mod app_updater;
 mod approvals;
 mod attachments;
 mod auth;
+mod checkout_root;
 #[cfg(native_desktop)]
 pub mod desktop;
 mod feed;

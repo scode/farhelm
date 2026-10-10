@@ -782,6 +782,12 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/preferences",
             get(preferences::get_preferences).put(preferences::put_preferences),
         )
+        // The browser edits only the all-hosts folder. Hook text and host
+        // overrides remain outside this authenticated configuration surface.
+        .route(
+            "/api/checkout-root",
+            get(checkout_config::get_checkout_root).put(checkout_config::put_checkout_root),
+        )
         // The invalidation feed (PLAN_M6_75.md item 5). A WebSocket like the
         // terminal routes, and served beside them for the same reason they
         // are here at all — one process, one port, one origin guard — but

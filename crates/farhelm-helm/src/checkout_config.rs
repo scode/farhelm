@@ -8,6 +8,8 @@
 //! The running helm observes CLI writes and invalidates browser readers; this
 //! module deliberately touches no host, creates no directories, and never
 //! runs the configured hook.
+//! The authenticated browser route exposes only the all-hosts root: neither
+//! hook text nor per-host overrides belong in a browser-readable snapshot.
 //!
 //! ## Inheritance semantics (binding)
 //!
@@ -31,6 +33,57 @@ use crate::store::{HelmStore, HostId, HostRow};
 use anyhow::Context;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
+
+/// The browser's complete configuration surface, deliberately narrower than
+/// [`CheckoutConfigSnapshot`]. A missing field is not a request to clear it;
+/// callers must send `root: null` explicitly, and cannot supply hook/host keys.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CheckoutRootBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    root: Option<String>,
+}
+
+/// Read only the all-hosts folder, never the effective configuration of a host.
+/// Keeping a dedicated reply shape prevents future snapshot fields, especially
+/// the executable post-clone command, from leaking through this browser edge.
+pub(crate) async fn get_checkout_root(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.checkout_config_snapshot(None).await {
+        Ok(snapshot) => axum::Json(CheckoutRootBody {
+            root: snapshot.global_root,
+        })
+        .into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// Explicitly save or clear the all-hosts folder, with the CLI's validation.
+/// Refusals reach the user; the saving client refetches after success. The
+/// revision watcher remains the sole feed publisher, avoiding duplicate or
+/// misattributed notifications when HTTP and CLI writes race. Nothing here
+/// expands paths, contacts a host, creates a folder or changes its override.
+pub(crate) async fn put_checkout_root(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::Json(body): axum::Json<CheckoutRootBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(root) = &body.root
+        && let Err(error) = validate_root(root)
+    {
+        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    }
+    let result = match body.root {
+        Some(root) => state.store.set_checkout_root(None, &root).await,
+        None => state.store.clear_checkout_root(None).await,
+    };
+    if let Err(error) = result {
+        return crate::http_error(error);
+    }
+    axum::http::StatusCode::NO_CONTENT.into_response()
+}
 
 /// Publish committed external configuration changes through the ordinary
 /// invalidation feed. The CLI writes SQLite directly, so an in-process setter
@@ -183,13 +236,7 @@ impl HelmStore {
     /// the stored value actually changes. Never contacts a host, creates a
     /// directory, or runs anything.
     pub async fn set_checkout_root(&self, host: Option<HostId>, root: &str) -> anyhow::Result<()> {
-        validate_root_path(root)?;
-        if root.len() > MAX_ROOT_BYTES {
-            anyhow::bail!(
-                "checkout root is {} bytes; the limit is {MAX_ROOT_BYTES} bytes",
-                root.len()
-            );
-        }
+        validate_root(root)?;
         self.write_setting(host, Field::Root, Some(root)).await
     }
 
@@ -457,6 +504,19 @@ fn validate_root_path(path: &str) -> anyhow::Result<()> {
     )
 }
 
+/// Validate before a write so HTTP can distinguish a user's refused value
+/// from database failures, while CLI and browser setters keep one contract.
+fn validate_root(root: &str) -> anyhow::Result<()> {
+    validate_root_path(root)?;
+    if root.len() > MAX_ROOT_BYTES {
+        anyhow::bail!(
+            "checkout root is {} bytes; the limit is {MAX_ROOT_BYTES} bytes",
+            root.len()
+        );
+    }
+    Ok(())
+}
+
 /// What one `farhelm helm checkout-config` invocation should do.
 #[derive(Debug, Clone)]
 pub enum CheckoutConfigAction {
@@ -632,6 +692,268 @@ fn global_line_disabled_aware(value: &Option<String>) -> String {
     match value {
         Some(value) if value.is_empty() => "disabled".to_string(),
         other => global_line(other),
+    }
+}
+
+#[cfg(test)]
+mod root_route_tests {
+    use crate::rest_harness;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    /// Exercise authentication, extraction and the registered browser route,
+    /// rather than passing an already-decoded value straight to its handler.
+    fn request(method: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri("/api/checkout-root")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// Keep reply inspection bounded and compare the exact public shape so
+    /// private fields cannot silently become part of a successful read.
+    async fn read(harness: &rest_harness::Harness) -> serde_json::Value {
+        let response = harness
+            .router()
+            .oneshot(request("GET", serde_json::Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 8192)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// The browser sees the global folder only, even when a host overrides it
+    /// and both scopes hold executable hook text. A snapshot serialization
+    /// would leak these values; exact reply equality rules that mechanism out.
+    #[farhelm_testtrace::test]
+    async fn get_exposes_only_global_root() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await, serde_json::json!({"root": null}));
+        let host = harness
+            .store
+            .add_ssh_host("checkout-route.invalid", None, None)
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_root(None, "~/global-checkouts")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_root(Some(host), "/host-only-checkouts")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(None, "global-private-hook-marker")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(Some(host), "host-private-hook-marker")
+            .await
+            .unwrap();
+        let snapshot = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.global_post_clone.as_deref(),
+            Some("global-private-hook-marker")
+        );
+        assert_eq!(
+            snapshot.host_override.as_ref().unwrap().root.as_deref(),
+            Some("/host-only-checkouts")
+        );
+        assert_eq!(
+            snapshot
+                .host_override
+                .as_ref()
+                .unwrap()
+                .post_clone
+                .as_deref(),
+            Some("host-private-hook-marker")
+        );
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"root": "~/global-checkouts"})
+        );
+    }
+
+    /// HTTP writes share the CLI watcher's changed-only publication contract:
+    /// one observation publishes once, a repeated observation or no-op does
+    /// not. Clearing preserves host overrides and hooks, which this public
+    /// route must never edit.
+    #[farhelm_testtrace::test]
+    async fn put_sets_clears_and_invalidates_changed_values() {
+        let harness = rest_harness::idle_helm().await;
+        let host = harness
+            .store
+            .add_ssh_host("checkout-route.invalid", None, None)
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_root(Some(host), "/host-checkouts")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(None, "private-hook-marker")
+            .await
+            .unwrap();
+        assert_eq!(read(&harness).await, serde_json::json!({"root": null}));
+        let mut revision = harness.manager.events().revision();
+        let mut observed = harness
+            .store
+            .checkout_config_snapshot(None)
+            .await
+            .unwrap()
+            .revision;
+        for (root, changed) in [
+            (Some("~/checkouts"), true),
+            (Some("~/checkouts"), false),
+            (None, true),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", serde_json::json!({"root": root})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(read(&harness).await, serde_json::json!({"root": root}));
+            assert_eq!(
+                harness.manager.events().revision(),
+                revision,
+                "the HTTP route must leave publication to the watcher"
+            );
+            assert_eq!(
+                super::publish_revision_change(
+                    &harness.store,
+                    harness.manager.events(),
+                    &mut observed
+                )
+                .await
+                .unwrap(),
+                changed
+            );
+            let after = harness.manager.events().revision();
+            assert_eq!(
+                after > revision,
+                changed,
+                "only a changed committed revision must invalidate"
+            );
+            assert!(
+                !super::publish_revision_change(
+                    &harness.store,
+                    harness.manager.events(),
+                    &mut observed
+                )
+                .await
+                .unwrap()
+            );
+            assert_eq!(harness.manager.events().revision(), after);
+            revision = after;
+        }
+        let snapshot = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.global_post_clone.as_deref(),
+            Some("private-hook-marker")
+        );
+        assert_eq!(
+            snapshot.host_override.unwrap().root.as_deref(),
+            Some("/host-checkouts")
+        );
+    }
+
+    /// Path refusals are user-visible 400s and leave the prior value and
+    /// revision intact. The same setter contract serves the GUI and CLI.
+    #[farhelm_testtrace::test]
+    async fn put_refusal_preserves_root_and_revision() {
+        let harness = rest_harness::idle_helm().await;
+        harness
+            .store
+            .set_checkout_root(None, "/saved-checkouts")
+            .await
+            .unwrap();
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"root": "/saved-checkouts"})
+        );
+        let feed_before = harness.manager.events().revision();
+        for (value, message) in [
+            ("relative", "not the relative path 'relative'"),
+            ("~another", "does not support ~user paths"),
+            ("", "must not be empty"),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", serde_json::json!({"root": value})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = axum::body::to_bytes(response.into_body(), 8192)
+                .await
+                .unwrap();
+            assert!(String::from_utf8(bytes.to_vec()).unwrap().contains(message));
+            assert_eq!(
+                harness.store.checkout_config_snapshot(None).await.unwrap(),
+                before
+            );
+            assert_eq!(harness.manager.events().revision(), feed_before);
+        }
+    }
+
+    /// Authentication and exact request grammar protect the configuration
+    /// write. Missing root cannot accidentally clear it, and extra private
+    /// fields cannot be accepted as ignored browser configuration.
+    #[farhelm_testtrace::test]
+    async fn route_requires_authentication_and_explicit_root() {
+        let harness = rest_harness::idle_helm().await;
+        harness
+            .store
+            .set_checkout_root(None, "/saved-checkouts")
+            .await
+            .unwrap();
+        for method in ["GET", "PUT"] {
+            let response = harness
+                .unauthenticated_router()
+                .oneshot(request(method, serde_json::json!({"root": null})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({"root": null, "post_clone": "private"}),
+            serde_json::json!({"root": null, "host": 1}),
+            serde_json::json!({"root": 3}),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(
+                read(&harness).await,
+                serde_json::json!({"root": "/saved-checkouts"})
+            );
+        }
     }
 }
 

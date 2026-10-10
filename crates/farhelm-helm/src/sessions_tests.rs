@@ -8456,15 +8456,15 @@ async fn create_with_invalid_github_repo_names_the_parse_error() {
 }
 
 /// A create body with a valid repository and accepted preview proceeds to the
-/// fresh-checkout resolution, and with no checkout root configured the
-/// refusal names the exact CLI command that fixes it — the operator-gap
+/// fresh-checkout resolution, and with no checkout folder configured the
+/// refusal points to Settings where the user can fix it — an actionable
 /// message, not a generic failure, and still before any host contact,
 /// history write, or supervisor frame.
 ///
 /// No intent key is supplied, so no reconciliation lookup is needed. The
 /// connected silent peer is joined to prove that no create frame is sent.
 #[farhelm_testtrace::test]
-async fn create_with_valid_github_repo_without_a_root_names_the_set_root_command() {
+async fn create_with_valid_github_repo_without_a_root_points_to_settings() {
     use tower::ServiceExt;
 
     // A CONNECTED silent supervisor, not a dropped peer: the refusal must
@@ -8503,10 +8503,9 @@ async fn create_with_valid_github_repo_without_a_root_names_the_set_root_command
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(
-        text.contains("no checkout root is configured")
-            && text.contains("checkout-config set-root"),
+        text.contains("no checkout folder is configured") && text.contains("Settings"),
         "a valid repository without a configured root must hit the actionable \
-         set-root refusal: {text}"
+         Settings refusal: {text}"
     );
     // The refusal happened at the helm: the connected silent supervisor
     // proves no create frame reached it. (It panics inside its own task on
@@ -9467,12 +9466,7 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
         missing["repos"], expected,
         "missing config retains accepted suggestions"
     );
-    assert!(
-        missing["scan_error"]
-            .as_str()
-            .unwrap()
-            .contains("checkout-config set-root")
-    );
+    assert!(missing["scan_error"].as_str().unwrap().contains("Settings"));
     harness
         .store
         .set_checkout_root(None, "~/target-checkouts")

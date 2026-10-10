@@ -479,6 +479,15 @@ dialogs' shared focus/isolation helper with its own selector; opening focuses th
 releases isolation and returns focus to the gear. The host setup and removal permanent answers each name that gear as
 the way to turn confirmation back on.
 
+The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
+have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
+with a required nullable `root` and no host or hook fields. It calls the existing global setter/clearer; the revision
+watcher is the sole invalidation publisher for HTTP and CLI writes. The saving field refetches on success and invokes
+its caller's callback so dependent reads need not wait for the watcher. A submitted save is app-owned and survives
+dismissal; its outcome and callback touch component-owned state only while the field remains mounted. The browser reads
+only the global folder, so neither host overrides nor the executable post-clone command enter its reply. The field keeps
+its refused draft and reports success.
+
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
 outcomes, and setup confirmation live in a modal dialog; a permanent setup answer is shared through the helm preference

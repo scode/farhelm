@@ -406,6 +406,42 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
     resp.json::<Preferences>().await.map_err(|e| e.to_string())
 }
 
+/// Only the all-hosts folder crosses the browser edge; this type must never
+/// grow into the private checkout snapshot that also holds executable hooks.
+#[derive(Deserialize, serde::Serialize)]
+struct CheckoutRootBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    root: Option<String>,
+}
+
+/// Seed an explicitly saved field with the global folder, still unexpanded.
+/// A host's effective folder is a separate concern: its CLI override may win.
+pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, String> {
+    let url = format!("{base}/api/checkout-root");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<CheckoutRootBody>()
+        .await
+        .map(|body| body.root)
+        .map_err(|e| e.to_string())
+}
+
+/// Save only on user request and return the helm's refusal to the field.
+/// Unlike queued preferences, a folder write is not silent or optimistic;
+/// callers refresh dependent discovery/preview only after this succeeds.
+pub(crate) async fn save_checkout_root(base: &str, root: Option<String>) -> Result<(), String> {
+    let url = format!("{base}/api/checkout-root");
+    let resp = send(client().put(&url).json(&CheckoutRootBody { root })).await?;
+    if !resp.status().is_success() {
+        // A refusal can arrive without a body (an auth or origin guard, a
+        // proxy); `refusal_text` keeps the field's alert from being blank.
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// Which field of the shared preference a writer owns.
 ///
 /// The write queue below serializes writes PER FIELD: each field is
