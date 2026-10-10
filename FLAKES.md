@@ -1790,3 +1790,32 @@ a pause lifted inside tmux's pause-after window must not trigger a catch-up rese
 Class: budget
 
 Cause: hypothesis
+
+## 2026-10-09 — `view-changes-do-not-postpone-a-recovery` (e2e/tests/terminal-reconnect.spec.ts)
+
+The browser-only deflake sweep (run `0ca012d4-81ae-4d46-b75d-54892e9c69b0`, retained run
+`a20f2a95-e3d7-4a0a-a340-055ca9547555`, selection `browser suite, both engines`, one browser worker, zero retries)
+failed this test once in WebKit (`webkit-terminal-reconnect`) on clean commit `31200f2c2502ff3f62edda30c2f8810fbb04662b`
+(a dependency-update stack over main, including Playwright 1.64.0 with its WebKit build, newer than the 1.62.0 the suite
+ran on before). It failed fast on its timing assertion: the recovery landed 4185 ms after the socket was closed, against
+a 4000 ms bound with a single 1.5-second reconnect rung. The three classification reruns
+(`b421c4bd-45b0-49d5-a970-9ba0b6323efe`, `a30e12c5-bc71-48df-be05-71c954456dfa`, `85cd1460-b130-4ada-9dc9-ecd6450dd513`)
+passed. The Chromium case passed in the same run. The same battery also failed two tests deterministically for
+unrelated, now-fixed reasons (`buttons.spec.ts` and `composer-word-search.spec.ts`). The machine was shared with other
+agents' work, at load average about 16 shortly after; memory pressure was not recorded. tmux 3.7c, executable SHA256
+`f660bd3c43f0708a8580b64bbab53cc799885d37e56b4e70fa44b2b2a36c05d9`, locale `C.UTF-8`; ambient `FARHELM_*` names were
+scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The bound is wall-clock time taken on the test's side and
+spans four view changes with 250 ms pauses, so test-side latency under load counts against it; that the recovery was not
+actually postponed is a hypothesis, not established, since the trace was not read. No earlier entry exists for this
+test. Full evidence is retained privately on the executing machine. Disposition: open (TODO.md).
+
+```
+Error: the recovery must land on the schedule it was given, not on one the view kept resetting
+expect(received).toBeLessThan(expected)
+Expected: < 4000
+Received:   4185
+```
+
+Class: budget
+
+Cause: hypothesis

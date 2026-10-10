@@ -288,6 +288,15 @@ Deferred work, with its original triggers:
   window anywhere in that drain produces a correct reset that the test reads as a shallow-pause failure. First step:
   find in the failed run's traces when the `%pause` arrived relative to the resume.
 
+- **Reconnect recovery misses its window under load.** The WebKit case of `view-changes-do-not-postpone-a-recovery` in
+  `e2e/tests/terminal-reconnect.spec.ts` measured a recovery at 4185 ms against its 4000 ms bound in deflake run
+  `0ca012d4-81ae-4d46-b75d-54892e9c69b0` (failed run `a20f2a95-e3d7-4a0a-a340-055ca9547555`; reruns
+  `b421c4bd-45b0-49d5-a970-9ba0b6323efe`, `a30e12c5-bc71-48df-be05-71c954456dfa` and
+  `85cd1460-b130-4ada-9dc9-ecd6450dd513` passed) on a machine at load average about 16 (FLAKES.md, 2026-10-09).
+  Hypothesis: the bound is wall-clock time measured from the test's side, so the view churn's own round trips under load
+  eat the margin above the 1.5-second rung; no reset was shown. First step: read the failed trace for when the page
+  scheduled and started its reconnect attempt relative to the socket close.
+
 ## Broken tests
 
 ## Code review
