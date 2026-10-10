@@ -4,6 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [blocked] `waiting-sound.md` — sounds when a session waits, an approval arrives, or (opt-in) a turn finishes, each switchable per device in Settings
 - [landing 88c8ce] `terminal-file-download.md` — path-shaped text in a terminal is checked on hover and downloads from the session's host on click (100 MB limit; desktop saves to Downloads)
 - [blocked] `hook-report-watch.md` — the supervisor applies conversation reports as soon as they are written, via a file watch, with the timer as backstop (after `sweep-on-timer.md`)
-- [pending] `managed-checkout-trash.md` — fresh GitHub checkouts become "managed checkouts": a branch glyph on their sessions, a folder/managed-checkout choice in the launcher and templates, and a trash beside New that lists archived checkouts per host and deletes them
+- [in-flight 300c5b] `managed-checkout-trash.md` — fresh GitHub checkouts become "managed checkouts": a branch glyph on their sessions, a folder/managed-checkout choice in the launcher and templates, and a trash beside New that lists archived checkouts per host and deletes them
 - [landing 88c8ce] `uninstall-ends-tmux.md` — hosts-panel uninstall also ends the host's private tmux server, by reloading systemd before the stop; the spec drops the promise to keep it
 - [blocked] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
