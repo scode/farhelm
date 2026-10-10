@@ -501,7 +501,13 @@ job accepts a skip; a failure inside a build job is the only kind it refuses.
 What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what
 you expect), `dist generate --check` (the generated workflow is current), the release scripts' own `--self-test` modes
 (`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`, `scripts/check-desktop-assets.sh`,
-`releasing/check-changelog.py`), and `shellcheck` over the scripts the workflow calls.
+`releasing/check-changelog.py`, `releasing/rehearse-release-gate.py`), and `shellcheck` over the scripts the workflow
+calls.
+
+To get the gate's verdict in GitHub without cutting a release, `releasing/rehearse-release-gate.py` derives a throwaway
+workflow from `release.yml` that runs the plan and per-target build jobs on a push to a `rehearsal/release-gate/...`
+branch and publishes nothing; its docstring says what it changes and what a rehearsal therefore does not check (the two
+tag assertions). `.agents/run-all-tests.md` is the procedure that pushes it. The generated file is never merged.
 
 When a tag produces a GitHub release that is incomplete or failed validation, the recovery procedure is in
 `dist-workspace.toml`'s header ("RECOVERY: a GitHub release that is incomplete or failed validation"). It is
