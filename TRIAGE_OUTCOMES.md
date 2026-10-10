@@ -7368,7 +7368,8 @@
   the fixture. If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the inner script quotes the paths or receives them as positional arguments; the path helper's
   documentation matches what it guarantees. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## unquoted-probe-fixture-paths-inherited-pipe-fixture-inherited-pipe-fixture.md
 
@@ -7378,7 +7379,8 @@
 - Decision: fix it, together with
   `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md`, under the same gate.
 - Completion criteria: the redirect target is quoted. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## real-agent-cleanup-forget-somebody-elses-workspace.md
 
@@ -7392,7 +7394,8 @@
   the run's own stamp or scratch directory). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the workspace name is unique per run and cleanup forgets only that name. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## stale-deflake-pid-terminate-unrelated-work.md
 
@@ -7408,7 +7411,8 @@
 - Completion criteria: `deflake stop` and the liveness check signal or trust the recorded process only when its start
   time matches; a stale file is treated as not running. Validate per `deflake/EVAL.md` if the change touches what it
   covers. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## qualified-hostname-scrubbing-leaves-private-domain.md
 
@@ -7422,7 +7426,8 @@
   the forbidden list ahead of the short name. If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: a fully qualified host name is scrubbed and checked for. No agent screens are re-captured. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## release-failure-advice-tells-operator-reuse-tag.md
 
@@ -7437,7 +7442,8 @@
 - Completion criteria: the printed advice says the tag is spent and to cut the next version per `releasing/AGENTS.md`;
   `release.yml` is regenerated with the pinned cargo-dist and `dist generate --check` passes. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+- Execution: complete in jj change `lmssuoslrywk`, bookmark `plan/harness-tooling-fixes/01-tooling-fixes`; draft PR
+  [#1799](https://github.com/scode/farhelm/pull/1799/changes).
 
 ## forward-tab-counts-freeze-gui.md
 

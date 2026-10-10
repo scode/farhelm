@@ -539,6 +539,23 @@ def read_json(path: pathlib.Path) -> dict | None:
         return None
 
 
+def process_start_time(pid: int) -> str | None:
+    """Read the process birth time on Linux and macOS; failure grants no authority.
+
+    A persisted PID can belong to unrelated work after daemon death or a reboot.
+    This narrows reuse without claiming an atomic identity-check-and-signal.
+    `ps` prints `lstart` in the caller's time zone and locale, so both are
+    pinned: the recorded value must compare equal from any later shell.
+    """
+    env = dict(os.environ, TZ="UTC0", LC_ALL="C")
+    try:
+        result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                capture_output=True, text=True, check=False, env=env)
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
+    except OSError:
+        return None
+
+
 class RunDir:
     """Layout of one sweep's private state directory.
 
@@ -608,14 +625,25 @@ class RunDir:
                     out.append(data)
         return out
 
-    def daemon_alive(self) -> bool:
-        """Liveness by pidfile + kill -0, never by process-name grep."""
+    def record_daemon(self, pid: int) -> None:
+        """Publish the same birth identity at spawn and daemon entry.
+
+        Readers refuse incomplete records, including legacy bare PID files.
+        """
+        self.pid_file.write_text(f"{pid}\n{process_start_time(pid) or ''}\n")
+
+    def daemon_pid(self) -> int | None:
+        """Return a PID only while its persisted birth identity still matches."""
         try:
-            pid = int(self.pid_file.read_text().strip())
-            os.kill(pid, 0)
-            return True
+            pid_text, born = self.pid_file.read_text().splitlines()
+            pid = int(pid_text)
+            return pid if pid > 0 and born and process_start_time(pid) == born else None
         except (OSError, ValueError):
-            return False
+            return None
+
+    def daemon_alive(self) -> bool:
+        """A reused process number is not a living daemon, even if kill -0 succeeds."""
+        return self.daemon_pid() is not None
 
     def found_flakes(self) -> list[TestId]:
         if not self.found_file.exists():
@@ -819,7 +847,7 @@ class Daemon:
     def main(self) -> None:
         signal.signal(signal.SIGTERM, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
-        self.run.pid_file.write_text(f"{os.getpid()}\n")
+        self.run.record_daemon(os.getpid())
         final_status = "failed"
         try:
             final_status = self.prepare_and_sweep()
@@ -1330,7 +1358,7 @@ def cmd_start(args: argparse.Namespace, checkout: pathlib.Path) -> int:
     # Write the pidfile here, before returning: a `wait` issued in the same
     # breath as `start` would otherwise see no pidfile and report the daemon
     # dead before it had finished importing. The daemon rewrites it on entry.
-    run.pid_file.write_text(f"{daemon.pid}\n")
+    run.record_daemon(daemon.pid)
     print(f"deflake: started run {run.path.name}" + (" (repeat mode)" if args.repeat else ""))
     print(f"run dir: {run.path}")
     print("next: `deflake/bin/deflake wait` — it returns only when there is something to do")
@@ -1455,9 +1483,8 @@ def cmd_events(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
 
 def cmd_stop(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
     run = resolve_run(checkout)
-    try:
-        pid = int(run.pid_file.read_text().strip())
-    except (OSError, ValueError):
+    pid = run.daemon_pid()
+    if pid is None:
         print("deflake: daemon is not running")
         return 0
     os.kill(pid, signal.SIGTERM)

@@ -35,24 +35,14 @@ triage.
   could show model text as misleading permission wording.
 - `replace-omits-conversation-loss-warning-failed-resume.md` — Replace omits a conversation-loss warning after a failed
   resume launch.
-- `stale-deflake-pid-terminate-unrelated-work.md` — Stopping an old test sweep can signal an unrelated process.
-- `real-agent-cleanup-forget-somebody-elses-workspace.md` — A failed real-agent test can unregister another workspace.
-- `release-failure-advice-tells-operator-reuse-tag.md` — Release recovery advice could lead an operator to reuse an
-  immutable tag.
 - `ssh-stanza-removal-destroy-existing-configuration.md` — Removing a temporary SSH stanza can destroy unrelated
   configuration.
 - `legacy-ssh-stanza-cleanup-has-own-destructive.md` — Legacy SSH cleanup has a separate configuration-loss window.
 - `installing-temporary-ssh-stanza-destroy-original-configuration.md` — Installing a test SSH stanza can leave the
   user's configuration incomplete.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
-- `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md` — A space in the temporary
-  root could redirect this fixture's write outside its directory.
-- `unquoted-probe-fixture-paths-inherited-pipe-fixture-inherited-pipe-fixture.md` — The inherited-pipe fixture could
-  truncate a file outside its temporary directory.
 - `arrow-navigation-retains-obsolete-position-item-disappears.md` — An outdated menu position could move keyboard focus
   onto Delete.
-- `qualified-hostname-scrubbing-leaves-private-domain.md` — Screen capture could leave the private domain of a qualified
-  hostname.
 
 ## High priority: material UX degradation
 
