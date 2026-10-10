@@ -175,6 +175,8 @@ test("sidebar width moves narrow-window chrome and menu-pointer cutoffs", async 
     await openRowMenu(row);
     await expect(row.locator(".session-row-menu-pointer")).toBeVisible();
   } finally {
-    await request.delete(`/api/sessions/${session.id}`);
+    // A resolved HTTP request can still be a refused deletion. The shared
+    // helper requires removal (or prior absence), on failures as well as passes.
+    await cleanupSession(request, session.id);
   }
 });

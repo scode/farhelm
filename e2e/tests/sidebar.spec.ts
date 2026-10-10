@@ -5106,17 +5106,36 @@ test("composer path actions keep typing inert and browse the selected remote hos
   expect(createPosts, "Use changes only the draft folder").toBe(0);
 
   await search.fill(remotePath);
+  const remoteLog = path.join(path.dirname(remotePath), "remote-supervisor.log");
+  // Both engines share this log and destination. Only bytes appended after
+  // this action's baseline can witness its forwarding, never an earlier run.
+  const logBeforeBrowse = fs.statSync(remoteLog).size;
+  const browseReceipt = `received directory browse request cwd=${remotePath}`;
+  let logCursor = logBeforeBrowse;
+  let logTail = Buffer.alloc(0);
   await form.getByRole("option", { name: `Browse this path: ${remotePath}`, exact: true }).click();
   await expect.poll(() => browseBodies.length).toBe(1);
   expect(browseBodies[0], "Browse carries the selected remote destination").toMatchObject({
     host: Number(remote), cwd: remotePath,
   });
   await expect(form.getByRole("button", { name: `${remotePath}/launch`, exact: true }), "the forwarded remote listing must expose its real launch child").toBeVisible();
-  const remoteLog = path.join(path.dirname(remotePath), "remote-supervisor.log");
   await expect.poll(
-    () =>
-      stripAnsi(fs.readFileSync(remoteLog, "utf8"))
-        .includes(`received directory browse request cwd=${remotePath}`),
+    () => {
+      const fd = fs.openSync(remoteLog, "r");
+      try {
+        expect(fs.fstatSync(fd).size, "the owned log must not rotate beneath this action's witness").toBeGreaterThanOrEqual(logCursor);
+        // Advance through bounded chunks. Retain just enough raw overlap for
+        // a receipt (including ANSI wrappers) split across two observations.
+        const bytes = Buffer.alloc(64 * 1024);
+        const read = fs.readSync(fd, bytes, 0, bytes.length, logCursor);
+        logCursor += read;
+        const observed = Buffer.concat([logTail, bytes.subarray(0, read)]);
+        logTail = observed.subarray(-Buffer.byteLength(browseReceipt) - 256);
+        return stripAnsi(observed.toString("utf8")).includes(browseReceipt);
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
     { message: "the selected remote supervisor must independently record the forwarded browse request" },
   ).toBe(true);
   expect(createPosts, "Browse only opens the picker").toBe(0);
@@ -6676,6 +6695,9 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   const harnessChoice = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
   const controls = [
     recentSlot,
+    // The destination kind's segmented control: two buttons, so two stops.
+    form.getByRole("button", { name: "folder", exact: true }),
+    form.getByRole("button", { name: "managed checkout", exact: true }),
     form.getByRole("combobox", { name: "host", exact: true }),
     browseButton,
     form.getByLabel("folder", { exact: true }),
@@ -7561,7 +7583,9 @@ test("an idle session that was never opened reads unseen, and opening it clears 
  * STICKS rather than being immediately re-marked seen by the session's own
  * still-mounted auto-mark effect — the whole reason that effect keys on
  * the activity STAMP rather than on the unseen predicate (see
- * `session_view.rs`'s `mark_key` memo).
+ * `session_view.rs`'s `mark_key` memo). A later listing reply must render
+ * while that view stays mounted; the instant after the click alone cannot
+ * distinguish persistence from an auto-mark effect that has not run yet.
  */
 test("a manual mark-unread on the open session sticks", async ({ page, request }) => {
   // Budgeted above the sum of this test's own explicit waits (20s + 45s +
@@ -7586,30 +7610,60 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     // The label must already read "mark unread" — the row is currently
     // seen — and clicking it must turn the dot blue again without moving
     // the selection.
-    const reads = countReads(page);
-    const listingReadsBeforeClear = reads.count("listing");
+    let automaticMarks = 0;
+    page.on("request", (candidate) => {
+      if (candidate.method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}/seen` &&
+        candidate.postDataJSON().seen_activity_at !== null) automaticMarks += 1;
+    });
     await openRowMenu(target);
     const markSeenItem = target.locator(".session-row-mark-seen");
     await expect(markSeenItem).toHaveText("mark unread");
-    await markSeenItem.click();
+    const [cleared] = await Promise.all([
+      page.waitForResponse((candidate) =>
+        candidate.request().method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}/seen` &&
+        candidate.request().postDataJSON().seen_activity_at === null
+      ),
+      markSeenItem.click(),
+    ]);
+    expect(cleared.ok(), "the manual unread write must succeed before measuring later effects").toBe(true);
+    // The write client ignores the success body. Its status and the rendered
+    // unread state establish the clear; body completion is not its contract.
     await expect(target.getByRole("menu")).toHaveCount(0);
     await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
       timeout: 20_000,
     });
     await expect(target).toHaveAttribute("data-session-selected", "true");
-    // Polled past at least one MORE listing read, rather than a fixed
-    // sleep: SPEC_impl.md's 3-second connected-host refresh interval means
-    // a plain `waitForTimeout` would either race a slow refresh under load
-    // or waste time waiting on a fast one, and neither actually proves a
-    // redraw happened — this does, by observing the read itself, which is
-    // what proves the manual clear survives more than one redraw of the
-    // still-open session, not just the instant after the click.
-    await expect
-      .poll(() => reads.count("listing"), {
-        timeout: 20_000,
-        message: "the sidebar must poll the listing at least once more before this proves anything",
-      })
-      .toBeGreaterThan(listingReadsBeforeClear);
+    // Start after unread is visible. A harmless rename drives a later feed
+    // refresh without adding output or remounting the session. Its new title
+    // proves that reply was rendered, rather than merely requested.
+    const reads = countReads(page);
+    const listingReadsAfterUnread = reads.count("listing");
+    const refreshedTitle = `${session.title}-refreshed`;
+    const laterRead = page.waitForRequest((candidate) =>
+      candidate.method() === "GET" && new URL(candidate.url()).pathname === "/api/sessions"
+    );
+    // The open view reads details independently of the sidebar. Its renamed
+    // title is the oracle that current (and its auto-mark effect) consumed
+    // this post-clear refresh, even if the listing answered much earlier.
+    const laterDetail = page.waitForResponse(async (candidate) =>
+      candidate.request().method() === "GET" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}` &&
+      candidate.ok() && (await candidate.json()).title === refreshedTitle
+    );
+    await renameSession(request, session.id, refreshedTitle);
+    const reply = await (await laterRead).response();
+    expect(reply, "a later listing read must receive a reply").not.toBeNull();
+    expect(reply!.ok()).toBe(true);
+    expect(await reply!.finished(), "the later listing reply must finish without a transport error").toBeNull();
+    expect(reads.count("listing")).toBeGreaterThan(listingReadsAfterUnread);
+    await expect(target).toContainText(refreshedTitle);
+    expect(await (await laterDetail).finished(), "the renamed session detail reply must finish").toBeNull();
+    await expect(page.locator(".titlebar .title")).toHaveText(refreshedTitle);
+    // Cross the frame-batched commit after both independent readers have
+    // rendered, before inspecting effects the detail reply could schedule.
+    await page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    ));
+    expect(automaticMarks, "a mounted session must not re-mark a manual unread clear").toBe(0);
     await expect(target.locator(".status-badge.idle.unseen")).toHaveText("idle — new output");
     await expect(target).toHaveAttribute("data-session-selected", "true");
   } finally {
