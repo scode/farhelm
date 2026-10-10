@@ -9,4 +9,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `managed-checkout-trash.md` — fresh GitHub checkouts become "managed checkouts": a branch glyph on their sessions, a folder/managed-checkout choice in the launcher and templates, and a trash beside New that lists archived checkouts per host and deletes them
 - [in-flight 1d062b] `uninstall-ends-tmux.md` — hosts-panel uninstall also ends the host's private tmux server, by reloading systemd before the stop; the spec drops the promise to keep it
 - [in-flight f8d9d7] `shutdown-expiry-quiesce.md` — a supervisor stop that runs out of time still briefly tells tmux to stop sending output first; the spec stops further defenses against the old tmux crash unless it recurs on 3.7c or later
-- [pending] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
+- [in-flight fb807a] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
