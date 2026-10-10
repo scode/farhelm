@@ -361,9 +361,11 @@ if expect "idle at max-wait" "$d" 10 "idle $A"; then
 	fi
 fi
 
-# A change seen on the deadline poll wins over idling.
-d=$(case_dir deadline "tree $A" "tree $A" "tree $B")
-run_case "$d" --baseline "$A" --interval 1 --max-wait 2
+# A change seen at the deadline wins over idling. A zero-second budget puts the
+# first poll at that boundary regardless of request overhead; requiring a third
+# poll within two seconds instead measured machine speed, not this priority.
+d=$(case_dir deadline "tree $B")
+run_case "$d" --baseline "$A" --interval 1 --max-wait 0
 expect "change on deadline poll" "$d" 0 "changed $A $B" && pass "change on deadline poll"
 
 # --max-wait 0 is a single poll. Leading zeros are decimal, not octal (`08` would crash bash arithmetic).
