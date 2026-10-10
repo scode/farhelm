@@ -11,3 +11,4 @@
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
 playwright github-checkouts.spec.ts borrowers retain the checkout until the final stopped session is deleted  # shared-checkout-browser-timeout-and-fixture-cleanup
+nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_or_replay  # shallow-pause-resets-under-load
