@@ -118,6 +118,51 @@ async function unaccepted(route: Route) {
     json: { error: "fixture preview conflict" } });
 }
 
+/** A fresh helm must explain managed-checkout setup without letting the note
+ * dominate the launcher. This uses the real missing-root reply and proves the
+ * fixture has no root before measuring helper text at desktop and phone widths.
+ */
+test("managed checkout setup notes use ordinary helper styling", async ({ page, request }, testInfo) => {
+  const host = await localHost(request);
+  const stack = JSON.parse(await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8")) as {
+    farhelm: string; state: string;
+  };
+  const result = await promisify(execFile)(stack.farhelm,
+    ["helm", "checkout-config", "show", "--state-dir", stack.state],
+    { timeout: 10_000, maxBuffer: 64 * 1024 });
+  expect(result.stdout).toMatch(/^root: unset$/m);
+  const discovery = await request.post("/api/github-repositories", {
+    data: { host: host.id, expected_incarnation: host.incarnation, query: "" },
+  });
+  expect(discovery.ok(), await discovery.text()).toBe(true);
+  expect((await discovery.json()).scan_error).toMatch(/^no checkout (root|folder) is configured/);
+  const form = await openComposer(page, host);
+  await form.getByRole("group", { name: "destination type", exact: true })
+    .getByRole("button", { name: "managed checkout", exact: true }).click();
+  const note = form.locator(".launch-composer-repository-note");
+  await expect(note).toBeVisible();
+  await expect(form.locator(".create-session-submit")).toBeDisabled();
+  await page.evaluate(() => document.fonts.ready);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await form.screenshot({ path: testInfo.outputPath(`checkout-setup-note-${width}.png`) });
+    const style = await note.evaluate((el) => {
+      const help = el.closest("form")!.querySelector(".launch-composer-checkout-explanation")!;
+      return {
+        size: getComputedStyle(el).fontSize,
+        color: getComputedStyle(el).color,
+        lineHeight: getComputedStyle(el).lineHeight,
+        helpColor: getComputedStyle(help).color,
+        overflowing: el.scrollWidth > el.clientWidth,
+      };
+    });
+    expect(style.size).toBe("12px");
+    expect(style.lineHeight).toBe("18px");
+    expect(style.color).toBe(style.helpColor);
+    expect(style.overflowing).toBe(false);
+  }
+});
+
 /** The visible type must own an empty or invalid repository draft. Selection
  * grants preview authority; Enter in the repository field never launches. The
  * ordinary folder survives a round trip without becoming a hidden fallback. */
@@ -234,7 +279,7 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
 /** A preview can be slow or fail after checkout mode has replaced an editable
  * folder. Until the helm supplies an accepted path, the folder control must
  * disclose that absence instead of showing the unrelated old `cwd` seed. */
-test("checkout folder shows pending and failed preview states without a stale path", async ({ page, request }) => {
+test("checkout folder shows pending and failed preview states without a stale path", async ({ page, request }, testInfo) => {
   const host = await localHost(request);
   await unavailableDiscovery(page, host);
   let release!: () => void;
@@ -262,7 +307,19 @@ test("checkout folder shows pending and failed preview states without a stale pa
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     release();
     await expect(folder).toHaveAttribute("placeholder", "checkout preview unavailable");
-    await expect(form.locator(".launch-composer-checkout-preview .create-session-error")).toBeVisible();
+    const error = form.locator(".launch-composer-checkout-preview .create-session-error");
+    await expect(error).toBeVisible();
+    await form.screenshot({ path: testInfo.outputPath("checkout-preview-error.png") });
+    // Form-level error padding would indent this line away from the preview
+    // it explains. Keep the refusal small and aligned with those details.
+    const errorStyle = await error.evaluate((el) => ({
+      size: getComputedStyle(el).fontSize,
+      paddingLeft: getComputedStyle(el).paddingLeft,
+      lineHeight: getComputedStyle(el).lineHeight,
+    }));
+    expect(errorStyle.size).toBe("12px");
+    expect(errorStyle.paddingLeft).toBe("0px");
+    expect(errorStyle.lineHeight).toBe("18px");
     await expect(folder).toHaveValue("");
     await form.getByRole("button", { name: "folder", exact: true }).click();
     await expect(folder).toHaveJSProperty("readOnly", false);
