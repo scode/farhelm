@@ -117,3 +117,34 @@ or contradicted claims or convention violations. A separate reader confirmed tha
 and PR state. Implementation and investigation stayed in the executing session, as the plan required. Actual native
 model attribution and usage counters were unavailable; requested routes are recorded as requests in private session
 `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf` and the plan's working log beside the checkouts.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1819. The rebase met the review queue index, where #1821 had removed entries adjacent to
+this plan's; both sets of removals were kept.
+
+#### A fix made while landing
+
+The plan recorded the rollback browser flake (`a-rolled-back-helm-gets-no-automatic-attach`) in TODO.md and FLAKES.md
+but not in `deflake/known-flakes.txt`, so every deflake sweep would have kept rediscovering it. The landing added the
+matching line in #1819 before it merged.
+
+#### Things to know
+
+- Possible follow-up: the heartbeat "while the answer is outstanding" check now counts only probes sent after silencing.
+  If silencing lands between a probe and its answer, the product sends no new probe before the old socket times out, so
+  the check fails at 15 s on correct behaviour. It fails loudly, never passes falsely, and should hit well under 1% of
+  runs on a quiet machine, more under load. The fix is to install the send/receive wrapper before silencing and accept
+  either an outstanding probe at silencing or a probe sent after it.
+- Left as is: the link-drag test checks that its URL starts at column 0 by arithmetic rather than by observing it; it
+  holds today.
+
+#### Checks
+
+- Run now, on the plan rebased onto main after the other six plans of the round merged: `dprint check`, and on Chromium
+  and WebKit with one worker and no retries the mouse-modes, terminal-links, terminal-reconnect, terminal-replay-rename,
+  terminal-tabs and terminal specs (run `c301b042`, 314 passed).
+- Reused: the round's Rust, JavaScript and static checks (runs `8bc6001f` and the rest listed for the round's other
+  plans); this plan changes only browser tests and queue bookkeeping, which those checks do not exercise.
+
+Nothing in the report above was made untrue by the landing.
