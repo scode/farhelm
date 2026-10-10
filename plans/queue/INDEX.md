@@ -7,5 +7,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [blocked] `hook-report-watch.md` — the supervisor applies conversation reports as soon as they are written, via a file watch, with the timer as backstop (after `sweep-on-timer.md`)
 - [landing 88c8ce] `claude-compaction-status.md` — Claude sessions read as working while compacting; the capture tool gains a /compact scenario and Claude is re-captured
 - [pending] `managed-checkout-trash.md` — fresh GitHub checkouts become "managed checkouts": a branch glyph on their sessions, a folder/managed-checkout choice in the launcher and templates, and a trash beside New that lists archived checkouts per host and deletes them
-- [complete] `uninstall-ends-tmux.md` — hosts-panel uninstall also ends the host's private tmux server, by reloading systemd before the stop; the spec drops the promise to keep it
+- [landing 88c8ce] `uninstall-ends-tmux.md` — hosts-panel uninstall also ends the host's private tmux server, by reloading systemd before the stop; the spec drops the promise to keep it
 - [blocked] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
