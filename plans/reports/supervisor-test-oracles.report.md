@@ -98,3 +98,32 @@ empty because the diff is self-explanatory.
 Actual native model identity and usage counters were unavailable. Requested routes are retained as requests in private
 routing session `a63f6b2c-45f7-4830-bf84-ea76de63472d`; they are not asserted as measured runtime attribution. The
 executor leaves the PR in draft and does not merge it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1816. The rebase met only the review queue index.
+
+#### Review before merging
+
+No findings. Each reworked test now observes what its finding said it missed: the writer task's own completion, a
+genuinely outstanding reply, a fresh conversation per transition, the lock contender's arrival, the exact stored
+outcome, reservations in any state, and the restart's claimed generation.
+
+#### Checks
+
+These six plans were landed together, stacked in landing order on main after gui-text-safety, ui-interaction-fixes and
+helm-cli-fixes merged; browser-terminal-test-oracles landed after them in the same round.
+
+- Run now, on the six stacked: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the plans-queue tests,
+  the test-recorder tests, the installer tests (517 checks), `sh -n scripts/install.sh`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  UI, protocol and CLI unit tests with the agent-relay, upload, boot-outcome, hook-identity, restart-with-resume and
+  session-lifecycle end-to-end tests, through the recorder with pinned tmux 3.7c, four slots and no retries (run
+  `8bc6001f`, 3064 of 3064); the UI JavaScript tests (230 of 230); and on Chromium and WebKit with one worker and no
+  retries the notifications, sidebar-resize, sidebar, terminal-attachments, terminal-create-idempotency,
+  terminal-multihost, yolo-guard, templates and quick-switcher specs (run `77ec2061`, 472 passed). `shellcheck` reports
+  the same warnings for `scripts/build-private-tmux.sh` and `scripts/desktop-smoke.sh` on main as with these changes.
+- These plans were claimed while an earlier round was still landing, which delayed their merge; the landing instructions
+  were changed the same day (#1829) so that a round's plans are fixed when it starts.
+
+Nothing in the report above was made untrue by the landing.
