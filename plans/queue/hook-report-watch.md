@@ -270,3 +270,48 @@ above, and every PR that changes code, tests or scripts passed the review gate. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan,
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-10 (claim 88c8ce).
+
+### An existing supervisor test can no longer reach the situation it checks
+
+This plan makes the supervisor pick up agents' conversation reports as soon as their files appear, instead of waiting
+for the next two-second check. As part of that, the supervisor's periodic two-second pass now skips a session whose
+report is being taken in at that moment, rather than waiting for it, so one slow report cannot hold up the pass for
+every other session. That is intended, and the plan's own tests cover it.
+
+An older supervisor test relied on exactly the waiting that was removed. It proves that stopping the supervisor waits
+for a periodic pass that is already in progress, rather than cutting it off half done, and it creates that situation by
+holding a session's report busy so the pass stops there. The pass now skips that session instead of stopping, so the
+test can never get into the state it means to test and fails every time after 30 seconds (runs `977df49c` and
+`b51c13f6`; it passes on main). The agent that carried out the plan did not run this test, so the failure was not caught
+before it handed the work in. Nothing is wrong for a user: this is a test whose way of pausing the pass no longer
+exists.
+
+The property it guards still matters: stopping a supervisor must not interrupt a pass midway. What is needed is a
+different way for the test to hold a pass in progress, at a point the pass still waits on, or a small test-only pause
+point in the pass if there is no such natural point.
+
+### Options
+
+1. Return the plan for another round that reworks that test as described, keeping what it proves. Recommended: it is a
+   contained test change.
+2. Delete the test as obsolete. Faster, but loses the only check that a stop does not cut a pass short.
+3. Land now with the test disabled, and rework it in a follow-up. Possible, but it lands a change to how passes behave
+   with the check for that same behavior switched off, and option 1 is barely more work.
+
+### Already done in this landing
+
+The landing's review found two problems that are fixed on #1776 now, so the next round starts from them:
+
+- A routine race could switch off immediate report pickup for the rest of a supervisor's life: when a session's report
+  folder was removed (a deleted session, or the supervisor's own cleanup) while the supervisor was refreshing its list
+  of report folders to watch, the file watching gave up and only the two-second check remained. It now retries, and
+  still gives up on errors that a retry cannot fix, such as reaching the system's limit on watched folders.
+- SPEC_impl.md now says that the periodic pass skips a session whose report is being taken in, while restarting a
+  session waits for it; two code comments were corrected, and the newly added file-watching library now has a note
+  explaining why it is needed.
+
+The plan's branch is also rebased onto current main. Nothing of this plan is on main yet.
