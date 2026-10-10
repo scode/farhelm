@@ -138,6 +138,7 @@ use crate::agent_kind::screen_reader::{
 use crate::store::LastOutcome;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
@@ -1185,24 +1186,16 @@ pub(super) async fn observe_entries(
     // only a subset of entries for this pass.
     let mut observations = Vec::new();
     let mut sentinel_hits = HashSet::new();
+    let mut negative_reads = Vec::new();
     for entry in entries {
         match observe_entry(sup, entry, states, known).await {
             Ok(observed) => {
                 if observed.settled_error {
-                    // A prior writer may have crashed between recording
-                    // the durable error and deleting launch artifacts.
-                    // The periodic retry removes that credential-bearing
-                    // residue without depending on another client request.
-                    if sup.may_record() {
-                        cleanup_launch_artifacts(
-                            &sup.state_dir,
-                            &sup.store,
-                            &entry.info.id,
-                            entry.generation,
-                        )
-                        .await;
-                    }
+                    cleanup_error_once(sup, entry).await;
                     continue;
+                }
+                if observed.settle_launch_reads {
+                    negative_reads.push(entry);
                 }
                 if let Some(detail) = observed.sentinel {
                     let changed = {
@@ -1226,7 +1219,7 @@ pub(super) async fn observe_entries(
             }
             Err(e) => error!(
                 session = %entry.info.id, error = %format!("{e:#}"),
-                "could not read this session's launch sentinel; deferring its ticker exit \
+                "could not read this session's launch evidence; deferring its ticker exit \
                  observation rather than risking a durable misclassification from pane state alone"
             ),
         }
@@ -1254,21 +1247,54 @@ pub(super) async fn observe_entries(
                             Some(LastOutcome::Error { .. })
                         )
                     {
-                        cleanup_launch_artifacts(
-                            &sup.state_dir,
-                            &sup.store,
-                            &entry.info.id,
-                            entry.generation,
-                        )
-                        .await;
+                        cleanup_error_once(sup, entry).await;
                     }
                 }
             }
-            Err(e) => warn!(
-                error = %format!("{e:#}"),
-                "could not record ticker-observed session outcomes; the next tick will retry"
-            ),
+            Err(e) => {
+                warn!(error = %format!("{e:#}"),
+                    "could not record ticker-observed session outcomes; the next tick will retry");
+                return;
+            }
         }
+    }
+    // A failed transition leaves Running/StopRequested in the mirror, so its
+    // negative read remains retryable. Prior terminal rows need no new write,
+    // but an uncommitted error still disqualifies them from negative caching.
+    for entry in negative_reads {
+        if sup.may_record()
+            && entry
+                .run
+                .outcome
+                .lock()
+                .expect("outcome mutex poisoned")
+                .is_terminal()
+            && entry
+                .run
+                .launch_error
+                .lock()
+                .expect("launch-error mutex poisoned")
+                .is_none()
+        {
+            entry
+                .run
+                .launch_reads_settled
+                .store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Retire Error artifacts once their preservation and removal both succeeded.
+/// Tick and wake share sampling admission, so this generation-local latch needs
+/// no additional pass lock. A failed cleanup leaves the next observation free
+/// to retry; rename shares the latch and relaunch replaces it.
+async fn cleanup_error_once(sup: &Supervisor, entry: &SessionEntry) {
+    if sup.may_record()
+        && !entry.run.launch_cleanup_done.load(Ordering::Relaxed)
+        && cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
+            .await
+    {
+        entry.run.launch_cleanup_done.store(true, Ordering::Relaxed);
     }
 }
 
@@ -1884,7 +1910,7 @@ mod tests {
     use super::super::status::session_status;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
-    use crate::store::{LastOutcome, StoredSession, now_unix};
+    use crate::store::{LastOutcome, StoredSession, Transition, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -3307,6 +3333,282 @@ mod tests {
         assert!(
             report.exists(),
             "even a recording wake must leave capture to the timer"
+        );
+    }
+
+    /// Owned pane death makes successful negative reads final for this launch.
+    /// Poisoning the file afterward distinguishes a skipped read from a read
+    /// whose result merely happens not to change the durable outcome. Reload
+    /// must reset the obligation and discover evidence afresh.
+    #[farhelm_testtrace::test]
+    async fn settled_launch_reads_stop_until_supervisor_reload() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-settled", "exit 4").await;
+        let entry = install_durable_running_entry(
+            &sup,
+            "settled",
+            Terminal {
+                tmux_name: "fh-settled".into(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        observe_for_test(&sup).await;
+        assert!(matches!(
+            stored_outcome(&sup, "settled").await,
+            LastOutcome::Exited {
+                exit_code: Some(4),
+                ..
+            }
+        ));
+        assert!(entry.run.launch_reads_settled.load(Ordering::Relaxed));
+        let spec = crate::launch::spec_path_for_launch(state.path(), "settled", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        std::fs::write(&sentinel, b"").unwrap();
+        assert!(
+            super::super::launch_artifacts::read_launch_sentinel(state.path(), "settled", 0)
+                .await
+                .is_err(),
+            "premise: an actual read would fail"
+        );
+        let states = sup.tmux.pane_states().await.unwrap();
+        let known =
+            super::super::status::KnownTmuxNames::from_sessions([("settled", Some("fh-settled"))]);
+        assert!(
+            observe_entry(&sup, &entry, &states, &known)
+                .await
+                .unwrap()
+                .sentinel
+                .is_none()
+        );
+        std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        drop(sup);
+        let reloaded = supervisor_with(&state, SupervisorSeams::default()).await;
+        assert!(
+            matches!(
+                stored_outcome(&reloaded, "settled").await,
+                LastOutcome::Error { .. }
+            ),
+            "reload must read again"
+        );
+        let entry = reloaded.sessions.lock().await["settled"].clone();
+        assert!(!entry.run.launch_reads_settled.load(Ordering::Relaxed));
+        assert!(entry.run.launch_cleanup_done.load(Ordering::Relaxed));
+        assert!(!sentinel.exists());
+    }
+
+    /// Inconclusive observations remain retryable, even after an inferred exit.
+    /// Same-boot absence and foreign names cannot prove the shim finished;
+    /// authority, read and write failures cannot settle it either. A cached
+    /// uncommitted error also remains an outstanding evidence obligation.
+    #[farhelm_testtrace::test]
+    async fn unsettled_launch_reads_keep_discovering_late_failures() {
+        for mode in [
+            "absent",
+            "unattributed",
+            "read-only",
+            "read-error",
+            "write-error",
+            "cached-error",
+        ] {
+            let state = StateDir::new();
+            let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+            let pane = spawn_pane(&sup, "fh-retry-read", "exit 5").await;
+            let entry = install_durable_running_entry(
+                &sup,
+                "retry-read",
+                Terminal {
+                    tmux_name: "fh-retry-read".into(),
+                    pane: pane.clone(),
+                },
+            )
+            .await;
+            wait_for_dead_pane(&sup, &pane).await;
+            let spec = crate::launch::spec_path_for_launch(state.path(), "retry-read", 0);
+            std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+            let sentinel = crate::launch::status_path_for_spec(&spec);
+            let mut states = sup.tmux.pane_states().await.unwrap();
+            assert!(states[&pane].dead, "premise: owned process has finished");
+            match mode {
+                // A controlled observation map isolates the missing/foreign
+                // evidence contract from tmux's actual dead-pane retention.
+                "absent" => {
+                    states.clear();
+                }
+                "unattributed" => {
+                    states.get_mut(&pane).unwrap().session_name = "renamed-outside-farhelm".into();
+                }
+                "read-only" => {
+                    sup.may_record.store(false, Ordering::SeqCst);
+                }
+                "read-error" => {
+                    std::fs::write(&sentinel, b"").unwrap();
+                }
+                "write-error" => {
+                    let conn =
+                        rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+                    conn.execute_batch("CREATE TRIGGER refuse_outcome BEFORE UPDATE OF outcome_state ON sessions BEGIN SELECT RAISE(FAIL, 'injected outcome failure'); END;").unwrap();
+                }
+                "cached-error" => {
+                    *entry.run.launch_error.lock().unwrap() = Some("uncommitted failure".into());
+                }
+                _ => unreachable!(),
+            }
+            let known = super::super::status::KnownTmuxNames::from_sessions([(
+                "retry-read",
+                Some("fh-retry-read"),
+            )]);
+            observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+            assert!(
+                !entry.run.launch_reads_settled.load(Ordering::Relaxed),
+                "{mode}"
+            );
+            if mode == "absent" {
+                assert!(
+                    matches!(
+                        stored_outcome(&sup, "retry-read").await,
+                        LastOutcome::Exited { .. }
+                    ),
+                    "an inferred exit must not settle same-boot absence"
+                );
+            } else if mode != "cached-error" {
+                assert_eq!(
+                    stored_outcome(&sup, "retry-read").await,
+                    LastOutcome::Running,
+                    "{mode}: failure must not commit an exit"
+                );
+            }
+            if mode == "write-error" {
+                let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+                conn.execute_batch("DROP TRIGGER refuse_outcome;").unwrap();
+            }
+            sup.may_record.store(true, Ordering::SeqCst);
+            std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+            assert!(
+                super::super::launch_artifacts::read_launch_sentinel(state.path(), "retry-read", 0)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "premise: late failure is readable"
+            );
+            observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+            assert!(
+                matches!(
+                    stored_outcome(&sup, "retry-read").await,
+                    LastOutcome::Error { .. }
+                ),
+                "{mode}: late failure must supersede inference"
+            );
+        }
+    }
+
+    /// Boot interruption is final without an owned pane: the previous boot's
+    /// shim cannot write more evidence. Use the store's actual conversion so
+    /// the fixture does not invent another meaning for Interrupted.
+    #[farhelm_testtrace::test]
+    async fn boot_interrupted_launch_reads_settle_without_a_pane() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-boot-settled", "exit 0").await;
+        let entry = install_durable_running_entry(
+            &sup,
+            "boot-settled",
+            Terminal {
+                tmux_name: "fh-boot-settled".into(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        sup.store
+            .record_boot("new-test-boot", true, HashMap::new(), None)
+            .await
+            .unwrap();
+        let outcome = stored_outcome(&sup, "boot-settled").await;
+        assert_eq!(outcome, LastOutcome::Interrupted);
+        sup.mirror_committed_outcome(&entry, &outcome);
+        let states = HashMap::new();
+        let known = super::super::status::KnownTmuxNames::default();
+        observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+        assert!(entry.run.launch_reads_settled.load(Ordering::Relaxed));
+        let spec = crate::launch::spec_path_for_launch(state.path(), "boot-settled", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(crate::launch::status_path_for_spec(&spec), b"").unwrap();
+        assert!(observe_entry(&sup, &entry, &states, &known).await.is_ok());
+    }
+
+    /// Artifact removal is retried until it succeeds, then stops for this Error.
+    /// A directory at the sentinel path supplies a real read failure without
+    /// relying on permissions (which privileged test runners can bypass).
+    #[farhelm_testtrace::test]
+    async fn error_cleanup_retries_failures_then_stops_after_success() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-cleanup-once", "exit 0").await;
+        let entry = install_durable_running_entry(
+            &sup,
+            "cleanup-once",
+            Terminal {
+                tmux_name: "fh-cleanup-once".into(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        let outcome = sup
+            .store
+            .transition(
+                "cleanup-once",
+                0,
+                Transition::SentinelError {
+                    detail: "failed launch".into(),
+                    pane: Some(pane),
+                },
+            )
+            .await
+            .unwrap()
+            .expect("durable Error row");
+        sup.mirror_committed_outcome(&entry, &outcome);
+        assert!(matches!(
+            stored_outcome(&sup, "cleanup-once").await,
+            LastOutcome::Error { .. }
+        ));
+        let spec = crate::launch::spec_path_for_launch(state.path(), "cleanup-once", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        std::fs::create_dir(&sentinel).unwrap();
+        std::fs::write(&spec, b"leftover credentials").unwrap();
+        observe_for_test(&sup).await;
+        assert!(!entry.run.launch_cleanup_done.load(Ordering::Relaxed));
+        assert!(
+            spec.exists() && sentinel.is_dir(),
+            "unreadable acceptance evidence must be retained"
+        );
+        std::fs::remove_dir(&sentinel).unwrap();
+        std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        std::fs::remove_file(&spec).unwrap();
+        std::fs::create_dir(&spec).unwrap();
+        observe_for_test(&sup).await;
+        assert!(
+            !entry.run.launch_cleanup_done.load(Ordering::Relaxed),
+            "a failed unlink must remain retryable even after acceptance settled"
+        );
+        assert!(!sentinel.exists() && spec.is_dir());
+        std::fs::remove_dir(&spec).unwrap();
+        std::fs::write(&spec, b"leftover credentials").unwrap();
+        observe_for_test(&sup).await;
+        assert!(entry.run.launch_cleanup_done.load(Ordering::Relaxed));
+        assert!(!spec.exists() && !sentinel.exists());
+        // Replanting an artifact is only a read/cleanup detector: the real
+        // finished shim cannot recreate it after successful cleanup.
+        std::fs::write(&spec, b"cleanup detector").unwrap();
+        observe_for_test(&sup).await;
+        assert!(
+            spec.exists(),
+            "successful cleanup must not run on every pass"
         );
     }
 

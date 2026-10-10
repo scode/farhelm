@@ -169,17 +169,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that a release keeps accepting what newer releases publish. This must ship before the first release that needs to say
   something new, the same way the upgrade epochs entry above handles new upgrade logic.
 
-- **Sweep on the timer only, and stop re-deriving known state.** The per-session sweep runs on the 2 s ticker and again
-  at the start of every session-list and session-info request, including the lists the helm sends after every
-  status-change hint: about one full sweep every 1.3 s, overlapping and contending, enough that ticks overrun. The
-  hook-only identity change (#1540) removed the coalescing that used to skip a ticker sweep after a list's. Run the
-  sweep from the timer only; requests answer from the state it leaves. Within the sweep, stop re-reading anything that
-  cannot have changed since it was last read: in particular stopped sessions whose outcome is settled, which today
-  re-read their launch status file, query checkout provenance, and re-parse their checkout-preparation JSON on every
-  ticker tick and every list, forever. Settle how fresh a list must be, and keep pane liveness (`list-panes`) on the
-  list if exit reporting needs to stay immediate. Needs SPEC_impl.md edits where it says the capture sweep rides
-  `ListSessions` on purpose. Details: `lore/2026-10-08-supervisor-idle-cpu.md`. Plan: `plans/queue/sweep-on-timer.md`.
-
 - **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
   win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
   supervisor's CPU was the kernel's cross-CPU interrupts from those `munmap` calls, though most of the churn comes from

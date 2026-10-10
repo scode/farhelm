@@ -553,6 +553,10 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 /// The tick, pane-death wake and deterministic seam collect these before
 /// committing a batch; replies only read the resulting durable and memory state.
 pub(crate) struct EntryObservation {
+    /// Every applicable launch read succeeded and found no failure after an
+    /// owned pane died, or after a boot-change interruption. The caller may
+    /// settle future reads only once this entry's terminal outcome is durable.
+    pub(crate) settle_launch_reads: bool,
     /// A launch-sentinel, wrapper-failure or interrupted-preparation detail found for this
     /// entry NOW. Outranks whatever `session_status` would compute,
     /// whether or not the matching transition also commits — see
@@ -564,7 +568,7 @@ pub(crate) struct EntryObservation {
     /// This entry is ALREADY durably `Error`: there is nothing left to
     /// witness, and its launch artifacts are due for the idempotent
     /// cleanup a crash between an earlier commit and its cleanup can
-    /// leave behind.
+    /// leave behind. The caller skips cleanup once its success latch is set.
     pub(crate) settled_error: bool,
 }
 
@@ -610,6 +614,9 @@ pub(crate) async fn interrupted_preparation_detail(
 /// Callers batch transitions, mirror committed outcomes and retain uncommitted
 /// error details for replies. An unreadable sentinel returns an error so the
 /// observer can log and retry without recording a possibly false exit.
+/// Successful negative reads can become final only after owned pane death or
+/// a boot-change interruption and durable terminal classification. The caller
+/// finishes that contract after committing any proposed outcome.
 pub(crate) async fn observe_entry(
     sup: &Supervisor,
     entry: &Arc<SessionEntry>,
@@ -630,6 +637,7 @@ pub(crate) async fn observe_entry(
             sentinel: None,
             transition: None,
             settled_error: true,
+            settle_launch_reads: false,
         });
     }
     // Possibly our own agent under another name: only the sentinel, which
@@ -655,7 +663,19 @@ pub(crate) async fn observe_entry(
     // read, even though it must not WRITE a conclusion it has no
     // standing to store — which is why `sentinel` and `transition`
     // below are set independently.
-    if sentinel_could_still_apply(&recorded) && dead_or_absent {
+    let mut settle_launch_reads = false;
+    // A spec stat that failed proves nothing either way. The observation
+    // still goes ahead, as it did before reads could settle, so the exit is
+    // recorded from the pane; only the settlement waits for a stat that
+    // succeeds.
+    let mut spec_stat_inconclusive = false;
+    if sentinel_could_still_apply(&recorded)
+        && dead_or_absent
+        && !entry
+            .run
+            .launch_reads_settled
+            .load(std::sync::atomic::Ordering::Relaxed)
+    {
         let found = read_launch_sentinel(&sup.state_dir, &entry.info.id, entry.generation)
             .await
             .with_context(|| {
@@ -666,16 +686,21 @@ pub(crate) async fn observe_entry(
             None if unattributed => None,
             // The wrapper-failure shape: no sentinel, a pane that is
             // present and dead, and a launch spec nothing consumed.
-            None => {
-                wrapper_failure_detail(
-                    &sup.state_dir,
-                    &entry.info.id,
-                    entry.generation,
-                    entry.scope.is_some(),
-                    pane_dead,
-                )
-                .await
-            }
+            None => match wrapper_failure_detail(
+                &sup.state_dir,
+                &entry.info.id,
+                entry.generation,
+                entry.scope.is_some(),
+                pane_dead,
+            )
+            .await
+            {
+                Ok(detail) => detail,
+                Err(_) => {
+                    spec_stat_inconclusive = true;
+                    None
+                }
+            },
         };
         if detail.is_none() && !unattributed {
             detail = interrupted_preparation_detail(
@@ -702,8 +727,17 @@ pub(crate) async fn observe_entry(
                 sentinel: Some(detail),
                 transition,
                 settled_error: false,
+                settle_launch_reads: false,
             });
         }
+        // The shim finishes its evidence writes before its pane becomes dead.
+        // An absent pane in the same boot is not that proof: tmux can briefly
+        // return an empty map while the shim still runs. Interrupted is written
+        // only by boot conversion, whose old shim cannot write any more.
+        settle_launch_reads = sup.may_record()
+            && !unattributed
+            && !spec_stat_inconclusive
+            && (pane_dead || matches!(recorded, LastOutcome::Interrupted));
     }
 
     let transition = if sup.may_record() && !unattributed {
@@ -715,6 +749,7 @@ pub(crate) async fn observe_entry(
         sentinel: None,
         transition,
         settled_error: false,
+        settle_launch_reads,
     })
 }
 

@@ -51,35 +51,35 @@ use tracing::{debug, warn};
 /// pre-existing M2 shape this build has no new evidence about and does not
 /// reclassify.
 ///
-/// A stat failure reports `None`: this is an inference of last resort, and
-/// inventing an `error` classification from an unreadable state directory
-/// would be exactly the guess the no-guessing rule forbids.
+/// A stat failure is inconclusive, not a proven absence. Callers may preserve
+/// their last-resort exit inference, but must not settle future reads from it:
+/// an unreadable state directory cannot prove that the shim consumed its spec.
 pub(crate) async fn wrapper_failure_detail(
     state_dir: &Path,
     id: &str,
     generation: i64,
     scoped: bool,
     pane_dead: bool,
-) -> Option<String> {
+) -> anyhow::Result<Option<String>> {
     if !scoped || !pane_dead {
-        return None;
+        return Ok(None);
     }
     let spec = crate::launch::spec_path_for_launch(state_dir, id, generation);
     match tokio::fs::try_exists(&spec).await {
-        Ok(true) => Some(
+        Ok(true) => Ok(Some(
             "the agent was never started: the launch never reached farhelm's exec shim, so \
              something before it — the transient cgroup scope wrapper, or the login shell \
              itself — exited first"
                 .to_string(),
-        ),
-        Ok(false) => None,
+        )),
+        Ok(false) => Ok(None),
         Err(e) => {
             debug!(
                 session = %id, generation, error = %e,
                 "could not tell whether this launch's spec was consumed; not classifying it \
                  as a wrapper failure"
             );
-            None
+            Err(e.into())
         }
     }
 }
@@ -118,7 +118,9 @@ pub(crate) async fn read_launch_sentinel(
 /// PLAN_M3.md item 3 requires a late-discovered sentinel to still
 /// supersede both, because neither is anything more than an inference
 /// from an ordinary dead-or-vanished pane, exactly the evidence class a
-/// sentinel is defined to beat.
+/// sentinel is defined to beat. Periodic observation also checks its
+/// generation-local negative-read latch: after owned pane death or a boot
+/// interruption, successful negative reads cannot acquire new shim evidence.
 pub(crate) fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
     !matches!(
         outcome,
@@ -140,16 +142,17 @@ pub(crate) fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
 /// creates before unlinking an actual sentinel; retain both files if its read
 /// or settlement fails, or its durable generation no longer matches.
 ///
-/// Startup and ordinary status observers share this gate, including their
-/// already-Error paths. Repeating it is harmless: settlement is monotonic,
-/// and file removal remains best effort. A later generation cannot settle
-/// the original create from its own sentinel.
+/// Startup and periodic observers share this gate, including already-Error
+/// paths. Returns true only after evidence preservation and both removals
+/// succeeded (missing files count as removed). Observers then stop retrying
+/// for this generation; failures remain retryable. A later generation cannot
+/// settle the original create from its own sentinel.
 pub(crate) async fn cleanup_launch_artifacts(
     state_dir: &Path,
     store: &SessionStore,
     id: &str,
     generation: i64,
-) {
+) -> bool {
     // Only the first launch can settle its original create. A real sentinel
     // may be its last acceptance evidence after tmux and its scope vanish;
     // Error alone cannot replace that proof because preterminal refusals use
@@ -171,19 +174,21 @@ pub(crate) async fn cleanup_launch_artifacts(
             Ok(false) => {
                 debug!(session = %id, generation,
                     "deferring launch cleanup: the sentinel's error generation is not durable");
-                return;
+                return false;
             }
             Err(error) => {
                 warn!(session = %id, generation, error = %format!("{error:#}"),
                     "retaining launch artifacts until accepted-create evidence is durable");
-                return;
+                return false;
             }
         }
     }
     let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
-    best_effort_remove(&status_path, "consumed launch sentinel").await;
-    best_effort_remove(&spec_path, "leftover launch spec").await;
+    // Try both even when one fails: either can contain launch credentials.
+    let status_removed = best_effort_remove(&status_path, "consumed launch sentinel").await;
+    let spec_removed = best_effort_remove(&spec_path, "leftover launch spec").await;
+    status_removed && spec_removed
 }
 
 /// Clear the launch artifacts sitting at ONE launch's spec and sentinel
@@ -304,13 +309,15 @@ fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
 /// it) and logging anything else as a warning naming both the file and
 /// what it was, rather than propagating — every call site here is itself
 /// already unwinding a different failure, and this cleanup must not mask
-/// that original error with an unrelated filesystem one.
-pub(crate) async fn best_effort_remove(path: &Path, what: &str) {
+/// that original error with an unrelated filesystem one. Returns whether
+/// removal succeeded so a background observer can stop retrying only then.
+pub(crate) async fn best_effort_remove(path: &Path, what: &str) -> bool {
     match tokio::fs::remove_file(path).await {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
         Err(e) => {
             warn!(path = %path.display(), error = %e, "could not remove {what}");
+            false
         }
     }
 }
@@ -669,19 +676,25 @@ mod tests {
         std::fs::create_dir_all(spec.parent().expect("launch dir")).expect("launch dir");
 
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, true, true).await,
+            wrapper_failure_detail(state.path(), &id, 0, true, true)
+                .await
+                .unwrap(),
             None,
             "no spec on disk means the shim consumed it and really did run"
         );
 
         std::fs::write(&spec, b"{}").expect("plant an unconsumed spec");
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, false, true).await,
+            wrapper_failure_detail(state.path(), &id, 0, false, true)
+                .await
+                .unwrap(),
             None,
             "an unscoped launch has no wrapper to have failed"
         );
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, true, false).await,
+            wrapper_failure_detail(state.path(), &id, 0, true, false)
+                .await
+                .unwrap(),
             None,
             "an ABSENT pane means the window or the whole tmux server was destroyed, which \
              strands a spec from a launch that was interrupted rather than failed"
@@ -689,6 +702,7 @@ mod tests {
         assert!(
             wrapper_failure_detail(state.path(), &id, 0, true, true)
                 .await
+                .unwrap()
                 .is_some_and(|detail| detail.contains("never reached farhelm's exec shim")),
             "a scoped launch whose spec was never consumed, under a dead pane, never started"
         );
@@ -696,7 +710,9 @@ mod tests {
         // Per LAUNCH, like every other artifact keyed on the generation: a
         // spec left by generation 0 must not paint generation 1 as failed.
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 1, true, true).await,
+            wrapper_failure_detail(state.path(), &id, 1, true, true)
+                .await
+                .unwrap(),
             None,
             "a previous generation's leftover spec is not this launch's evidence"
         );

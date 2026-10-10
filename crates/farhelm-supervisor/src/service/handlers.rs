@@ -867,11 +867,11 @@ async fn handle_stop_session(
                 )
                 .await
                 {
-                    Some(detail) => Transition::SentinelError {
+                    Ok(Some(detail)) => Transition::SentinelError {
                         detail,
                         pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
                     },
-                    None => Transition::ObservedExit {
+                    Ok(None) | Err(_) => Transition::ObservedExit {
                         exit_code: dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id)
                             .await,
                     },
@@ -7861,6 +7861,8 @@ mod tests {
                     pane: "%0".to_string(),
                 }),
                 run: RunCells {
+                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -8044,6 +8046,8 @@ mod tests {
             },
             terminal: None,
             run: RunCells {
+                launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -8239,6 +8243,8 @@ mod tests {
                 },
                 terminal: None,
                 run: RunCells {
+                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),

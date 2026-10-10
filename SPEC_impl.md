@@ -1735,21 +1735,27 @@ evidence, but cannot authorize another directory move.
   launch-error classification and notification resolution may lag by one nominal two-second tick; the pane-death wake
   commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable launch evidence is logged
   and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay in generation-local memory
-  for replies. An injected launch holding no identity warns once after 65 seconds from the first input frame delivered
-  to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC
-  (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame
-  (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk tmux confirmed. The terminal's
-  automatic replies to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports)
-  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the
-  latest screen reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An
-  outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path. With no reading
-  yet, or no dedicated reader, the existing submitted-line rule applies. A paste large enough to span frames still has
-  its middle frames judged without their markers. The spawn records whether its argv received the hook before tmux
-  starts, fenced by launch generation. Reload restores that flag; older rows default unhooked and stay unchecked. The
-  anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch and supervisor restart, so
-  a picked-up launch starts its clock at the next qualifying Enter after reload rather than recovering the time of an
-  earlier Enter. A Resume carries its identity and therefore stays silent even if its new hook never reports. The
-  warning changes no offer or admission rule.
+  for replies. Successful negative launch-sentinel and preparation reads settle for the generation only after a durable
+  terminal outcome and an owned pane seen dead, or a boot-change interruption. Same-boot pane absence keeps retrying: an
+  empty tmux query can be transient while the shim still writes. Read errors, uncommitted failures and observers without
+  recording authority never settle reads. Rename shares the latches; relaunch and supervisor reload read again. Error
+  artifacts are cleaned once after successful accepted-create evidence preservation and removal, with failed cleanup
+  retried. Report-backed identities still refresh under their capture claim because accepted reports and decision-time
+  Restart can change the row after the pane stops. An injected launch holding no identity warns once after 65 seconds
+  from the first input frame delivered to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage
+  return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a
+  bracketed paste of the same frame (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk
+  tmux confirmed. The terminal's automatic replies to the agent TUI's own queries (device attributes, cursor position,
+  colour answers, focus reports) never carry a carriage return, so an agent the user opened but has not typed into
+  cannot trip it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized dialog and
+  does not start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture runs on the
+  input path. With no reading yet, or no dedicated reader, the existing submitted-line rule applies. A paste large
+  enough to span frames still has its middle frames judged without their markers. The spawn records whether its argv
+  received the hook before tmux starts, fenced by launch generation. Reload restores that flag; older rows default
+  unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the diagnostic latch on every
+  relaunch and supervisor restart, so a picked-up launch starts its clock at the next qualifying Enter after reload
+  rather than recovering the time of an earlier Enter. A Resume carries its identity and therefore stays silent even if
+  its new hook never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
