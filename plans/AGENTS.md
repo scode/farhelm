@@ -631,6 +631,22 @@ been notified in the monitor log.
 
 If no plan is `[complete]`, the round is over.
 
+NOTE: A round's plans are fixed when it starts: the plans this `queue status` shows as `[complete]`, and no others. Land
+every one of them (merged, or blocked, or given back) before claiming anything else. A plan that completes while the
+round runs belongs to the next round, which starts as soon as this one ends (Waiting between rounds), however small it
+looks and however much it overlaps the plans in flight. Every executor builds and tests on main, so each hour a finished
+plan waits unmerged is an hour of other work on a staler main than it could have. Do not:
+
+- claim (`start-landing`) a plan that completed after the round started, even to "review it in parallel";
+- add such a plan to the round's stack, or restack the round to fit it in;
+- restart a round's combined checks so that they also cover a newly completed plan;
+- hold back a plan whose checks have passed so that it can merge together with plans that are still being checked;
+- treat a watcher wake-up during a round as a reason to change the round. Note the newly completed plans in the monitor
+  log and leave them `[complete]`.
+
+On 2026-10-10 a round that started with three plans grew to nine this way, one claim at a time, and nothing merged for
+about two hours.
+
 Before anything merges, review on purpose what has landed on main since each complete plan's stack was based, and what
 is about to land together: the diffs, not the titles, read against each other. Look for interactions that produce no
 textual conflict: something one change renamed or repurposed that another relies on, a contract a new caller assumes
