@@ -9966,7 +9966,9 @@
 - Completion criteria: Record body completion after the final assertion. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## client-log-test-establish-claimed-later-capture.md
 
@@ -10000,7 +10002,9 @@
 - Completion criteria: Change only the title and require two distinct, non-empty keys. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## notification-stub-accepts-writes-wrong-session.md
 
@@ -10016,7 +10020,9 @@
 - Completion criteria: Match or record the session id and assert the other session gets no mark. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## sticks-test-wait-additional-refresh-it-claims.md
 
@@ -10033,7 +10039,9 @@
 - Completion criteria: Take the baseline after the unread state is visible and wait for a later completed listing read.
   If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## failed-clone-setup-leaves-hosts-route-permanently.md
 
@@ -10049,7 +10057,9 @@
 - Completion criteria: Release the held request at the start of the cleanup block. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## empty-frame-test-stops-stimulus-checking-watchdog.md
 
@@ -10127,7 +10137,9 @@
   triage."
 - Completion criteria: Use the shared session-cleanup helper. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## multi-session-test-hold-delete-request.md
 
@@ -10175,7 +10187,9 @@
 - Completion criteria: Search only the log bytes written after clicking Browse. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## failed-setup-overwrite-ownership-running-replacement-supervisor.md
 
@@ -10192,7 +10206,9 @@
 - Completion criteria: Restore only when nothing is serving, as the reboot group's teardown already does. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## phantom-tab-regression-test-never-waits-claimed-later.md
 
@@ -10224,7 +10240,9 @@
 - Completion criteria: Capture the helm's build before faking replies and assert no mismatch banner appears. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
 
 ## mouse-fidelity-assertion-accepts-utf-corrupted-reports.md
 
@@ -10256,4 +10274,6 @@
 - Completion criteria: In cleanup, find the host by its unique destination when no id was recorded, and require the
   delete to succeed. If that turns out significantly more complicated than expected, leave it unfixed and return it to
   the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
+- Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
+  `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
+  [draft PR](https://github.com/scode/farhelm/pull/1821/changes).

@@ -16,12 +16,13 @@ interface StubNotification { seq: number; at: number; text: string; resolved?: b
 
 /**
  * The helm's half of the feature, for one session: its notifications and the
- * two marks. `writes` records every mark request the page sent, in order.
+ * two marks. `writes` records every mark request and its addressed session,
+ * so a request aimed at another real session cannot count as a correct mark.
  */
 class NotificationStub {
   readThrough = 0;
   clearedThrough = 0;
-  writes: { route: "read" | "cleared"; through: number }[] = [];
+  writes: { session: string; route: "read" | "cleared"; through: number }[] = [];
   constructor(public notifications: StubNotification[]) {}
 
   /** What the helm would put on the row: uncleared entries, newest first. */
@@ -35,8 +36,9 @@ class NotificationStub {
   }
 }
 
-/** Serve `stub`'s notifications on session `id`'s listing row, and answer the
- * mark routes by moving the marks forward only, as the helm does. */
+/** Serve one session's notifications and mutate only that session's marks.
+ * Record other destinations too: a real wrong-session route can succeed,
+ * but must neither change this stub nor disappear from the test's evidence. */
 async function serveNotifications(page: Page, id: string, stub: NotificationStub): Promise<void> {
   await page.route((url) => url.pathname === "/api/sessions", async (route: Route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -51,10 +53,13 @@ async function serveNotifications(page: Page, id: string, stub: NotificationStub
     (url) => /^\/api\/sessions\/[^/]+\/notifications\/(read|cleared)$/.test(url.pathname),
     async (route: Route) => {
       const which = route.request().url().endsWith("/cleared") ? "cleared" : "read";
+      const session = new URL(route.request().url()).pathname.split("/")[3];
       const through = (route.request().postDataJSON() as { through: number }).through;
-      stub.writes.push({ route: which, through });
-      stub.readThrough = Math.max(stub.readThrough, through);
-      if (which === "cleared") stub.clearedThrough = Math.max(stub.clearedThrough, through);
+      stub.writes.push({ session, route: which, through });
+      if (session === id) {
+        stub.readThrough = Math.max(stub.readThrough, through);
+        if (which === "cleared") stub.clearedThrough = Math.max(stub.clearedThrough, through);
+      }
       // The real helm still answers (a no-op there, since it holds no
       // notifications for this session), so the reply carries its build
       // stamp: a reply without one latches the page's build-skew notice and
@@ -243,7 +248,7 @@ test.describe("session notifications", () => {
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
     await expect(bell, "Escape hands focus back to the bell").toBeFocused();
-    await expect.poll(() => stub.writes).toEqual([{ route: "read", through: 5 }]);
+    await expect.poll(() => stub.writes).toEqual([{ session: session.id, route: "read", through: 5 }]);
     feed.notify(2);
     await expect(bell).not.toHaveClass(/\bloud\b/, { timeout: 20_000 });
 
@@ -259,7 +264,7 @@ test.describe("session notifications", () => {
     const viewport = page.viewportSize()!;
     await page.mouse.click(viewport.width - 20, viewport.height - 20);
     await expect(list).toHaveCount(0);
-    await expect.poll(() => stub.writes.at(-1)).toEqual({ route: "read", through: 6 });
+    await expect.poll(() => stub.writes.at(-1)).toEqual({ session: session.id, route: "read", through: 6 });
 
     // The bell itself toggles the list shut. With nothing unread left in it,
     // closing it has nothing to mark and sends no request.
@@ -272,6 +277,7 @@ test.describe("session notifications", () => {
     await expect(list).toHaveCount(0);
     await expect(bell).toHaveAttribute("aria-expanded", "false");
     expect(stub.writes).toHaveLength(2);
+    expect(stub.writes.filter((write) => write.session === other.id), "closing this list must not mark the other open session").toEqual([]);
   });
 
   /**
@@ -295,7 +301,7 @@ test.describe("session notifications", () => {
     await bell.click();
     await page.locator(".session-bell-clear").click();
     await expect(page.locator(".session-bell-flyout")).toHaveCount(0);
-    await expect.poll(() => stub.writes.some((write) => write.route === "cleared" && write.through === 7)).toBe(true);
+    await expect.poll(() => stub.writes.some((write) => write.session === session.id && write.route === "cleared" && write.through === 7)).toBe(true);
     feed.notify(2);
     await expect(bell).toHaveCount(0, { timeout: 20_000 });
 

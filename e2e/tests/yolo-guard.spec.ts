@@ -24,7 +24,7 @@ import {
   stopSession,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
-import { fulfillAsHelm } from "./helpers/terminal-suite";
+import { requireHelmBuild } from "./helpers/helm-build";
 
 /** Open the launcher on a Codex YOLO launch into `cwd`, ready to submit. */
 async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
@@ -266,6 +266,9 @@ test("don't ask again marks the host safe before launching, and a failed mark la
   request,
 }) => {
   const cwd = stackScratchDir("yolo-stop-asking-");
+  // This spec does not install the terminal family's reset hook. Capture
+  // the real stamp here so the refusal tests recovery without latching skew.
+  const build = requireHelmBuild(await request.get("/api/sessions"), "YOLO refusal fixture");
   const created: string[] = [];
   try {
     await setLocalYoloWithoutAsking(request, false);
@@ -282,7 +285,11 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     await page.route(`**/api/hosts/${local}/yolo-without-asking`, async (route) => {
       markPosts.push(route.request().postDataJSON());
       if (refuseMark) {
-        await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held by the test" });
+        await route.fulfill({
+          status: 409,
+          headers: { "content-type": "text/plain", "x-farhelm-build": build },
+          body: "held by the test",
+        });
       } else {
         await route.continue();
       }
@@ -303,6 +310,7 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     await confirmation.locator(".yolo-confirm-stop-asking").click();
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("could not stop asking for");
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+    await expect(page.locator(".build-skew"), "a current-build refusal must preserve the normal page lifecycle").toHaveCount(0);
     expect(markPosts).toEqual([{ yolo_without_asking: true }]);
     expect(createPosts, "a failed mark sends no create").toHaveLength(1);
     expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);

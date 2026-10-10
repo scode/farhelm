@@ -2584,6 +2584,9 @@ test.describe("multi-host", () => {
         timeout: 20_000,
       });
     } finally {
+      // Teardown waits for active routes. Release before fallible session
+      // cleanup, including failures that never reached the successful release.
+      releaseHosts!();
       if (cloneId) await cleanupSession(request, cloneId);
       await cleanupSession(request, anchor.id);
       await cleanupSession(request, source.id);
@@ -2664,7 +2667,9 @@ test.describe("multi-host", () => {
       // The hook's own budget: bringing the host back is a real reconnect,
       // and every test after this group depends on it having happened.
       test.setTimeout(180_000);
-      await restoreRemoteSupervisor(request);
+      // Setup can fail before the kill. Starting another supervisor then
+      // overwrites the owned child handle with a lock-refused replacement.
+      if (!(await remoteSupervisorAlive())) await restoreRemoteSupervisor(request);
       if (staleSessionId) await cleanupSession(request, staleSessionId);
     });
 
@@ -3958,7 +3963,15 @@ test.describe("multi-host", () => {
       expect(row.remote_farhelm).toBe("farhelm");
       expect(row.remote_state_dir).toBeNull();
     } finally {
-      if (added) await request.delete(`/api/hosts/${added}`).catch(() => {});
+      // Registration precedes the assertions and id capture. Recover only
+      // this test's unique destination when an early assertion interrupted it.
+      if (added === undefined) {
+        added = (await apiHosts(request)).find((host: any) => host.destination === destination)?.id;
+      }
+      if (added !== undefined) {
+        const removed = await request.delete(`/api/hosts/${added}`);
+        expect(removed.ok(), `removing this test's registered host: ${await removed.text()}`).toBe(true);
+      }
     }
   });
 

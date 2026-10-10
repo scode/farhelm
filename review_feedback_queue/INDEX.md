@@ -244,18 +244,12 @@ triage.
   executable.
 - `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
   outside cleanup.
-- `title-retry-test-changes-folder-too-masking.md` — The title-change retry test also changes the folder, hiding its
-  target regression.
 - `failed-rotation-assertion-invalidates-subsequent-tests-credentials.md` — Failure after credential rotation could
   break later tests' authentication.
 - `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks
   refer to the wrong session.
 - `stop-recovery-test-fail-wrong-listing-request.md` — The Stop recovery test could inject failure into an earlier
   listing read.
-- `notification-stub-accepts-writes-wrong-session.md` — The notification stub accepts read marks addressed to another
-  session.
-- `sticks-test-wait-additional-refresh-it-claims.md` — The unread-stability test can finish after only the first render.
-- `failed-clone-setup-leaves-hosts-route-permanently.md` — Early clone-test failure leaves a route gate unreleased.
 - `constructor-font-regression-observes-mutable-value-construction.md` — The constructor-font test observes a value that
   can already have been corrected.
 - `link-drag-fixture-mistake-wrapped-url-single-row-url.md` — The link-drag test could drag outside the link while
@@ -265,21 +259,14 @@ triage.
 - `empty-frame-test-stops-stimulus-checking-watchdog.md` — The empty-frame test permits a watchdog reset on every frame.
 - `outstanding-heartbeat-test-accept-probe-answered-wedge.md` — The heartbeat test could count a probe answered before
   the intended wedge.
-- `resize-teardown-accepts-refused-deletion-success.md` — Resize-test teardown reports success after a refused deletion.
 - `multi-session-test-hold-delete-request.md` — The multi-session test's DELETE gate does not match the real request.
 - `exited-session-test-bypasses-delete-gate.md` — The exited-session test separately bypasses its deletion hold.
-- `remote-browse-witness-accept-earlier-tests-request.md` — A remote-routing witness can reuse a previous test's
-  receipt.
-- `failed-setup-overwrite-ownership-running-replacement-supervisor.md` — Failed supervisor setup can overwrite ownership
-  of the still-serving child.
 - `phantom-tab-regression-test-never-waits-claimed-later.md` — The phantom-tab test checks absence before witnessing
   later reconciliation.
 - `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
   global serialization guard.
-- `yolo-refusal-fixture-unintentionally-puts-page-into.md` — The YOLO-refusal fixture silently changes the page into
-  build mismatch.
 - `saving-restoring-cursor-attributes-loses-extended-formatting.md` — Cursor restore leaves extended formatting changed
   after the save.
 - `scrolling-downward-inserts-rows-wrong-background.md` — Downward scrolling inserts blank rows with the default
@@ -288,8 +275,6 @@ triage.
   as proof of deterministic test failure.
 - `mouse-fidelity-assertion-accepts-utf-corrupted-reports.md` — The mouse-fidelity test accepts the encoding corruption
   it claims to reject.
-- `failed-add-host-assertions-leave-extra-registered-host.md` — A failed add-host test leaves a registration that later
-  resets do not remove.
 - `history-fixture-enables-yolo-installing-restoration-guard.md` — History-test setup can leak its changed confirmation
   policy.
 - `keyboard-launch-fixture-has-same-separate-setup-ownership.md` — Keyboard-launch setup independently leaves changed
@@ -363,8 +348,6 @@ triage.
 - `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
   template.
 - `concurrent-starts-bypass-sweep-serialization.md` — Concurrent sweep starts could publish the losing run as current.
-- `intentional-child-passes-because-it-failed-wrong.md` — The intentional teardown-failure child could also fail its
-  body and still pass the parent.
 - `long-cwd-test-never-supplies-long-path.md` — The long-folder test could pass after ellipsis styling is removed.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.

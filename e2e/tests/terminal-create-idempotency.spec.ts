@@ -172,7 +172,9 @@ for (const field of [
 // still part of what makes a create the create it is (the server
 // fingerprints it), so editing it starts a new intent exactly like the
 // other two fields. Kept separate from the loop above because a bad title
-// cannot fail a create — this one has to succeed to be observed at all.
+// cannot fail a create. Keep the invalid folder unchanged so both attempts
+// fail identically: fixing the folder would renew the key independently and
+// hide a title-only regression.
 test("editing the title after a failed create mints a new intent key", async ({
   page,
   request,
@@ -199,12 +201,18 @@ test("editing the title after a failed create mints a new intent key", async ({
     await expect(form.locator(".create-session-error")).toBeVisible();
 
     await form.getByLabel("name (optional)").fill(`${title}-renamed`);
-    await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.locator('button[type="submit"]').click();
-    const id = await sessionIdFor(rowByTitle(page, `${title}-renamed`));
-    await waitForSessionRevealed(page, id);
+    const [retry] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.request().method() === "POST" && new URL(response.url()).pathname === "/api/sessions"
+      ),
+      form.locator('button[type="submit"]').click(),
+    ]);
+    expect(retry.ok(), "the unchanged invalid folder must still refuse the title-only retry").toBe(false);
+    await expect(form.locator(".create-session-error")).toBeVisible();
 
     expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
     expect(keys[1]).not.toBe(keys[0]);
   } finally {
     await cleanUpSessionsTitled(request, title);

@@ -41,6 +41,8 @@ test("intentional timeline unexpected pass", async ({ page, timeline }) => {
 /** A hook failure after a passing body exercises the final-status decision. */
 test("intentional timeline teardown failure", async ({ page, timeline }) => {
   await page.setContent("<main>teardown</main>");
-  timeline.record("child-body-complete", [["outcome", "teardown"]]);
   await expect(page.locator("main")).toHaveText("teardown");
+  // The parent uses this marker to prove the body passed before the hook
+  // failed. Recording it before the assertion would accept a body failure.
+  timeline.record("child-body-complete", [["outcome", "teardown"]]);
 });
