@@ -8943,7 +8943,9 @@
 - Completion criteria: Documentation only: limit the changed-contents guarantee to what is actually checked and describe
   what the Mac check covers. If that turns out significantly more complicated than expected, leave it unfixed and return
   it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## light-theme-documentation-headings-have-unreadably-low-contrast.md
 
@@ -8960,7 +8962,9 @@
 - Completion criteria: Give those headings a readable light-theme colour. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## local-desktop-build-recipe-fails-relative-target.md
 
@@ -8977,7 +8981,9 @@
 - Completion criteria: Export the normalized target directory before the builds. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## centos-test-changes-meaning-existing-global-ssh.md
 
@@ -9128,7 +9134,9 @@
 - Completion criteria: Refuse (or point the launch at the resolved target directory) when the target directory is
   outside the checkout's `target/`, as the docs screenshot script does. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## readme-capture-use-stale-builds-successful-build.md
 
@@ -9144,7 +9152,9 @@
 - Completion criteria: Refuse an outside override before building, as the docs screenshot script does. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## hero-publisher-self-test-requires-different-hashes-potentially.md
 
@@ -9161,7 +9171,9 @@
 - Completion criteria: Make the second publish differ deterministically, for example with a second test image. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
+- Execution: complete: change `ykqzurwtszsrzmtknxtprluzzslrqtup`, bookmark
+  `plan/docs-and-capture-fixes/01-docs-and-capture-fixes`;
+  [draft PR #1809](https://github.com/scode/farhelm/pull/1809/changes).
 
 ## optional-desktop-interaction-smoke-times-out-during.md
 

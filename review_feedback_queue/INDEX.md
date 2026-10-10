@@ -268,8 +268,6 @@ triage.
 - `replacement-open-shutdown-test-assumes-procfs.md` — Returned replacement-client cleanup is unverified on macOS.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
-- `local-desktop-build-recipe-fails-relative-target.md` — The desktop build recipe could split artifacts across relative
-  target directories.
 - `restored-terminal-snapshots-lose-select-to-copy.md` — Restored terminal snapshots no longer copy selected text.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
@@ -404,16 +402,8 @@ triage.
 - `retained-failed-tags-become-mandatory-upgrade-test-inputs.md` — Failed release tags could make standard upgrade
   validation impossible.
 - `cutover-probe-ignores-output-asserted-boundary.md` — The cutover probe ignores early output between reply blocks.
-- `readme-capture-use-stale-builds-successful-build.md` — README capture can photograph stale behavior despite a
-  successful rebuild.
-- `video-recording-use-stale-builds-successful-build.md` — Video capture independently launches fixed paths after
-  building elsewhere.
 - `optional-desktop-interaction-smoke-times-out-during.md` — The optional desktop smoke times out during normal
   deletion.
-- `hero-publisher-self-test-requires-different-hashes-potentially.md` — The publisher self-test could reject two valid
-  identical commits.
-- `light-theme-documentation-headings-have-unreadably-low-contrast.md` — Light-theme section headings have insufficient
-  contrast.
 - `cancelled-attach-retain-abandoned-terminal-channel.md` — Cancellation before attach transmission could retain local
   terminal-routing metadata.
 - `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` — The wedged-browser test observes a detach that does
@@ -529,5 +519,3 @@ triage.
   repeated attempts.
 - `non-fragment-files-satisfy-changelog-coverage.md` — Changelog coverage accepts files that fragment discovery never
   loads.
-- `uninstall-documentation-promises-protection-modified-mac-app.md` — The uninstall guide promises Mac content
-  protection the product does not provide.

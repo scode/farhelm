@@ -47,6 +47,27 @@ case "$output" in
   *) echo "--output must end in .mp4" >&2; exit 2 ;;
 esac
 
+# The fleet launches checkout-local outputs even with --no-build. An outside
+# build directory would therefore record older binaries after a good build.
+# Resolve an accepted override once so cargo and dx see the same absolute path.
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  target="$(python3 - "$CARGO_TARGET_DIR" "$repo/target" <<'PYTARGET'
+import os
+import sys
+# An explicit target/ is valid before the first build creates it. realpath
+# follows existing symlinks without requiring the final directory to exist.
+target = os.path.realpath(sys.argv[1])
+if target != os.path.realpath(sys.argv[2]):
+    raise SystemExit(1)
+print(target)
+PYTARGET
+  )" || {
+    echo "CARGO_TARGET_DIR must name this checkout's target/; capture refused" >&2
+    exit 1
+  }
+  export CARGO_TARGET_DIR="$target"
+fi
+
 # Checked before the builds so a missing encoder fails in a second rather
 # than after a full staging and choreography run.
 ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264 || {
