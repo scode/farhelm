@@ -309,67 +309,93 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-10 (claim 88c8ce).
+### 2026-10-10: answer to a blocked question
 
-### Sounds make extra session-list reads that break existing browser tests
+The question, as the executor put it:
 
-The plan's sounds work (#1768, not merged; nothing of this plan is on main) watches the whole fleet for sessions that
-start waiting, new approval requests and finished turns. To see every session, including ones the sidebar's host filter
-hides (decision D5), it makes its own read of the session list, separate from the sidebar's, every time the helm says
-something changed, and once when the page opens. That separate read was the planner's proposal, not one of your
-decisions.
+> Blocked while landing on 2026-10-10 (claim 88c8ce).
+>
+> ### Sounds make extra session-list reads that break existing browser tests
+>
+> The plan's sounds work (#1768, not merged; nothing of this plan is on main) watches the whole fleet for sessions that
+> start waiting, new approval requests and finished turns. To see every session, including ones the sidebar's host
+> filter hides (decision D5), it makes its own read of the session list, separate from the sidebar's, every time the
+> helm says something changed, and once when the page opens. That separate read was the planner's proposal, not one of
+> your decisions.
+>
+> The landing's browser run found that several existing browser tests assume the sidebar is the only thing in the page
+> that reads the session list, and they now fail with the sounds in place (run `d0aa9ade`, on Chromium and WebKit):
+>
+> - The sort tests check that after a reload every list read asks for the order the user chose. The sounds' read always
+>   asks for the default order (most recently active first), so "the chosen order survives a reload" and "the list is
+>   not drawn until the remembered order is known" fail.
+> - A test that holds list reads (it deliberately delays the helm's replies) and releases them one at a time, to prove
+>   an old read cannot bring back a session's status from before it was stopped, now releases the sounds' read where it
+>   expects the sidebar's, and fails.
+> - A test that makes one held list read fail, to check the sidebar shows that failure, can hit the sounds' read
+>   instead, so it fails or passes depending on which read it catches; in this run it failed on both engines.
+>
+> Nothing here is broken for a user: the sounds read the list correctly, and the sidebar still behaves the same. The
+> failures are tests whose assumption the plan made untrue. Browser tests do not run in CI, so the executor's runs
+> (which covered only the sounds, settings and change-feed tests) did not show it. They have to be settled before the
+> plan lands, and how depends on whether the sounds keep a read of their own.
+>
+> ### Options
+>
+> 1. Keep the separate read, and make it recognisable to the tests: the sounds' request carries a marker the helm
+>    ignores (an extra request parameter, say), and the affected tests and their shared helpers skip marked reads. No
+>    change in behaviour: the marker exists only so tests can tell the two readers apart. The cost is a test-only tag on
+>    a shipped request, and that every test that counts or holds list reads, now and later, must skip marked reads.
+> 2. Share one read: the sidebar fetches the whole fleet and applies its host filter in the page, and the sounds use
+>    that same listing. One read per change instead of two (the second read is a cheap local read on the helm, so this
+>    saves little), and the tests keep their assumption. It is a larger change to the sidebar's reading, filtering and
+>    failure handling, in an area those same tests guard closely, and the planner chose the separate read so the sounds
+>    would not depend on the sidebar's filter.
+> 3. Keep the separate read, but have it ask for the same order as the sidebar, and rework each held-read test by hand
+>    (for example, by waiting for both readers' requests and releasing them in a known order). That fixes the sort tests
+>    cheaply, but there is no single clean rule for the held-read tests, and each future one meets the same problem.
+>
+> Recommendation: option 1. It keeps your D5 behaviour with the smallest change, does not touch the sidebar, and gives
+> every current and future test one rule for telling the sidebar's reads from the sounds', at the price of a marker that
+> only tests use.
+>
+> ### Also for the next round
+>
+> The landing review found three smaller problems the next round should fix whatever the answer:
+>
+> - On a phone or tablet, sound never becomes allowed. The page enables audio as soon as a mouse button, pen or finger
+>   goes down, but on touch screens browsers grant audio permission only when the finger lifts (or on a click), so every
+>   sound on a touch device is dropped. Desktop browsers and the desktop app are not affected.
+> - In SPEC.md's Settings paragraph, "the other two choices apply to every host and client" no longer says which two now
+>   that the dialog also has three sound switches, and its list of per-device exceptions names sidebar width and
+>   terminal text size but not the sound switches.
+> - One unit test (a refused storage write does not undo the switches) checks that no sound plays without first checking
+>   that one plays when it should, so it would also pass if audio never started in the test.
+>
+> The landing already rebased the plan's branch onto the sidebar-resizing work, which conflicted in SPEC.md,
+> SPEC_impl.md and the list of scripts the page loads (each now holds both changes), restored a paragraph break in
+> SPEC_impl.md that the rebase had dropped, and pushed the result to #1768, so the next round starts from it.
 
-The landing's browser run found that several existing browser tests assume the sidebar is the only thing in the page
-that reads the session list, and they now fail with the sounds in place (run `d0aa9ade`, on Chromium and WebKit):
+The maintainer's answer:
 
-- The sort tests check that after a reload every list read asks for the order the user chose. The sounds' read always
-  asks for the default order (most recently active first), so "the chosen order survives a reload" and "the list is not
-  drawn until the remembered order is known" fail.
-- A test that holds list reads (it deliberately delays the helm's replies) and releases them one at a time, to prove an
-  old read cannot bring back a session's status from before it was stopped, now releases the sounds' read where it
-  expects the sidebar's, and fails.
-- A test that makes one held list read fail, to check the sidebar shows that failure, can hit the sounds' read instead,
-  so it fails or passes depending on which read it catches; in this run it failed on both engines.
+The maintainer's answer, verbatim:
 
-Nothing here is broken for a user: the sounds read the list correctly, and the sidebar still behaves the same. The
-failures are tests whose assumption the plan made untrue. Browser tests do not run in CI, so the executor's runs (which
-covered only the sounds, settings and change-feed tests) did not show it. They have to be settled before the plan lands,
-and how depends on whether the sounds keep a read of their own.
+> Let's adjust the plan to only do beeps for what the current filter view is showing. I think this should completely
+> eliminate the tension here and not add a bunch more complexity nor require a bunch of refactoring? I was on the fence
+> on this originally during design anyway. As a UX perspective therea re downsides to beeping for anything.
 
-### Options
+Agreed restatement:
 
-1. Keep the separate read, and make it recognisable to the tests: the sounds' request carries a marker the helm ignores
-   (an extra request parameter, say), and the affected tests and their shared helpers skip marked reads. No change in
-   behaviour: the marker exists only so tests can tell the two readers apart. The cost is a test-only tag on a shipped
-   request, and that every test that counts or holds list reads, now and later, must skip marked reads.
-2. Share one read: the sidebar fetches the whole fleet and applies its host filter in the page, and the sounds use that
-   same listing. One read per change instead of two (the second read is a cheap local read on the helm, so this saves
-   little), and the tests keep their assumption. It is a larger change to the sidebar's reading, filtering and failure
-   handling, in an area those same tests guard closely, and the planner chose the separate read so the sounds would not
-   depend on the sidebar's filter.
-3. Keep the separate read, but have it ask for the same order as the sidebar, and rework each held-read test by hand
-   (for example, by waiting for both readers' requests and releasing them in a known order). That fixes the sort tests
-   cheaply, but there is no single clean rule for the held-read tests, and each future one meets the same problem.
-
-Recommendation: option 1. It keeps your D5 behaviour with the smallest change, does not touch the sidebar, and gives
-every current and future test one rule for telling the sidebar's reads from the sounds', at the price of a marker that
-only tests use.
-
-### Also for the next round
-
-The landing review found three smaller problems the next round should fix whatever the answer:
-
-- On a phone or tablet, sound never becomes allowed. The page enables audio as soon as a mouse button, pen or finger
-  goes down, but on touch screens browsers grant audio permission only when the finger lifts (or on a click), so every
-  sound on a touch device is dropped. Desktop browsers and the desktop app are not affected.
-- In SPEC.md's Settings paragraph, "the other two choices apply to every host and client" no longer says which two now
-  that the dialog also has three sound switches, and its list of per-device exceptions names sidebar width and terminal
-  text size but not the sound switches.
-- One unit test (a refused storage write does not undo the switches) checks that no sound plays without first checking
-  that one plays when it should, so it would also pass if audio never started in the test.
-
-The landing already rebased the plan's branch onto the sidebar-resizing work, which conflicted in SPEC.md, SPEC_impl.md
-and the list of scripts the page loads (each now holds both changes), restored a paragraph break in SPEC_impl.md that
-the rebase had dropped, and pushed the result to #1768, so the next round starts from it.
+- This replaces D5. Sounds are for what the session list currently shows: the sessions in the sidebar's current listing,
+  under its host selector and filters. The sound code reads that same listing rather than making its own session-list
+  request, so the page keeps a single reader of the session list and the existing browser tests' assumption that the
+  sidebar is the only one holds. The separate always-on unfiltered read is dropped.
+- Approval requests keep sounding for every new request, since their cards appear whatever the filter is.
+- Sessions that come into view because the user changed the filter or host selector are treated like the first load: no
+  sound for a state they were already in, only for changes seen after that.
+- The next round also fixes the three smaller problems from the landing review: sound must become allowed on touch
+  screens (unlock on the end of a touch or on a click, not only on a press); SPEC.md's Settings paragraph says which
+  choices are shared by every host and client and lists the sound switches among the per-device settings; and the
+  storage-refusal unit test first checks that a sound plays when it should.
