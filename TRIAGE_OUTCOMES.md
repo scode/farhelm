@@ -7263,7 +7263,8 @@
   to the user. The `$$` handling in the same function belongs to the separate dollar-path items and is not part of this.
 - Completion criteria: an unknown backslash escape yields no program path, so ownership is refused; a test covers
   `\x20`. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/os-readback-fixes.md`.
+- Execution: complete in jj change `lktnzotykwszrzprprznyttlnlkmppww`, bookmark `plan/os-readback-fixes/01-os-readback`;
+  PR: https://github.com/scode/farhelm/pull/1796/changes.
 
 ## lowercase-sections-override-ownership-despite-being-ignored.md
 
@@ -7276,7 +7277,8 @@
   `Service` and flip the test). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: only `[Service]` counts; the test expects a lowercase section to be ignored and its comment is
   corrected. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/os-readback-fixes.md`.
+- Execution: complete in jj change `lktnzotykwszrzprprznyttlnlkmppww`, bookmark `plan/os-readback-fixes/01-os-readback`;
+  PR: https://github.com/scode/farhelm/pull/1796/changes.
 
 ## large-macos-environments-corrupt-otherwise-valid-hook-argument.md
 
@@ -7296,7 +7298,8 @@
 - Completion criteria: the argument read uses a buffer large enough for the whole answer; the parser still enforces the
   argument budget; the comment matches the documented kernel behavior; the change compiles on macOS. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/os-readback-fixes.md`.
+- Execution: complete in jj change `lktnzotykwszrzprprznyttlnlkmppww`, bookmark `plan/os-readback-fixes/01-os-readback`;
+  PR: https://github.com/scode/farhelm/pull/1796/changes.
 
 ## arrow-navigation-retains-obsolete-position-item-disappears.md
 
