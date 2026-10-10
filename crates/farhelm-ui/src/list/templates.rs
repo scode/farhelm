@@ -685,7 +685,7 @@ fn FieldEditor(
                 div { class: "templates-field",
                     span { "destination" }
                     div { class: "templates-segments", role: "group", aria_label: "destination",
-                        for (is_github,text) in [(false,"folder"),(true,"fresh GitHub checkout")] {
+                        for (is_github,text) in [(false,"folder"),(true,"managed checkout")] {
                             button { r#type: "button", disabled, aria_pressed: is_github == github, "data-tooltip": "destination: {text}",
                                 onclick: move |_| draft.with_mut(|d| { let value=match d.fields.destination.take() { Some(TemplateDestination::Folder(v) | TemplateDestination::Github(v)) => v, None => String::new() }; d.fields.destination=Some(if is_github { TemplateDestination::Github(value) } else { TemplateDestination::Folder(value) }); }), "{text}"
                             }
@@ -694,12 +694,12 @@ fn FieldEditor(
                     label {
                         span { if github { "repository" } else { "folder path" } }
                         input { class: "templates-destination", value, disabled, placeholder: if github { "owner/name" } else { "/path/to/project" },
-                            "data-tooltip": if github { "repository: each session gets a fresh checkout" } else { "folder path: the working folder on the selected host" },
+                            "data-tooltip": if github { "repository: each session gets a managed checkout" } else { "folder path: the working folder on the selected host" },
                             oninput: move |e| draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })),
                         }
                     }
                 }
-                if github { span { class: "templates-hint", "Each session gets a fresh checkout of this repository." } }
+                if github { span { class: "templates-hint", "Each session gets a managed checkout of this repository." } }
             }
         }
     };

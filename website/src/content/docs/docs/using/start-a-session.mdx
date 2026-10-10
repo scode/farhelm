@@ -1,6 +1,6 @@
 ---
 title: Start a session
-description: Launch an agent with the session launcher, reuse recent setups, or start from a fresh GitHub checkout.
+description: Launch an agent with the session launcher, reuse recent setups, or start from a managed checkout.
 sidebar:
   order: 1
 ---
@@ -120,28 +120,31 @@ Typing a path offers to use it as the directory or to browse it.
   alt="The search box with name: fix login bug typed, offering to set that as the session's name."
 />
 
-A few other prefixes do something no plain search does: `gh:` starts a [fresh GitHub
-checkout](#start-from-a-fresh-github-checkout), `tl:` applies one of your [launch
+A few other prefixes do something no plain search does: `gh:` starts a [managed
+checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices, `trust:` is the only way to set workspace
 trust from the search box, and `perms:` the only way to pick **default** permissions there. The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
 
-## Start from a fresh GitHub checkout
+## Start from a managed checkout
 
-A session can also start in a new clone of a GitHub repository instead of an existing directory. Type `gh:` followed by
-the repository as `owner/repo` in the search box, then choose **Fresh checkout: owner/repo**. Farhelm suggests
-repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
+A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
+managed checkout: it makes the directory for the session and moves it into the trash when its last session is deleted
+(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). Type `gh:` followed by the repository as
+`owner/repo` in the search box, then choose **Managed checkout: owner/repo**. Farhelm suggests repositories you have
+launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
 on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **use existing
 folder** switches back to an ordinary directory.
 
-**Clone** on a session in a GitHub checkout starts a fresh checkout of the same repository, even if the session runs in
-a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when taken.
-Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **use existing
-folder** restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
+**Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
+in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
+taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **use
+existing folder** restores the source's directory and name. **Replace with** and **Replace** keep the existing
+directory.
 
 When you launch, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
@@ -149,16 +152,15 @@ Git asks for, such as a password, shows up in the terminal for you to answer. A 
 helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
 and any partial clone stays where it is.
 
-The cache makes repeated fresh checkouts faster and takes roughly the disk space of one extra copy of each repository
+The cache makes repeated managed checkouts faster and takes roughly the disk space of one extra copy of each repository
 on each host. It lives under Farhelm's state directory on that host, in `repo-cache/<owner>/<name>.git`, outside your
 checkout directory. Farhelm removes caches unused for more than 30 days when the host's supervisor, the program that
-keeps its sessions running, starts (see [The pieces](/docs/how-it-works/the-pieces/)). You can
-delete a cache directory by hand at any time; existing checkouts stay independent, and the next fresh checkout downloads
-it again. Avoid doing that while a checkout is being prepared, since it can make that launch fail, and leave the sibling
-`.lock` files in place so concurrent checkouts still take turns. A cache failure names its path in the terminal and
-stops the clone.
+keeps its sessions running, starts (see [The pieces](/docs/how-it-works/the-pieces/)). You can delete a cache directory
+by hand at any time; existing checkouts stay independent, and the next managed checkout downloads it again. Avoid doing
+that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
+place so concurrent checkouts still take turns. A cache failure names its path in the terminal and stops the clone.
 
-Fresh checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that directory
+Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that directory
 on each host you want to clone on, then run this on the machine that runs the helm (the program that serves the Farhelm
 app; see [The pieces](/docs/how-it-works/the-pieces/)):
 

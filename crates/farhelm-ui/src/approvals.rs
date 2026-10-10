@@ -733,7 +733,7 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
             rows.push(CardRow::Value("folder", folder.clone()))
         }
         Some(TemplateDestination::Github(repo)) => {
-            rows.push(CardRow::Value("fresh checkout of", repo.clone()))
+            rows.push(CardRow::Value("managed checkout of", repo.clone()))
         }
         None => {}
     }

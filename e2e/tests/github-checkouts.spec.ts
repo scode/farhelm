@@ -133,7 +133,7 @@ async function openComposer(page: Page, host: number): Promise<Locator> {
 async function selectRepo(form: Locator, repo: string) {
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill(`gh:${repo}`);
-  const option = form.getByRole("option", { name: `Fresh checkout: ${repo}`, exact: true });
+  const option = form.getByRole("option", { name: `Managed checkout: ${repo}`, exact: true });
   await expect(option).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
   await expect(search).toHaveValue("");
@@ -182,6 +182,26 @@ async function assertCheckout(
   expect(await fixture.git("-C", cwd, "rev-parse", "HEAD")).toBe(fixture.commit);
   expect(await fixture.git("-C", cwd, "config", "--local", "--get", "remote.origin.url")).toBe(fixture.url);
   return session;
+}
+
+/** Current membership must be visible even for a borrower with no launch
+ * repository. Full rows name the repository; compact rows preserve the mark,
+ * and both expose the path and last-session lifetime through the tooltip. */
+async function assertManagedMark(page: Page, id: string, repo: string, root: string, cwd = root) {
+  const row = page.locator(`.session-row[data-session-id="${id}"]`);
+  const compact = page.getByRole("checkbox", { name: "compact", exact: true });
+  await compact.uncheck();
+  await expect(row.locator(".session-repository")).toHaveText(repo);
+  const mark = row.locator(".managed-checkout-mark");
+  await expect(mark.locator('svg[data-glyph="branch"]')).toHaveAttribute("aria-hidden", "true");
+  await expect(mark.locator(".visually-hidden")).toHaveText("managed checkout");
+  const location = cwd === root ? "" : ` Session folder: ${cwd}.`;
+  await expect(mark).toHaveAttribute("data-tooltip", `managed checkout of ${repo} at ${root}.${location} Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.`);
+  await expect(page.locator(".titlebar .managed-checkout-mark")).toHaveAttribute("data-tooltip", await mark.getAttribute("data-tooltip") as string);
+  await compact.check();
+  await expect(row.locator(".session-identity-copy .managed-checkout-mark")).toBeVisible();
+  await expect(row.locator(".session-repository")).toHaveCount(0);
+  await compact.uncheck();
 }
 
 /** Lose a real, durably refused response after a late path collision. The
@@ -288,7 +308,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
 
 /** Command mode retains its command when gh is selected, under the same real
  * clone/hook/live-terminal oracles the structured launches use. */
-test("a typed command survives a real fresh checkout", async ({ page, request }) => {
+test("a typed command survives a real managed checkout", async ({ page, request }) => {
   const fixture = await checkoutFixture("browser-raw");
   const ids: string[] = [];
   try {
@@ -367,6 +387,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
     const original = await assertCheckout(page, request, fixture, origin.id, origin.cwd, false);
+    await assertManagedMark(page, origin.id, fixture.repo, origin.cwd);
     const identity = await fs.stat(origin.cwd);
     const subdir = path.join(origin.cwd, "dirty-subdir");
     await fs.mkdir(subdir);
@@ -379,6 +400,11 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     ids.push(foreign.id);
     expect((await sessionState(request, foreign.id)).working_copy).toBeNull();
     await assertLive(page, foreign.id);
+    const foreignRow = page.locator(`.session-row[data-session-id="${foreign.id}"]`);
+    await expect(foreignRow.locator(".session-cwd")).toBeVisible();
+    await expect(page.locator(".titlebar .header-copy").first()).toContainText(unmanaged);
+    await expect(foreignRow.locator(".managed-checkout-mark")).toHaveCount(0);
+    await expect(page.locator(".titlebar .managed-checkout-mark")).toHaveCount(0);
     await deleteSession(request, foreign.id);
 
     // Existing-folder mode makes a borrower; Clone otherwise allocates fresh.
@@ -401,12 +427,13 @@ test("borrowers retain the checkout until the final stopped session is deleted",
       expect(state.github_repo).toBeNull();
       expect(state.working_copy).toEqual(original.working_copy);
       await assertLive(page, borrower.id);
+      await assertManagedMark(page, borrower.id, fixture.repo, origin.cwd, borrower.cwd);
     }
     const borrowerRow = page.locator(`.session-row[data-session-id="${nested.id}"]`);
     await borrowerRow.locator(".session-row-menu").click();
     await borrowerRow.locator(".session-row-delete").click();
     await expect(borrowerRow.locator(".confirm-checkout-consequence")).toHaveText(
-      "The checkout stays while another session uses it. Deleting its last session moves it into the working-copy archive; no files are deleted.",
+      "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted.",
     );
     await borrowerRow.locator(".confirm-cancel").click();
     const before = await contents(origin.cwd);
@@ -543,7 +570,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
 /** Both the origin and a subdirectory borrower clone into independent checkouts.
  * The untouched name is shared by display, preview and create; explicit edits
  * must retain the existing refusal instead of entering the suffix search. */
-test("clone defaults to fresh checkouts and searches only untouched names", async ({ page, request }) => {
+test("clone defaults to managed checkouts and searches only untouched names", async ({ page, request }) => {
   const fixture = await checkoutFixture("browser-clone");
   const ids: string[] = [];
   try {
@@ -777,12 +804,12 @@ test("clone retains its name and key after a lost success and occupied re-previe
 
 /** Why: Replace with a fresh checkout of the source's own repository was
  * refused every time, because the copied title named the source's checkout
- * and an explicit name never gains a suffix. Spec (SPEC.md, Fresh GitHub
+ * and an explicit name never gains a suffix. Spec (SPEC.md, Managed
  * checkouts): the copied, unedited title is not a name once a fresh checkout
  * is the destination, so the assembled helm and supervisor allocate the next
  * free `repo-N` as both directory and title. Replace takes a different helm
  * path from create, so this is the one real-clone proof of the fix. */
-test("replace with into a fresh checkout of the source's repository gets the next free name", async ({ page, request }) => {
+test("replace with into a managed checkout of the source's repository gets the next free name", async ({ page, request }) => {
   const fixture = await checkoutFixture("browser-replace-with");
   const ids: string[] = [];
   try {

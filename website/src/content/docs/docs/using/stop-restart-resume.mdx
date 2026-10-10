@@ -51,6 +51,12 @@ Both are in a session's menu in the [session list](/docs/using/session-list/), a
 right of the session header. Delete asks you to confirm, with one exception: from the session list, a session that has
 already ended and has no shell tabs open is deleted at once.
 
+For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another
+session uses it; deleting its last session moves the directory, including uncommitted work, into
+`farhelm-archived-working-copies` under the configured checkout root. This archive is the checkout's trash: the move
+preserves its contents and frees no disk space. If the move fails, Delete still removes the session and tells you which
+directory was left behind; Farhelm no longer manages it.
+
 ## After a reboot
 
 When a host reboots, every session still running on it ends and shows as interrupted, and its terminal contents are

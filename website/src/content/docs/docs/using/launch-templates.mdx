@@ -33,7 +33,7 @@ which is different from leaving it out. An empty model input means the default m
 with suggestions when the template sets an **agent type**. Approvals and other offered choices follow that agent type.
 
 The destination can be a directory or a
-[fresh GitHub checkout](/docs/using/start-a-session/#start-from-a-fresh-github-checkout). A model or a destination can
+[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout). A model or a destination can
 stand on its own: another template can supply the agent or host.
 
 Templates belong to the helm, the program that shows you every host's sessions
@@ -45,7 +45,7 @@ a command still needs that command to exist on the host you launch on.
 When you have set up a launch in **new** or **clone**, choose **save as template**. Give it a new name and check the
 choices you want to keep. Agent, model and effort choices are checked when set, as are command choices. Approvals and
 workspace trust are checked when you chose them; a host, directory and session name only when you picked or typed them.
-A fresh GitHub checkout's repository is checked too. Remembered defaults and a cloned session's host and directory
+A managed checkout's repository is checked too. Remembered defaults and a cloned session's host and directory
 stay available, but unchecked.
 
 The template keeps the current **agent** or **command** tab and only the choices you check. Saving closes the launcher
@@ -107,7 +107,7 @@ Here `api-repo` supplies the host and directory, so the command needs neither `-
 as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what each
 sets.
 
-A few templates work in the launcher but not for agents. The `farhelm` command cannot make a fresh GitHub checkout, so a
+A few templates work in the launcher but not for agents. The `farhelm` command cannot make a managed checkout, so a
 template with that destination is refused there unless `--cwd` gives a directory instead. `farhelm spawn` always starts
 on the agent's own host, so it refuses a template that sets a host. And on a host that asks before YOLO launches, an
 agent cannot use a template that makes the launch YOLO or a custom command

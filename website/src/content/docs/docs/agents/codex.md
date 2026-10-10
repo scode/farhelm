@@ -15,8 +15,8 @@ Codex may ask whether to trust the working directory at startup. The session lau
 choice for Codex: true sets that directory's project trust to `trusted` for this run, false sets it to `untrusted`, and
 the default adds no override. Codex 0.155.1 accepted this per-run
 [`projects.<path>.trust_level`](https://developers.openai.com/codex/config-reference/) override in a focused prompt
-reproduction. Farhelm fills the exact target directory after a fresh checkout is prepared, so the choice also applies to
-that path. It does not write Codex's persistent trust state or change its approval and sandbox policies. The existing
+reproduction. Farhelm fills the exact target directory after a managed checkout is prepared, so the choice also applies
+to that path. It does not write Codex's persistent trust state or change its approval and sandbox policies. The existing
 hook-trust bypass is separate and does not establish directory trust.
 
 ## Launchers and wrappers

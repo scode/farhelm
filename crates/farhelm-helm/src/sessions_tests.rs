@@ -1116,7 +1116,7 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
 /// A completed delete that left a checkout in place reaches the browser as
 /// a `notice` in the success body.
 ///
-/// Why it matters: SPEC.md "Fresh GitHub checkouts" makes archiving never
+/// Why it matters: SPEC.md "Managed checkouts" makes archiving never
 /// block Delete, and a checkout left unarchived must never be silent; the
 /// supervisor's notice is the only thing that tells the user where the
 /// folder is. Specified: a scripted `SessionDeleted` with a notice answers
@@ -1142,7 +1142,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
-                notice: Some("The checkout at /work/bar-1 was not archived".to_string()),
+                notice: Some("The managed checkout at /work/bar-1 was not archived".to_string()),
             })
             .await
             .unwrap();
@@ -1163,7 +1163,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
         value,
-        serde_json::json!({"notice": "The checkout at /work/bar-1 was not archived"})
+        serde_json::json!({"notice": "The managed checkout at /work/bar-1 was not archived"})
     );
 
     peer.await.unwrap();
@@ -2228,7 +2228,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
 /// Why: a Replace whose new session uses a different folder (an override or
 /// a fresh checkout) can release the source's last checkout reference, and
 /// a checkout that could not be archived must never be released silently
-/// (SPEC.md "Fresh GitHub checkouts"). The reply stays a session object so a
+/// (SPEC.md "Managed checkouts"). The reply stays a session object so a
 /// client that ignores the field is unaffected.
 #[farhelm_testtrace::test]
 async fn a_replace_reply_carries_the_source_deletes_notice() {
@@ -2269,7 +2269,7 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
-                notice: Some("The checkout at /work/bar was not archived".to_string()),
+                notice: Some("The managed checkout at /work/bar was not archived".to_string()),
             })
             .await
             .unwrap();
@@ -2290,7 +2290,7 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
         "the reply is still the new session"
     );
     assert_eq!(
-        body["delete_notice"], "The checkout at /work/bar was not archived",
+        body["delete_notice"], "The managed checkout at /work/bar was not archived",
         "the source delete's notice reaches the caller verbatim"
     );
 }

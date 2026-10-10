@@ -2756,7 +2756,7 @@ pub enum ControlMsg {
     ///
     /// `notice` is set when the delete completed but left something for the
     /// user to know about, today a managed checkout it could not archive
-    /// safely and left in place (SPEC.md "Fresh GitHub checkouts": archiving
+    /// safely and left in place (SPEC.md "Managed checkouts": archiving
     /// never blocks Delete, and the outcome must never be silent). Additive:
     /// an older receiver ignores it and still sees a successful delete.
     SessionDeleted {

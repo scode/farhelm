@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use crate::hosts::gui_host_name;
 use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, HostMark, LocalHostIcon,
-    PermissionGlyph, PermissionIcon, QualifierGlyph, QualifierIcon,
+    ManagedCheckoutMark, PermissionGlyph, PermissionIcon, QualifierGlyph, QualifierIcon,
 };
 use crate::launch_composer::{selection_explicit_before_permissions, selection_permission_value};
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -1573,6 +1573,11 @@ pub(super) fn SessionRow(
                                 tooltip: true,
                             }
                             if compact {
+                                // Compact rows omit the directory line. Keep
+                                // checkout lifetime visible beside the name.
+                                if let Some(checkout) = &session.working_copy {
+                                    ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone() }
+                                }
                                 if session.stale {
                                     span { class: "compact-qualifier", "data-tooltip": "{STALE_TOOLTIP}",
                                         QualifierIcon { glyph: QualifierGlyph::Stale }
@@ -1658,20 +1663,31 @@ pub(super) fn SessionRow(
                                 "data-tooltip": "{display_peer(host_name)}",
                                 "{host_name}"
                             }
-                            span { class: "session-host-separator", ":" }
+                            span {
+                                class: "session-host-separator",
+                                "data-separator": if session.working_copy.is_some() { "dot" } else { "colon" },
+                                if session.working_copy.is_some() { "·" } else { ":" }
+                            }
                         }
-                        // Two spans, not one: `.session-cwd` is the rtl
-                        // clipping container that puts the ellipsis on the
-                        // LEFT, and the inner `dir="ltr"` child is the bidi
-                        // isolate that keeps the path's characters in
-                        // logical order under it — rtl applied directly to
-                        // the text would move a leading "/" to the visual
-                        // right (see `.session-cwd` in app.css). The
-                        // tooltip carries the UNABBREVIATED path, which is
-                        // what makes the `~` safe: see `abbreviate_home`
-                        // for whose home it does and does not know about.
-                        span { class: "session-cwd", "data-tooltip": "{display_peer(&session.cwd)}",
-                            span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
+                        // Current checkout membership names the repository;
+                        // the shared mark keeps its lifetime and actual cwd
+                        // reachable through one hover target.
+                        if let Some(checkout) = &session.working_copy {
+                            ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone(), show_repository: true }
+                        } else {
+                            // Two spans, not one: `.session-cwd` is the rtl
+                            // clipping container that puts the ellipsis on the
+                            // LEFT, and the inner `dir="ltr"` child is the bidi
+                            // isolate that keeps the path's characters in
+                            // logical order under it — rtl applied directly to
+                            // the text would move a leading "/" to the visual
+                            // right (see `.session-cwd` in app.css). The
+                            // tooltip carries the UNABBREVIATED path, which is
+                            // what makes the `~` safe: see `abbreviate_home`
+                            // for whose home it does and does not know about.
+                            span { class: "session-cwd", "data-tooltip": "{display_peer(&session.cwd)}",
+                                span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
+                            }
                         }
                     }
                     }
@@ -1914,7 +1930,7 @@ pub(super) fn SessionRow(
                                 // Delete decides from durable references.
                                 span {
                                     class: "confirm-consequence confirm-checkout-consequence",
-                                    "The checkout stays while another session uses it. Deleting its last session moves it into the working-copy archive; no files are deleted."
+                                    "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                 }
                             }
                             button {

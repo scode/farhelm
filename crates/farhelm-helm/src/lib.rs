@@ -2303,7 +2303,7 @@ fn supervisor_reply_status(kind: ErrorKind) -> axum::http::StatusCode {
 /// accept the same key after an unknown lookup. Spent or unresolved keys also
 /// conflict and must never acquire this marker from their status alone.
 #[derive(Debug, thiserror::Error)]
-#[error("fresh checkout was not accepted")]
+#[error("managed checkout was not accepted")]
 pub(crate) struct FreshCreateUnaccepted;
 
 #[cfg(test)]

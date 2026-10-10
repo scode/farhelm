@@ -602,10 +602,17 @@ written in raw: shown escaped while untouched, so a directional override or an i
 say something different from the bytes a submit would send, and an untouched submit still sends those ORIGINAL bytes
 rather than the escaped spelling on screen.
 
-The title is the exception once a fresh checkout is the destination: an untouched copied title is submitted empty and
-not displayed (SPEC.md, Fresh GitHub checkouts). The composer applies that rule wherever it reads the title for a launch
+The title is the exception once a managed checkout is the destination: an untouched copied title is submitted empty and
+not displayed (SPEC.md, Managed checkouts). The composer applies that rule wherever it reads the title for a launch
 (`create_form::submitted_title`) instead of clearing the field when a repository is picked, because the checkout
 preview's title must equal the create's, and choosing an existing folder again must bring the copied title back.
+
+The session list and open-session header mark current `working_copy` membership with the shared inline branch SVG,
+including sessions sharing another session's checkout whose launch has no repository provenance. Full rows display
+`working_copy.repo` after a spaced dot separating it from the host; compact rows retain only the mark beside the title.
+The escaped tooltip exposes the recorded canonical path, the session directory when its spelling differs from the root,
+and checkout lifetime. A visually hidden word pairs with the decorative SVG without repeating a visible repository.
+Ordinary directories keep their existing clipping and display.
 
 The macOS desktop WindowBuilder retains native decorations while making the titlebar transparent, hiding its visible
 title text, and extending the webview into the full content area. Tao positions the native traffic lights in logical
@@ -1551,7 +1558,7 @@ Protocol 24 carries validated checkout destinations separately from existing cwd
 can preview, discover or create them; restricted session clients cannot supply helm-owned configuration. Shared proto
 validation constructs the sole HTTPS GitHub URL and validates naming; the supervisor repeats validation at admission.
 Existing request fingerprint encodings remain frozen. When Delete removes a session, its permanent reservations keep
-only a `sha256:` digest of their fingerprint (and, for a fresh checkout, a digest of its client identity, which
+only a `sha256:` digest of their fingerprint (and, for a managed checkout, a digest of its client identity, which
 reconciliation compares): enough to answer a retry of the same request and refuse a different one under the spent key,
 without keeping the command line the fingerprint holds. Opening the store applies the same reduction to reservations of
 sessions deleted before it existed. Fresh fingerprints include the original client identity and resolved configuration,
@@ -1623,11 +1630,11 @@ commits before Delete or observes the directory as unavailable afterward.
 
 Root identity is checked even before accepting an apparently missing source. Common archive entry points refuse
 overlapping active registry paths, including during startup recovery. A refused or failed archive step does not fail
-Delete (SPEC.md, Fresh GitHub checkouts): the session and its checkout registry row are retired, the folder is left in
-place (after a failed move, possibly at its journaled archive destination, which the notice then names), and the reply
-carries a notice naming it. A Replace's reply carries its source Delete's notice as well, since a replacement in another
-folder can release the source's last reference. After process teardown and committed final retirement, Delete removes
-the private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
+Delete (SPEC.md, Managed checkouts): the session and its checkout registry row are retired, the folder is left in place
+(after a failed move, possibly at its journaled archive destination, which the notice then names), and the reply carries
+a notice naming it. A Replace's reply carries its source Delete's notice as well, since a replacement in another folder
+can release the source's last reference. After process teardown and committed final retirement, Delete removes the
+private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
 evidence, but cannot authorize another directory move.
 
 ### Runtime state
@@ -1938,8 +1945,8 @@ evidence, but cannot authorize another directory move.
   in general: on those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the
   user has in that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own
   `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's workspace-trust option,
-  including for fresh checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they then
-  run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
+  including for managed checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they
+  then run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
   configuration, MCP servers included, the ability to run commands, and because skipping injection there would drop
   conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation becomes an
   explicit step surfaced to the user, where the user is told what is being installed and accepts specific hooks; after
@@ -3977,7 +3984,7 @@ field an older CLI may still send. The SHA-256 of its JSON travels beside the as
 `CreateSession::request_fingerprint`, and the supervisor stores `("agent_request_v1", digest)` as the reservation's
 fingerprint in place of the resolved fields, so a retry that resolves differently after a template or source edit still
 replays, and a deleted child's tombstone digests it like any fingerprint. The supervisor honors the field only beside a
-key and never beside a fresh checkout, and only the helm's full-authority connection can send it, since a
+key and never beside a managed checkout, and only the helm's full-authority connection can send it, since a
 session-authenticated create is refused before any field is read (protocol 41). Every attempt resolves afresh and the
 helm keeps no record of a key; a create the first attempt left pending is still relaunched from its stored row
 (`validate_retry`), never from the retry's resolution, and only when the launches, folders and titles agree: under a

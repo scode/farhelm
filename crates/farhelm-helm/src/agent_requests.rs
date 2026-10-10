@@ -1669,7 +1669,7 @@ async fn write_template_for_agent(
         Some(farhelm_proto::launcher::TemplateDestination::Github(_))
     ) {
         return Err(crate::sessions::invalid_request(
-            "a template written from the farhelm command line cannot use a fresh GitHub \
+            "a template written from the farhelm command line cannot use a managed \
              checkout; give --cwd a folder"
                 .to_string(),
         ));
@@ -6931,7 +6931,7 @@ mod tests {
                     host: None,
                 },
                 ErrorKind::InvalidRequest,
-                "fresh GitHub checkout",
+                "managed checkout",
             ),
             (
                 AgentVerb::TemplateEdit {

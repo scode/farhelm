@@ -2051,6 +2051,9 @@ pub(crate) fn SessionView(
                         "{activity.age}"
                     }
                 }
+                if let Some(checkout) = &shown.working_copy {
+                    crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone() }
+                }
                 button {
                     r#type: "button",
                     class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
@@ -2374,7 +2377,7 @@ pub(crate) fn SessionView(
                                 }
                                 if shown.working_copy.is_some() {
                                     span { class: "confirm-consequence confirm-checkout-consequence",
-                                        "The checkout stays while another session uses it. Deleting its last session moves it into the working-copy archive; no files are deleted."
+                                        "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                     }
                                 }
                                 button {
