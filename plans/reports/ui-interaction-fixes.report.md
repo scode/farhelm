@@ -75,3 +75,36 @@ failures. A fresh inherited-model scope checkpoint confirmed the corrections use
 the complexity gates. Actual native model identities, reasoning settings and usage counters were not independently
 exposed; private evidence remains under session `5c9810ab-dcb4-4a62-9a79-bfb239f2d810`. The executor did not mark the PR
 ready or merge it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1812, after gui-text-safety and before helm-cli-fixes. The rebase was clean; the two
+plans both change `terminal.js`, in different places (paste insertion against copy-on-select), with no shared state.
+
+#### A fix made while landing
+
+The new test for the row-menu fix copied the fix's logic into its own body and called only helpers that already existed,
+so it would have passed with the fix reverted. The landing moved the remap of a pending keyboard target, and its
+precedence over a delayed focus event, into one function in the menu module, called it from the session row, and made
+the test drive that function, so reverting the remap or its precedence now fails the test. In #1812 before it merged.
+
+Smaller notes left as they are: the copy-on-select helper keeps a parameter it no longer reads, and one comment in
+`terminal.js` has an awkward rewrap.
+
+#### Checks
+
+- Run now, on the three stacked in landing order: `cargo fmt --all -- --check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the supervisor, helm, UI
+  and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no retries (2709 of 2709),
+  the UI JavaScript tests (230 of 230), and on Chromium and WebKit with one worker and no retries the
+  terminal-attachments, terminal-clipboard, templates, quick-switcher, approval-layout and sidebar specs (run
+  `7d69e2db`, 355 passed, 9 skipped: WebKit cannot be granted clipboard permissions, and the real-Claude cases). The two
+  failures were one sidebar test, "composer menu-closed Tab order follows the displayed launch groups", on both engines;
+  it fails the same way on plain main (run `4bb205ad`), because the managed-checkout destination buttons added earlier
+  today were never added to its expected Tab order. The browser-sidebar-test-oracles plan carries that fix.
+- After the landing fixes: `dprint check`, `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, and the UI menu
+  tests (17 of 17).
+- These three landed on their own rather than with the six plans claimed later in the round; see the monitor's
+  2026-10-10 change to the landing instructions.
+
+Nothing in the report above was made untrue by the landing.
