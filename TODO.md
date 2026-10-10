@@ -97,11 +97,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   new token, set it as `FEEDBACK_GITHUB_TOKEN` in Vercel, and deploy again (`docs/feedback-endpoint.md`). The endpoint
   allows five requests per IP per 10 minutes, so space test sends out.
 
-- **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
-  user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
-  Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
-  this is picked up. Plan: `plans/queue/waiting-sound.md`.
-
 - **Download files named in the terminal.** When text in a session's terminal looks like a file path (an agent saying "I
   wrote the file here"), hovering it should mark it as clickable, and clicking it should download that file from the
   session's host to the user's machine. Which text counts as a path, how relative paths resolve, and what happens for a

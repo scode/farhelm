@@ -158,6 +158,7 @@ mod rows;
 mod session_view;
 mod settings;
 mod skew;
+mod sounds;
 mod status;
 mod tabs;
 mod window_chrome;
@@ -1219,6 +1220,7 @@ declare_assets! {
     const EVENTS_JS: Asset = asset!("/assets/events.js");
     // Width is a per-device DOM preference, shared by web and desktop.
     const SIDEBAR_WIDTH_JS: Asset = asset!("/assets/sidebar-width.js");
+    const SOUNDS_JS: Asset = asset!("/assets/sounds.js");
     // Farhelm's own hover tooltip (see the file's module docs for why the
     // browser's `title` tooltip is not used anywhere). It installs one
     // delegated listener set on `document` when it loads; components only
@@ -1330,9 +1332,9 @@ pub fn App() -> Element {
 /// Dioxus", looping animations) requires every looping animation to stop
 /// while the window is inactive, and a Farhelm window visible beside another
 /// app's focused window counts as inactive. The universal
-/// `animation-play-state` rule at the end of app.css is the only reader;
-/// nothing on the Rust side reads the attribute or hears from these
-/// listeners, so the eval channel finishing does not matter.
+/// `animation-play-state` rule at the end of app.css pauses animations;
+/// the sound asset also reads it to keep the open session quiet while the
+/// user is looking at it. Neither needs these listeners' eval channel.
 ///
 /// The state is recomputed from `document.hasFocus()` and
 /// `document.visibilityState` on every window `focus`/`blur` and document
@@ -1501,6 +1503,7 @@ fn AppBody() -> Element {
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         document::Script { src: SIDEBAR_WIDTH_JS }
+        document::Script { src: SOUNDS_JS }
         // Above both views and outside the match, deliberately: a build
         // mismatch is a fact about this whole PAGE rather than about
         // whatever it happens to be showing, and it must not disappear

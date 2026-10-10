@@ -983,22 +983,23 @@ remembered by the helm as one preference shared by every client, together with t
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a client
 that has already loaded its preferences keeps its previous behavior until it reloads. The gear immediately to the right
-of the sidebar version opens a settings dialog with two checkboxes: `set up new hosts without asking` and
+of the sidebar version opens a settings dialog with the host checkboxes `set up new hosts without asking` and
 `remove hosts without asking`, ticked when the respective confirmation is skipped. Unticking one restores that
 confirmation; ticking one makes the same choice as the host dialog's permanent answer. Changes take effect immediately
 in the current client. Each checkbox explains the current behavior, and each host dialog's permanent answer points to
-the gear as the place to undo it. The installed desktop app's dialog has a third checkbox, for installing updates
-automatically (see [Installation and updates](#installation-and-updates)); unlike the other two it is a setting of that
-app installation, kept with the app rather than by the helm, and a browser never shows it. The other two choices apply
-to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client keeps
-its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a browser
-tab and the desktop app open in the same order and on the same session. Per-client persistence — browser storage, a
-desktop state file, anything that lets two clients remember different answers — is not wanted for these shared
-preferences (sidebar width and terminal text size, by contrast, are deliberately per device; see Terminal experience). A
-client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an
-optional parent reference usable by the API, but parentage does not nest the list and implies nothing about VCS state.
-Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone`
-need not record the asking session.
+the gear as the place to undo it. Sounds has three device switches (see Status). The installed desktop app's dialog also
+has a checkbox for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
+the host choices it is a setting of that app installation, kept with the app rather than by the helm, and a browser
+never shows it. The two host confirmation choices apply to every host and client of this helm; existing controls with a
+natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
+after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
+same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
+different answers — is not wanted for these shared preferences (sidebar width, terminal text size and sound switches, by
+contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm
+for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference
+usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not
+comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the
+asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
@@ -1104,6 +1105,15 @@ renames, stops, deletes, status transitions — appear in all other connected cl
 behavior below is one instance of this general rule, not a special case.
 
 ### Status
+
+Each client can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when
+an agent goes from running to idle. Only Claude and Codex report Waiting today. Settings has a Sounds section with one
+switch per event, remembered per device: waiting and approval default on, turn finished off. The open session stays
+quiet while its window is active; initial page-load or sign-in state makes no sound. Status sounds follow the sidebar's
+current host selector and filters; changing that view silently records its existing statuses. New approval requests
+sound regardless of those filters, because their cards are always shown. Each observation plays only its most urgent
+enabled, non-quiet event: approval, waiting, then turn finished. Browser playback needs a prior user gesture; blocked
+playback is discarded, never queued. Every open client makes its own sounds.
 
 Each session shows one of: **running** (agent actively working), **waiting** (a detected pending question or approval
 directed at the user), **idle** (agent alive and at rest, no pending ask), **exited** (process ended), **interrupted**
