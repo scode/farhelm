@@ -54,7 +54,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
   different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
-  as one choice, and ideally a color as well, so a session's host can be told apart at a glance.
+  as one choice, and ideally a color as well, so a session's host can be told apart at a glance. Plan:
+  `plans/queue/host-icons.md`.
 
 - **Make checkout archiving understandable, or drop it.** Deleting the last session using a fresh GitHub checkout moves
   the checkout into `farhelm-archived-working-copies` under the working-copy root. The only explanation is one line in
@@ -111,12 +112,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
   Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
-  this is picked up.
+  this is picked up. Plan: `plans/queue/waiting-sound.md`.
 
 - **Download files named in the terminal.** When text in a session's terminal looks like a file path (an agent saying "I
   wrote the file here"), hovering it should mark it as clickable, and clicking it should download that file from the
   session's host to the user's machine. Which text counts as a path, how relative paths resolve, and what happens for a
-  missing file, a directory, or a very large file are to be decided when this is picked up.
+  missing file, a directory, or a very large file are to be decided when this is picked up. Plan:
+  `plans/queue/terminal-file-download.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
@@ -135,7 +137,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`plans/queue/hook-report-files.md`), the supervisor reads them on its periodic reconciliation pass, every two
   seconds. Make pickup immediate with an inotify-style watch (or the macOS equivalent) on the report directories, so a
   report is applied as soon as it is written rather than up to a pass later. Kept out of that plan on purpose, to keep
-  it small.
+  it small. Plan: `plans/queue/hook-report-watch.md`.
 
 - **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
   checksums, and CI no longer signs. What remains: a Vercel user that holds only the get.farhelm.io project; disconnect
