@@ -316,22 +316,49 @@ section exists, its latest entry must also be satisfied. Then close the plan per
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-10 (claim 88c8ce).
+### 2026-10-10: answer to a blocked question
 
-### Two review findings to settle before landing
+The question, as the executor put it:
 
-This plan lets you click a file path an agent printed in a terminal and download that file from the session's host,
-after a hover that shows the host, full path and size. The landing review (nothing of this plan is on main; PRs #1769,
-#1771 and #1773 are open) found authorization, path handling and the click requirement sound, and raised two points.
+> Blocked while landing on 2026-10-10 (claim 88c8ce).
+>
+> ### Two review findings to settle before landing
+>
+> This plan lets you click a file path an agent printed in a terminal and download that file from the session's host,
+> after a hover that shows the host, full path and size. The landing review (nothing of this plan is on main; PRs #1769,
+> #1771 and #1773 are open) found authorization, path handling and the click requirement sound, and raised two points.
+>
+> 1. After the first download in a terminal, a status strip ("downloading…", then "saved to …" or "download failed: …")
+>    stays pinned over the terminal's bottom rows, usually the agent's input box or status line, until the terminal
+>    closes. Nothing removes it and clicks pass through it.
+> 2. The desktop app saves downloaded files into the Downloads folder without the macOS quarantine flag a browser save
+>    would carry, so a file a remote host chose opens without the "downloaded from the internet" prompt. SPEC.md's
+>    security section does not mention this new path from a host to the user's own machine.
+>
+> Since the plan was built, managed-checkout-trash landed with helm-to-supervisor protocol version 44, which this plan
+> also claims; the next round must move it to 45.
 
-1. After the first download in a terminal, a status strip ("downloading…", then "saved to …" or "download failed: …")
-   stays pinned over the terminal's bottom rows, usually the agent's input box or status line, until the terminal
-   closes. Nothing removes it and clicks pass through it.
-2. The desktop app saves downloaded files into the Downloads folder without the macOS quarantine flag a browser save
-   would carry, so a file a remote host chose opens without the "downloaded from the internet" prompt. SPEC.md's
-   security section does not mention this new path from a host to the user's own machine.
+The maintainer's answer:
 
-Since the plan was built, managed-checkout-trash landed with helm-to-supervisor protocol version 44, which this plan
-also claims; the next round must move it to 45.
+The maintainer's answer, verbatim:
+
+> 1: (a) but also move it to the top so it doesn't obscure the place where you are interacting with your agent or recent
+> transcript.
+>
+> 2: no quarantine, intentionally. that shit is just annoying. the target audience of farhelm is not likely to want it,
+> it's just another annoying stupid thing they have to live with when macos prompts them for stuff. this should go into
+> SPEC.md - we do not set the quarantine flag on downloaded files.
+
+Where (a) for point 1 was: a success message fades after a few seconds (the drag-copy notice is the precedent), while a
+failure stays until the user's next click or download.
+
+Agreed restatement:
+
+- The download status message moves to the top of the terminal, so it never covers the agent's input box or the most
+  recent transcript at the bottom. "Saved to …" fades after a few seconds; "download failed: …" stays until the next
+  click or download in that terminal.
+- Downloaded files are deliberately saved without the macOS quarantine flag. SPEC.md says so in its security section,
+  where it also records this path from a session's host to the user's own machine.
+- The helm-to-supervisor protocol version moves to 45, not 44: managed-checkout-trash landed first with 44.
