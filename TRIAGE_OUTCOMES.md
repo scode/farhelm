@@ -7720,7 +7720,7 @@
   broadly is an implementation DECISION within the gate. A test covers a paste containing the marker. If it needs
   significantly more than a small change in that path, stop and bring it back to the user. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`.
 
 ## stop-approval-retain-targets-owner.md
 
@@ -8293,7 +8293,7 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ssh-config-atomic.md`.
 
 ## legacy-ssh-stanza-cleanup-has-own-destructive.md
 
@@ -8311,7 +8311,7 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ssh-config-atomic.md`.
 
 ## installing-temporary-ssh-stanza-destroy-original-configuration.md
 
@@ -8328,7 +8328,7 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ssh-config-atomic.md`.
 
 ## update-temporaries-briefly-permit-cross-account-writes.md
 
@@ -8368,7 +8368,8 @@
   provisioning refuse such a path up front with a clear error instead of writing a service that cannot start. A test
   covers the refusal. If it needs significantly more than a check where Farhelm renders a service's paths, stop and
   bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/setup-refusals.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md
 
@@ -8383,7 +8384,8 @@
   whose `Type=` is anything else as unrecognised, which setup and uninstall already refuse clearly. A test covers a
   `Type=oneshot` unit with several commands. If it needs significantly more than that check, stop and bring it back to
   the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/setup-refusals.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## distinct-proxy-routes-reuse-wrong-hosts-ssh.md
 
@@ -8426,7 +8428,8 @@
   control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
   templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
   validation, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md
 
@@ -8440,7 +8443,8 @@
   control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
   templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
   validation, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## displayed-recovery-paths-shell-quoting.md
 
@@ -8452,7 +8456,7 @@
   prints only the path, without a command, when it cannot be quoted safely. A test covers a path with a space. If it
   needs significantly more than a small quoting helper, stop and bring it back to the user. Remove this feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/setup-refusals.md`.
 
 ## published-uploads-lack-directory-fsync.md
 
@@ -8480,7 +8484,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-summaries-interpolate-model-text-into-approval-templates-list-summary-rendering.md
 
@@ -8493,7 +8498,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-summaries-interpolate-model-text-into-approval-quick-switcher-summary-rendering.md
 
@@ -8507,7 +8513,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## ascii-spaces-remain-invisible-host-identity-approval-labels.md
 
@@ -8522,7 +8529,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## restart-execute-cancel.md
 
