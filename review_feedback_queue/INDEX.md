@@ -85,7 +85,6 @@ triage.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
 
-- `birth-oracle.md` — Birth-time oracle treats execution errors as absent capability.
 - `template-catalog-error.md` — Template discovery failure looks like an empty catalog.
 - `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
 - `publisher-copy-race.md` — Screenshot publication may certify pixels different from those it checked.
@@ -99,20 +98,11 @@ triage.
   retained command.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `failed-upload-regression-fails-native-macos-tools.md` — The failed-upload test stops at incompatible macOS metadata
-  tools.
-- `orphan-cleanup-regression-requires-gnu-tools-platform-guard.md` — The orphan-cleanup test fails on macOS before its
-  intended sequence.
-- `tampering-regression-fails-reaching-tampering-boundary-macos.md` — The tampering test never reaches byte tampering on
-  native macOS.
 - `live-processes-reported-dead-macos.md` — macOS process checks can certify death without observing the process.
 - `child-discovery-always-times-out-macos.md` — Child-discovery fixtures cannot reach lifecycle checks on macOS.
 - `unavailable-process-scan-certifies-no-marked-processes.md` — A missing process scan can make cleanup assertions pass
   without inspection.
 - `pid-cleanup-guard-inert-macos.md` — The fixture's PID cleanup guard does not work on macOS.
-- `tilde-replay-test-equates-display-canonical-paths.md` — The tilde-replay test rejects correct canonical paths.
-- `checkout-recovery-compares-canonical-roots-unresolved-fixture.md` — Checkout recovery tests reject correctly resolved
-  directory roots.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
 - `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
   covering the operation.
@@ -121,8 +111,6 @@ triage.
   meant to reject.
 - `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
   cannot measure RSS on native macOS.
-- `directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md` — Directory browsing tests fail on
-  symlinked temporary roots.
 - `hup-resistant-process-fixture-leaks-early-failure.md` — Early failure leaves HUP-resistant fixture processes behind.
 - `live-agent-restart-test-never-establishes-live-agent.md` — The live-agent restart test can run only the dead-agent
   branch.
@@ -169,22 +157,14 @@ triage.
   after fallible setup.
 - `orphan-client-test-accepts-failed-inspection-proof-no.md` — The orphan-client test accepts unknown inspection as
   proof of no writer leak.
-- `orderly-shutdown-assertion-vacuous-macos.md` — The orderly-shutdown death assertion is always satisfied on macOS.
-- `eof-replacement-test-cannot-detect-overlap-macos.md` — The replacement-entry test cannot detect old/new client
-  overlap on macOS.
-- `replacement-open-shutdown-test-assumes-procfs.md` — Returned replacement-client cleanup is unverified on macOS.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
 - `restored-terminal-snapshots-lose-select-to-copy.md` — Restored terminal snapshots no longer copy selected text.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
-- `rss-measurement-undercounts-larger-page-linux-systems.md` — Large Linux pages make the memory test accept
-  whole-upload buffering.
 - `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.
 - `failed-spec-publication-test-observe-whether-tmux-started.md` — Failed-publication tests cannot prove that no
   external window started.
-- `checkout-validation-test-cannot-construct-fixture-apfs.md` — APFS rejects the validation fixture before its intended
-  checks run.
 - `stop-test-leave-fixture-permanently-stopped-failure.md` — Failure after stopping the Stop fixture could leave its
   child indefinitely suspended.
 - `restart-test-has-same-stopped-child-cleanup-gap.md` — The Restart fixture separately risks leaving a suspended child

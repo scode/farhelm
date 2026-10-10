@@ -2177,20 +2177,38 @@ mod tests {
         record_planned(conn, &planned_spec(root, basename)).expect("planned row")
     }
 
-    /// Whether the filesystem under `path` reports birth times, asked of
-    /// coreutils' `stat` (`%W`, 0 or `-` when unknown) rather than of the
-    /// code under test, so a broken `observe` fails the birth-time tests
-    /// instead of making them skip.
-    fn filesystem_reports_birth_time(path: &Path) -> bool {
-        std::process::Command::new("stat")
-            .args(["-c", "%W"])
+    /// Independently establish birth-time support, distinguishing probe failure
+    /// from a successful observation that the filesystem has no creation time.
+    ///
+    /// GNU stat reports seconds with `%W`; native macOS stat uses `%B`.
+    /// Only an explicit unavailable value permits the ownership tests to skip.
+    /// Command, decoding and parsing errors must fail rather than excuse a
+    /// production observer that stopped recording available birth times.
+    /// Callers establish this fixture premise before consulting production's
+    /// recorded value, so even its successful branch cannot hide a bad probe.
+    fn filesystem_reports_birth_time(path: &Path) -> anyhow::Result<bool> {
+        use anyhow::Context;
+        let output = std::process::Command::new("stat")
+            .args(if cfg!(target_os = "macos") {
+                ["-f", "%B"]
+            } else {
+                ["-c", "%W"]
+            })
             .arg(path)
             .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .and_then(|text| text.trim().parse::<i64>().ok())
-            .is_some_and(|seconds| seconds > 0)
+            .context("execute the independent birth-time probe")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "birth-time probe exited with {}",
+            output.status
+        );
+        let text = String::from_utf8(output.stdout).context("decode the birth-time probe")?;
+        let text = text.trim();
+        if text == "-" {
+            return Ok(false);
+        }
+        let seconds = text.parse::<i64>().context("parse the birth-time probe")?;
+        Ok(seconds > 0)
     }
 
     fn identity_of_path(path: &Path) -> DirectoryIdentity {
@@ -3314,6 +3332,8 @@ mod tests {
     fn a_different_birth_time_is_a_different_object() {
         let conn = registry_conn();
         let dir = tempfile::tempdir().expect("tempdir");
+        let reports_birth_time = filesystem_reports_birth_time(dir.path())
+            .expect("the independent birth-time probe must succeed");
         let row = planned_row(&conn, dir.path(), "bar");
         allocate(&conn, &row.id, None).expect("allocate");
         let fresh = get_working_copy(&conn, &row.id)
@@ -3321,7 +3341,7 @@ mod tests {
             .expect("present");
         let Some(recorded) = fresh.path_birth_ns else {
             assert!(
-                !filesystem_reports_birth_time(dir.path()),
+                !reports_birth_time,
                 "the filesystem reports birth times, but none was recorded"
             );
             println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");
@@ -3391,6 +3411,8 @@ mod tests {
     fn a_changed_device_number_with_matching_birth_time_is_the_same_folder() {
         let conn = registry_conn();
         let dir = tempfile::tempdir().expect("tempdir");
+        let reports_birth_time = filesystem_reports_birth_time(dir.path())
+            .expect("the independent birth-time probe must succeed");
         let row = planned_row(&conn, dir.path(), "bar");
         allocate(&conn, &row.id, None).expect("allocate");
         let fresh = get_working_copy(&conn, &row.id)
@@ -3398,7 +3420,7 @@ mod tests {
             .expect("present");
         if fresh.path_birth_ns.is_none() {
             assert!(
-                !filesystem_reports_birth_time(dir.path()),
+                !reports_birth_time,
                 "the filesystem reports birth times, but none was recorded"
             );
             println!("SKIPPED: this filesystem reports no birth time to confirm a device change");
@@ -3475,6 +3497,8 @@ mod tests {
     fn a_recreated_checkout_directory_is_a_different_object() {
         let conn = registry_conn();
         let dir = tempfile::tempdir().expect("tempdir");
+        let reports_birth_time = filesystem_reports_birth_time(dir.path())
+            .expect("the independent birth-time probe must succeed");
         let row = planned_row(&conn, dir.path(), "bar");
         allocate(&conn, &row.id, None).expect("allocate");
         let fresh = get_working_copy(&conn, &row.id)
@@ -3482,7 +3506,7 @@ mod tests {
             .expect("present");
         if fresh.path_birth_ns.is_none() {
             assert!(
-                !filesystem_reports_birth_time(dir.path()),
+                !reports_birth_time,
                 "the filesystem reports birth times, but none was recorded"
             );
             println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");
@@ -3514,13 +3538,15 @@ mod tests {
     fn allocation_refuses_a_root_with_a_different_birth_time() {
         let conn = registry_conn();
         let dir = tempfile::tempdir().expect("tempdir");
+        let reports_birth_time = filesystem_reports_birth_time(dir.path())
+            .expect("the independent birth-time probe must succeed");
         let root_identity = identity_of_path(dir.path());
         let mut spec = planned_spec(dir.path(), "bar");
         spec.root_identity = Some(root_identity);
         let planned = record_planned(&conn, &spec).expect("planned row");
         let Some(recorded) = planned.root_birth_ns else {
             assert!(
-                !filesystem_reports_birth_time(dir.path()),
+                !reports_birth_time,
                 "the filesystem reports birth times, but planning recorded none"
             );
             println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");

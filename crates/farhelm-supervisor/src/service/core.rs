@@ -16732,7 +16732,10 @@ pub(crate) mod tests {
                 .iter()
                 .all(|child| !child.ends_with("ordinary-file"))
         );
-        assert_eq!(listing.parent.as_deref(), home.path().to_str());
+        // The supervisor returns canonical identities; the temp-root spelling
+        // may itself contain a symlink, notably on macOS.
+        let canonical_home = home.path().canonicalize().expect("canonical home");
+        assert_eq!(listing.parent.as_deref(), canonical_home.to_str());
     }
 
     /// Why this matters: people keep project folders behind symlinks (a
@@ -29630,26 +29633,31 @@ exit 0
     /// Root resolution must never replace invalid UTF-8 with a different path,
     /// or interpret a relative root against the supervisor process. Preview
     /// bounds and label validation must refuse before scanning or allocation.
+    /// Only the invalid-name fixture is omitted on macOS: APFS cannot create
+    /// that name, but relative-root, bounds and label refusals remain portable.
     #[farhelm_testtrace::test]
     async fn checkout_roots_and_preview_fields_fail_closed() {
-        use std::os::unix::ffi::OsStringExt;
         let state = StateDir::new();
         let root = tempfile::tempdir().unwrap();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .unwrap();
-        let invalid = root
-            .path()
-            .join(std::ffi::OsString::from_vec(vec![b'x', 0xff]));
-        std::fs::create_dir(&invalid).unwrap();
-        let alias = root.path().join("valid-alias");
-        std::os::unix::fs::symlink(&invalid, &alias).unwrap();
-        assert!(alias.canonicalize().unwrap().to_str().is_none());
-        let error = sup
-            .resolve_checkout_root(alias.to_str().unwrap())
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("not valid UTF-8"));
+        #[cfg(not(target_os = "macos"))]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let invalid = root
+                .path()
+                .join(std::ffi::OsString::from_vec(vec![b'x', 0xff]));
+            std::fs::create_dir(&invalid).unwrap();
+            let alias = root.path().join("valid-alias");
+            std::os::unix::fs::symlink(&invalid, &alias).unwrap();
+            assert!(alias.canonicalize().unwrap().to_str().is_none());
+            let error = sup
+                .resolve_checkout_root(alias.to_str().unwrap())
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("not valid UTF-8"));
+        }
         assert!(
             sup.resolve_checkout_root("relative-root")
                 .await
@@ -29687,7 +29695,10 @@ exit 0
             error.downcast_ref::<RequestError>().unwrap().kind,
             ErrorKind::InvalidRequest
         );
-        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        assert_eq!(
+            std::fs::read_dir(root.path()).unwrap().count(),
+            if cfg!(target_os = "macos") { 0 } else { 2 }
+        );
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
     }
 
