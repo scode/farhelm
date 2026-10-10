@@ -117,3 +117,58 @@ touched file. The orchestrator read the findings and checked them against source
 claims alone were not treated as test passes. Native model attribution and usage counters were not exposed, so the
 requested routes do not establish exact runtime attribution. All seven PRs are verified open drafts with the intended
 heads and linear base chain; the executor marked none ready and merged none.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1824, #1825, #1826, #1827, #1828, #1830 and #1831. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+All three are in #1828, before it merged:
+
+- A supervisor test of GitHub-checkout requests still expected the refusal to say "checkout root"; this stack renamed it
+  to say "checkout folder". The plan's own checks ran only the tests it changed, so the combined run was the first to
+  see it. The test now expects the new wording.
+- A refused folder save with no explanation in the reply showed an empty error under the field. It now falls back to the
+  request and its status, as every other refusal in the UI does.
+- The field saved the text exactly as typed, and the helm accepts a path with a trailing space. A path pasted with a
+  stray trailing space would then make the first checkout create a folder whose name ends in a space, which the preview
+  does not show. The field now trims surrounding whitespace before saving, so an all-space entry clears the folder. No
+  new test covers the trimming; the existing Settings save and clear cases pass.
+
+#### Things to know
+
+- Possible follow-up before the release notes point people to Settings: the user docs (the website's "start a session"
+  page and `docs/github-checkouts.md`) still say to create the folder by hand on each host and run
+  `farhelm helm checkout-config set-root`, and quote a "no checkout root is configured" message that no longer exists.
+  The plan left the docs page out on purpose.
+- Left as they are:
+  - some refusals the field can show still say "checkout root" while the UI says "checkout folder";
+  - Enter in the field neither launches (intended) nor saves;
+  - the Settings field's note borrows a launcher style;
+  - the settings switches' styling is scoped by the dialog's accessible name, so renaming that dialog would silently
+    drop it;
+  - a folder created at first checkout stays, empty, if a later check refuses the checkout, as the plan accepted.
+- The review checked the folder-path handling closely and found nothing: `..` after a missing directory and dangling
+  links are refused, creation uses the path the preview showed and re-checks it, and the browser never sees per-host
+  folders or post-clone commands.
+
+#### Checks
+
+These two plans were landed together, ui-correctness-fixes first with the checkout-folder stack on top, on main after
+browser-terminal-test-oracles merged.
+
+- Run now, on the two stacked, after the fixes below: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  UI, protocol and CLI unit tests with the GitHub-checkout end-to-end tests, through the recorder with pinned tmux 3.7c,
+  four slots and no retries (run `7b43b961`, 2891 of 2891); the UI JavaScript tests (230 of 230); on Chromium and WebKit
+  with one worker and no retries the approval-layout, feedback, github-checkout-composer, settings, templates,
+  listing-mutation-fence, notifications, provisioning, restart-with, terminal-font, terminal-links,
+  terminal-replay-rename and mouse-modes specs (run `bf94c1ca`, 374 passed); and the sidebar's launcher Tab-order test
+  on both engines (run `aeda93f9`, 2 passed).
+- The terminal-links, terminal-replay-rename and mouse-modes specs were run on top of browser-terminal-test-oracles,
+  which changed the link tests that ui-correctness-fixes' link-selection change has to pass.
+- An earlier run of the same Rust selection, before the test fix below, stopped at that test's failure; it is not
+  counted as a pass.
+
+Nothing in the report above was made untrue by the landing.
