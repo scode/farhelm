@@ -383,3 +383,33 @@ above, and every PR that changes code, tests or scripts passed the review gate. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan,
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
+
+## Decisions
+
+### 2026-10-10: follow-up after review
+
+The maintainer's follow-up, verbatim:
+
+> send it back to fix case (1) with complexity gate. the mere fact that we need a database change is not a complexity
+> problem (just in case that comes up in the executor), only the complexity of the resulting code in the end.
+
+and, after discussing the other case: "yeah leave case 2, still send it back to fix case 1 with the complexity gate".
+
+Agreed restatement:
+
+- Case 1, to fix: a session whose agent exited on its own (an exited row without a stop annotation) before the host
+  rebooted. Before the reboot the supervisor may have seen its pane dead and stopped re-reading its launch evidence, but
+  that mark is held only in memory. After the reboot the new supervisor finds an exited row (not Interrupted, which only
+  rows still running at the reboot get) and no pane to see, so it re-reads the launch failure file and the
+  checkout-preparation evidence on every two-second tick for as long as the row exists. The plan's own reason for
+  treating a reboot-interrupted launch as settled (the previous boot's launch cannot write any more) applies equally
+  here, so such rows should settle too. The in-memory design was a planner proposal whose stated cost, "a supervisor
+  restart re-reads once per session", does not hold for these rows.
+- A database or schema change is allowed and is not by itself a complexity problem; judge complexity by the resulting
+  code only. Possible shapes include recording per launch which boot it belongs to, persisting the settled mark, or
+  settling finished rows when the supervisor first starts after a reboot; pick what keeps the code simplest while
+  covering supervisor restarts within the same boot correctly.
+- Complexity gate: if fixing case 1 needs significant code complexity, stop and block with the options instead of
+  building it.
+- Case 2 stays as it is: within one boot, a pane that is merely missing keeps being re-read, because tmux can briefly
+  report no panes while the launch is still writing. It is rare and cheap; do not change it.
