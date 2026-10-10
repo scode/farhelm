@@ -167,6 +167,11 @@ pub(crate) struct GithubRepositories {
     pub(crate) repos: Vec<GithubRepo>,
     pub(crate) truncated: bool,
     pub(crate) scan_error: Option<String>,
+    /// Only the helm knows whether a command-line host override supplies a root.
+    /// Older or partial replies keep the existing note rather than guessing
+    /// setup eligibility from a message or the global-only configuration route.
+    #[serde(default)]
+    pub(crate) needs_checkout_root: bool,
 }
 
 /// Discovery is tied to both its query and the destination generation. A
@@ -339,6 +344,7 @@ mod tests {
             repos: vec![GithubRepo::parse("acme/bar").unwrap()],
             truncated: true,
             scan_error: Some("scan unavailable".into()),
+            needs_checkout_root: false,
         };
         assert!(authority.accepts(&authority, &reply));
         let mut live = authority.clone();

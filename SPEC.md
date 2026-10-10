@@ -683,6 +683,12 @@ never hook text or host overrides. The root must already exist on the target hos
 supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
 hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
+When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
+explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
+keeps the draft editable; success refreshes repository suggestions and the checkout preview without reopening the
+launcher. Selecting a repository before setup does not hide the field. A host with a command-line override keeps its
+folder and is never offered this setup. The template editor keeps its ordinary destination control.
+
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
 only the user can write is the user's responsibility. Farhelm does not check the root's owner or mode, and the ownership

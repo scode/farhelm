@@ -182,6 +182,9 @@ struct GithubRepositoriesBody {
     repos: Vec<farhelm_proto::GithubRepo>,
     truncated: bool,
     scan_error: Option<String>,
+    /// This is effective host configuration, not the global setting's absence.
+    /// The browser must never offer setup over a command-line host override.
+    needs_checkout_root: bool,
 }
 
 /// The status a failed repository search shows, chosen by the helm.
@@ -274,6 +277,7 @@ pub(crate) async fn github_repositories(
         Ok(config) => config,
         Err(error) => return http_error(error),
     };
+    let needs_checkout_root = config.root.is_none();
     let recent = match state
         .store
         .github_repository_history(claim.host, &installation_identity)
@@ -346,6 +350,7 @@ pub(crate) async fn github_repositories(
         repos,
         truncated,
         scan_error,
+        needs_checkout_root,
     })
     .into_response()
 }

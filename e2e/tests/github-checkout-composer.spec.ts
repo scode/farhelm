@@ -17,9 +17,9 @@ import {
   stubFeed,
 } from "./helpers/fleet";
 import { LIVE_BADGE, LIVE_STATES } from "./helpers/terminal-suite";
-import type { APIRequestContext, Page, Route } from "@playwright/test";
+import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -117,6 +117,118 @@ async function unaccepted(route: Route) {
   await fulfill(route, { status: 409, headers: { "x-farhelm-create-outcome": "definitely-unaccepted" },
     json: { error: "fixture preview conflict" } });
 }
+
+/** Inline setup must refresh the same launcher's discovery and failed preview.
+ * The real supervisor scans a local Git fixture; a greeted, unchanging feed
+ * prevents the revision watcher from supplying the refresh under test. No
+ * launch or network clone is performed. A command-line host override then
+ * proves the field follows effective host configuration, not the global GET. */
+test("inline checkout folder setup refreshes discovery and preview and respects host overrides", async ({ page, request }, testInfo) => {
+  const host = await localHost(request);
+  const stack = JSON.parse(await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8")) as {
+    farhelm: string; state: string;
+  };
+  const run = promisify(execFile);
+  const cli = (...args: string[]) => run(stack.farhelm,
+    ["helm", "checkout-config", ...args, "--state-dir", stack.state],
+    { timeout: 10_000, maxBuffer: 64 * 1024 });
+  const previousReply = await request.get("/api/checkout-root");
+  expect(previousReply.ok(), await previousReply.text()).toBe(true);
+  const previous = await previousReply.json();
+  const root = await mkdtemp(path.join(stack.state, "inline-checkouts-"));
+  let overrideSet = false;
+  let submittedSave: Request | undefined;
+  page.on("request", (outgoing) => {
+    if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") {
+      submittedSave = outgoing;
+    }
+  });
+  try {
+    const cleared = await request.put("/api/checkout-root", { data: { root: null } });
+    expect(cleared.ok(), await cleared.text()).toBe(true);
+    expect((await cli("show", "--host", String(host.id))).stdout).toMatch(/^root: unset$/m);
+    const clone = path.join(root, "local-clone");
+    await mkdir(clone);
+    await run("git", ["-C", clone, "init", "--quiet"]);
+    await run("git", ["-C", clone, "remote", "add", "origin", "https://github.com/acme/bar.git"]);
+    expect((await run("git", ["-C", clone, "config", "--get", "remote.origin.url"])).stdout.trim())
+      .toBe("https://github.com/acme/bar.git");
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    const form = await openComposer(page, host);
+    await feed.waitForConnection(1);
+    expect(feed.openSockets()).toBeGreaterThan(0);
+    await form.getByRole("group", { name: "destination type", exact: true })
+      .getByRole("button", { name: "managed checkout", exact: true }).click();
+    await expect(form.locator(".launch-composer-repository-note")).toBeVisible();
+    const field = form.locator(".checkout-root-field");
+    const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue("");
+    await expect(field).toContainText("Settings");
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await field.screenshot({ path: testInfo.outputPath(`inline-checkout-setup-${width}.png`) });
+      expect(await field.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    await folder.fill("relative-folder");
+    await field.getByRole("button", { name: "save", exact: true }).click();
+    await expect(field.getByRole("alert")).toContainText("not the relative path 'relative-folder'");
+    expect(await (await request.get("/api/checkout-root")).json()).toEqual({ root: null });
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    // A repository can be selected before setup. Keep its folder editor and
+    // refused draft through the failed preview instead of hiding the remedy.
+    await selectRepo(page);
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "failed");
+    await expect(folder).toHaveValue("relative-folder");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    const discoveryAfterSave = page.waitForResponse(async (response) =>
+      response.url().endsWith("/api/github-repositories") && response.ok()
+      && (await response.json()).needs_checkout_root === false
+    );
+    await folder.fill(root);
+    await field.getByRole("button", { name: "save", exact: true }).click();
+    const discovered = await (await discoveryAfterSave).json();
+    expect(discovered.repos).toContainEqual({ owner: "acme", name: "bar" });
+    await expect(field).toHaveCount(0);
+    const preview = form.locator(".launch-composer-checkout-preview");
+    await expect(preview).toHaveAttribute("data-preview-state", "ready");
+    await expect(preview).toContainText(await realpath(root));
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await form.screenshot({ path: testInfo.outputPath(`inline-checkout-ready-${width}.png`) });
+    }
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+
+    overrideSet = true;
+    await cli("set-root", root, "--host", String(host.id));
+    const unset = await request.put("/api/checkout-root", { data: { root: null } });
+    expect(unset.ok(), await unset.text()).toBe(true);
+    expect(await (await request.get("/api/checkout-root")).json()).toEqual({ root: null });
+    const discovery = await request.post("/api/github-repositories", {
+      data: { host: host.id, expected_incarnation: host.incarnation, query: "" },
+    });
+    expect(discovery.ok(), await discovery.text()).toBe(true);
+    expect((await discovery.json()).needs_checkout_root).toBe(false);
+    const overriddenForm = await openComposer(page, host);
+    await overriddenForm.getByRole("group", { name: "destination type", exact: true })
+      .getByRole("button", { name: "managed checkout", exact: true }).click();
+    await overriddenForm.getByRole("combobox", { name: "repository", exact: true }).focus();
+    await expect(overriddenForm.getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
+    await expect(overriddenForm.locator(".checkout-root-field")).toHaveCount(0);
+    expect((await cli("show", "--host", String(host.id))).stdout).toContain(`${root} (host override)`);
+  } finally {
+    // A failed assertion must not race the app-owned save with restoration.
+    const settled = await submittedSave?.response();
+    if (settled) await settled.finished();
+    if (overrideSet) await cli("clear-root", "--host", String(host.id));
+    const restored = await request.put("/api/checkout-root", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 /** A fresh helm must explain managed-checkout setup without letting the note
  * dominate the launcher. This uses the real missing-root reply and proves the
@@ -700,8 +812,10 @@ test("Escape dismisses repository suggestions before closing the composer", asyn
 
 /** A preview for host A has no authority on host B, even while B's own
  * response is still pending. Both requests are latched so a stale success
- * cannot hide behind an already-ready replacement response. */
-test("switching hosts rejects the old checkout preview while the new host is pending", async ({ page, request }) => {
+ * cannot hide behind an already-ready replacement response. Retaining the
+ * selected repository on B must still discover its missing-root flag and
+ * offer setup independently of that held preview. */
+test("switching hosts rejects the old checkout preview and checks setup for the selected repository", async ({ page, request }) => {
   const local = await localHost(request);
   let remote: LocalHost | undefined;
   await expect.poll(async () => {
@@ -720,7 +834,7 @@ test("switching hosts rejects the old checkout preview while the new host is pen
     const host = input.host === local.id ? local : remote!;
     await fulfill(route, { json: {
       host: String(host.id), incarnation: input.expected_incarnation, installation_identity: host.identity,
-      repos: [], truncated: false, scan_error: null,
+      repos: [], truncated: false, scan_error: null, needs_checkout_root: host.id === remote!.id,
     } });
   });
   let releaseLocal!: () => void;
@@ -752,10 +866,16 @@ test("switching hosts rejects the old checkout preview while the new host is pen
     await selectRepo(page);
     await expect.poll(() => localStarted).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await expect(form.locator(".checkout-root-field")).toHaveCount(0);
     const hostPicker = form.getByRole("combobox", { name: "host", exact: true });
     await chooseLauncherHost(hostPicker, String(remote!.id));
     await expect(hostPicker).toHaveAttribute("data-host-id", String(remote!.id));
     await expect.poll(() => remoteStarted).toBe(true);
+    // Keeping the repository selected must not suppress the new host's first
+    // setup check. Its pending preview supplies no setup signal; discovery's
+    // host-bound flag is the only authority for this field.
+    await expect(form.locator(".checkout-root-field")
+      .getByRole("textbox", { name: "checkout folder", exact: true })).toBeEditable();
     releaseLocal();
     await expect.poll(() => localFinished).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
