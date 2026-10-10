@@ -183,6 +183,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the
   Claude screen fixtures so it stays covered.
 
+- **Pin the Rust toolchain.** Nothing pins Rust today: there is no `rust-toolchain.toml`, CI's toolchain action installs
+  whatever stable is current when the job runs, and a developer machine keeps whatever stable it last updated to. So
+  local checks and CI can lint with different clippies without anyone choosing that. On 2026-10-09 CI was on 1.99 and
+  the local machine on 1.98.1, and CI's clippy failed on lints the local one did not have yet (fixed in #1742). Pin an
+  exact version so local, CI and the release builds agree, and make toolchain bumps deliberate PRs. First check that the
+  cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
+  own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
