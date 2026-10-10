@@ -35,11 +35,6 @@ triage.
   could show model text as misleading permission wording.
 - `replace-omits-conversation-loss-warning-failed-resume.md` — Replace omits a conversation-loss warning after a failed
   resume launch.
-- `ssh-stanza-removal-destroy-existing-configuration.md` — Removing a temporary SSH stanza can destroy unrelated
-  configuration.
-- `legacy-ssh-stanza-cleanup-has-own-destructive.md` — Legacy SSH cleanup has a separate configuration-loss window.
-- `installing-temporary-ssh-stanza-destroy-original-configuration.md` — Installing a test SSH stanza can leave the
-  user's configuration incomplete.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
 - `arrow-navigation-retains-obsolete-position-item-disappears.md` — An outdated menu position could move keyboard focus
   onto Delete.
