@@ -381,7 +381,6 @@ impl ProvisioningBackend for E2eProvisioningBackend {
                 .collect(),
             default_state_dir: present(PathBuf::from(behavior.home).join(".local/state/farhelm")),
             unit_active_state: "active".to_string(),
-            unit_kill_mode: "process".to_string(),
             // The unit loaded from the planned path, which is the first one
             // asked about.
             unit_fragment: paths.first().map(|path| present(path.to_path_buf())),
@@ -408,6 +407,8 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         &self,
         target: &ProvisioningTarget,
         _unit: &str,
+        _tmux_program: &Path,
+        _tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
         self.action(target, "stop-supervisor").await
     }

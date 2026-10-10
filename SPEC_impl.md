@@ -3355,23 +3355,24 @@ never installs a unit on the helm's own machine.
 
 UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
 consumes the plan's id from a body, like update's route, but the user sees and confirms the rendered plan, like setup's.
-Its actions disable the supervisor unit, remove the unit file, stop the unit, reload the user manager, remove the lib
+Its actions disable the supervisor unit, remove the unit file, reload the user manager, stop the unit, remove the lib
 directory, and finally forget the host. Removing the file before stopping keeps the supervisor answering until nothing
 can start it again: up to the unit file's removal the host stays connected and the ordinary checks apply, and after it a
-retry may proceed without a connection. Stopping before reloading keeps the stop from killing anything but the
-supervisor. The unit's `KillMode=process` leaves the private tmux server, which holds any ended sessions' panes, out of
-the stop, but systemd forgets a removed unit's settings when the user manager reloads: a reload after the file is gone
-turns `KillMode` into the default `control-group`, and a stop then ends the whole group (verified on a real user manager
-when this was built). The disable step passes `--no-reload`, because `systemctl disable` otherwise reloads the manager
-itself, and the stop step refuses a running unit whose loaded `KillMode` is not `process` (after something else reloaded
-the manager between a failed run's unit removal and its retry, say, or for a hand-written unit without it) rather than
-kill its tmux server; the refusal names an Update from the hosts panel, which rewrites the unit, as the way out. The
-tmux server is not stopped by uninstall at all: one holding ended sessions keeps running, from the removed binary if it
-was the private one, until it exits or the host restarts. Only the removals still outstanding are planned (the unit
-file's two steps when it exists, the lib directory's when it exists), and each host command treats work already done as
-a skip, so a failed run continues from wherever it stopped with no process-local memory of how far it got, which would
-not survive a helm restart. Every path comes from the plan, frozen from the same layout and overrides an install uses,
-never re-derived at run time.
+retry may proceed without a connection. Reloading after the file is gone makes systemd forget the unit's
+`KillMode=process` and use its default `control-group`: the stop ends the supervisor and the private tmux server,
+including any ended sessions' retained panes (this default behavior was verified on a real user manager when uninstall
+was built). The same stop action then ends any server still reachable at this host's private state-directory socket.
+That covers an inactive supervisor whose process-only policy left tmux alive before systemd forgot its removed unit. The
+tmux client is the accepted host executable when available, otherwise the private lib-directory executable; both it and
+the socket are frozen in the plan before confirmation. An absent server skips this cleanup, including a retry after the
+lib directory was removed; any other tmux failure leaves the host listed so uninstall can be retried. The socket cleanup
+reaches the named server even outside the unit's control group; it does not scan for other processes or servers. The
+disable command may reload implicitly; the explicit reload after file removal ensures the same stop behavior on every
+retry, including one whose preceding stop failed. Only the removals still outstanding are planned (the unit file's two
+steps when it exists, the lib directory's when it exists), and each host command treats work already done as a skip, so
+a failed run continues from wherever it stopped with no process-local memory of how far it got, which would not survive
+a helm restart. Every path comes from the plan, frozen from the same layout and overrides an install uses, never
+re-derived at run time.
 
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live
@@ -3394,8 +3395,9 @@ resolution check included, so that a dangling link gets the refusal that points 
 it leads". The removal command repeats the `-L` test in the same shell as the `rm`, as the unit removal does for setup's
 marker, and refuses a lib directory that became a link after confirmation as a failed step. A row with no recorded state
 directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
-started between the confirmation check and the stop is not locked out: it survives, unmanaged, which matches
-`farhelm uninstall`'s stance of neither forcibly terminating nor proving that everything stopped.
+started between the confirmation check and the stop is not locked out and may be ended with the unit. The
+confirmation-time check is sufficient; nothing requires another check during the removal. Local `farhelm uninstall`
+keeps its separate scope and behavior.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share
@@ -3457,7 +3459,8 @@ The supervisor unit uses `KillMode=process`. Sessions started through Farhelm be
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
 explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model
 as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while tmux continues to own
-the session processes and terminals until the user deletes them or the host reboots.
+the session processes and terminals until the user deletes them, the host reboots, or Farhelm is uninstalled from the
+host, which ends the private tmux server on purpose.
 
 The supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill sweep
 claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux server. A

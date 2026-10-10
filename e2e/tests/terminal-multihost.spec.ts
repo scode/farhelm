@@ -3686,13 +3686,14 @@ test.describe("multi-host", () => {
       await expect.poll(() => heldReply, { timeout: 60_000 }).toBe(true);
       expect(noticeWhileHeld, "the notice showed before the reply was released").toBe(true);
       // The confirmed run's host actions, in the order the plan froze them:
-      // the stop comes before the reload, which is what keeps it from
-      // ending the sessions' tmux server on a real host.
+      // the reload comes before the stop, so systemd has already forgotten
+      // the unit's process-only stop policy and the stop ends the
+      // installation's private tmux server with the supervisor.
       expect(injectedHostActions(info.remote_ssh).slice(actionsBefore.length)).toEqual([
         "disable-supervisor",
         "remove-unit",
-        "stop-supervisor",
         "daemon-reload",
+        "stop-supervisor",
         "remove-directory",
       ]);
       await page.locator(".uninstall-notice-dismiss").click();

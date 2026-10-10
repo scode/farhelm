@@ -7032,7 +7032,8 @@
   SPEC.md's uninstall paragraph says the private tmux server is ended too, and that a session started on the host while
   the removal runs may be ended with it (the confirmation-time check being sufficient, stricter checks allowed). Focused
   tests cover the plan and the step. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/uninstall-ends-tmux.md`.
+- Execution: complete; jj change `vszrrtmmnypm`, bookmark `plan/uninstall-ends-tmux/01-uninstall-ends-tmux`;
+  [PR #1781](https://github.com/scode/farhelm/pull/1781/changes).
 
 ## shutdown-expiry.md
 

@@ -1098,7 +1098,9 @@ impl Supervisor {
     /// can crash the private tmux server"). SIGKILL cannot be helped; a
     /// planned stop can, and the generated units' `KillMode=process` makes
     /// every planned stop and upgrade exactly that: a SIGTERM to the
-    /// supervisor alone, while tmux and every session keep running.
+    /// supervisor alone, while tmux and every session keep running. Remote
+    /// uninstall is the exception: it ends the private tmux server on
+    /// purpose, after systemd has forgotten that policy.
     ///
     /// First a stop boundary is established while holding `attachments`:
     /// from then on no new session sink is handed out and no attachment
