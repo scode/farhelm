@@ -70,6 +70,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   surface what is going on, such as that a session lives in a checkout and of which repository, and what a `gh:` launch
   or an action on such a session is about to do. Related to the checkout archiving entry above.
 
+- **Redesign the launcher's folder shortcuts.** Under the folder field, the launcher shows a grid of dotted-underline
+  links: recently used folders, cut off so that several look identical, then "home" and "local home" on a row of their
+  own. Nothing labels them, so the grid reads like a rendering bug until you stare at it long enough to guess that it
+  might be history. Redesign it so it is obvious at a glance what the links are and that clicking one fills the folder.
+  Details to be worked out.
+
 - **Deep end-to-end upgrade tests before a release ships.** Catch a release that bricks an existing installation before
   it goes out: upgrade from real released artifacts (the previous release, and older ones users may still run) to the
   candidate build, on every path a user upgrades through (the Mac app through the installer, the helm, and remote hosts
