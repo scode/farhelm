@@ -58,3 +58,36 @@ finding was two orphaned description tails in the feedback index; those were rem
 and formatting were checked locally. No source or test defects remained. A fresh native `gpt-6.1-sol` medium reader
 found that the commit/PR wording conveys the destructive trigger and why cleanup is confined to Git children, with no
 contradiction or convention violation. Actual native model identity and usage counters were not exposed.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1798. This round landed five triage plans together, in order: untrusted-text-escaping,
+git-env-isolation, os-readback-fixes, harness-tooling-fixes and ssh-config-atomic. Each rebased onto main with only
+conflicts in the review queue's index, where each plan removes only its own entries. Since their stacks were based, main
+gained this day's earlier landings (sounds, file downloads, the reboot follow-up of the supervisor's timer sweep) and
+the 2026-10-10 spec triage; of the files these plans touch, only the helm's supervisor client changed upstream (download
+routing), away from the log line one of them changes. A separate reviewer read all five against each other and main by
+reading the code only, and checked each against its triage decisions and completion criteria.
+
+#### Review before merging
+
+No findings. The scrub removes exactly git's own list of repository-locating variables apart from the three
+configuration ones, which the decision keeps so configuration and credentials still work; it covers every git command
+checkout preparation runs, and leaves the hook and the agent their environment. The regression test sets the variable
+only in the child it starts, never in the test process.
+
+#### Checks
+
+- Run now, on the first four stacked in landing order: `dist generate --check` (the release workflow matches its
+  sources), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the
+  supervisor, helm, UI and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no
+  retries (run `1b086587`, 2699 of 2699), and on Chromium and WebKit with one worker and no retries the spawn, header,
+  readers and change-feed specs (run `50ffb9fe`, 44 passed; the two skipped are the real-Claude spawn cases).
+- Run now, after the landing's fixes, with ssh-config-atomic stacked on top:
+  `cargo clippy -p farhelm-helm --all-targets`, `shellcheck` on the provisioning script, and the helm's client tests
+  including the new log-escaping test (run `0067a921`, 68 of 68). The new test was also seen to fail with the escaping
+  removed, then restored.
+- Reused from the executors: their focused runs for each fix, the hosted macOS compile of the argument-reading change,
+  and the deflake end-to-end evaluation.
+
+Nothing in the report above was made untrue by the landing.
