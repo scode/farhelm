@@ -57,7 +57,7 @@ test("destination", async ({ page, request }) => {
   const form = await openLauncher(page);
   const destination = form.locator(".launch-composer-destination");
   await director.callout(
-    destination.locator("select.create-session-host"),
+    destination.locator(".create-session-host"),
     "The host the session runs on. Starts on the host of the session you have open.",
     { side: "left", dy: -30 },
   );

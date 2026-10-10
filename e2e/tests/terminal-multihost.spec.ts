@@ -1,3 +1,4 @@
+import { chooseLauncherHost } from "./helpers/host-picker";
 // =====================================================================
 // Multi-host: the hosts panel, the stale list, and host management
 // (PLAN_M6.md item 6).
@@ -2362,9 +2363,8 @@ test.describe("multi-host", () => {
       // By LABEL, which is the helm's own display name for the host — the
       // same string the session row will carry, so selecting and asserting
       // key off one vocabulary rather than two.
-      await form
-        .locator(".create-session-host")
-        .selectOption({ label: info.remote_ssh });
+      await chooseLauncherHost(form
+        .locator(".create-session-host"), { label: info.remote_ssh });
       await form.locator(".create-session-submit").click();
 
       // A successful create navigates into the new session, exactly as a
@@ -2457,7 +2457,7 @@ test.describe("multi-host", () => {
       // The selector follows the CLONED row's host across the handoff
       // (`pending_choice`), not the anchor session's host the dialog
       // would otherwise have opened onto.
-      await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(remote.id), {
         timeout: 20_000,
       });
       await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT_INVOCATION, {
@@ -2549,7 +2549,7 @@ test.describe("multi-host", () => {
 
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
-      await expect(form.locator(".create-session-host")).toHaveValue("");
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", "");
       const command = form.getByLabel("agent command");
       await expect(command).toHaveValue(FAKE_AGENT_INVOCATION, { timeout: 20_000 });
       await command.fill(explicitCommand);
@@ -2558,7 +2558,7 @@ test.describe("multi-host", () => {
 
       // The host still followed the clone across the handoff — only the
       // command was overridden.
-      await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(remote.id), {
         timeout: 20_000,
       });
       await expect(command).toHaveValue(explicitCommand);
@@ -3794,8 +3794,8 @@ test.describe("multi-host", () => {
     feed.notify(1);
     await page.locator(".new-session-button").click();
     const selector = page.locator(".create-session-host");
-    await selector.selectOption({ label: "user@ephemeral" });
-    await expect(selector).toHaveValue("8100");
+    await chooseLauncherHost(selector, { label: "user@ephemeral" });
+    await expect(selector).toHaveAttribute("data-host-id", "8100");
     await expect(page.locator(".create-session-host-note")).toHaveCount(0);
 
     // The host is removed from under the open dialog, and the page finds out
@@ -3812,7 +3812,7 @@ test.describe("multi-host", () => {
     await expect(
       selector,
       "the selector must SHOW the target that would actually be used",
-    ).not.toHaveValue("8100");
+    ).not.toHaveAttribute("data-host-id", "8100");
   });
 
   // The host selector is inert for the whole round trip, exactly like the
@@ -3888,7 +3888,7 @@ test.describe("multi-host", () => {
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
       await form.getByRole("tab", { name: "command", exact: true }).click();
-      await form.locator(".create-session-host").selectOption(String(down));
+      await chooseLauncherHost(form.locator(".create-session-host"), String(down));
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);
       await answerYolo(form);
@@ -3998,9 +3998,8 @@ test.describe("multi-host", () => {
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
-      await form
-        .locator(".create-session-host")
-        .selectOption({ label: info.remote_ssh });
+      await chooseLauncherHost(form
+        .locator(".create-session-host"), { label: info.remote_ssh });
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 

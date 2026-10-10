@@ -1752,3 +1752,29 @@ fixture premise: the agent is alive
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-10 — `remembered destination is rechecked after key minting` (e2e/tests/destination-authority.spec.ts)
+
+WebKit failed this existing destination-authority case in retained run `219019be-3701-4a7f-a6e6-23e9bed45091`; the other
+65 selected cases passed. The selection covered launcher host-picker, keyboard, destination-authority, sidebar,
+switcher, checkout-preview and multi-host transitions on both engines, one worker and zero retries. The tested Git head
+was `6c395a7326bf90a979da20f8917c69228ae65987`, with the uncommitted launcher host-picker change above it. The bounded
+timeline records the stub feed closing 9.995 seconds after arrival, matching the client's ten-second silent-feed
+deadline: the fixture never greeted its connection, although the real helm always does. Notification then had no live
+peer. The failed case took 23.656 seconds; three unchanged exact WebKit repetitions in generic recorded run
+`78f7a8c1-1d1d-47ae-bce7-b32191c18043` passed in 18.8, 22.4 and 13.7 seconds. Those passes do not invalidate the
+recorded lifetime failure. This was Linux x86_64, Node 26.11.1 and Playwright 1.62.0, pinned tmux 3.7c with recorded
+executable SHA256 `c84c73fdedbcf3fbcca8cc261e208c5795f7493609b027b39fe11e4af3a2fb04`, locale `C.UTF-8`. The recorder
+removed ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`; its child carried recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Other
+process load and load averages were not captured. Full evidence remains in private local recorder storage. PR #1775
+fixes both destination fixtures with the existing greeting facility and checks for a live feed before notifying, while
+retaining the deliberately held key-creation boundary.
+
+```text
+Error: no feed socket is open to notify on
+```
+
+Class: peer-lifecycle
+
+Cause: established

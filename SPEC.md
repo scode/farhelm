@@ -454,6 +454,12 @@ shipping uninstall support.
 Session creation is one action, not a wizard. Choose an existing directory or explicitly request a fresh GitHub
 checkout; the agent choice is independent of that destination:
 
+- Host: The session launcher's host picker shows each host's mark and name in the list's existing order, including
+  unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End browse; Enter
+  or Space chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the closed field
+  launches with the shown target. The picker is disabled for the whole launch round trip, and its value is empty before
+  hosts arrive. The template editor keeps its native host field.
+
 - Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
   against the supervisor process rather than the client, and would shift meaning across supervisor restarts). `~` and
   `~/path` are also accepted and resolve against the home of the user running the supervisor on the target host —
@@ -509,10 +515,10 @@ checkout; the agent choice is independent of that destination:
   appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never launches, and
   Escape closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
   Enter on a choice button (launch-kind tab, harness, effort, permissions, or workspace trust) applies that choice and
-  then launches through the ordinary Launch path, or shows its refusal beside Launch. Enter on the host or agent-type
-  dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; Space and arrows
-  still set values. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
-  save-as-template panel keep their own Enter rules. A held Enter never launches.
+  then launches through the ordinary Launch path, or shows its refusal beside Launch. Enter on the closed host picker or
+  the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those
+  native controls retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model
+  field, YOLO confirmation, and save-as-template panel keep their own Enter rules. A held Enter never launches.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
   and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
@@ -1343,10 +1349,11 @@ case-insensitive subsequence to find sessions across all hosts, independent of t
 matches come before matches only in host name or directory, with most recent activity first within each group. With
 nothing typed, sessions appear in most recent activity order. Every match is reachable by scrolling; if the helm's
 listing cap cut the snapshot, the switcher says only the most recently active sessions were searched. Rows show status,
-agent, host and directory, with matching characters marked. Arrow keys choose and Enter opens the selected session,
-using the same busy refusals as a sidebar row; the first match is initially selected. Opening a session hidden by the
-host selector resets that selector to ALL. Escape or a click outside closes and restores the previous focus. A loading
-list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
+agent, host (with its chosen mark) and directory, with matching characters marked. Arrow keys choose and Enter opens the
+selected session, using the same busy refusals as a sidebar row; the first match is initially selected. Opening a
+session hidden by the host selector resets that selector to ALL. Escape or a click outside closes and restores the
+previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a
+failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "new session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,

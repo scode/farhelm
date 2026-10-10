@@ -52,11 +52,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   started from the user's own ssh config puts that config's port forwards on Farhelm's connection, where no client can
   cancel them. Say so when a host has no socket at all because the state directory's path is too long.
 
-- **Pick an icon and color per host.** Every remote host shows the same cloud in the session list, so sessions on
-  different hosts look alike. Let the user pick a host's icon from a set of about ten Farhelm draws, with the cloud kept
-  as one choice, and ideally a color as well, so a session's host can be told apart at a glance. Plan:
-  `plans/queue/host-icons.md`.
-
 - **Make checkout archiving understandable, or drop it.** Deleting the last session using a fresh GitHub checkout moves
   the checkout into `farhelm-archived-working-copies` under the working-copy root. The only explanation is one line in
   Delete's confirmation ("moves it into the working-copy archive"), which does not say where that is or what it is for,

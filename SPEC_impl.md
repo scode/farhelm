@@ -4119,3 +4119,13 @@ behind the existing read-generation barrier before releasing the write token; an
 preceding pair, and the next explicit choice cannot undo it while the refresh is pending. The ordinary refresh still
 supplies connection facts and subsequent changes from other clients. A sidebar-surface preview shows the icon without
 changing a session.
+
+The quick switcher reuses ListView's existing hosts signal for marks, while retaining its independent fleet session
+listing. The launcher reduces the same host snapshot to `HostOption` display facts, including identity words. Its host
+field is a launcher-only button combobox with one listbox, active-descendant navigation and non-tabbable options,
+following the model picker's focus ownership. Arrow keys, Home and End browse without committing; Enter or Space commits
+an open option, Escape or blur discards browsing, and closed Enter retains `enter_choice` launch behavior. Typeahead
+uses a case-insensitive prefix, restarting after a one-second pause and cycling repeated letters. The menu closes during
+busy work and unmounts with its launcher; the committed id stays empty until hosts arrive. The parent retains the old
+native select's synchronous destination/history fence, browse invalidation, clone takeover and intent reset. Picking the
+already committed host does not reset the draft. Template editing retains its native host select.

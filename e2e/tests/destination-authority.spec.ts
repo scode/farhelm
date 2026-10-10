@@ -1,3 +1,4 @@
+import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 // Destination snapshots must survive sidebar projection changes without
 // letting a remembered path follow a registry row onto another installation.
 import { expect, test } from "./helpers/evidence";
@@ -42,6 +43,9 @@ for (const replace of [false, true]) {
     });
     let replacement = false;
     const feed = await stubFeed(page);
+    // These cases require a healthy feed, not an ungreeted outage. Match the
+    // helm's greeting so its silence deadline cannot remove our notification peer.
+    feed.notifyOnConnect(0);
     await page.route("**/api/hosts", async (route) => {
       const listing = structuredClone(fixture.listing);
       if (replacement) {
@@ -69,12 +73,13 @@ for (const replace of [false, true]) {
       expect(await terminal!.evaluate((node) => node === document.querySelector("#terminal")), "filtering must preserve the same terminal element").toBe(true);
       if (replace) {
         replacement = true;
+        expect(feed.openSockets(), "replacement notification requires a live feed peer").toBe(1);
         feed.notify(1);
         await expect(page.locator(`.filter-host option[value="${fixture.remote.id}"]`), "the replacement registry must be rendered before opening New").toContainText("replacement destination");
       }
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
-      await expect(form.locator(".create-session-host")).toHaveValue(String(replace ? fixture.local : fixture.remote.id));
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(replace ? fixture.local : fixture.remote.id));
       await expect(form.getByLabel("folder", { exact: true })).toHaveValue(replace ? "~" : active.cwd);
       await expect(form.locator(".launch-composer-harness-choice button[aria-pressed=true]")).toHaveCount(0);
       await expect(form.locator(".create-session-submit")).toBeDisabled();
@@ -94,6 +99,9 @@ async function historyFixture(page: Page, request: APIRequestContext) {
   const state = { reconnects: 0, replaced: false };
   const posts: Array<{ host: number; cwd: string; expected_incarnation: number }> = [];
   const feed = await stubFeed(page);
+  // Holding key creation must not also stage a silent-feed outage. The real
+  // helm greets every subscription; preserve that independent fixture premise.
+  feed.notifyOnConnect(0);
   const headers = { "content-type": "application/json", "x-farhelm-build": fixture.build };
   await page.route("**/api/hosts", async (route) => {
     const listing = structuredClone(fixture.listing);
@@ -120,7 +128,7 @@ async function historyFixture(page: Page, request: APIRequestContext) {
   await feed.waitForConnection(1);
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  await form.locator(".create-session-host").selectOption(String(fixture.remote.id));
+  await chooseLauncherHost(form.locator(".create-session-host"), String(fixture.remote.id));
   await expect(form, "the actual remote connection must reach the mounted composer").toHaveAttribute("data-browse-live-connection", String(fixture.remote.incarnation));
   await form.getByLabel("folder", { exact: true }).fill("/tmp");
   return { ...fixture, state, posts, feed, form };
@@ -149,12 +157,14 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
     await expect(folder).toHaveValue("/tmp");
     await expect(launch).toBeEnabled();
     state.reconnects = 1;
+    expect(feed.openSockets(), "reconnect notification requires a live feed peer").toBe(1);
     feed.notify(1);
     await expect(form, "same-install reconnect must be consumed before testing continuity").toHaveAttribute("data-browse-live-connection", String(remote.incarnation + 1));
     await expect(form).toHaveAttribute("data-remembered-destination-valid", "true");
     await expect(launch).toBeEnabled();
     state.replaced = true;
     state.reconnects = 2;
+    expect(feed.openSockets(), "replacement notification requires a live feed peer").toBe(1);
     feed.notify(2);
     await expect(form, "connected replacement must be consumed before checking refusal").toHaveAttribute("data-browse-live-connection", String(remote.incarnation + 2));
     await expect(form).toHaveAttribute("data-remembered-destination-valid", "false");
@@ -166,11 +176,11 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
     await form.evaluate((node) => (node as HTMLFormElement).requestSubmit());
     await expect(form.locator(".create-session-error")).toContainText("remembered folder belongs to a different installation");
     expect(posts).toHaveLength(0);
-    // Native selects need a changed value to emit change. Choose away and
-    // back, as a person can, instead of synthesizing change on the same value.
-    await form.locator(".create-session-host").selectOption(String(local));
-    await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await form.locator(".create-session-host").selectOption(String(remote.id));
+    // Choosing the committed host is a no-op. Choose away and back to make
+    // an explicit correction, rather than manufacturing a same-value change.
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
+    await chooseLauncherHost(form.locator(".create-session-host"), String(remote.id));
     await expect(form).toHaveAttribute("data-remembered-destination-valid", "true");
     await expect(launch).toBeEnabled();
     await launch.click();
@@ -188,15 +198,16 @@ test("queued saved-folder activation cannot follow an explicit host change", asy
   const saved = form.locator(".launch-composer-folder-links").getByRole("button", { name: "/var/tmp", exact: true });
   await expect(saved).toBeVisible();
   const attempts = Number(await form.getAttribute("data-history-activation-attempts"));
+  await launcherHostOptions(form.locator(".create-session-host"));
+  await expect(form.locator(`.launcher-host-option[data-host-id="${local}"]`)).toBeVisible();
   await form.evaluate((node, local) => {
-    const host = node.querySelector<HTMLSelectElement>(".create-session-host")!;
+    const host = node.querySelector<HTMLButtonElement>(`.launcher-host-option[data-host-id="${local}"]`)!;
     const saved = [...node.querySelectorAll<HTMLButtonElement>(".launch-composer-folder-links button")].find((button) => button.textContent?.includes("/var/tmp"))!;
-    host.value = String(local);
-    host.dispatchEvent(new Event("change", { bubbles: true }));
+    host.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     saved.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, local);
   await expect(form).toHaveAttribute("data-history-activation-attempts", String(attempts + 1));
-  await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+  await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
 });
 
@@ -237,6 +248,7 @@ test("remembered destination is rechecked after key minting", async ({ page, req
     expect(posts).toHaveLength(0);
     state.replaced = true;
     state.reconnects = 1;
+    expect(feed.openSockets(), "post-mint replacement requires a live feed peer").toBe(1);
     feed.notify(1);
     await expect(form).toHaveAttribute("data-browse-live-connection", String(remote.incarnation + 1));
     await expect(form).toHaveAttribute("data-remembered-destination-valid", "false");
@@ -245,9 +257,9 @@ test("remembered destination is rechecked after key minting", async ({ page, req
     expect(posts).toHaveLength(0);
     // A fresh explicit choice also proves the refusal released the shared
     // operation guard; a leaked guard would leave this selector disabled.
-    await form.locator(".create-session-host").selectOption(String(local));
-    await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await form.locator(".create-session-host").selectOption(String(remote.id));
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
+    await chooseLauncherHost(form.locator(".create-session-host"), String(remote.id));
     await expect(launch).toBeEnabled();
   } finally {
     await page.evaluate(() => (window as any).__destinationMint.release());

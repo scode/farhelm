@@ -125,7 +125,7 @@ async function openComposer(page: Page, host: number): Promise<Locator> {
   await page.locator(".new-session-button").click();
   const form = page.locator('.create-session-form[role="dialog"]');
   await expect(form).toBeVisible();
-  await expect(form.locator(".create-session-host")).toHaveValue(String(host));
+  await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(host));
   return form;
 }
 
