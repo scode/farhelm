@@ -8582,3 +8582,1582 @@
 - Completion criteria: Remove this feedback file and its index entry.
 - Execution: `complete`; covered by SPEC.md "Local authority and trust between hosts"; feedback file and index entry
   removed during triage.
+
+## feedback-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Feedback
+  sent from the app is lost when the page is closed or reloaded before the send finishes: the helm forwards it from the
+  request handler itself (`crates/farhelm-helm/src/feedback.rs`), so a client disconnect cancels the forward partway,
+  contrary to SPEC_impl.md "Who owns an accepted action".
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Run the forward on a helm-owned task through the helm's existing `run_owned` helper, so a
+  disconnect loses only the reply. If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## grok-trust.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Switching
+  a launch from Codex, Muse or Pi to Grok (for example a CLI template stacked on a trusted Codex template) keeps the
+  earlier workspace-trust choice, so the helm rejects the launch. The harness-switch normalization in
+  `crates/farhelm-proto/src/launcher.rs` returns early for Grok before the code that clears trust.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Clear the workspace-trust choice in the Grok early-return branch as well. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## font-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. At the
+  largest or smallest terminal text size, clicking A+ or A- again leaves keyboard focus on the button, so typing stops
+  reaching the terminal and Enter presses the button. The handler in `crates/farhelm-ui/assets/terminal.js` returns
+  early before handing focus back.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Hand focus back to the terminal even when the size does not change; keep the font update and
+  refit only for a real change. If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## selecting-osc-hyperlink-open-it-unintentionally.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Dragging
+  to select text inside a link a program printed (an OSC 8 hyperlink) can open the link, and since file links landed
+  also start a download, when the user only meant to copy. The plain-link handler in
+  `crates/farhelm-ui/assets/terminal.js` already ignores activation while a selection exists; the OSC 8 `activate`
+  handler has no such guard.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Add the same non-empty-selection guard to the OSC 8 handler's `activate`. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## older-listing-replace-newly-opened-session-another.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. After
+  creating or replacing a session, a sidebar listing request that started before the create can arrive late without the
+  new session, and the app then closes the session it just opened. Only the delete path fences earlier listing reads
+  (`crates/farhelm-ui/src/list/view.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Fence earlier listing reads on the create and replace success paths, as delete already does. If
+  that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## codex-draft-mistaken-for-question.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. An idle
+  Codex session whose unsent draft contains text shaped like Codex's queued-question footer is shown in the sidebar as
+  waiting for an answer: the queued-question check in `crates/farhelm-supervisor/src/agent_kind/screen_reader.rs` scans
+  the last lines of the screen without excluding the draft below the input prompt.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Run the queued-question check only on lines above the last input prompt line, with test cases for
+  a draft and a real question. If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## uninstall-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Closing
+  or reloading the hosts panel while an Update or Uninstall confirmation is being prepared kills only the ssh process,
+  so a user-configured ssh helper such as a ProxyCommand can be left running on the helm's machine. Discovery already
+  runs on a helm-owned task for exactly this reason; the update and uninstall planners run on the request task
+  (`crates/farhelm-helm/src/provisioning/service.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Run the update and uninstall planners through `run_owned`, as discovery does. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## cancellation-protection-starts-too-late.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If the
+  helm stops a host's connection manager (Stop or shutdown) before its supervising task first runs, the connection actor
+  is orphaned and keeps connecting to or refreshing that host with nothing able to stop it: the abort guard is created
+  inside the spawned future (`crates/farhelm-helm/src/manager.rs`), and dropping a join handle does not abort.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Create the abort guard before spawning the supervising task and move it into the future. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## token-recovery-path.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. After a
+  `token rotate` whose outcome is unknown, with a non-UTF-8 `--state-dir`, the printed recovery command names a
+  different directory (lossy conversion in `crates/farhelm-helm/src/token_control.rs`), and running it can mint a token
+  for the wrong helm. SPEC.md says such paths are refused.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Refuse a non-UTF-8 state directory at the start of `rotate`, before anything changes. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-dot-name.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. A
+  template named `.` or `..` passes validation, but saving or deleting it always fails, because the name is the last
+  segment of the request URL and the URL parser treats a dot segment as path navigation
+  (`crates/farhelm-proto/src/launcher.rs` has no dot-only check).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Refuse dot-only names in the template shape check with a clear message. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## literal-helm-state-path-breaks-ssh-connections.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. A helm
+  state directory whose path literally contains `${` is expanded by OpenSSH's ControlPath, so ssh connections to
+  supervisors and provisioning fail every time or use a different socket. The escaping in
+  `crates/farhelm-helm/src/ssh.rs` handles only `\`, `"` and `%`.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: When the path contains `${`, fall back to the existing arguments that turn off connection
+  sharing. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
+  for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## setups-sign-in-command-ignores-selected-state-directory.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. After
+  `farhelm helm setup --state-dir X`, the printed sign-in advice is a bare `farhelm helm token show`, which reads the
+  default helm, so it can show another helm's token or create a new database there (`crates/farhelm/src/setup.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Append the shell-quoted `--state-dir` when one was chosen, as the rotate recovery command already
+  does. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
+  triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## update-popup-stops-following-current-step-opening.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. While
+  hovering a host's "updating" status in a short window, the step list scrolls to the current step only when the popup
+  opens, so the highlighted step can scroll out of view as the update moves on, contrary to SPEC.md, and the popup
+  cannot be scrolled by hand. The scroll effect in `crates/farhelm-ui/src/hosts.rs` does not depend on the current step.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Make the scroll effect also re-run when the current step changes. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## non-ascii-template-names-lose-exact-match-priority.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. In the
+  launcher's template search, typing the full name of a template with non-ASCII letters in a different case ("écrire"
+  for "Écrire") highlights another matching template instead, so accepting the highlight applies the wrong template. The
+  filter lowercases with Unicode rules while the exact-match check in `crates/farhelm-ui/src/launch_composer.rs` uses
+  ASCII-only case folding, against its own docstring.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Use the same Unicode lowercasing for the exact-match check as the filter. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-notification-read-mark-suppresses-subsequent-retries.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If
+  marking a session's notifications read fails once, the bell stays unread and closing the list again never resends the
+  mark, because the mark is cached as sent before the request and the failure only logs
+  (`crates/farhelm-ui/src/list/view.rs`). SPEC.md promises the next close repairs it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: On failure, roll back the cached mark for that session if it still holds the mark that failed, so
+  a newer successful mark is not undone. If that turns out significantly more complicated than expected, leave it
+  unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## earlier-setup-uninstall-error-hides-later-update.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On a host
+  row, after a refused setup or uninstall, an Update failure is hidden behind the old setup/uninstall message: starting
+  an Update clears only earlier update errors, and the setup/uninstall message is shown first
+  (`crates/farhelm-ui/src/provisioning.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: When an Update starts, also clear the setup/uninstall error and warning. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## rename-refusal-text-bypasses-peer-text-rendering.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. When a
+  rename is refused, the dialog shows the refusal text unescaped (`crates/farhelm-ui/src/rename.rs`), so invisible or
+  right-to-left characters from a supervisor can hide or reorder the explanation. Every other refusal surface escapes
+  it, per the contract in `crates/farhelm-ui/src/api.rs`.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Render the error through the existing peer-text rendering, as the row error line does. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-refusal-text-bypasses-peer-text-rendering.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  "Restart with" dialog shows a refusal unescaped (`crates/farhelm-ui/src/restart_with.rs`), unlike ordinary Restart.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Render the error through the existing peer-text rendering. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## rename-original-title-display-conceals-title-characters-original-title-original-title-display.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  rename dialog shows the session's current title raw (`crates/farhelm-ui/src/rename.rs`), so invisible or
+  direction-changing characters can hide what the title is; the sidebar row and the delete and replace confirmations
+  already escape it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Show the current title through the existing peer-title rendering; the stored title is not
+  touched. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
+  for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ime-confirmation-save-template-prematurely.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. In the
+  "save as template" panel, pressing Enter to confirm an input-method candidate (CJK input, for example) saves the
+  template with an unfinished name and closes the launcher (`crates/farhelm-ui/src/list/save_template.rs`). The rename
+  dialog and create form already check for composition.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Add the same composition check before saving on Enter. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## uninstall-documentation-promises-protection-modified-mac-app.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  uninstall guide (`docs/install_uninstall.md`) says changed file contents make uninstall refuse, but the Mac app's
+  record carries no checksums (SPEC_impl.md and `crates/farhelm/src/uninstall/app.rs`), so a customized Mac app file is
+  removed anyway: a false safety promise.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Documentation only: limit the changed-contents guarantee to what is actually checked and describe
+  what the Mac check covers. If that turns out significantly more complicated than expected, leave it unfixed and return
+  it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## light-theme-documentation-headings-have-unreadably-low-contrast.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On the
+  docs website in light mode, third- and fourth-level headings (including release-note category headings) are pale
+  blue-grey on near-white, about 1.8:1 contrast: `website/src/styles/farhelm.css` applies a dark-theme colour to them
+  and the light-theme block never overrides it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Give those headings a readable light-theme colour. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## local-desktop-build-recipe-fails-relative-target.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. With a
+  relative `CARGO_TARGET_DIR`, the local desktop build recipe in `crates/farhelm-desktop/README.md` builds the web
+  bundle and the desktop binary into different directories, so embedding fails; the README's own explanation says both
+  must use the same absolute directory, and the recipe normalizes the path but never exports it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Export the normalized target directory before the builds. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## centos-test-changes-meaning-existing-global-ssh.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. While the
+  CentOS provisioning test runs (and after it if it is killed), settings at the top of the user's real `~/.ssh/config`
+  apply only to the test's host alias instead of every host, because `scripts/test-provision-centos.sh` prepends a
+  `Host` stanza without resetting the scope afterwards. The planned atomic-write work (`ssh-config-atomic.md`) does not
+  cover this.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: End the inserted block with a `Match all` (or `Host *`) line so the original configuration is
+  read with global scope again. If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## tmux-build-script-bash32.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Building
+  the private tmux on a stock Mac, whose default bash is 3.2, aborts at the first configure step:
+  `scripts/build-private-tmux.sh` runs under `set -u` and expands arrays that the macOS branch leaves empty.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Expand the optional arrays with the portable empty-safe form, or refuse bash older than 4.4 up
+  front. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
+  triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## plans-heading-splice.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. A plan
+  question containing an indented `##` heading or a setext heading passes the splice guard in `scripts/plans-queue.py`
+  (it only checks column-zero `##`), and formatting can turn it into a real heading, so answering the question archives
+  only part of it and leaves the rest in the plan.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Make the guard also catch indented ATX headings and setext underlines at or above the section
+  level, with a round-trip test. If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## watcher-revision-cache.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The plans
+  watcher (`scripts/plans-watch.sh`) reads the plan tree and runs the wake check against the branch name separately, so
+  it can cache a tree as "nothing to wake for" using a verdict from a later commit; if that tree hash recurs, idle
+  executors sleep until the idle cap.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Resolve the branch to one commit per poll and use it for both reads. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-discovery-strips-valid-trailing-path-characters.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  test-run recorder's checkout discovery (`scripts/record-test-run.py`) applies a general whitespace trim to git's
+  output, so a checkout directory whose name ends in whitespace resolves to a different path and the run records the
+  wrong tree's identity.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Remove only git's trailing newline. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## initial-result-publication-failure-erases-observed-child-result.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If the
+  test-run recorder fails to write the first final record after the command finished, its fallback rewrites the record
+  with the child's status, duration and cleanup facts blanked (`scripts/record-test-run.py`), so the retained evidence
+  durably says the result is unavailable although it was observed.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Keep the observed result available to the fallback write so it is preserved. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## cutover-probe-ignores-output-asserted-boundary.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The tmux
+  replay-to-live compatibility probe (`scripts/check-tmux-cutover.py`) ignores pane-output notifications that arrive
+  before the final command reply, so output leaking before output is enabled would not fail it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Assert that no output notification appears before the cutover point. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## non-fragment-files-satisfy-changelog-coverage.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  changelog coverage sweep in `releasing/check-changelog.py` counts any added file under the fragment folder (a `.txt`,
+  an extensionless file, a nested `.md`) as a commit's fragment, while the loader and format check read only top-level
+  `*.md` files, so a commit can pass while its release note is never read.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Apply the loader's top-level `*.md` rule (README excluded) to the paths the sweep counts. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## video-recording-use-stale-builds-successful-build.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. With a
+  shared Cargo target directory set, "refresh the demo video" (`scripts/readme-video.sh`) builds into that directory but
+  records the old binary and web bundle in the checkout's own `target/`, so the video silently shows past behaviour.
+  `scripts/docs-screenshots.sh` already refuses this case.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Refuse (or point the launch at the resolved target directory) when the target directory is
+  outside the checkout's `target/`, as the docs screenshot script does. If that turns out significantly more complicated
+  than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## readme-capture-use-stale-builds-successful-build.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  README screenshot script (`scripts/readme-screenshot.sh`) has the same problem: with the build output directory
+  overridden, it builds there but photographs old binaries in the checkout's `target/`.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Refuse an outside override before building, as the docs screenshot script does. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## hero-publisher-self-test-requires-different-hashes-potentially.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  README screenshot publisher's `--self-test` (`scripts/publish-readme-hero.sh`) fails on correct code whenever its two
+  publishes land in the same second, because it publishes the same PNG with the same message and identity twice and then
+  requires different commit hashes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Make the second publish differ deterministically, for example with a second test image. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## optional-desktop-interaction-smoke-times-out-during.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  optional pixel-driven leg of the desktop smoke (`scripts/desktop-smoke.sh`) can report a cleanup failure on a healthy
+  session delete: deleting its bash session takes the supervisor's full 5-second stop grace and the request is capped at
+  5 seconds. The default leg documents this race and uses 30.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Raise that delete's time limit to 30 seconds, matching the default leg. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## directory-witness-read-pwd-writes-it.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  `~/ws` working-directory test (`crates/farhelm/tests/e2e/session_lifecycle.rs`) can fail a correct launch by reading
+  the witness file after the shell creates it but before `pwd` writes to it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Wait until the file holds a complete newline-terminated line before comparing. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## directory-report-polling-accept-unfinished-write.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  supervisor's launch-directory test (`crates/farhelm-supervisor/src/service/core.rs`) has the same race on its shim's
+  report file.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Require a complete newline-terminated record before comparing. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## wrapper-stop-test-fails-sh-uses-bashs-final-command.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On hosts
+  where `/bin/sh` is bash, the wrapper Stop test and a restart test fail during setup: bash runs the fixture's
+  `sh -c 'sleep 3600'` by replacing itself with `sleep`, so the grandchild they wait for never exists
+  (`crates/farhelm-fixtures/src/fake_agent.rs`). The outer wrapper test already documents and avoids this.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Keep the fixture's shell alive (for example `sleep 3600; exit $?`). If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## fixed-process-marker-lets-concurrent-stop-tests.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  Stop-cancellation test (`crates/farhelm-supervisor/src/service/handlers.rs`) marks its child with the fixed session id
+  `s1`, and the stop sweep scans every process on the machine, so concurrent runs can kill each other's children and
+  pass falsely. The sibling Restart test uses a fresh id and cites this hazard.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Use a fresh UUID for the marker and the stored session. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## uninstall-test-inherits-unrelated-state-directory.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  uninstall-inspection test fails for any developer whose environment sets an absolute `XDG_STATE_HOME`, because the
+  fixture launcher (`crates/farhelm-helm/src/provisioning.rs`) removes `XDG_CONFIG_HOME` from the child's environment
+  but not `XDG_STATE_HOME`.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Also remove `XDG_STATE_HOME` from the child command's environment (the test process's own
+  environment is not touched). If that turns out significantly more complicated than expected, leave it unfixed and
+  return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## fixture-startup-leave-real-systemd-service-behind.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If
+  starting tmux fails in the teardown-guard test (`crates/farhelm-helm/src/provisioning.rs`), a runtime-enabled user
+  unit is left in the shared systemd user manager, because its cleanup guard is created only after the tmux spawn.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Create the unit's cleanup guard immediately after enabling it. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## generic-launch-assertion-uses-different-argv-encoding-fixture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  generic-launch test (`crates/farhelm/tests/e2e/hook_identity.rs`) fails whenever the fixture binary's path needs shell
+  quoting (a checkout path with a space), because the fake agent prints argv with shell-word quoting while the test
+  expects a plain space join; its comment claiming both sides use the same join is wrong.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Compare against the shell-word join and fix the comment. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## raw-restart-helper-mistakes-notifications-replies.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The raw
+  restart-with test helper (`crates/farhelm/tests/e2e/restart_with_resume.rs`) returns the first control frame, so a
+  sessions-changed notification arriving first, which SPEC_impl.md allows on that connection, fails the test.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Skip notifications until the reply carrying the request's id. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## foreign-origin-test-finish-observing-sending-request.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  foreign-origin Stop test's 2-second "nothing reached the supervisor" window starts at the handshake, before harness
+  setup (`crates/farhelm-helm/src/sessions_tests.rs`), so on a loaded machine it can expire before the request is even
+  sent.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Keep observing until the response has come back, then check that no frame arrived. If that turns
+  out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-adoption-test-leaks-private-tmux-server.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If any
+  assertion fails in the below-floor tmux adoption test (`crates/farhelm-supervisor/src/tmux.rs`), its private tmux
+  server, configured with `exit-empty off`, keeps running forever, in a plain tempdir outside the test-state sweep.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Install the existing tmux server guard before starting the server and use the test-state tempdir,
+  as the scratch-server helper does. If that turns out significantly more complicated than expected, leave it unfixed
+  and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## upload-memory-test-leaks-mib-fixture-successful-runs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Every
+  successful run of the upload-memory test leaves a 64 MiB file in the system temp directory, because the measuring
+  child exits with `process::exit` before its tempdir is cleaned up (`crates/farhelm-supervisor/src/files.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Drop or close the tempdir before exiting. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## stopped-fixture-could-survive-assertion-failure.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If an
+  assertion fails in the sweep test while its sleeper child is stopped
+  (`crates/farhelm-supervisor/src/service/sweep.rs`), the child is left suspended forever, which exceeds the module's
+  documented budget of at most one short-lived stray sleeper.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Own the child in a drop guard that kills and reaps it from spawn until the manual cleanup. If
+  that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## orderly-shutdown-assertion-vacuous-macos.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On macOS
+  the test that a terminal connection's helper process is dead when shutdown returns always passes, because it checks
+  for `/proc/<pid>`, which never exists there (`crates/farhelm-supervisor/src/service/terminals.rs`; the module is not
+  Linux-only).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Use a portable liveness check (signal 0 returning no-such-process), confirmed to see the live
+  process first. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
+  user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## eof-replacement-test-cannot-detect-overlap-macos.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On macOS
+  the test that a dead-output helper is gone before its replacement opens always reports it gone, for the same `/proc`
+  reason (`crates/farhelm-supervisor/src/service/terminals.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: The same portable liveness check, inside the replacement callback. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## replacement-open-shutdown-test-assumes-procfs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On macOS
+  the test that the replacement helper is cleaned up at shutdown always passes, for the same `/proc` reason
+  (`crates/farhelm-supervisor/src/service/terminals.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: The same portable liveness check. If that turns out significantly more complicated than expected,
+  leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-validation-test-cannot-construct-fixture-apfs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On macOS
+  the checkout-root validation test (`crates/farhelm-supervisor/src/service/core.rs`) panics during setup because APFS
+  refuses its non-UTF-8 directory name, so none of its checks run there; analogous tests are gated.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Gate or split out the invalid-name part so the portable checks still run on macOS. If that turns
+  out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## rss-measurement-undercounts-larger-page-linux-systems.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On Linux
+  machines with pages larger than 4 KiB (16 KiB or 64 KiB arm64 kernels), the upload memory test multiplies resident
+  pages by 4096 (`crates/farhelm-supervisor/src/files.rs`), under-measures growth, and passes the regression it exists
+  to catch.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Multiply by the system page size. If that turns out significantly more complicated than expected,
+  leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## birth-oracle.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Four
+  checkout-ownership tests are meant to fail if production stops recording folder creation times, but they print SKIPPED
+  and pass whenever the independent `stat` probe errors, which GNU-style `stat` flags always do on macOS
+  (`crates/farhelm-supervisor/src/working_copies.rs`); the probe's docstring says the opposite.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Make the probe distinguish supported, unavailable and failed, use the BSD `stat` form on macOS,
+  and fail on probe errors. If that turns out significantly more complicated than expected, leave it unfixed and return
+  it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-upload-regression-fails-native-macos-tools.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On macOS
+  the failed-upload provisioning test (`crates/farhelm-helm/src/provisioning.rs`) dies on GNU-only `stat -c` before it
+  reaches the upload failure it checks; a sibling test is already Linux-only for this reason.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Gate it to Linux like the sibling. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## orphan-cleanup-regression-requires-gnu-tools-platform-guard.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Same
+  macOS failure in the orphan-cleanup upload test (`crates/farhelm-helm/src/provisioning.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
+  unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## tampering-regression-fails-reaching-tampering-boundary-macos.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Same
+  macOS failure in the tampering test, which never reaches its tampering step
+  (`crates/farhelm-helm/src/provisioning.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
+  unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## tilde-replay-test-equates-display-canonical-paths.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Where
+  temp paths go through a symlink (macOS `/tmp` to `/private/tmp`), the tilde-replay test
+  (`crates/farhelm/tests/e2e/create_idempotency.rs`) rejects a correct canonical path before it checks replay.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Canonicalize the expected value for the canonical-path assertion only. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-recovery-compares-canonical-roots-unresolved-fixture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. Same
+  symlinked-tempdir false failure in the checkout recovery test's root assertions
+  (`crates/farhelm/tests/e2e/github_checkouts.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Canonicalize the fixture roots before comparing. If that turns out significantly more complicated
+  than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  folder-browse test (`crates/farhelm-supervisor/src/service/core.rs`) fails wherever the temp directory sits behind a
+  symlink, comparing the canonical parent path with the raw tempdir path; the line above it already canonicalizes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Canonicalize the fixture path before comparing. If that turns out significantly more complicated
+  than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## cgroup-cleanup-masks-dead-pane-sweep-regression.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. On any
+  Linux machine with a systemd user manager, the test that Stop still finds a leftover background process after the
+  agent died (`crates/farhelm/tests/e2e/session_lifecycle.rs`) passes even if that search is broken, because the
+  session's cgroup scope is killed first. A sibling test already runs the similar fixture with scopes disabled.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Run it on a harness with cgroup scopes disabled and check the launch really ran unscoped. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## cgroup-cleanup-masks-closure-seeding-regression.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that Stop kills an unmarked child of a leftover background process passes on systemd hosts whether or not that
+  discovery works, because the scope kill reaches both (`crates/farhelm/tests/e2e/session_lifecycle.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## cgroup-cleanup-masks-fork-quiescing-regression.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that Stop catches processes that keep forking during shutdown passes on systemd hosts even with that logic removed,
+  because the scope kill ends the whole fork storm (`crates/farhelm/tests/e2e/session_lifecycle.rs`).
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## signal-cleanup-test-interrupts-cleanup-exists.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  installer test that claims to prove an interrupted install cleans up its staging directory
+  (`scripts/test-install-sh.sh`) sends the signal during the checksum download, before staging or its signal traps
+  exist, so it passes even if that cleanup is removed.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Send the signal only once the staging directory exists. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## distinct-payload-test-observe-payload-bytes.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  provisioning test meant to catch a host being given the Farhelm executable instead of its private tmux
+  (`crates/farhelm-helm/src/provisioning.rs`) checks only step labels, never the installed bytes, so that exact
+  regression passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Use the fake backend's stateful mode, as other tests do, and assert the bytes at both
+  destinations. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
+  user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## empty-chunk-test-accepts-upload-stalls-only-traffic.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  empty-chunk-flood upload test (`crates/farhelm/tests/e2e/attachment_uploads.rs`) reads the outcome only after the
+  flood ends, when a broken implementation would also have aborted, so it passes if empty chunks wrongly count as
+  progress.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Require the abort to arrive while the flood is still running. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## releasing-both-relay-gates-establish-reverse-reply.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The relay
+  test claiming to prove answers are matched by id when they arrive in reverse order
+  (`crates/farhelm/tests/e2e/agent_relay.rs`) releases both gates at once, so the order is never forced.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Release the second session, await its answer, then release the first. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## concurrent-list-test-silently-accepts-failure-polling-participant.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  list-during-stop race test (`crates/farhelm/tests/e2e/boot_id_durable_outcome.rs`) passes even if the concurrent list
+  poller fails immediately, so the race may never be exercised.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Make the poller fail on a list error and assert that it polled successfully. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## later-refresh-hide-stale-refresh-regression.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  stale-refresh test (`crates/farhelm-helm/src/sessions_tests.rs`) can miss its bug: with stale-reply rejection removed,
+  the next unheld refresh can restore the session before the assertions run, and its wait uses a fleet-wide absolute
+  request count.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Hold the successor listing until the assertions finish and wait on this host's count relative to
+  the hold. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
+  for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## malformed-message-test-pass-through-ordinary-eof.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that a malformed supervisor message kills the connection (`crates/farhelm-helm/src/client.rs`) passes even if the helm
+  ignores the message, because the fake supervisor hangs up right after sending it and the hang-up alone fails the
+  pending request.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Keep the fake supervisor's connection open until the request has failed. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## shutdown-test-accepts-forced-cancellation-natural-completion.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that a signalled connection writer finishes on its own (`crates/farhelm-supervisor/src/service/connection.rs`) passes
+  even if the writer hangs, because the drain helper it calls force-cancels a stuck writer without reporting it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Await the writer task directly under a short timeout and require success. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## replay-test-consumes-outstanding-reply-testing-recovery.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that catch-up replay settles a pending filter reply (`crates/farhelm-supervisor/src/tmux/stream.rs`) never reaches
+  that state: pumping output until the pause event consumes the filter reply first, so the debt is already zero when
+  replay starts.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Reorder the commands so exactly one filter reply is outstanding when replay starts, and assert
+  that. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
+  triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## omp-transition-assertions-cannot-detect-stale-conversation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The OMP
+  test claiming Resume always names the latest conversation transition (`crates/farhelm-supervisor/src/service/core.rs`)
+  reports the same token for every transition, so a binding stuck on the first report still passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Give the transitions distinct ids and files and check the binding after each. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## lock-test-establish-contender-reached-lock.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  per-key lock test's "same key still blocked" check (`crates/farhelm-supervisor/src/service/core.rs`) proves nothing if
+  the waiter has not been scheduled yet; an existing arrival observer was built for exactly this.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Wait on the existing arrival observer instead of yielding. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## ended-session-replay-test-accepts-relaunch-under-same.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that a retried create for an ended session replays it rather than relaunching
+  (`crates/farhelm-supervisor/src/service/core.rs`) checks only the id, row count and reservation, so a relaunch under
+  the same id passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Also assert the stored row is still exited with its original exit code. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## invalid-key-test-overlooks-permanently-settled-reservations.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that an invalid duplicate-suppression key is refused before anything is stored
+  (`crates/farhelm-supervisor/src/service/handlers.rs`) checks only pending reservations, so a regression storing a
+  permanent failed reservation passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Assert no reservation of any state exists for each refused key. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## oversized-resume-test-overlooks-settled-storage.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  oversized-resume-command test (`crates/farhelm-supervisor/src/service/handlers.rs`) has the same blind spot.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Assert no reservation of any state exists for the key. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## resume-preservation-test-never-verifies-relaunch-was-accepted.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that a restart keeps the captured conversation and its provenance (`crates/farhelm-supervisor/src/store.rs`) discards
+  the restart decision, and a refusal leaves the same data in place, so it passes when the restart was refused.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Require the restart to be claimed, with a generation bump, before the preservation assertions. If
+  that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## intentional-child-passes-because-it-failed-wrong.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  browser-harness self-test for a cleanup failure after a passing test (`e2e/harness-tests/timeline-child.failure.ts`)
+  records "body complete" before the body's final assertion, so it can report the teardown-failure path exercised when
+  the body actually failed first.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Record body completion after the final assertion. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## client-log-test-establish-claimed-later-capture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The UI's
+  client-log test claims logging keeps being forwarded after a hostile console argument
+  (`crates/farhelm-ui/js-tests/client-log-shim.test.js`) but only counts calls to the original console, so a guard that
+  silently stops forwarding passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Flush the shim and assert the later message was actually sent, as neighbouring tests do. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## title-retry-test-changes-folder-too-masking.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  browser test that editing the title after a failed create gets a new request key
+  (`e2e/tests/terminal-create-idempotency.spec.ts`) also changes the folder, which alone renews the key, so it passes if
+  title edits stop renewing it.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Change only the title and require two distinct, non-empty keys. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## notification-stub-accepts-writes-wrong-session.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  notification browser test's stubbed routes (`e2e/tests/notifications.spec.ts`) accept a read or clear mark for any
+  session and credit it to the session under test, so marking the wrong session passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Match or record the session id and assert the other session gets no mark. If that turns out
+  significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## sticks-test-wait-additional-refresh-it-claims.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  "manual mark-unread sticks" test (`e2e/tests/sidebar.spec.ts`) takes its refresh baseline before the click, so the
+  read that first shows the unread state satisfies the "one more refresh" wait and a later automatic re-mark goes
+  unseen.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Take the baseline after the unread state is visible and wait for a later completed listing read.
+  If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-clone-setup-leaves-hosts-route-permanently.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If an
+  assertion fails before the held hosts request is released (`e2e/tests/terminal-multihost.spec.ts`), teardown waits on
+  a route handler that never finishes, adding a teardown timeout to every such failure.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Release the held request at the start of the cleanup block. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## empty-frame-test-stops-stimulus-checking-watchdog.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that empty frames cannot keep a replaying terminal hidden (`e2e/tests/terminal-replay-rename.spec.ts`) stops sending
+  them before checking for the reveal, so a broken watchdog that reveals later still passes; its comment claims that
+  case would never reveal.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Require the reveal before the empty-frame injection ends. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## reconnect-deadline-test-permits-deadline-reset-regression.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that view changes do not postpone a reconnect (`e2e/tests/terminal-reconnect.spec.ts`) stops switching tabs after
+  about a second, so a timer restarted on every click still recovers inside the allowance and passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Keep switching until the remount is seen, with a cap, or bound recovery against the original
+  deadline. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
+  for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## outstanding-heartbeat-test-accept-probe-answered-wedge.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  "while the answer is outstanding" heartbeat test (`e2e/tests/terminal-reconnect.spec.ts`) can be satisfied by a
+  heartbeat sent and answered before the terminal was silenced.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Count only heartbeats sent after silencing. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## link-drag-fixture-mistake-wrapped-url-single-row-url.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  link-drag test's check that the URL fits on one row (`e2e/tests/terminal-links.spec.ts`) looks for a run of repeated
+  characters that also appears on the first row of a wrapped URL, so the drag can test the wrong thing.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Assert the whole URL is on the head row. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## resize-teardown-accepts-refused-deletion-success.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  sidebar-cutoffs test's cleanup (`e2e/tests/sidebar-resize.spec.ts`) ignores the delete's status, so a refused delete
+  leaves a live session in the shared stack while the test passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Use the shared session-cleanup helper. If that turns out significantly more complicated than
+  expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## multi-session-test-hold-delete-request.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  multi-session test (`e2e/tests/terminal.spec.ts`) means to hold a delete open while checking no confirmation appears,
+  but deleting an ended session carries a query string its route pattern does not match, so nothing is held; the same
+  file explains and handles this elsewhere.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Match on the URL's pathname. If that turns out significantly more complicated than expected,
+  leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## exited-session-test-bypasses-delete-gate.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  "exited session deletes immediately" test (`e2e/tests/terminal.spec.ts`) has the same unmatched delete hold, so its
+  no-confirmation check races the real delete.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Match on the pathname and release the hold in the cleanup block. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## remote-browse-witness-accept-earlier-tests-request.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The check
+  that a browse reached the remote supervisor (`e2e/tests/sidebar.spec.ts`) searches that supervisor's whole log, which
+  both browser engines share, so the second engine can pass on the first engine's entry.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Search only the log bytes written after clicking Browse. If that turns out significantly more
+  complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## failed-setup-overwrite-ownership-running-replacement-supervisor.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If setup
+  for the "remote supervisor killed" group fails before the kill (`e2e/tests/terminal-multihost.spec.ts`), teardown
+  starts a second remote supervisor and records it as the owned one; it exits on the lock, and the running one is
+  orphaned past the file's cleanup.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Restore only when nothing is serving, as the reboot group's teardown already does. If that turns
+  out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## phantom-tab-regression-test-never-waits-claimed-later.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The test
+  that a tab opened and closed before any poll does not come back (`e2e/tests/terminal-tabs.spec.ts`) says it waits out
+  the poll interval, but its count check returns immediately because the count is already zero.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Wait for a session-detail response that started after the close, then check once without
+  retrying. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
+  for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## yolo-refusal-fixture-unintentionally-puts-page-into.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  YOLO-guard refusal test (`e2e/tests/yolo-guard.spec.ts`) fakes the helm's reply with an empty build stamp because the
+  spec never captures the real one, so the page latches a version mismatch and runs the rest of the flow degraded.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Capture the helm's build before faking replies and assert no mismatch banner appears. If that
+  turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## mouse-fidelity-assertion-accepts-utf-corrupted-reports.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. The
+  mouse-fidelity test claims to catch UTF-8 mangling of mouse reports (`e2e/tests/mouse-modes.spec.ts`) but checks only
+  the length and one byte's range, so a UTF-8-expanded report passes.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: Assert the exact report bytes from the known click coordinates. If that turns out significantly
+  more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## failed-add-host-assertions-leave-extra-registered-host.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main at `83516c6c` (screened 2026-10-10), not runtime reproduction. If a
+  check fails after the blank-fields add-host test registers its host but before it records the id
+  (`e2e/tests/terminal-multihost.spec.ts`), the host is never removed and later tests expecting exactly two hosts fail.
+- Decision: fix it. On 2026-10-10 the user asked for every undecided queue finding that is clearly a bug (no judgement
+  needed about whether it should be fixed), whose fix is straightforward without complexity or scope creep, and that
+  later changes have not mooted, and chose to fix all 96 findings a screen of the queue found to meet those criteria.
+  Complexity gate, in the user's words: "if it turns more complicated than expected, skip and keep it unfixed for
+  triage."
+- Completion criteria: In cleanup, find the host by its unique destination when no id was recorded, and require the
+  delete to succeed. If that turns out significantly more complicated than expected, leave it unfixed and return it to
+  the user for triage. Remove this feedback file and its index entry.
+- Execution: `pending`.
