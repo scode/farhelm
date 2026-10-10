@@ -1110,8 +1110,16 @@ async fn handle_delete_session(
     let tx = tx.clone();
     tasks.spawn(async move {
         match mutation.await {
-            Ok((Ok(notice), _permit)) => {
-                send_reply(&tx, &ControlMsg::SessionDeleted { req_id, notice }).await;
+            Ok((Ok(outcome), _permit)) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::SessionDeleted {
+                        req_id,
+                        notice: outcome.notice,
+                        archived: outcome.archived,
+                    },
+                )
+                .await;
             }
             Ok((Err(error), _permit)) => {
                 reply_error(&tx, req_id, error.kind, error.message).await;
@@ -2395,6 +2403,67 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         }
         ControlMsg::ListSessions { req_id } => {
             handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id).await
+        }
+        ControlMsg::ListCheckoutTrash {
+            req_id,
+            measure_sizes,
+        } => {
+            let sup = Arc::clone(sup);
+            spawn_admitted(
+                &sup.clone().admission,
+                ctx.tasks,
+                ctx.tx,
+                req_id,
+                |tx| async move {
+                    match tokio::time::timeout(
+                        DIRECTORY_BROWSE_TIMEOUT,
+                        sup.list_checkout_trash(measure_sizes),
+                    )
+                    .await
+                    {
+                        Ok(Ok(listing)) => {
+                            send_reply(&tx, &ControlMsg::CheckoutTrashListed { req_id, listing })
+                                .await
+                        }
+                        Ok(Err(error)) => {
+                            reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}"))
+                                .await
+                        }
+                        Err(_) => {
+                            reply_error(
+                                &tx,
+                                req_id,
+                                ErrorKind::Internal,
+                                "trash listing did not finish in time",
+                            )
+                            .await
+                        }
+                    }
+                },
+            )
+            .await;
+        }
+        ControlMsg::DeleteCheckoutTrash { req_id, ids } => {
+            let sup = Arc::clone(sup);
+            spawn_admitted(
+                &sup.clone().admission,
+                ctx.tasks,
+                ctx.tx,
+                req_id,
+                |tx| async move {
+                    match sup.delete_checkout_trash(ids).await {
+                        Ok(deleted) => {
+                            send_reply(&tx, &ControlMsg::CheckoutTrashDeleted { req_id, deleted })
+                                .await
+                        }
+                        Err(error) => {
+                            reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}"))
+                                .await
+                        }
+                    }
+                },
+            )
+            .await;
         }
         ControlMsg::BrowseDirectory { req_id, cwd } => {
             // Keep this at debug level because directory names can be private,

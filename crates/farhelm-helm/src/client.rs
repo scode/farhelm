@@ -2768,6 +2768,45 @@ impl SupervisorClient {
         }
     }
 
+    /// Fetch this connected host's recorded archives; paths and sizes come
+    /// from its supervisor, never from the helm's local filesystem.
+    pub async fn list_checkout_trash(
+        &self,
+        measure_sizes: bool,
+    ) -> anyhow::Result<farhelm_proto::CheckoutTrashListing> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::ListCheckoutTrash {
+                    req_id,
+                    measure_sizes,
+                },
+            )
+            .await?
+        {
+            ControlMsg::CheckoutTrashListed { listing, .. } => Ok(listing),
+            other => Err(wrong_reply("ListCheckoutTrash", &other)),
+        }
+    }
+
+    /// IDs choose recorded archives, not arbitrary paths. A transport failure
+    /// can follow a completed removal; callers refetch rather than inventing
+    /// a definite failure for each checkout.
+    pub async fn delete_checkout_trash(
+        &self,
+        ids: Vec<String>,
+    ) -> anyhow::Result<farhelm_proto::CheckoutTrashDeleted> {
+        let req_id = self.req_id();
+        match self
+            .request(req_id, ControlMsg::DeleteCheckoutTrash { req_id, ids })
+            .await?
+        {
+            ControlMsg::CheckoutTrashDeleted { deleted, .. } => Ok(deleted),
+            other => Err(wrong_reply("DeleteCheckoutTrash", &other)),
+        }
+    }
+
     /// Reconcile a previously submitted fresh intent under its durable snapshot.
     /// `None` means unknown and is the only result that permits ordinary create
     /// validation to continue. Transport errors remain ambiguous; callers must
@@ -3046,13 +3085,13 @@ impl SupervisorClient {
     /// deleting if more is alive at handling time than the guard allows (see
     /// `farhelm_proto::DeleteGuard`).
     ///
-    /// `Ok(Some(notice))` is a completed delete that left something the user
-    /// must be told about (`ControlMsg::SessionDeleted::notice`).
+    /// The outcome distinguishes a completed archive from a preserved folder.
+    /// A notice must reach the user even though the session Delete succeeded.
     pub async fn delete_session_with(
         &self,
         id: &str,
         guard: farhelm_proto::DeleteGuard,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
         let req_id = self.req_id();
         match self
             .request(
@@ -3066,7 +3105,9 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionDeleted { notice, .. } => Ok(notice),
+            ControlMsg::SessionDeleted {
+                notice, archived, ..
+            } => Ok(farhelm_proto::SessionDeleteOutcome { notice, archived }),
             other => Err(wrong_reply("DeleteSession", &other)),
         }
     }

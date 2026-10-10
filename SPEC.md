@@ -733,6 +733,11 @@ checkout to move into `farhelm-archived-working-copies` under its original root,
 timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
 A foreign object replacing the recorded path must remain untouched. The UI calls this archive the trash.
 
+An explicitly confirmed trash delete is the permanent-cleanup exception: it removes only recorded archived checkouts
+whose opened root and directory still match their ownership evidence. It does not follow symlinks or cross mounts, and
+refuses an archive containing a retained session's working folder. Missing or mismatched records can be discarded
+without touching a replacement folder; other failures are reported and remain available for retry.
+
 Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
 safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
 earlier move attempt being impossible to establish), Delete still removes the session, releases the checkout from

@@ -1075,6 +1075,7 @@ mod tests {
             writer
                 .write_control(&ControlMsg::SessionDeleted {
                     req_id,
+                    archived: false,
                     notice: None,
                 })
                 .await

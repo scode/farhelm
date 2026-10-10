@@ -4046,7 +4046,9 @@ pub(crate) fn notification_cell()
 ///   `capture_locks` claim directly, briefly; report and capture work never
 ///   takes a lifecycle claim, so those edges only run one way.
 /// - `admission` before `directory_browse_workers`: a browse request's
-///   blocking filesystem worker.
+///   blocking filesystem worker. Trash reads share those worker slots without
+///   taking directory admission; permanent deletion is separately serialized
+///   by `working_copy_operations` through its blocking filesystem work.
 /// - `uploads`: may be taken under the whole mutation chain down to the
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
 ///   is never held alongside `attachments`, `sessions`, or `sinks`.
@@ -4269,6 +4271,7 @@ pub struct Supervisor {
     /// bounds is this process's tmux subprocesses, whichever connection
     /// asked.
     pub(crate) list_admission: Arc<tokio::sync::Semaphore>,
+    /// Shared by directory browsing and trash listing.
     /// Bounds filesystem workers independently from request replies. A
     /// request may time out and release its handler permit while its blocking
     /// `stat`/directory read continues; the worker keeps this permit until
@@ -4465,8 +4468,11 @@ pub struct Supervisor {
     ///
     /// LOCK ORDER: taken AFTER a create's keyed intent guard and BEFORE
     /// any lifecycle claim (R1.1), by create, delete, and restart alike.
-    /// How long each holds it differs; the lock-order table in this
-    /// struct's docs has both.
+    /// Permanent trash deletion holds it through its blocking filesystem
+    /// work, including after caller cancellation. Passive trash reads use
+    /// the browse-worker slots without taking this admission lock.
+    /// How long create, delete, and restart hold it differs; the lock-order
+    /// table in this struct's docs describes those lifetimes.
     pub(crate) working_copy_operations: Arc<tokio::sync::Mutex<()>>,
     /// All discovery requests share this scanner's two-child budget. It is
     /// independent of directory admission: slow Git inspection must not hold
@@ -4807,25 +4813,63 @@ impl Supervisor {
         // still blocked in the filesystem. Copy the expanded path before
         // spawning so the detached worker never borrows that caller state.
         let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?.into_owned();
-        Self::run_directory_browse_worker(Arc::clone(&self.directory_browse_workers), move || {
+        Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
             Self::browse_directory_blocking(&cwd)
         })
         .await
     }
 
-    /// Start one blocking browse operation under the pool that represents
+    /// Read this host's trash without blocking the async connection loop.
+    /// Retired archive rows no longer move. Idempotent pruning needs no
+    /// directory admission, so a hung passive read cannot freeze lifecycle work.
+    pub(crate) async fn list_checkout_trash(
+        &self,
+        measure_sizes: bool,
+    ) -> anyhow::Result<farhelm_proto::CheckoutTrashListing> {
+        let db = self.store.conn.clone();
+        Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
+            crate::checkout_trash::list(&db, measure_sizes)
+        })
+        .await
+    }
+
+    /// Hold directory admission through the actual OS mutation, even if the
+    /// client disconnects or times out. A new session must not enter an archive
+    /// after its live-session guard has been checked.
+    pub(crate) async fn delete_checkout_trash(
+        &self,
+        ids: Vec<String>,
+    ) -> anyhow::Result<farhelm_proto::CheckoutTrashDeleted> {
+        if ids.len() > crate::checkout_trash::DELETE_ID_CAP {
+            anyhow::bail!("too many archived checkouts selected");
+        }
+        let admission = Arc::clone(&self.working_copy_operations).lock_owned().await;
+        let db = self.store.conn.clone();
+        // Admission already serializes deletion. Waiting for browse slots here
+        // would let two wedged passive reads freeze every session operation.
+        tokio::task::spawn_blocking(move || {
+            let _admission = admission;
+            let live = crate::store::session_directory_paths(&db.lock())?;
+            crate::checkout_trash::delete(&db, &ids, &live)
+        })
+        .await
+        .context("checkout trash worker panicked")?
+    }
+
+    /// Start one blocking directory operation under the pool that represents
     /// actual filesystem work, rather than the caller waiting for a reply.
     ///
     /// The returned future may be cancelled by a reply deadline. The spawned
     /// task is intentionally detached in that case, retaining `permit` until
     /// the operating system returns from `work`; that preserves the worker
     /// cap during a wedged mount.
-    async fn run_directory_browse_worker<F>(
+    async fn run_directory_worker<T, F>(
         workers: Arc<tokio::sync::Semaphore>,
         work: F,
-    ) -> anyhow::Result<DirectoryBrowse>
+    ) -> anyhow::Result<T>
     where
-        F: FnOnce() -> anyhow::Result<DirectoryBrowse> + Send + 'static,
+        T: Send + 'static,
+        F: FnOnce() -> anyhow::Result<T> + Send + 'static,
     {
         let permit = workers
             .acquire_owned()
@@ -16812,7 +16856,7 @@ pub(crate) mod tests {
             timed_callers.push(tokio::spawn(async move {
                 tokio::time::timeout(
                     CALLER_TIMEOUT,
-                    Supervisor::run_directory_browse_worker(worker_pool, move || {
+                    Supervisor::run_directory_worker(worker_pool, move || {
                         worker_started.fetch_add(1, Ordering::SeqCst);
                         started_tx
                             .send(worker)
@@ -16852,7 +16896,7 @@ pub(crate) mod tests {
             contenders.push(Box::pin(async move {
                 tokio::time::timeout(
                     CALLER_TIMEOUT,
-                    Supervisor::run_directory_browse_worker(contender_pool, move || {
+                    Supervisor::run_directory_worker(contender_pool, move || {
                         contender_started.fetch_add(1, Ordering::SeqCst);
                         Ok(DirectoryBrowse {
                             cwd: format!("/contender-{contender}"),
@@ -16925,7 +16969,7 @@ pub(crate) mod tests {
             let worker_started = Arc::clone(&started);
             let reuse_started_tx = reuse_started_tx.clone();
             reusable_callers.push(tokio::spawn(async move {
-                Supervisor::run_directory_browse_worker(worker_pool, move || {
+                Supervisor::run_directory_worker(worker_pool, move || {
                     worker_started.fetch_add(1, Ordering::SeqCst);
                     reuse_started_tx
                         .send(worker)

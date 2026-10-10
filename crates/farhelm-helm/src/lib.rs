@@ -621,6 +621,14 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route(
+            "/api/checkout-trash/list",
+            axum::routing::post(sessions::list_checkout_trash),
+        )
+        .route(
+            "/api/checkout-trash/delete",
+            axum::routing::post(sessions::delete_checkout_trash),
+        )
         .route("/api/templates", get(templates::list_templates))
         .route(
             "/api/templates/{name}",

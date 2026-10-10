@@ -44,6 +44,7 @@ pub mod attachments;
 /// Running a helper program with a deadline, output caps, and a
 /// process-group kill.
 pub mod bounded_command;
+mod checkout_trash;
 /// The SQLite plumbing the supervisor's and the helm's stores share.
 pub mod db;
 pub mod files;

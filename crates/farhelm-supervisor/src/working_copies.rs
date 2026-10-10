@@ -428,6 +428,19 @@ impl Observed {
 /// birth time.
 #[cfg(target_os = "linux")]
 fn observe(path: &Path) -> std::io::Result<Observed> {
+    observe_at(path, libc::AT_FDCWD, libc::AT_SYMLINK_NOFOLLOW, None)
+}
+
+/// The path and opened-handle checks share Linux's birth-time observation.
+/// `AT_EMPTY_PATH` binds ownership verification to the descriptor the caller
+/// will traverse, rather than reopening a pathname after it was checked.
+#[cfg(target_os = "linux")]
+fn observe_at(
+    path: &Path,
+    fd: std::os::fd::RawFd,
+    flags: i32,
+    file: Option<&fs::File>,
+) -> std::io::Result<Observed> {
     use std::os::unix::ffi::OsStrExt as _;
 
     /// `struct statx_timestamp` from `<linux/stat.h>`.
@@ -478,9 +491,9 @@ fn observe(path: &Path) -> std::io::Result<Observed> {
     let rc = unsafe {
         libc::syscall(
             libc::SYS_statx,
-            libc::AT_FDCWD,
+            fd,
             c_path.as_ptr(),
-            libc::AT_SYMLINK_NOFOLLOW,
+            flags,
             STATX_TYPE | STATX_INO | STATX_BTIME,
             &mut buf as *mut Statx,
         )
@@ -488,7 +501,10 @@ fn observe(path: &Path) -> std::io::Result<Observed> {
     if rc != 0 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ENOSYS) {
-            let meta = fs::symlink_metadata(path)?;
+            let meta = match file {
+                Some(file) => file.metadata()?,
+                None => fs::symlink_metadata(path)?,
+            };
             return Ok(Observed {
                 dev: meta.dev(),
                 ino: meta.ino(),
@@ -562,6 +578,87 @@ fn same_directory(observed: &Observed, identity: DirectoryIdentity, birth: Optio
             Some(recorded) => observed.birth_ns == Some(recorded),
             None => observed.dev == dev,
         }
+}
+
+/// Observe the object that an already-open directory descriptor identifies.
+/// This is the same inode/birth-time contract as pathname observation, including
+/// Linux musl's direct statx path and legacy kernels' no-birth-time fallback.
+fn observe_open_directory(file: &fs::File) -> std::io::Result<Observed> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        observe_at(
+            Path::new(""),
+            file.as_raw_fd(),
+            libc::AT_EMPTY_PATH,
+            Some(file),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let meta = file.metadata()?;
+        let birth_ns = meta
+            .created()
+            .ok()
+            .and_then(|created| created.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|since| i64::try_from(since.as_nanos()).ok());
+        Ok(Observed {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            is_dir: meta.is_dir(),
+            birth_ns,
+        })
+    }
+}
+
+/// Open and verify the recorded root before trash traversal. Ancestor path
+/// changes can select a different object, but that opened object must still
+/// match the allocation evidence before any child is inspected or removed.
+pub(crate) fn verified_root_dir(row: &WorkingCopyRow) -> Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let expected = row
+        .root_identity
+        .ok_or_else(|| WorkingCopyError::WrongState(row.id.clone()))?;
+    let path = PathBuf::from(&row.canonical_root);
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
+            return Err(WorkingCopyError::IdentityMismatch { path });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let observed = observe_open_directory(&file)?;
+    if observed.is_dir && device_change_unconfirmed(&observed, expected, row.root_birth_ns) {
+        return Err(WorkingCopyError::DeviceChangedUnconfirmed { path });
+    }
+    if !observed.is_dir || !same_directory(&observed, expected, row.root_birth_ns) {
+        return Err(WorkingCopyError::IdentityMismatch { path });
+    }
+    Ok(file)
+}
+
+/// Verify the opened archive itself, so a later path swap cannot transfer its
+/// recorded deletion authority to another directory. No recursive mutation is
+/// performed here; trash owns that user-confirmed exception.
+pub(crate) fn verify_archived_handle(
+    row: &WorkingCopyRow,
+    file: &fs::File,
+    path: &Path,
+) -> Result<()> {
+    let expected = row
+        .path_identity
+        .ok_or_else(|| WorkingCopyError::WrongState(row.id.clone()))?;
+    let observed = observe_open_directory(file)?;
+    if !observed.is_dir || !same_directory(&observed, expected, row.path_birth_ns) {
+        return Err(WorkingCopyError::IdentityMismatch {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
 }
 
 /// Whether `observed` fails [`same_directory`] only because its device
@@ -1942,6 +2039,21 @@ pub fn release_unarchived(conn: &Connection, working_copy_id: &str) -> Result<()
     )?;
     if deleted == 0 {
         return Err(WorkingCopyError::WrongState(working_copy_id.to_string()));
+    }
+    Ok(())
+}
+
+/// Forget a terminal archive only when no session still claims its lifetime.
+/// A repeated prune is idempotent. Corrupt retained membership refuses instead
+/// of reporting cleanup as complete while leaving its authority row behind.
+pub(crate) fn forget_retired(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM working_copies WHERE id = ?1 AND allocation_state = 'retired' \
+         AND NOT EXISTS (SELECT 1 FROM working_copy_members WHERE working_copy_id = ?1)",
+        [id],
+    )?;
+    if get_working_copy(conn, id)?.is_some() {
+        return Err(WorkingCopyError::WrongState(id.to_string()));
     }
     Ok(())
 }
