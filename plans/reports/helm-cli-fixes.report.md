@@ -86,3 +86,40 @@ establish the intended boundary. No production-code or additional source finding
 The second fresh native gpt-6.1-sol medium wording reader found the commit and PR text accurate and
 convention-compliant. Implementation stayed local under the required no-workhorse mode. Native actual model identity and
 usage counters were not exposed. The executor did not mark the PR ready or merge it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1813, last of the three plans landed together. The rebase was clean.
+
+#### Fixes made while landing
+
+- The dependency list in `crates/farhelm/Cargo.toml` was not in the order the repository's formatter requires, which the
+  combined check caught; the landing reformatted it.
+- SPEC_impl.md said the ssh connection runs with connection sharing off only "where a socket cannot fit". It now also
+  names the second trigger this plan added: a state path containing a literal `${`, which OpenSSH would expand even
+  inside the quoted control path.
+
+Both in #1813 before it merged. Smaller notes left as they are: one manager test was extended rather than added and its
+name no longer describes everything it checks; the changelog fragment calls the feedback dialog a "page"; and a comment
+explaining that the end-to-end harness also uses `shell-words` was lost when it became a regular dependency.
+
+The reviewer could not confirm from a live screen that Codex always draws a queued question above its composer; no
+capture of that screen exists.
+
+#### Checks
+
+- Run now, on the three stacked in landing order: `cargo fmt --all -- --check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the supervisor, helm, UI
+  and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no retries (2709 of 2709),
+  the UI JavaScript tests (230 of 230), and on Chromium and WebKit with one worker and no retries the
+  terminal-attachments, terminal-clipboard, templates, quick-switcher, approval-layout and sidebar specs (run
+  `7d69e2db`, 355 passed, 9 skipped: WebKit cannot be granted clipboard permissions, and the real-Claude cases). The two
+  failures were one sidebar test, "composer menu-closed Tab order follows the displayed launch groups", on both engines;
+  it fails the same way on plain main (run `4bb205ad`), because the managed-checkout destination buttons added earlier
+  today were never added to its expected Tab order. The browser-sidebar-test-oracles plan carries that fix.
+- After the landing fixes: `dprint check`, `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, and the UI menu
+  tests (17 of 17).
+- These three landed on their own rather than with the six plans claimed later in the round; see the monitor's
+  2026-10-10 change to the landing instructions.
+
+Nothing in the report above was made untrue by the landing.
