@@ -1384,6 +1384,8 @@ mod tests {
         let host = |kind, state| crate::Host {
             id: 1,
             kind,
+            color: Default::default(),
+            icon: Default::default(),
             destination: None,
             alias: None,
             name: "this machine".to_string(),

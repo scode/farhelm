@@ -110,11 +110,25 @@ async function checkoutFixture(repoName: string) {
     root, repo, repoName, url, commit, git,
     /** Call only after cleanupSession: Delete must archive intact content
      * while both the original root and its recorded identity still exist. */
-    async close() {
-      await config("clear-post-clone");
-      await config("clear-root");
-      await fs.writeFile(stack.checkout_git_config, originalConfig);
-      await fs.rm(scratch, { recursive: true, force: true });
+    async close(request: APIRequestContext) {
+      try {
+        const host = await localHostId(request);
+        const listed = await request.post("/api/checkout-trash/list", { data: { host, measure_sizes: false } });
+        expect(listed.ok(), await listed.text()).toBe(true);
+        const trash = await listed.json();
+        const owned = [...trash.checkouts, ...trash.issues].filter((entry: {path: string}) => entry.path.startsWith(root + path.sep));
+        const ids = [...new Set(owned.map((entry: {id: string}) => entry.id))];
+        if (ids.length) {
+          const emptied = await request.post("/api/checkout-trash/delete", { data: { host, ids } });
+          expect(emptied.ok(), await emptied.text()).toBe(true);
+          expect((await emptied.json()).removed.sort()).toEqual(ids.sort());
+        }
+      } finally {
+        await config("clear-post-clone");
+        await config("clear-root");
+        await fs.writeFile(stack.checkout_git_config, originalConfig);
+        await fs.rm(scratch, { recursive: true, force: true });
+      }
     },
   };
 }
@@ -264,7 +278,7 @@ test("lost durable refusal refreshes the preview before an explicit new launch",
     expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve this collision\n");
   } finally {
     for (const id of new Set(ids.reverse())) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -302,7 +316,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
     expect((await fs.readdir(fixture.root)).sort()).toEqual([`${fixture.repoName}-1`, `${fixture.repoName}-fix`]);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -328,7 +342,7 @@ test("a typed command survives a real managed checkout", async ({ page, request 
     expect(persisted.invocation).toBe(FAKE_AGENT);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -368,7 +382,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     expect(await fs.readdir(fixture.root), "an ordinary launch runs neither clone nor post-clone hook").toEqual([]);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -461,7 +475,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     expect(await fs.readFile(path.join(unmanaged, "foreign"), "utf8")).toBe("unmanaged content\n");
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -563,7 +577,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     expect(await fs.readFile(path.join(unmanaged, "foreign"), "utf8")).toBe("keep unrelated directory\n");
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -644,7 +658,7 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     await page.keyboard.press("Escape");
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -714,7 +728,7 @@ test("clone lost race re-previews a suffix and waits for another launch click", 
     expect((await sessionState(request, origin.id)).working_copy).toEqual(original.working_copy);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -798,7 +812,7 @@ test("clone retains its name and key after a lost success and occupied re-previe
     expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(origin.cwd), name].sort());
   } finally {
     for (const id of new Set(ids.reverse())) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
 
@@ -871,6 +885,240 @@ test("replace with into a managed checkout of the source's repository gets the n
     expect((await request.get(`/api/sessions/${origin.id}`)).status()).toBe(404);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close();
+    await fixture.close(request);
   }
 });
+
+
+/** Set up through the real preview/create chain, then independently prove the
+ * checkout and terminal are live before any trash or preservation assertion. */
+async function trashSession(page: Page, request: APIRequestContext,
+  fixture: Awaited<ReturnType<typeof checkoutFixture>>, ids: string[], title: string) {
+  const host = await localHostId(request);
+  const hosts = await request.get("/api/hosts");
+  expect(hosts.ok(), await hosts.text()).toBe(true);
+  const claim = (await hosts.json()).hosts.find((row: {id: number}) => row.id === host);
+  expect(claim.state.phase).toBe("connected");
+  const offered = await request.post("/api/github-checkout-preview", {
+    data: { host, expected_incarnation: claim.incarnation, repo: fixture.repo, title },
+  });
+  expect(offered.ok(), await offered.text()).toBe(true);
+  const preview = await offered.json();
+  const created = await request.post("/api/sessions", { data: {
+    host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title,
+    command: commandLaunch(FAKE_AGENT), intent_key: `trash-${title}-${Date.now()}`,
+    github_checkout: { repo: fixture.repo, title, preview },
+  }});
+  expect(created.ok(), await created.text()).toBe(true);
+  const session = await created.json();
+  ids.push(session.id);
+  await page.goto("/");
+  await assertCheckout(page, request, fixture, session.id, session.cwd, false);
+  return session;
+}
+
+/** Observe the real animation calls without replacing their effects. This
+ * distinguishes an affirmative archive cue from a generic row disappearance. */
+async function observeTrashCue(page: Page) {
+  await page.evaluate(() => {
+    const original = Element.prototype.animate;
+    (window as any).__trashCue = { flight: 0, wiggle: 0 };
+    Element.prototype.animate = function(...args: Parameters<typeof original>) {
+      if (this.classList.contains("checkout-trash-flight")) (window as any).__trashCue.flight++;
+      if (this.classList.contains("checkout-trash-button")) (window as any).__trashCue.wiggle++;
+      return original.apply(this, args);
+    };
+  });
+}
+
+/** The user chooses Delete and answers the live-session prompt. Retain its
+ * actual host fact independently of the count and animation assertions. */
+async function uiDelete(page: Page, id: string): Promise<{archived?: boolean}> {
+  const row = page.locator(`.session-row[data-session-id="${id}"]`);
+  await openRowMenu(row);
+  await row.locator(".session-row-delete").click();
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.request().method() === "DELETE" && new URL(r.url()).pathname === `/api/sessions/${id}`),
+    row.locator(".confirm-delete").click(),
+  ]);
+  expect(response.ok(), await response.text()).toBe(true);
+  const reply = await response.json();
+  await expect(row).toHaveCount(0);
+  return reply;
+}
+
+/** Borrowers and another window share archive membership, but only the window
+ * whose Delete actually archived the checkout plays the finite cue. */
+test("trash count and cue follow the final reference, including another client", async ({page, request, context}, info) => {
+  const fixture = await checkoutFixture("browser-trash-cue");
+  const ids: string[] = [];
+  let observer: Page | undefined;
+  try {
+    const host = await localHostId(request);
+    const origin = await trashSession(page, request, fixture, ids, "origin");
+    const borrower = await createSession(request, {host, title: "trash-borrower", cwd: origin.cwd});
+    ids.push(borrower.id);
+    expect((await sessionState(request, borrower.id)).working_copy).toBeTruthy();
+    await assertLive(page, borrower.id);
+    await page.emulateMedia({reducedMotion: "no-preference"});
+    await observeTrashCue(page);
+    observer = await context.newPage();
+    await observer.goto("/");
+    await expect(observer.locator(`.session-row[data-session-id="${origin.id}"]`)).toBeVisible();
+    await observeTrashCue(observer);
+    // This zero is the initial presentation, not a host-read readiness oracle.
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "0");
+    expect((await uiDelete(page, origin.id)).archived).toBeUndefined();
+    expect(await page.evaluate(() => (window as any).__trashCue)).toEqual({flight: 0, wiggle: 0});
+    expect(await fs.readFile(path.join(origin.cwd, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
+    expect((await uiDelete(page, borrower.id)).archived).toBe(true);
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
+    await expect.poll(() => page.evaluate(() => (window as any).__trashCue)).toEqual({flight: 1, wiggle: 1});
+    await expect(observer.locator(`.session-row[data-session-id="${borrower.id}"]`)).toHaveCount(0);
+    await expect(observer.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
+    expect(await observer.evaluate(() => (window as any).__trashCue)).toEqual({flight: 0, wiggle: 0});
+    await page.locator(".checkout-trash-button").click();
+    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const band = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
+    await expect(band.locator(".checkout-trash-entry")).toHaveCount(1);
+    await expect(band.locator(".trash-host-delete")).toBeEnabled();
+    await expect(band.locator(".checkout-trash-entry-meta")).toContainText(fixture.repo);
+    await expect(band.locator(".checkout-trash-entry-meta")).toContainText(/archived .* UTC/);
+    await expect(band.locator(".checkout-trash-path")).toContainText(path.join(fixture.root, "farhelm-archived-working-copies"));
+    await expect(band.locator(".checkout-trash-host-header")).toContainText(/KiB|MiB/);
+    await band.locator(".trash-host-delete").click();
+    await expect(band.locator(".checkout-trash-confirm")).toContainText("never committed or pushed is lost permanently");
+    await expect(band.locator(".trash-confirm-cancel")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);
+    await band.locator(".trash-host-delete").click();
+    await page.screenshot({path: info.outputPath("trash-confirmation.png")});
+    await band.locator(".trash-confirm-submit").click();
+    await expect(band).toHaveCount(0);
+    expect(await fs.readdir(path.join(fixture.root, "farhelm-archived-working-copies"))).toEqual([]);
+    await dialog.locator(".trash-close").click();
+    await expect(page.locator(".checkout-trash-button")).toBeFocused();
+  } finally {
+    await observer?.close();
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close(request);
+  }
+});
+
+/** Permanent cleanup freezes IDs, leaves recovery sessions and unrecorded
+ * neighbours untouched, and skips an unreachable host. Real files distinguish
+ * a safe refusal from a merely optimistic dialog. */
+test("trash global confirmation freezes archives and reports preserved recovery work", async ({page, request}, info) => {
+  test.setTimeout(120_000);
+  const fixture = await checkoutFixture("browser-trash-delete");
+  const ids: string[] = [];
+  let down: number | undefined;
+  try {
+    const host = await localHostId(request);
+    const first = await trashSession(page, request, fixture, ids, "first");
+    await deleteSession(request, first.id);
+    const archive = path.join(fixture.root, "farhelm-archived-working-copies");
+    const destinations = await fs.readdir(archive);
+    expect(destinations).toHaveLength(1);
+    const recovered = path.join(archive, destinations[0]);
+    expect(await fs.readFile(path.join(recovered, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
+    const recovery = await createSession(request, {host, title: "recovery-in-trash", cwd: recovered});
+    ids.push(recovery.id);
+    await assertLive(page, recovery.id);
+    const neighbour = path.join(archive, "unrecorded");
+    await fs.mkdir(neighbour);
+    await fs.writeFile(path.join(neighbour, "keep"), "unrecorded neighbour\n");
+    const added = await request.post("/api/hosts", {data: {ssh: "user@trash-unreachable.invalid"}});
+    expect(added.ok(), await added.text()).toBe(true);
+    down = (await added.json()).id;
+    await page.goto("/");
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
+    await page.locator(".checkout-trash-button").click();
+    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const unreachable = dialog.locator(`.checkout-trash-host[data-host-id="${down}"]`);
+    await expect(unreachable).toHaveClass(/unreachable/);
+    await expect(unreachable).toContainText("not reachable");
+    await expect(unreachable.locator(".trash-host-delete")).toBeDisabled();
+    await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
+    await dialog.locator(".trash-delete-all").click();
+    await expect(dialog.locator(".checkout-trash-confirm")).toContainText("Delete 1 archived checkout");
+    await dialog.locator(".trash-confirm-submit").click();
+    await expect(dialog.locator(".checkout-trash-issue").filter({hasText: recovered}).first()).toContainText("a session uses this archive");
+    await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(1);
+    expect(await fs.readFile(path.join(recovered, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
+    expect(await fs.readFile(path.join(neighbour, "keep"), "utf8")).toBe("unrecorded neighbour\n");
+    await dialog.locator(".trash-close").click();
+    await deleteSession(request, recovery.id);
+
+    // Reduced motion is checked on an affirmative local archive reply, not
+    // on a bare deletion which would skip the cue in every configuration.
+    const second = await trashSession(page, request, fixture, ids, "second");
+    await page.emulateMedia({reducedMotion: "reduce"});
+    await observeTrashCue(page);
+    expect((await uiDelete(page, second.id)).archived).toBe(true);
+    expect(await page.evaluate(() => (window as any).__trashCue)).toEqual({flight: 0, wiggle: 0});
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "2");
+    await page.locator(".checkout-trash-button").click();
+    await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
+    await dialog.locator(".trash-delete-all").click();
+    await expect(dialog.locator(".checkout-trash-confirm")).toContainText("Delete 2 archived checkouts");
+    const later = await contextlessTrashSession(request, fixture, ids, "later");
+    await expect.poll(async () => (await fs.readdir(archive)).length).toBe(4); // two confirmed, later, neighbour
+    const [deletion] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === "/api/checkout-trash/delete"),
+      dialog.locator(".trash-confirm-submit").click(),
+    ]);
+    expect(deletion.request().postDataJSON().ids).toHaveLength(2);
+    expect(deletion.request().postDataJSON().host).toBe(host);
+    await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(1);
+    await expect(dialog.locator(".checkout-trash-entry")).toContainText("later");
+    expect(await fs.readFile(path.join(later, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
+    expect(await fs.readFile(path.join(neighbour, "keep"), "utf8")).toBe("unrecorded neighbour\n");
+    await page.screenshot({path: info.outputPath("trash-preserved.png")});
+    await dialog.locator(".trash-close").click();
+  } finally {
+    // Restore the shared clone configuration even if host removal fails.
+    try {
+      if (down !== undefined) {
+        const removed = await request.delete(`/api/hosts/${down}`);
+        expect(removed.ok(), await removed.text()).toBe(true);
+      }
+    } finally {
+      try {
+        for (const id of ids.reverse()) await cleanupSession(request, id);
+      } finally {
+        await fixture.close(request);
+      }
+    }
+  }
+});
+
+/** Archive new work from another client while the first client holds its
+ * confirmation. The durable hook file establishes completed preparation;
+ * no terminal liveness assumption is needed for this API-driven archive. */
+async function contextlessTrashSession(request: APIRequestContext,
+  fixture: Awaited<ReturnType<typeof checkoutFixture>>, ids: string[], title: string): Promise<string> {
+  // This helper uses the same real preview/admission contracts as trashSession.
+  const host = await localHostId(request);
+  const hosts = (await (await request.get("/api/hosts")).json()).hosts;
+  const claim = hosts.find((row: {id: number}) => row.id === host);
+  expect(claim.state.phase).toBe("connected");
+  const offered = await request.post("/api/github-checkout-preview", {data: {host, expected_incarnation: claim.incarnation, repo: fixture.repo, title}});
+  expect(offered.ok(), await offered.text()).toBe(true);
+  const preview = await offered.json();
+  const created = await request.post("/api/sessions", {data: {host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title,
+    command: commandLaunch(FAKE_AGENT), intent_key: `trash-${title}-${Date.now()}`, github_checkout: {repo: fixture.repo, title, preview}}});
+  expect(created.ok(), await created.text()).toBe(true);
+  const session = await created.json();
+  ids.push(session.id);
+  // The hook's durable file is a preparation oracle independent of admission.
+  await expect.poll(async () => fs.readFile(path.join(session.cwd, "hook-count"), "utf8").catch(() => "not prepared"),
+    {timeout: 20_000}).toBe("once\n");
+  expect((await sessionState(request, session.id)).working_copy).toBeTruthy();
+  await deleteSession(request, session.id);
+  const destinations = await fs.readdir(path.join(fixture.root, "farhelm-archived-working-copies"));
+  const name = destinations.find(name => name.startsWith(path.basename(session.cwd) + "-"));
+  expect(name).toBeTruthy();
+  return path.join(fixture.root, "farhelm-archived-working-copies", name!);
+}

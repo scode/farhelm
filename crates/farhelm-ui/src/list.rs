@@ -48,6 +48,8 @@ mod save_template;
 mod shared;
 /// The Templates panel beside New (SPEC.md, Launch templates).
 mod templates;
+/// Recorded archives, confirmed permanent cleanup, and its local Delete cue.
+mod trash;
 mod view;
 
 pub(crate) use shared::{OpenDestination, with_source_host};

@@ -589,3 +589,26 @@ pub(crate) fn SettingsIcon() -> Element {
         }
     }
 }
+
+/// The checkout trash's empty outline and open-lid full state. The containing
+/// button supplies its count and accessible name; the shape is decorative.
+#[component]
+pub(crate) fn TrashIcon(full: bool) -> Element {
+    rsx! {
+        svg {
+            width: "16", height: "16", view_box: "0 0 12 12", fill: "none",
+            stroke: "currentColor", stroke_width: "1.2",
+            stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
+            "data-glyph": if full { "trash-full" } else { "trash-empty" },
+            if full {
+                path { d: "M2 2.6l7.6-1.9M5 1.9l-.3-1 2.4-.6.3 1" }
+                path { d: "M2.6 4.2l.6 6.1a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0 .9-.8l.6-6.1z", fill: "currentColor" }
+                path { d: "M4 4.2l.8-1.2 1.4.6 1.6-.9.6 1.5" }
+            } else {
+                path { d: "M1.5 3h9M4.6 3V1.6h2.8V3" }
+                path { d: "M2.6 3l.6 7.3a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0 .9-.8L9.4 3" }
+                path { d: "M5 5.2v3.8M7 5.2v3.8" }
+            }
+        }
+    }
+}

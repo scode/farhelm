@@ -52,21 +52,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   started from the user's own ssh config puts that config's port forwards on Farhelm's connection, where no client can
   cancel them. Say so when a host has no socket at all because the state directory's path is too long.
 
-- **Make checkout archiving understandable, or drop it.** Deleting the last session using a fresh GitHub checkout moves
-  the checkout into `farhelm-archived-working-copies` under the working-copy root. The only explanation is one line in
-  Delete's confirmation ("moves it into the working-copy archive"), which does not say where that is or what it is for,
-  and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
-  learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do. Plan:
-  `plans/queue/managed-checkout-trash.md`.
-
-- **Make `gh:` launches less magical.** In the maintainer's words, "the gh: stuff is kinda magical right now". A session
-  in a fresh GitHub checkout behaves differently from one in an ordinary folder: a `gh:` launch clones into a new
-  directory under the working-copy root and names it after the session, deleting the last session using it archives the
-  checkout, and Clone is planned to make another checkout. Consider how the launcher and the session list could better
-  surface what is going on, such as that a session lives in a checkout and of which repository, and what a `gh:` launch
-  or an action on such a session is about to do. Related to the checkout archiving entry above. Plan:
-  `plans/queue/managed-checkout-trash.md`.
-
 - **Redesign the launcher's folder shortcuts.** Under the folder field, the launcher shows a grid of dotted-underline
   links: recently used folders, cut off so that several look identical, then "home" and "local home" on a row of their
   own. Nothing labels them, so the grid reads like a rendering bug until you stare at it long enough to guess that it

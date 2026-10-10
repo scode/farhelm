@@ -733,6 +733,17 @@ checkout to move into `farhelm-archived-working-copies` under its original root,
 timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
 A foreign object replacing the recorded path must remain untouched. The UI calls this archive the trash.
 
+The session list's trash button sits immediately left of New, with an outline can when empty and an open-lid can and
+count when it holds checkouts on reachable hosts. Its dialog groups archives newest first by host, showing repository,
+archive time, bounded disk usage and the directory to copy work out of before cleanup. Unreachable hosts remain visible
+but cannot be checked or deleted. Unknown sizes make totals explicitly partial. Per-host and global delete ask once in
+place, naming the confirmed hosts, checkout count and size, and warning that uncommitted or unpushed work is permanently
+lost. The global action skips unreachable hosts and waits until every reachable host can be read. There is no restore
+action or automatic cleanup.
+
+Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
+moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
+
 An explicitly confirmed trash delete is the permanent-cleanup exception: it removes only recorded archived checkouts
 whose opened root and directory still match their ownership evidence. It does not follow symlinks or cross mounts, and
 refuses an archive containing a retained session's working folder. Missing or mismatched records can be discarded

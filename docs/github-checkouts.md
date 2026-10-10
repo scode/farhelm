@@ -77,8 +77,17 @@ Leave the sibling `.lock` files in place so simultaneous checkouts continue to t
 
 A checkout stays in place while any retained session uses it or one of its subdirectories. Stopped, exited, and errored
 sessions all count. Deleting the final session moves the entire checkout into `farhelm-archived-working-copies` under
-its original root, with a timestamped name. This includes untracked files and Git metadata; it frees no disk space.
-Empty that archive by hand when you decide its contents are no longer needed.
+its original root, with a timestamped name. This includes untracked files and Git metadata; it frees no disk space. The
+trash button beside New opens these archives grouped by host, newest first, with their repository, archive time, disk
+usage and on-disk directory. Copy anything you want to recover out of that directory before cleanup. Size totals are
+partial when a directory cannot be measured; an unreachable host cannot be checked or emptied.
+
+Delete all on a host, or across reachable hosts, asks once before removing the selected archived checkouts permanently.
+Uncommitted or unpushed work in them is lost. Farhelm verifies its recorded ownership again before deleting: unrelated
+archive neighbours and replaced directories stay untouched, and an archive containing a retained session's working
+directory is refused. Missing or replaced entries can be forgotten from the trash with a visible explanation. Cleanup
+failures are shown per checkout, including a failure after some contents have already been removed. There is no restore
+action, and nothing empties the trash automatically.
 
 An ordinary session that borrows a managed checkout can be its final reference, so deleting that borrower can cause the
 move. Same-directory replacement keeps a reference throughout. Moving a replacement elsewhere releases the old checkout
