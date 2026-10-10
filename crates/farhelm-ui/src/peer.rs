@@ -84,8 +84,8 @@ pub(crate) fn display_peer(raw: &str) -> String {
     }
 }
 
-/// A host identity as it should be SHOWN: every non-ASCII character escaped,
-/// not just the known-bad ones [`display_peer`] escapes.
+/// A host identity as it should be SHOWN: spaces and every non-ASCII
+/// character escaped, not just the known-bad ones [`display_peer`] escapes.
 ///
 /// The adopt prompt ("recorded as install X; now reports Y") exists so the
 /// user notices when a destination is a different install, and it only works
@@ -99,16 +99,15 @@ pub(crate) fn display_identity(raw: &str) -> String {
     let escaped: String = raw
         .chars()
         .map(|ch| {
-            if ch.is_ascii() && !is_presentation_unsafe(ch) {
+            if ch.is_ascii() && ch != ' ' && !is_presentation_unsafe(ch) {
                 ch.to_string()
             } else {
                 format!("<U+{:04X}>", ch as u32)
             }
         })
         .collect();
-    // Through `display_peer` once more for its degenerate-value forms: an
-    // identity of only spaces must not render as nothing in the adopt
-    // button. On the already escaped ASCII it changes nothing else.
+    // Keep the empty-value placeholder; all spaces have already gained a
+    // visible spelling, including in an otherwise blank identity.
     display_peer(&escaped)
 }
 
@@ -245,7 +244,8 @@ mod tests {
     /// (a variation selector, which the shared list leaves alone for emoji's
     /// sake) would look identical there. Spec: identities escape every
     /// non-ASCII character, so such a pair renders differently, while a plain
-    /// UUID renders as itself.
+    /// UUID renders as itself. Spaces are visible even beside ordinary text,
+    /// so browser whitespace collapsing cannot hide an identity difference.
     #[farhelm_testtrace::test]
     fn identities_that_differ_invisibly_render_differently() {
         let recorded = "8f1c2a7e-0000-4000-8000-000000000001";
@@ -258,7 +258,15 @@ mod tests {
         assert_eq!(display_identity(""), "(empty)");
         // The adopt button interpolates this directly, so an all-space
         // identity must still render as something visible.
-        assert_eq!(display_identity("   "), "(whitespace only: 3 characters)");
+        assert_eq!(display_identity("   "), "<U+0020><U+0020><U+0020>");
+        assert_eq!(
+            display_identity(&format!("{recorded} ")),
+            format!("{recorded}<U+0020>")
+        );
+        assert_eq!(
+            display_identity(" install  id "),
+            "<U+0020>install<U+0020><U+0020>id<U+0020>"
+        );
     }
 
     /// Why this matters: the shared unsafe list now covers more invisible

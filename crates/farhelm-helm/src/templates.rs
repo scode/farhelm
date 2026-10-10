@@ -4,7 +4,7 @@
 //!
 //! Templates belong to the helm, one catalog for every host it manages. The
 //! helm checks only a template's shape when storing it (a usable name,
-//! fields of a bounded size, no unknown field); whether its fields apply is
+//! fields of a bounded size, editable commands, no unknown field); whether its fields apply is
 //! decided when it is applied, against the launcher as it is then
 //! (`farhelm_proto::launcher::apply_template`). Writes come from these routes
 //! and from an agent's `farhelm agent template` verbs, which share
@@ -266,5 +266,33 @@ mod tests {
         assert!(status.is_client_error(), "{status}");
         let (_, body) = request(&harness, "GET", "/api/templates", None).await;
         assert_eq!(body["templates"], serde_json::json!([]));
+    }
+
+    /// The shared save boundary must refuse unsafe command bytes before any
+    /// persistence. Both fields are checked through the real HTTP route, and
+    /// refusal leaves the catalog empty rather than storing a partial edit.
+    #[farhelm_testtrace::test]
+    async fn template_writes_refuse_hidden_command_characters_without_storing() {
+        let harness = rest_harness::idle_helm().await;
+        let (_, before) = request(&harness, "GET", "/api/templates", None).await;
+        assert_eq!(before["templates"], serde_json::json!([]));
+        for (key, label) in [
+            ("command", "launch command"),
+            ("resume_command", "resume command"),
+        ] {
+            for command in ["echo 'first\nsecond'", "tool \u{200B}hidden"] {
+                let (status, body) = request(
+                    &harness,
+                    "PUT",
+                    "/api/templates/unsafe",
+                    Some(serde_json::json!({key: command})),
+                )
+                .await;
+                assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+                assert!(body.as_str().unwrap().contains(label), "{body}");
+            }
+        }
+        let (_, after) = request(&harness, "GET", "/api/templates", None).await;
+        assert_eq!(after["templates"], before["templates"]);
     }
 }

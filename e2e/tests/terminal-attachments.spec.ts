@@ -145,10 +145,10 @@ interface DispatchResult {
  *
  * A paste is dispatched at xterm's hidden helper TEXTAREA rather than at
  * the mount element, and that is not incidental: xterm registers its own
- * paste handler there, so dispatching anywhere above it would test
- * terminal.js's interception while silently skipping the handler that has
- * to keep working for plain text. Capture-phase interception still sees
- * the event on the way down.
+ * paste handler there, so dispatching anywhere above it would fail to prove
+ * that capture-phase interception runs before the engine's own handler.
+ * Farhelm now owns text pastes too, calling xterm's paste method after
+ * sanitizing the contents rather than letting the event reach that handler.
  *
  * A drop is preceded by a `dragover` at the same element, because that is
  * the order a real drag produces and because `drop` does not fire at all
@@ -632,8 +632,8 @@ test("a pasted image is uploaded under a generated name and its path inserted", 
 // the text says. This pins both halves: the text arrives as terminal
 // input, and no upload was attempted.
 //
-// It also exercises xterm's own paste handler, which an interception bug
-// could break by swallowing every paste event indiscriminately.
+// It also exercises Farhelm's text interception and xterm's paste method,
+// so sanitizing framing controls cannot accidentally swallow ordinary text.
 test("pasted text that looks like a path arrives as text, with nothing uploaded", async ({
   page,
   request,
@@ -657,6 +657,30 @@ test("pasted text that looks like a path arrives as text, with nothing uploaded"
     await waitForIslandLogicalText(page, "terminal", "echo:/etc/hosts");
     expect(uploads.count(), "text is not an attachment").toBe(0);
     await expect(page.locator('[data-terminal="agent"] .attach-error')).toHaveCount(0);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// A pure sanitizer test cannot prove the capture listener intercepted before
+// xterm's own handler or that drops use it too. The live pty echo distinguishes
+// one outer paste frame from an embedded marker that would close it early.
+test("pasted and dropped text cannot close bracketed paste early", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  let id: string | undefined;
+  try {
+    const stamp = Date.now();
+    const session = await openAttachmentSession(page, request, `attach-frame-${stamp}`);
+    id = session.id;
+    await latchBracketedPaste(page, "terminal");
+    expect(await page.evaluate(() => (window as any).__farhelmIslands.terminal.term.modes.bracketedPasteMode)).toBe(true);
+    for (const kind of ["paste", "drop"] as const) {
+      const prefix = `${kind}-${stamp}-before`;
+      const dispatched = await dispatchPayload(page, "terminal", kind, { text: `${prefix}\x1b[201~after` });
+      expect(dispatched.event.defaultPrevented).toBe(true);
+      if (kind === "paste") expect(dispatched.event.reachedTarget).toBe(false);
+      await waitForIslandMatch(page, "terminal", new RegExp(`\\^\\[\\[200~${prefix}after\\^\\[\\[201~`));
+    }
   } finally {
     if (id) await cleanupSession(request, id);
   }
@@ -2103,12 +2127,12 @@ test("a text-only drop is prevented, inserted, and leaves the page where it was"
 // Interception has to happen BEFORE xterm's own paste handler, and only
 // for the flavors it takes responsibility for. A file paste that reached
 // xterm would paste the payload's text on top of the upload; a text paste
-// that did NOT reach it would lose the paste entirely.
+// that reached it would bypass Farhelm's removal of framing controls.
 //
 // Both are observed rather than inferred: the helper reports whether the
 // event was cancelled, whether propagation was stopped, and whether it
 // ever arrived at xterm's own textarea.
-test("file pastes are cancelled before xterm sees them; text pastes are not", async ({
+test("file and text pastes are intercepted before xterm sees the event", async ({
   page,
   request,
 }) => {
@@ -2138,16 +2162,12 @@ test("file pastes are cancelled before xterm sees them; text pastes are not", as
     ).toBe(false);
 
     const passed = await dispatchPayload(page, "terminal", "paste", { text: `plain-${stamp}` });
-    expect(passed.event.defaultPrevented, "xterm's own handler owns a text paste").toBe(false);
+    expect(passed.event.defaultPrevented, "Farhelm sanitizes a text paste before insertion").toBe(true);
+    expect(passed.event.propagationStopped).toBe(true);
     expect(
       passed.event.reachedTarget,
-      "a text paste has to arrive at the textarea xterm listens on, or the paste is simply lost",
-    ).toBe(true);
-    // Propagation IS stopped for this one — by xterm itself, on the way
-    // back up, which is the behavior terminal.js's capture-phase listeners
-    // exist to get in front of. What matters here is that it was not
-    // stopped BEFORE the target, which `reachedTarget` above is the
-    // evidence for.
+      "text must not fall through to xterm's unsanitized event handler",
+    ).toBe(false);
     await waitForIslandLogicalText(page, "terminal", `plain-${stamp}`);
   } finally {
     if (id) await cleanupSession(request, id);

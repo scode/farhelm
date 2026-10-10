@@ -1,4 +1,4 @@
-// Unit coverage for term-bytes.js's `binaryStringToBytes`, run with node's
+// Unit coverage for term-bytes.js's binary conversion and paste sanitizing, run with node's
 // built-in test runner (PLAN_M6_5.md item 1 — see the plan's "Testing
 // decisions" for why `node --test` over vitest/jest: node is already a CI
 // requirement for Playwright, and one small function does not earn a
@@ -24,7 +24,25 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const fs = require("node:fs");
 const path = require("node:path");
-const { binaryStringToBytes } = require("../assets/term-bytes.js");
+const { binaryStringToBytes, sanitizePastedText } = require("../assets/term-bytes.js");
+
+// Paste contents cannot close the frame xterm adds around them. In particular,
+// deleting one marker must not join its neighbours into a new marker; ESC is
+// stripped more broadly to keep that invariant without repeated rescanning.
+test("pasted end markers and ESC fragments cannot become terminal framing", () => {
+  assert.equal(sanitizePastedText("safe\x1b[201~evil\n"), "safeevil\n");
+  assert.equal(sanitizePastedText("\x1b[201~a\x1b[201~b\x1b[201~"), "ab");
+  assert.equal(sanitizePastedText("\x1b[20\x1b[201~1~"), "[201~");
+  assert.equal(sanitizePastedText("\x1b[31mred\x1b[0m"), "[31mred[0m");
+});
+
+// Unicode, spaces and line breaks remain paste contents; xterm still decides
+// newline normalization and whether the pane needs bracketed-paste framing.
+test("ordinary pasted text is unchanged", () => {
+  for (const text of ["", "/etc/hosts", "hello 世界 ❤️", "line\nnext\r\n\tindented"]) {
+    assert.equal(sanitizePastedText(text), text);
+  }
+});
 
 // The contract under test is "every UTF-16 code unit becomes its low
 // byte" — code UNIT, because `charCodeAt` and `length` operate on code
@@ -85,6 +103,8 @@ test("browser-global branch: window.farhelmTermBytes exists with no module prese
   vm.runInContext(source, sandbox);
 
   assert.equal(typeof sandbox.window.farhelmTermBytes.binaryStringToBytes, "function");
+  assert.equal(typeof sandbox.window.farhelmTermBytes.sanitizePastedText, "function");
+  assert.equal(sandbox.window.farhelmTermBytes.sanitizePastedText("a\x1b[201~b"), "ab");
   // `Array.from(...)`, not a direct `Uint8Array` comparison: the sandbox's
   // `Uint8Array` constructor is a DIFFERENT one from this test's own realm
   // (each `vm` context gets its own global built-ins), so `assert/strict`'s

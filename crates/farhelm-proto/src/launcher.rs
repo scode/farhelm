@@ -314,9 +314,12 @@ pub struct LaunchTemplate {
     pub fields: TemplateFields,
 }
 
-/// Check what the helm stores for a template: a usable name and fields of a
-/// bounded size. Whether the fields apply is decided only when the template
-/// is applied, against the launcher as it is then (SPEC.md).
+/// Refuse templates whose name, commands or size cannot be safely edited.
+/// Commands cannot contain controls or invisible formatting characters: the
+/// single-line editor cannot show or preserve them. Every save path shares
+/// this check; applying an already stored template does not run it, so legacy
+/// commands remain usable until the user edits the template (SPEC.md).
+/// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     let name = &template.name;
     if name.is_empty() {
@@ -332,6 +335,23 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     }
     if name.chars().any(char::is_control) {
         return Err("a template name cannot contain control characters".to_string());
+    }
+    for (field, command) in [
+        ("launch command", template.fields.command.as_deref()),
+        (
+            "resume command",
+            template
+                .fields
+                .resume_command
+                .as_ref()
+                .and_then(|value| value.as_deref()),
+        ),
+    ] {
+        if command.is_some_and(|command| command.chars().any(crate::text::is_presentation_unsafe)) {
+            return Err(format!(
+                "a template's {field} cannot contain control or invisible formatting characters"
+            ));
+        }
     }
     let bytes = serde_json::to_string(&template.fields).map_or(usize::MAX, |json| json.len());
     if bytes > TEMPLATE_FIELDS_CAP {
@@ -1162,5 +1182,79 @@ mod tests {
             },
         );
         assert!(check_template_shape(&huge).is_err());
+    }
+
+    /// Single-line editors cannot preserve hidden command characters. Every
+    /// save uses this refusal, naming the affected field; absent and reset
+    /// commands, ordinary Unicode and quoted shell arguments remain valid.
+    #[test]
+    fn template_commands_refuse_controls_and_invisible_formatting() {
+        for bad in [
+            "echo a\nb",
+            "echo\targument",
+            "echo \u{200B}hidden",
+            "echo \u{202E}reverse",
+        ] {
+            for (field, fields) in [
+                (
+                    "launch command",
+                    TemplateFields {
+                        command: Some(bad.into()),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "resume command",
+                    TemplateFields {
+                        resume_command: Some(Some(bad.into())),
+                        ..Default::default()
+                    },
+                ),
+            ] {
+                let refusal = check_template_shape(&template("unsafe", fields)).unwrap_err();
+                assert!(refusal.contains(field), "{refusal}");
+                assert!(
+                    refusal.contains("control or invisible formatting"),
+                    "{refusal}"
+                );
+            }
+        }
+        for fields in [
+            TemplateFields::default(),
+            TemplateFields {
+                resume_command: Some(None),
+                ..Default::default()
+            },
+            TemplateFields {
+                command: Some("echo '世界 ❤️'".into()),
+                resume_command: Some(Some("tool --resume '{conversation}'".into())),
+                ..Default::default()
+            },
+        ] {
+            check_template_shape(&template("ordinary", fields)).unwrap();
+        }
+    }
+
+    /// The new save rule must not retroactively disable stored templates.
+    /// Applying a legacy multiline command preserves its bytes; attempting
+    /// to save any edit still refuses until that command is repaired.
+    #[test]
+    fn legacy_template_commands_still_apply_but_cannot_be_saved() {
+        let legacy = template(
+            "legacy",
+            TemplateFields {
+                kind: Some(LauncherKind::Command),
+                command: Some("echo 'first\nsecond'".into()),
+                ..Default::default()
+            },
+        );
+        assert!(check_template_shape(&legacy).is_err());
+        let applied = apply_template(
+            &LauncherState::default(),
+            &legacy,
+            &context(&[], &[], false),
+        )
+        .unwrap();
+        assert_eq!(applied.command, "echo 'first\nsecond'");
     }
 }
