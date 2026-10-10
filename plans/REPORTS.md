@@ -4,3 +4,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 
 - [`omp-pane-guard-all-launches`](reports/omp-pane-guard-all-launches.report.md) landed 2026-10-10 in #1779: the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
 - [`hook-report-watch`](reports/hook-report-watch.report.md) landed 2026-10-10 in #1776: the supervisor applies conversation reports as soon as they are written, via a file watch, with the timer as backstop
+- [`sweep-on-timer`](reports/sweep-on-timer.report.md) landed 2026-10-10 in #1792: the supervisor sweeps on its 2 s timer only, and stops re-reading settled stopped sessions

@@ -122,3 +122,49 @@ Implementation and investigation stayed local; only prescribed reviews and cold 
 model configurations are exposed, but actual runtime model identity and usage counters are unavailable. Private review
 evidence remains under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf` and in the plan's working log beside the
 checkouts.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1792 (stop repeated launch checks after reboot), one squash commit on main, in the plan's
+follow-up round, first of the three plans landed together in this round (then waiting-sound and terminal-file-download).
+The rebase met one textual conflict, in SPEC_impl.md, where hook-report-watch had added a sentence on the periodic pass
+skipping sessions busy with a report next to the text this round changes; both are kept.
+
+#### Review before merging
+
+A separate reviewer read the round by reading the code only. Case 1 is fixed: a launch's "its boot has ended" proof is
+recorded for every retained session in the same database transaction that handles a reboot, survives later supervisor
+restarts in the new boot, is cleared for every new launch, and is restored only when a failed restart is definitively
+abandoned. Case 2 is unchanged: within one boot, a merely missing pane without that proof keeps being re-read. It found
+no path that settles a launch that could still write, and judged the change (one database column, one statement in the
+reboot transaction) proportionate to your complexity gate. Sessions whose reboot an older supervisor already handled
+keep being re-read until the next reboot the new code sees, as the report says; that includes existing installations
+right after upgrading.
+
+#### Fixes made while landing
+
+- The supervisor's test of upgrading a version-17 session database still expected the database to end at version 29;
+  this round adds version 30, so the test failed in the combined run. The landing updated it to 30 and named the new
+  step in its message.
+- SPEC_impl.md now records that older supervisors refuse the version-30 database after a downgrade, as it does for the
+  two previous versions, and two code comments the reviewer found garbled or backwards were rewritten.
+
+#### Checks
+
+All three plans of this round (sweep-on-timer's follow-up, waiting-sound, terminal-file-download) were stacked in
+landing order and checked together.
+
+- Run now: `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and `cargo build` (clean after the landing's fixes below); the
+  supervisor, helm, UI and protocol unit tests in full with the file-download end-to-end tests, through the recorder
+  with pinned tmux 3.7c, four slots and no retries (run `6225cfec`, 2699 of 2700; the failure is sweep-on-timer's
+  database upgrade test, fixed as described in its notes, after which the upgrade, schema and store tests passed 113 of
+  113 in run `106eaf3c`); the UI JavaScript tests run directly (226 of 226); the desktop asset comparison (run
+  `d09df54a`, 24 assets on both sides); and, on Chromium and WebKit with one worker and no retries, the sounds,
+  settings, change-feed, sort, stale-read, filter, approval-layout and terminal-file specs (run `208a7db7`, 122 of 122),
+  which include the four specs the first waiting-sound round broke.
+- Between the checks and the merges, main gained the 2026-10-10 triage decisions written into SPEC.md (#1801) and its
+  plan (#1802). They touch none of these plans' subjects; the only effect was a textual SPEC.md conflict in the last
+  terminal-file-download PR, resolved by keeping both texts. No checks were re-run for that.
+
+The report's checks predate the rebase; nothing else in it was made untrue by the landing.
