@@ -5,9 +5,9 @@
 //! OMP extension assets) learns which conversation its agent is in and has
 //! to tell the supervisor. It does that by writing a report file into a
 //! per-session drop directory under the supervisor's state directory and
-//! exiting; the supervisor applies waiting files on its periodic
-//! reconciliation pass (`service::report_files`). Nothing here talks to a
-//! socket, so a report made while the supervisor is not running (on the
+//! exiting; the supervisor applies waiting files on watch events, with its
+//! periodic reconciliation pass as the backstop (`service::report_files`).
+//! Nothing here talks to a socket, so a report made while the supervisor is not running (on the
 //! Mac, whenever the desktop app is closed) waits on disk instead of being
 //! lost, and a hook never stalls its agent waiting for a reply.
 //!

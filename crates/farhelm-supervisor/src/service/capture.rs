@@ -109,7 +109,7 @@ impl Supervisor {
         let entries: Vec<Arc<SessionEntry>> =
             self.sessions.lock().await.values().cloned().collect();
         self.apply_report_files(&entries, wait_for_drain).await;
-        refresh_report_only_captures(self, &entries).await;
+        refresh_report_only_captures(self, &entries, wait_for_drain).await;
         let silent = report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, Instant::now());
         for entry in silent {
             self.notify_hook_silent(&entry).await;
@@ -270,7 +270,9 @@ pub(crate) fn advance_capture(
 /// readiness independently. Reloading only after taking the claim
 /// prevents an older observation from overwriting a newer accepted report.
 /// Historical non-hook identities are left intact without re-verification.
-async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
+/// Periodic refresh skips busy claims so watch admissions cannot stall the
+/// ticker; decision-time callers wait for the serialized observation.
+async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>], wait: bool) {
     for entry in entries {
         // Every integrated kind, asked of the integration seam rather than
         // listed here: a hand-written list silently skipped any kind added
@@ -278,10 +280,17 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         if crate::agent_kind::integration_for(entry.snapshot.kind).is_none() {
             continue;
         }
-        // The shared capture claim, unbounded here: this is a background
-        // pass with no reporter waiting on it, so patience is correct and
-        // a timeout would only trade convergence for a retry next pass.
-        let _claim = sup.capture_locks.claim(&entry.info.id).await;
+        // The ticker must skip an admission that owns this claim rather than
+        // parking all sampling behind that session's exact-file verification.
+        // Restart and explicit reconciliation still need a completed refresh.
+        let _claim = if wait {
+            sup.capture_locks.claim(&entry.info.id).await
+        } else {
+            let Some(claim) = sup.capture_locks.try_claim(&entry.info.id) else {
+                continue;
+            };
+            claim
+        };
         let before = entry
             .run
             .capture
@@ -630,6 +639,36 @@ mod tests {
                 .expect("list")
                 .is_empty(),
             "a stored identity suppresses the notification"
+        );
+    }
+
+    /// Periodic refresh must not park the entire ticker behind a report's
+    /// capture claim. A decision-time refresh still converges after the claim
+    /// becomes free, so skipping a busy session cannot weaken Restart's reads.
+    #[farhelm_testtrace::test]
+    async fn periodic_refresh_skips_a_capture_claim_held_by_report_admission() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        silent_hook_session(&sup, "busy-report", Some("stored-conversation")).await;
+        let claim = sup.capture_locks.claim("busy-report").await;
+        let drain = sup.report_drain.lock().await;
+        assert!(sup.capture_locks.claimed_for_test("busy-report"));
+        tokio::time::timeout(Duration::from_secs(5), sup.capture_now())
+            .await
+            .expect("periodic capture must skip both report-owned locks");
+        drop(claim);
+        drop(drain);
+        sup.capture_pass(true).await;
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("busy-report")
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            Some("stored-conversation")
         );
     }
 

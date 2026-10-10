@@ -121,12 +121,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
   once Farhelm's own installation there is complete.
 
-- **Pick up hook report files immediately.** Once conversation hooks write their reports as files
-  (`plans/queue/hook-report-files.md`), the supervisor reads them on its periodic reconciliation pass, every two
-  seconds. Make pickup immediate with an inotify-style watch (or the macOS equivalent) on the report directories, so a
-  report is applied as soon as it is written rather than up to a pass later. Kept out of that plan on purpose, to keep
-  it small. Plan: `plans/queue/hook-report-watch.md`.
-
 - **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
   checksums, and CI no longer signs. What remains: a Vercel user that holds only the get.farhelm.io project; disconnect
   the docs project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`);

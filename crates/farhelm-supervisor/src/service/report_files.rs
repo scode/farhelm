@@ -2,9 +2,9 @@
 //!
 //! A hook writes its report into the session's drop directory and exits
 //! (`crate::hook_report` owns the format and the layout). This module is the
-//! supervisor's half: on every reconciliation pass (`Supervisor::capture_now`,
-//! which the ticker runs every two seconds and which startup,
-//! reload and Restart run before reading capture state) it takes each waiting
+//! supervisor's half: a recursive file watcher runs this drain promptly, and
+//! every reconciliation pass (`Supervisor::capture_now`: the two-second ticker,
+//! startup, reload and Restart) runs it as well. Each drain takes every waiting
 //! report, runs it through admission (the per-kind attribution and the
 //! five-step capture transaction, `Supervisor::report_conversation`), and
 //! deletes it once the outcome is settled.
@@ -109,7 +109,7 @@ impl Supervisor {
     /// drop directories of sessions that no longer exist. See the module docs
     /// for the order and the settle/retry rule.
     ///
-    /// Drains never overlap: the ticker, reload and Restart may all call this,
+    /// Drains never overlap: the watch task, ticker, reload and Restart call this,
     /// and only one at a time gets the drain lock. That is what lets a pass
     /// treat a taken file it finds at its start as a leftover of a
     /// supervisor that died mid-pass (one supervisor holds a state directory
@@ -120,7 +120,8 @@ impl Supervisor {
     /// is applying the same files, and a drain can take as long as admission
     /// does (exact-record reads, a busy capture claim); a periodic pass need
     /// not repeat work the existing drain is already doing. A caller that needs every report
-    /// already on disk judged when it returns (`wait: true`: Restart, which
+    /// already on disk judged when it returns (`wait: true`: the watch task,
+    /// which must not lose an event to a concurrent drain; Restart, which
     /// is about to choose the conversation to resume, and the test seam)
     /// waits its turn instead.
     pub(crate) async fn apply_report_files(&self, entries: &[Arc<SessionEntry>], wait: bool) {
@@ -135,6 +136,11 @@ impl Supervisor {
                 Err(_) => return,
             }
         };
+        // A waiting watch drain may acquire its turn after ownership was withdrawn.
+        // Admission must still leave the files for the next recording supervisor.
+        if !self.may_record() {
+            return;
+        }
         let root = self.state_dir.join(hook_report::REPORTS_DIR);
         let names = match dir_entry_names(&root).await {
             Ok(names) => names,
@@ -144,6 +150,9 @@ impl Supervisor {
                 return;
             }
         };
+        if let Some(gate) = self.seams.faults.report_drain_listed() {
+            gate().await;
+        }
         for name in names {
             let dir = root.join(&name);
             match entries.iter().find(|entry| entry.info.id == name) {

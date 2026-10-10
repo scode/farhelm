@@ -14,9 +14,10 @@
 //!
 //! # Timer-owned reconciliation
 //!
-//! The timer observes launch outcomes and applies report files without a polling
-//! helm. Lists and rename replies read that state, plus fresh pane liveness and
-//! tabs: launch-error classification, Resume readiness and notifications may lag
+//! The timer observes launch outcomes without a polling helm and backs up the
+//! independent file watcher that applies hook reports promptly (`report_watch`).
+//! Lists and rename replies read that state, plus fresh pane liveness and tabs:
+//! launch-error classification, exact-record readiness and notifications may lag
 //! by one nominal tick. The pane-death wake promptly commits newly dead owned
 //! agent panes, without sampling screens or sweeping the stopped population.
 //! Startup, reload and decision-time Restart retain their capture pass.
@@ -121,7 +122,11 @@
 //! point", which the first version of this doc claimed while the code only
 //! checked at the top of the loop.
 //!
-//! `TickerHandle::shutdown` waits for the task to actually be gone and
+//! The handle also owns the independent report watcher. Its drain does not
+//! delay sampling; it finishes an in-flight admission before stopping, while
+//! a closed supervisor lifetime channel ends an idle watch without another event.
+//!
+//! `TickerHandle::shutdown` waits for both tasks to actually be gone and
 //! fails if it panicked, so "no leaked task" and "the ticker did not die
 //! screaming" are both assertions rather than hopes. In production
 //! `TickerHandle::watch` is what turns the same information into a loud
@@ -168,6 +173,9 @@ use tracing::{debug, error, info, warn};
 /// freshness — what a reader recognizes prompts in — has the same
 /// population-dependent bound, with the same consequence: a prompt that
 /// appeared is noticed at the session's next sample, whenever that is.
+///
+/// Hook report pickup does not wait for this interval: the independent file
+/// watcher applies reports promptly, and the tick remains its backstop.
 ///
 /// Overridable per supervisor through [`crate::service::SupervisorSeams`],
 /// which is how tests get a cadence measured in milliseconds.
@@ -692,6 +700,9 @@ pub(crate) struct TickerHandle {
     /// the stop is a latched fact the sampling loop can re-check between
     /// captures rather than an edge it can miss.
     _stop: oneshot::Sender<()>,
+    /// Independent event-driven report drains share this owner, never the tick
+    /// loop: waiting for report admission must not hold up pane sampling.
+    _report_watch: super::report_watch::ReportWatchHandle,
     /// The task, taken once by whoever observes its end.
     ///
     /// `Option` because a `JoinHandle` must never be polled after it
@@ -705,6 +716,11 @@ pub(crate) struct TickerHandle {
 impl TickerHandle {
     /// Await the ticker's END and report it, loudly if it panicked; then
     /// never resolve again.
+    ///
+    /// It also returns, once, when the conversation report watch's task
+    /// ends (that task logs its own reason); the ticker keeps running then,
+    /// and the next call goes back to waiting on it. So a caller may see this
+    /// resolve at most twice over the handle's life.
     ///
     /// `serve` selects on this beside `accept`, which is the only
     /// supervision a task like this can usefully get: restarting it would
@@ -724,7 +740,10 @@ impl TickerHandle {
             std::future::pending::<()>().await;
             return;
         };
-        let outcome = task.await;
+        let outcome = tokio::select! {
+            outcome = task => outcome,
+            () = self._report_watch.watch() => return,
+        };
         self.task = None;
         match outcome {
             Ok(()) => warn!(
@@ -758,6 +777,7 @@ impl TickerHandle {
     /// also a stopped one.
     pub(crate) async fn shutdown(mut self) {
         drop(self._stop);
+        self._report_watch.shutdown().await;
         if let Some(task) = self.task.take() {
             task.await.expect("the ticker task must not panic");
         }
@@ -879,6 +899,7 @@ fn next_deadline(
 /// The task holds a `Weak`, so this does NOT extend the supervisor's
 /// lifetime; a failed upgrade is a normal, silent end to the loop.
 pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
+    let report_watch = super::report_watch::start_report_watch(sup);
     let interval = sup.seams.ticker_interval;
     let weak = Arc::downgrade(sup);
     // A clone of the driver rather than a reach through `weak` each time:
@@ -975,6 +996,7 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
     });
     TickerHandle {
         _stop: stop_tx,
+        _report_watch: report_watch,
         task: Some(task),
     }
 }
@@ -3832,13 +3854,51 @@ mod tests {
     }
 
     /// Shutdown waits for report reconciliation already inside a tick.
-    /// The per-session claim is a real admission boundary: observing its
-    /// waiter proves the ticker reached the refresh before requesting stop.
-    /// The warning latch afterwards proves the rest of that pass completed.
+    /// Hold the drain at its directory snapshot, before the refresh and silent-hook
+    /// warning. Periodic refresh skips busy capture claims, so a held claim cannot
+    /// establish this boundary anymore. Disable the independent watcher so only
+    /// the ticker can reach the gate; the warning latch afterwards proves that
+    /// same pass finished rather than being cancelled when stop was requested.
     #[farhelm_testtrace::test]
     async fn shutdown_waits_out_a_report_refresh_already_in_flight() {
         let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let watch_failed = Arc::new(AtomicBool::new(false));
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    report_watch_creation: Some(Arc::new({
+                        let watch_failed = Arc::clone(&watch_failed);
+                        move || {
+                            watch_failed.store(true, Ordering::Relaxed);
+                            anyhow::bail!("ticker-only cooperative stop fixture")
+                        }
+                    })),
+                    report_drain_listed: Some(Arc::new({
+                        let entered = Arc::clone(&entered);
+                        let release = Arc::clone(&release);
+                        move || {
+                            let release = Arc::clone(&release);
+                            entered.notify_one();
+                            Box::pin(async move { release.notified().await })
+                        }
+                    })),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        // Startup must finish before the directory exists: otherwise its own
+        // reconciliation would wait at the gate before a ticker could be started.
+        let root = state.path().join(crate::hook_report::REPORTS_DIR);
+        assert!(
+            !root.exists(),
+            "startup did not enter the report drain gate"
+        );
+        std::fs::create_dir(&root).expect("make the ticker's drain reach its snapshot");
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
         entry.info.id = "silent-hook".into();
         entry.snapshot.kind = farhelm_proto::AgentKind::Claude;
@@ -3850,14 +3910,20 @@ mod tests {
             .lock()
             .await
             .insert(entry.info.id.clone(), Arc::clone(&entry));
-        let claim = sup.capture_locks.claim(&entry.info.id).await;
         let ticker = start_ticker(&sup);
-        tokio::time::timeout(
-            TEST_DEADLINE,
-            sup.capture_locks.claims_reached_for_test(&entry.info.id, 2),
-        )
-        .await
-        .expect("ticker must reach report refresh's held claim");
+        assert!(
+            watch_failed.load(Ordering::Relaxed),
+            "only the ticker may drain"
+        );
+        tokio::time::timeout(TEST_DEADLINE, entered.notified())
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "ticker must reach the held report drain: {error}; root_exists={}; hook_warned={}",
+                    root.is_dir(),
+                    entry.run.hook_warned.load(Ordering::Relaxed)
+                )
+            });
         let shutdown = ticker.shutdown();
         tokio::pin!(shutdown);
         assert!(
@@ -3868,10 +3934,10 @@ mod tests {
             "shutdown must wait for the refresh already in flight"
         );
         assert!(!entry.run.hook_warned.load(Ordering::Relaxed));
-        drop(claim);
+        release.notify_one();
         tokio::time::timeout(TEST_DEADLINE, shutdown)
             .await
-            .expect("shutdown after claim release");
+            .expect("shutdown after report drain release");
         assert!(
             entry.run.hook_warned.load(Ordering::Relaxed),
             "the in-flight pass must finish before shutdown returns"
