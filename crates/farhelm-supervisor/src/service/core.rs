@@ -2889,6 +2889,8 @@ fn relaunched_entry(
         info,
         terminal,
         run: RunCells {
+            launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_error: Arc::new(std::sync::Mutex::new(None)),
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
             first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -3730,6 +3732,17 @@ pub(crate) struct SessionEntry {
 /// entry's construction sites.
 #[derive(Clone)]
 pub(crate) struct RunCells {
+    /// Successful negative launch reads after this run could no longer write.
+    /// Only a durably terminal outcome with an owned dead pane, or a boot-change
+    /// interruption, can settle them. Same-boot absence is transient evidence;
+    /// read failures and uncommitted errors must keep retrying. Rename shares
+    /// this latch; relaunch and reload begin with fresh evidence obligations.
+    pub(crate) launch_reads_settled: Arc<std::sync::atomic::AtomicBool>,
+    /// Error cleanup completed after preserving accepted-create evidence.
+    /// Failed reads, settlements and removals leave this clear for the next
+    /// observer. A reload retries once because a prior process may have crashed
+    /// between committing Error and unlinking its credential-bearing artifacts.
+    pub(crate) launch_cleanup_done: Arc<std::sync::atomic::AtomicBool>,
     /// A launch failure observed but not yet stored, retained for cached replies.
     /// A read-only supervisor or failed write must still show Error rather than
     /// lose the only classification a dead pane cannot supply. Successful Error
@@ -5547,6 +5560,7 @@ impl Supervisor {
         // would already be the terminal `Interrupted` this policy can never
         // reclassify (`Transition::apply`'s catch-all).
         let mut rows = store.load_all().await?;
+        let mut cleaned_launches = HashSet::new();
         if may_write
             && let Ok(Some(current)) = &current_boot
             && stored_boot.as_ref() != Some(current)
@@ -5636,7 +5650,9 @@ impl Supervisor {
                     .map(|row| (row.id.clone(), row.generation))
                     .collect::<Vec<_>>()
                 {
-                    cleanup_launch_artifacts(state_dir, store, &id, generation).await;
+                    if cleanup_launch_artifacts(state_dir, store, &id, generation).await {
+                        cleaned_launches.insert(id);
+                    }
                 }
             }
         }
@@ -5714,8 +5730,11 @@ impl Supervisor {
             // read-only reload must not remove files, though, because this
             // pass does not own the state directory's durable writes.
             if matches!(row.outcome, LastOutcome::Error { .. }) {
-                if may_write {
-                    cleanup_launch_artifacts(state_dir, store, &row.id, row.generation).await;
+                if may_write
+                    && !cleaned_launches.contains(&row.id)
+                    && cleanup_launch_artifacts(state_dir, store, &row.id, row.generation).await
+                {
+                    cleaned_launches.insert(row.id.clone());
                 }
                 if let Some((pane, state)) = found {
                     found_panes.insert(row.id.clone(), (pane, state));
@@ -5783,6 +5802,8 @@ impl Supervisor {
                                 pane_dead,
                             )
                             .await
+                            .ok()
+                            .flatten()
                         };
                         // Only a previously accepted, now stopped terminal
                         // can turn incomplete setup into a runtime failure.
@@ -5969,8 +5990,10 @@ impl Supervisor {
                         .map(|row| (row.id.clone(), row.generation))
                         .collect::<Vec<_>>()
                     {
-                        if matches!(committed.get(&id), Some(LastOutcome::Error { .. })) {
-                            cleanup_launch_artifacts(state_dir, store, &id, generation).await;
+                        if matches!(committed.get(&id), Some(LastOutcome::Error { .. }))
+                            && cleanup_launch_artifacts(state_dir, store, &id, generation).await
+                        {
+                            cleaned_launches.insert(id);
                         }
                     }
                     committed
@@ -6034,6 +6057,7 @@ impl Supervisor {
             );
             // Derived before `row.id` is moved into the entry's `info`.
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
+            let launch_cleanup_done = cleaned_launches.contains(&row.id);
             let launch_error = if matches!(outcome, LastOutcome::Error { .. }) {
                 None
             } else {
@@ -6094,6 +6118,10 @@ impl Supervisor {
                     },
                     terminal,
                     run: RunCells {
+                        launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(
+                            launch_cleanup_done,
+                        )),
                         launch_error: Arc::new(std::sync::Mutex::new(launch_error)),
                         outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
@@ -8409,6 +8437,8 @@ impl Supervisor {
                 info: info.clone(),
                 terminal,
                 run: RunCells {
+                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -9681,6 +9711,8 @@ impl Supervisor {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
                 run: RunCells {
+                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     // Input starts only the diagnostic timer, never identity admission.
@@ -13667,6 +13699,8 @@ impl Supervisor {
                 info,
                 terminal: None,
                 run: RunCells {
+                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -17114,6 +17148,8 @@ pub(crate) mod tests {
             },
             terminal,
             run: RunCells {
+                launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(outcome)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -17320,6 +17356,25 @@ pub(crate) mod tests {
         assert_eq!(renamed.info.title, "new title");
         assert_eq!(old.info.title, "t", "the replaced entry is left untouched");
 
+        old.run
+            .launch_reads_settled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        old.run
+            .launch_cleanup_done
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            renamed
+                .run
+                .launch_reads_settled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        assert!(
+            renamed
+                .run
+                .launch_cleanup_done
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+
         *old.run.outcome.lock().unwrap() = LastOutcome::Interrupted;
         assert_eq!(
             *renamed.run.outcome.lock().unwrap(),
@@ -17440,6 +17495,13 @@ pub(crate) mod tests {
             conversation: "conv-old".to_string(),
         };
 
+        old.run
+            .launch_reads_settled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        old.run
+            .launch_cleanup_done
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+
         let relaunched = relaunched_entry(
             &old,
             old.info.clone(),
@@ -17448,6 +17510,21 @@ pub(crate) mod tests {
             None,
             LastOutcome::Launching,
         );
+        assert!(
+            !relaunched
+                .run
+                .launch_reads_settled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "a new shim has new evidence to write"
+        );
+        assert!(
+            !relaunched
+                .run
+                .launch_cleanup_done
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "old cleanup cannot retire new launch artifacts"
+        );
+
         assert_eq!(
             relaunched
                 .run
@@ -31651,6 +31728,94 @@ exit 0
                 outcome
             );
         }
+    }
+
+    /// Ready preparation and missing launch failure are final once an owned
+    /// pane has died. Corrupting preparation afterward makes a repeated parse
+    /// observable as Error, independently of the sentinel's negative result.
+    #[farhelm_testtrace::test]
+    async fn settled_launch_reads_do_not_reparse_ready_preparation() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let info = fresh_create(&sup, &checkout_fixture(&root), None)
+            .await
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&info.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = crate::launch::preparation_state_path(state.path(), &plan.id);
+        crate::launch::write_preparation_state(
+            &path,
+            &plan.id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let row = sup.store.session(&info.id).await.unwrap().unwrap();
+        assert!(
+            !row.pane.is_empty(),
+            "premise: accepted pane owns preparation duty"
+        );
+        assert!(
+            sup.store
+                .preparation_origin(&info.id, row.generation)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        std::fs::remove_file(crate::launch::spec_path_for_launch(
+            state.path(),
+            &info.id,
+            row.generation,
+        ))
+        .unwrap();
+        let entry = sup.sessions.lock().await[&info.id].clone();
+        let mut states = sup.tmux.pane_states().await.unwrap();
+        let pane = states.get_mut(&row.pane).unwrap();
+        assert_eq!(pane.session_name, row.tmux_name);
+        // The dummy executable does not run preparation or the shim. Supply
+        // the classification boundary explicitly, as in the preparation tests
+        // above, so this proof depends on neither process timing nor Git.
+        pane.dead = true;
+        let known = super::super::status::KnownTmuxNames::from_sessions([(
+            info.id.as_str(),
+            Some(row.tmux_name.as_str()),
+        )]);
+        super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+        assert!(
+            entry
+                .run
+                .launch_reads_settled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        assert!(
+            sup.store
+                .session(&info.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome
+                .is_terminal()
+        );
+        std::fs::write(&path, b"invalid JSON").unwrap();
+        assert!(
+            crate::launch::read_preparation_state(&path, &plan.id).is_err(),
+            "premise: another parse would fail"
+        );
+        let observed = super::super::status::observe_entry(&sup, &entry, &states, &known)
+            .await
+            .unwrap();
+        assert!(
+            observed.sentinel.is_none(),
+            "settled preparation must not be reclassified from another read"
+        );
     }
 
     /// Ordinary restart requires Ready only for the original fresh session.
