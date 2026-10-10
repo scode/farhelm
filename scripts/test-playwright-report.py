@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import test_run_playwright as adapter
 
 
-def report(output, *, status="expected", expected="passed", results=None, version="1.62.0", errors=None):
+def report(output, *, status="expected", expected="passed", results=None, version="1.64.0", errors=None):
     """Build a minimal pinned-runner report with one independently identified case per engine."""
     projects = [{
         "id": f"{engine}-x", "name": f"{engine}-x",
@@ -276,7 +276,7 @@ class PlaywrightPreparationTest(unittest.TestCase):
                         "npm_config_playwright_browsers_path", "npm_package_config_pwdebug",
                         "npm_package_config_playwright_browsers_path")
             original.update({name: "secret-value" for name in controls})
-            versions = {"node": b"v24.16.0\n", "playwright": b"Version 1.62.0\n"}
+            versions = {"node": b"v24.16.0\n", "playwright": b"Version 1.64.0\n"}
             calls = []
 
             def probe(argv):

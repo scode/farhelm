@@ -186,7 +186,7 @@ PATH="$tmux_dir:$PATH" python3 ../scripts/record-test-run.py \
 ```
 
 The requested `npx playwright test` prefix is a selection syntax; execution uses resolved Node and the locally installed
-Playwright CLI directly. Both Playwright packages and their lock entries must match 1.62.0. The maintained config runs
+Playwright CLI directly. Both Playwright packages and their lock entries must match 1.64.0. The maintained config runs
 with one worker, zero retries, one execution per selected case, no focused-only tests and no snapshot updates. Only
 file-pattern and grep selectors are accepted; project, reporter, config and execution-policy overrides are refused. Both
 configured engines must execute cases before a zero child exit can support recorder success. A single-engine debugging

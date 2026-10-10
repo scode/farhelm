@@ -17,7 +17,7 @@ from typing import Callable
 
 from test_run_nextest import read_regular
 
-VERSION = "1.62.0"
+VERSION = "1.64.0"
 TERMINATION_GRACE = 60.0
 GRACEFUL_SIGNAL = signal.SIGINT
 ARGV_LIMIT = 128
