@@ -199,7 +199,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_44` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_45` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -210,7 +210,32 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 44;
+pub const PROTOCOL_VERSION: u32 = 45;
+
+/// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
+pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
+
+/// The host's answer to a hover. Refusals are data so the UI can distinguish a
+/// folder or oversized file from a transport failure without parsing prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadFileStatus {
+    Ready,
+    NotFound,
+    Folder,
+    TooLarge,
+    NotReadable,
+    NotRegular,
+}
+
+/// Resolved host path and fresh metadata. An absent size means no readable
+/// metadata was available; callers must not infer a zero-byte file from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadFileInfo {
+    pub path: String,
+    pub size: Option<u64>,
+    pub status: DownloadFileStatus,
+}
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2404,6 +2429,45 @@ pub struct SessionDeleteOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlMsg {
+    /// Resolve and inspect a path on the session's host. Only full-authority
+    /// helm connections may ask; relative paths use the recorded session cwd.
+    StatFile {
+        req_id: u64,
+        session_id: String,
+        path: String,
+    },
+    /// Fresh filesystem evidence for a hover, never a promise about a later read.
+    FileStat { req_id: u64, info: DownloadFileInfo },
+    /// Open a regular file and start a credit-paced read on a nonzero channel
+    /// never previously used for a download on this connection. A download id
+    /// stays reserved after abort/end, including against Attach and BeginUpload,
+    /// because queued bytes can outlive their producer. Helm ids never recycle.
+    /// The sender may initially send UPLOAD_WINDOW_BYTES, then needs advancing
+    /// DownloadAck credit. No data or successful end precedes DownloadStarted.
+    BeginDownload {
+        req_id: u64,
+        session_id: String,
+        path: String,
+        channel: u32,
+    },
+    /// The descriptor was opened and checked. Size is opening metadata; the
+    /// stream runs to EOF and fails if it exceeds DOWNLOAD_LIMIT_BYTES.
+    DownloadStarted {
+        req_id: u64,
+        channel: u32,
+        info: DownloadFileInfo,
+    },
+    /// Cumulative bytes consumed. Monotonic and never greater than bytes sent;
+    /// a duplicate is harmless. Uses the attachment upload credit window.
+    DownloadAck { channel: u32, received: u64 },
+    /// Cancel an in-flight read. Unknown/already-ended channels are harmless.
+    AbortDownload { channel: u32 },
+    /// Terminal event, ordered after every data frame on this channel. None is
+    /// EOF; a reason means the whole download failed and must not be saved.
+    DownloadEnded {
+        channel: u32,
+        reason: Option<String>,
+    },
     /// First message in each direction on every connection. The receiver
     /// refuses a `protocol_version` mismatch by replying `Error` and
     /// closing — SPEC.md's version-skew rule, enforced at the edge.
@@ -3516,7 +3580,9 @@ impl ControlMsg {
     /// caller holding the pending-request table can answer the second.
     pub fn reply_req_id(&self) -> Option<u64> {
         match self {
-            ControlMsg::SessionCreated { req_id, .. }
+            ControlMsg::FileStat { req_id, .. }
+            | ControlMsg::DownloadStarted { req_id, .. }
+            | ControlMsg::SessionCreated { req_id, .. }
             | ControlMsg::GithubCheckoutReconciled { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
             | ControlMsg::DirectoryListing { req_id, .. }
@@ -3544,7 +3610,9 @@ impl ControlMsg {
             // wildcard: each is a message a hostile or confused peer could
             // echo back, and this `None` is what stops that echo from being
             // delivered as an answer.
-            ControlMsg::CreateSession { .. }
+            ControlMsg::StatFile { .. }
+            | ControlMsg::BeginDownload { .. }
+            | ControlMsg::CreateSession { .. }
             | ControlMsg::ReconcileGithubCheckout { .. }
             | ControlMsg::ListSessions { .. }
             | ControlMsg::BrowseDirectory { .. }
@@ -3567,7 +3635,10 @@ impl ControlMsg {
             | ControlMsg::AgentRequest { .. } => None,
             // The handshake, and the channel-correlated events: nothing
             // here has a `req_id` field to return in the first place.
-            ControlMsg::Hello { .. }
+            ControlMsg::DownloadAck { .. }
+            | ControlMsg::AbortDownload { .. }
+            | ControlMsg::DownloadEnded { .. }
+            | ControlMsg::Hello { .. }
             | ControlMsg::Detach { .. }
             | ControlMsg::Detached { .. }
             | ControlMsg::ReplayComplete { .. }
@@ -3589,7 +3660,9 @@ impl ControlMsg {
     /// request waiting forever.
     pub fn request_req_id(&self) -> Option<u64> {
         match self {
-            ControlMsg::CreateSession { req_id, .. }
+            ControlMsg::StatFile { req_id, .. }
+            | ControlMsg::BeginDownload { req_id, .. }
+            | ControlMsg::CreateSession { req_id, .. }
             | ControlMsg::ReconcileGithubCheckout { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
             | ControlMsg::BrowseDirectory { req_id, .. }
@@ -3610,7 +3683,12 @@ impl ControlMsg {
             // correlate its refusal — an uncorrelated one would leave the
             // asking `farhelm agent` waiting on a reply that never comes.
             | ControlMsg::AgentRequest { req_id, .. } => Some(*req_id),
-            ControlMsg::Hello { .. }
+            ControlMsg::FileStat { .. }
+            | ControlMsg::DownloadStarted { .. }
+            | ControlMsg::DownloadAck { .. }
+            | ControlMsg::AbortDownload { .. }
+            | ControlMsg::DownloadEnded { .. }
+            | ControlMsg::Hello { .. }
             | ControlMsg::GithubCheckoutReconciled { .. }
             | ControlMsg::SessionCreated { .. }
             | ControlMsg::SessionList { .. }
@@ -3664,6 +3742,13 @@ impl ControlMsg {
     /// identifier is what they will grep for.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            ControlMsg::StatFile { .. } => "StatFile",
+            ControlMsg::FileStat { .. } => "FileStat",
+            ControlMsg::BeginDownload { .. } => "BeginDownload",
+            ControlMsg::DownloadStarted { .. } => "DownloadStarted",
+            ControlMsg::DownloadAck { .. } => "DownloadAck",
+            ControlMsg::AbortDownload { .. } => "AbortDownload",
+            ControlMsg::DownloadEnded { .. } => "DownloadEnded",
             ControlMsg::Hello { .. } => "Hello",
             ControlMsg::CreateSession { .. } => "CreateSession",
             ControlMsg::SessionCreated { .. } => "SessionCreated",
@@ -4638,8 +4723,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_44() {
-        assert_eq!(PROTOCOL_VERSION, 44);
+    fn protocol_version_is_pinned_at_45() {
+        assert_eq!(PROTOCOL_VERSION, 45);
     }
 
     /// Why this matters: a create the user makes must keep its

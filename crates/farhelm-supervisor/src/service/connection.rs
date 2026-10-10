@@ -21,7 +21,7 @@ use farhelm_proto::io::{
     write_frame_before_stall,
 };
 use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, DetachCode, ErrorKind, Frame};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -249,6 +249,9 @@ where
     // few per transfer; a transfer that fills even this is one whose
     // client has stopped reading entirely, which the writer stall timeout
     // already covers.
+    // Download frames drain only after terminal/control traffic. A window
+    // bounds bytes, and this shared queue also bounds frames across transfers.
+    let (bulk_tx, bulk_rx) = mpsc::channel::<Frame>(super::uploads::UPLOAD_CHUNK_QUEUE);
     let (priority_tx, priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
     // A full-authority connection is a candidate for agent upcalls; a
     // session-authenticated one never is. The distinction is admission, not
@@ -295,6 +298,7 @@ where
         WriterTaskChannels {
             ordinary_rx: rx,
             priority_rx,
+            bulk_rx,
             close_rx: writer_close_rx,
             failed_tx: writer_failed_tx,
         },
@@ -316,6 +320,13 @@ where
     // directions and different lifetimes — an upload ends at its commit,
     // an attachment when its terminal is taken over.
     let mut upload_routes: HashMap<u32, UploadRoute> = HashMap::new();
+    let mut downloads: HashMap<u32, super::downloads::DownloadRoute> = HashMap::new();
+    // An aborted producer may still have frames queued in the bulk writer.
+    // Never recycle its channel on this connection, even after the task ends:
+    // an ordinary Attached reply could otherwise overtake old file bytes.
+    // Production clients already allocate once. One retained id per read
+    // avoids a drain handshake or writer-side transfer-generation machinery.
+    let mut download_channels = HashSet::new();
 
     // Tracking (not admission — that is now `sup.admission`, shared
     // across every connection this supervisor serves; see its own docs
@@ -335,6 +346,7 @@ where
             // own docs for why a long-lived connection needs this every
             // iteration, not just at shutdown.
             reap_finished_tasks(&mut tasks);
+            downloads.retain(|_, route| !route.task.is_finished());
             // Same discipline for finished transfers: a route left behind
             // by a completed upload would make its channel number
             // permanently unusable on this connection (see
@@ -583,6 +595,31 @@ where
                         // because `ConnectionCtx` deliberately stops at
                         // the per-message handlers.
                         None => match msg {
+                            ControlMsg::StatFile { req_id, session_id, path } => {
+                                tasks.spawn(super::downloads::stat(Arc::clone(&sup), tx.clone(), req_id, session_id, path));
+                            }
+                            ControlMsg::BeginDownload { req_id, session_id, path, channel } => {
+                                if channel == 0 || input_routes.contains_key(&channel)
+                                    || upload_routes.get(&channel).is_some_and(UploadRoute::is_live)
+                                    || download_channels.contains(&channel) {
+                                    send_reply(&tx, &ControlMsg::Error { req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                        message: "download channel is invalid or in use".into() }).await;
+                                } else {
+                                    download_channels.insert(channel);
+                                    downloads.insert(channel, super::downloads::start(&mut tasks,
+                                        Arc::clone(&sup), bulk_tx.clone(), req_id, session_id, path, channel));
+                                }
+                            }
+                            ControlMsg::DownloadAck { channel, received } => {
+                                if let Some(route) = downloads.get(&channel) { route.ack(received); }
+                            }
+                            ControlMsg::AbortDownload { channel } => { downloads.remove(&channel); }
+                            ControlMsg::Attach { req_id, channel, .. } | ControlMsg::BeginUpload { req_id, channel, .. }
+                                if download_channels.contains(&channel) => {
+                                send_reply(&tx, &ControlMsg::Error { req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                    message: "channel was reserved for a download".into() }).await;
+                            }
+
                             ControlMsg::AgentResponse { req_id, outcome } => {
                                 let link = link.as_ref().expect(
                                     "a full-authority connection registers its link at hello",
@@ -631,6 +668,8 @@ where
         });
     }
     drop(upload_routes);
+    drop(downloads);
+    drop(bulk_tx);
     // Tear down any attachments this connection owned so the next
     // attach doesn't fight a dead forwarder. Signal AND await, exactly
     // like the takeover path: a shutdown request only wakes the forwarder,
@@ -792,6 +831,7 @@ async fn drain_writer(
 struct WriterTaskChannels {
     ordinary_rx: mpsc::Receiver<Frame>,
     priority_rx: mpsc::Receiver<Frame>,
+    bulk_rx: mpsc::Receiver<Frame>,
     close_rx: oneshot::Receiver<()>,
     failed_tx: oneshot::Sender<String>,
 }
@@ -815,6 +855,7 @@ where
     let WriterTaskChannels {
         mut ordinary_rx,
         mut priority_rx,
+        mut bulk_rx,
         mut close_rx,
         failed_tx,
     } = channels;
@@ -829,7 +870,7 @@ where
             // Biased, so an upload's control frame goes out ahead of
             // whatever terminal output is queued — see `priority_tx`'s own
             // comment for why that is a contract rather than a
-            // preference. `else` fires only when BOTH queues are closed,
+            // preference. `else` fires only when all three queues are closed,
             // which is this task's ordinary end.
             let frame = tokio::select! {
                 biased;
@@ -840,11 +881,13 @@ where
                     // which the normal receive arms drain those frames.
                     ordinary_rx.close();
                     priority_rx.close();
+                    bulk_rx.close();
                     queues_closed = true;
                     continue;
                 }
                 Some(frame) = priority_rx.recv() => frame,
                 Some(frame) = ordinary_rx.recv() => frame,
+                Some(frame) = bulk_rx.recv() => frame,
                 else => break,
             };
             // A write that makes NO PROGRESS for a whole window is
@@ -2463,6 +2506,7 @@ mod tests {
             WriterTaskChannels {
                 ordinary_rx: rx,
                 priority_rx,
+                bulk_rx: mpsc::channel(1).1,
                 close_rx,
                 failed_tx: writer_failed_tx,
             },

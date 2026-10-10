@@ -1578,6 +1578,24 @@ incidental complexity in the codebase. One case is still an explicit error rathe
 exceeds the frame limit is refused at the writer's size backstop, so a host with a single record too large to ship
 reports a failed listing rather than a silently shortened one.
 
+### Session-host file reads
+
+Protocol version 45 adds helm-only `StatFile`/`FileStat` and `BeginDownload`/`DownloadStarted`, with `DownloadAck`,
+`AbortDownload` and `DownloadEnded` for the streamed read. Paths resolve on the supervisor against the session's
+recorded cwd and the account home captured at daemon startup. The stat opens the file to prove readability, follows
+symlinks, and reports a resolved absolute path, size and typed refusal. Begin opens and checks independently; a hover
+reserves nothing. Only regular files up to 100,000,000 bytes are accepted. Reads run to EOF, with the cap enforced
+before forwarding each chunk, so growth past the cap fails the whole transfer.
+
+Download data uses the attachment upload's chunk size and credit window reversed. Acknowledgements are cumulative bytes
+consumed, monotonic and no greater than bytes sent. Begin, data and end share a bounded bulk writer queue, drained after
+terminal and control traffic; the connection reader never waits for a download's consumer. A helm-side guard owns
+routing and cancellation from before Begin is sent through EOF. Dropping it sends Abort, and connection death reports
+failure. Download channel ids stay reserved for the connection's lifetime, including against attachment and upload
+reuse: queued frames can outlive an aborted producer. The production helm already allocates each id only once. There is
+no upload staging, publication phase, admission cap or progress timer. Session-authenticated connections remain behind
+the restricted operation allowlist and cannot stat or read files.
+
 ## Supervisor internals
 
 ### Owned checkout admission and lifetime

@@ -5690,6 +5690,30 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
+        // File access belongs to the helm, even for the authenticated session's
+        // own directory. Pin both operations so a future allowlist expansion
+        // cannot accidentally give an agent a filesystem-read side channel.
+        for request in [
+            ControlMsg::StatFile {
+                req_id: 39,
+                session_id: "parent-session".into(),
+                path: "/file".into(),
+            },
+            ControlMsg::BeginDownload {
+                req_id: 40,
+                session_id: "parent-session".into(),
+                path: "/file".into(),
+                channel: 7,
+            },
+        ] {
+            let req_id = request.request_req_id().unwrap();
+            handle_restricted_control(&sup, request, &tx, &auth).await;
+            let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
+            assert!(
+                matches!(reply, ControlMsg::Error { req_id: id, kind: ErrorKind::Unauthorized, .. } if id == req_id)
+            );
+        }
+
         handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
         let unauthorized: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("authority refusal").body).unwrap();

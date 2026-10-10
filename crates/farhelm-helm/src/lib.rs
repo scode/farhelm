@@ -91,7 +91,7 @@ use tracing::warn;
 
 mod client;
 pub use client::{
-    CreateExtras, Detach, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
+    CreateExtras, Detach, DownloadGuard, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
     SupervisorError, SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
 };
 
