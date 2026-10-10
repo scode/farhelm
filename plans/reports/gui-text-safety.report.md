@@ -100,3 +100,47 @@ read passed after the opening was clarified to state the shell-command execution
 Implementation and investigation were done by the executor under the plan's no-workhorse rule. Only the prescribed
 reviews were delegated. Native model/effort and usage attribution were not exposed by the harness; requested model names
 are not measurement evidence.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1811, first of three plans landed together (then ui-interaction-fixes and
+helm-cli-fixes). Since the plan was based, main gained only plan bookkeeping; the rebase was clean.
+
+#### Review before merging
+
+A separate reviewer read the change by reading the code only. The paste finding is about the bracketed-paste end marker
+on the input side: a host could fill the clipboard (through the OSC 52 allowance) with text containing an early "end of
+paste" marker followed by a command and a carriage return, so pasting it into a shell would run that command. Paste and
+dropped text is now cleaned before xterm frames it, so the marker cannot survive; the output parser, OSC 8 links, OSC 52
+and window titles are unchanged. Every template save path now runs the new command check, and the escaping changes
+escape each value exactly once.
+
+#### Decided at landing: older templates
+
+The reviewer found that a template saved before this change can still hold a line break or invisible character in a
+command; opening it in the one-line editor drops the character from view, and editing and saving then passes the new
+check with the command silently changed. You chose to accept this: there are no users, so it affects no one. Nothing was
+changed for it.
+
+Smaller notes left as they are: one connected-host detail shows an installation id without making spaces visible, unlike
+the other identity labels; paste cleaning depends on the attachments feature being installed, which today it always is;
+the escaped spelling of an identity does not escape `<`, so a literal `<U+0020>` and a real space look alike, which
+supervisor-minted ids never contain; and SPEC_impl.md does not record that pasted text loses every escape character.
+
+#### Checks
+
+- Run now, on the three stacked in landing order: `cargo fmt --all -- --check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the supervisor, helm, UI
+  and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no retries (2709 of 2709),
+  the UI JavaScript tests (230 of 230), and on Chromium and WebKit with one worker and no retries the
+  terminal-attachments, terminal-clipboard, templates, quick-switcher, approval-layout and sidebar specs (run
+  `7d69e2db`, 355 passed, 9 skipped: WebKit cannot be granted clipboard permissions, and the real-Claude cases). The two
+  failures were one sidebar test, "composer menu-closed Tab order follows the displayed launch groups", on both engines;
+  it fails the same way on plain main (run `4bb205ad`), because the managed-checkout destination buttons added earlier
+  today were never added to its expected Tab order. The browser-sidebar-test-oracles plan carries that fix.
+- After the landing fixes: `dprint check`, `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, and the UI menu
+  tests (17 of 17).
+- These three landed on their own rather than with the six plans claimed later in the round; see the monitor's
+  2026-10-10 change to the landing instructions.
+
+Nothing in the report above was made untrue by the landing.
