@@ -235,7 +235,7 @@ pub fn exec_start_program(unit_text: &str) -> Option<PathBuf> {
             .strip_prefix('[')
             .and_then(|rest| rest.strip_suffix(']'))
         {
-            in_service = section.eq_ignore_ascii_case("Service");
+            in_service = section == "Service";
             continue;
         }
         if !in_service {
@@ -270,8 +270,8 @@ fn exec_start_value_program(value: &str) -> Option<PathBuf> {
 /// Read one systemd command-line token, undoing the quoting
 /// [`systemd_arg`] applies.
 ///
-/// Deliberately narrow: double and single quotes, backslash escapes, `%%`,
-/// and `$$`. Systemd's full C-style escape set (`\n`, `\x41`, …) is not
+/// Deliberately narrow: double and single quotes, `\\` and `\"` escapes,
+/// `%%`, and `$$`. Systemd's full C-style escape set (`\n`, `\x41`, …) is not
 /// handled, because a unit using it against a path is not a unit this
 /// project wrote and the honest answer for the ownership check above is
 /// "unrecognized".
@@ -293,7 +293,10 @@ fn first_systemd_token(value: &str) -> Option<String> {
     let mut closed = quote.is_none();
     while let Some(character) = chars.next() {
         match character {
-            '\\' => token.push(chars.next()?),
+            '\\' => match chars.next()? {
+                escaped @ ('\\' | '"') => token.push(escaped),
+                _ => return None,
+            },
             '%' if chars.peek() == Some(&'%') => {
                 chars.next();
                 token.push('%');
@@ -970,14 +973,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn exec_start_program_reads_back_what_the_renderer_wrote() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/home/u/we ird/%farhelm\""),
+            farhelm: Path::new("/home/u/we ird/%farhelm\"\\bin"),
             state_dir: Path::new("/state"),
             tmux: Path::new("/usr/bin/tmux"),
         })
         .unwrap();
         assert_eq!(
             exec_start_program(&unit),
-            Some(PathBuf::from("/home/u/we ird/%farhelm\""))
+            Some(PathBuf::from("/home/u/we ird/%farhelm\"\\bin"))
         );
         assert_eq!(
             exec_start_program("[Service]\nExecStart=/usr/bin/farhelm supervisor run\n"),
@@ -1054,11 +1057,35 @@ mod tests {
             ),
             Some(PathBuf::from("/third/farhelm"))
         );
-        // Section names are case-insensitive to systemd.
+        // Systemd ignores unknown sections, including case variants. A later
+        // typo must not replace the program named by the real [Service].
         assert_eq!(
             exec_start_program("[service]\nExecStart=/real/farhelm run\n"),
+            None
+        );
+        assert_eq!(
+            exec_start_program(
+                "[Service]\nExecStart=/real/farhelm run\n[service]\nExecStart=/decoy/farhelm run\n"
+            ),
             Some(PathBuf::from("/real/farhelm"))
         );
+    }
+
+    /// Unsupported escapes must refuse ownership rather than invent a path.
+    /// Systemd decodes these spellings, while dropping their backslash would
+    /// name a different installation during setup or uninstall. Both quoting
+    /// forms must keep that ambiguity from becoming ownership evidence.
+    #[farhelm_testtrace::test]
+    fn exec_start_program_refuses_unsupported_escapes() {
+        for program in [
+            r"/opt/space\x20install/farhelm",
+            r#""/opt/space\x20install/farhelm""#,
+            r"/opt/line\ninstall/farhelm",
+            r#""/opt/line\ninstall/farhelm""#,
+        ] {
+            let unit = format!("[Service]\nExecStart={program} supervisor run\n");
+            assert_eq!(exec_start_program(&unit), None, "{program}");
+        }
     }
 
     /// Unit discovery has to land in the directory the user manager

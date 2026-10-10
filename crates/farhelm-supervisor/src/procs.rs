@@ -731,8 +731,9 @@ fn parse_procargs2(buf: &[u8]) -> Option<Vec<u8>> {
 /// the whole command line ("the process was invoked bare"), while the
 /// truth is that the observation was cut short; refusing the evidence
 /// keeps a truncated read from becoming a false entry-point match. The
-/// byte total is capped at [`MAX_ARGV_BYTES_PER_PROCESS`] for the same
-/// reason the fetch buffer is sized to it.
+/// byte total is capped at [`MAX_ARGV_BYTES_PER_PROCESS`] independently of
+/// the fetch buffer: the kernel's answer also contains the executable path
+/// and environment, which must not consume the argv evidence budget.
 ///
 /// Like its sibling, the `test` arm of the cfg keeps it (and its tests)
 /// alive in ordinary Linux CI.
@@ -1450,7 +1451,7 @@ mod imp {
     /// combined argv and environment, and therefore on any
     /// `KERN_PROCARGS2` answer.
     ///
-    /// This is [`read_environ`]'s ONLY buffer sizing, not a fallback, and
+    /// This sizes both [`read_environ`] and [`read_process_argv`], and
     /// that is a correctness requirement rather than a simplification: XNU
     /// has a long-standing `KERN_PROCARGS2` bug (observed on this
     /// project's own hardware, macOS 26.5.1) where the NULL-`oldp` size probe
@@ -1467,7 +1468,7 @@ mod imp {
     /// never be "too small" and the buggy path is unreachable.
     ///
     /// Cached because it is fixed for the life of the boot while
-    /// [`read_environ`] runs once per process per sweep round. A failed
+    /// process reads recur in sweep and ancestry observations. A failed
     /// read falls back to a generous fixed size rather than giving up —
     /// deliberately NOT the 4 KiB POSIX `ARG_MAX` floor, which on a host
     /// with a bigger real argmax would recreate the undersized-buffer
@@ -1581,12 +1582,11 @@ mod imp {
     pub(super) fn read_process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
         let pid = i32::try_from(pid).ok()?;
         let mut mib: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as c_int];
-        // The per-process argv cap bounds this fetch, not ARG_MAX: there
-        // is no reason to copy megabytes of args to keep kilobytes of
-        // argv, and a buffer sized to the cap makes truncation
-        // observable (a full buffer with no room left for the parser's
-        // terminator) instead of silent.
-        let needed = super::MAX_ARGV_BYTES_PER_PROCESS + 1;
+        // The kernel returns the executable path and environment too. Sizing
+        // the whole response to the argv budget can lose short, valid argv
+        // when the environment is large. A short buffer is not guaranteed
+        // to fail: see arg_max's documented zero-fill observation.
+        let needed = arg_max();
         let mut buf = vec![0u8; needed];
         let mut len = needed;
         // SAFETY: `buf` owns `needed` bytes and `len` says exactly that,
@@ -1607,10 +1607,8 @@ mod imp {
             return None;
         }
         buf.truncate(len);
-        // A too-small buffer surfaces as ENOMEM above, never as silent
-        // truncation — so a successful fetch holds the whole argv region,
-        // and anything the parser refuses past this point is malformed
-        // data, not a short read.
+        // The parser keeps the argv evidence budget independent of the
+        // full-response allocation and refuses a truncated argv region.
         super::parse_procargs2_argv(&buf)
     }
 }

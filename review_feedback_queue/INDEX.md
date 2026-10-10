@@ -13,10 +13,6 @@ triage.
 
 - `executable-read-back-collapses-dollars-select-another-installations.md` — Uninstall can mistake a service with
   literal dollars for another installation's service.
-- `unsupported-c-escapes-become-different-executable-instead.md` — Escaped service paths could make uninstall choose the
-  wrong service.
-- `lowercase-sections-override-ownership-despite-being-ignored.md` — A lowercase section typo could mislead uninstall
-  about service ownership.
 - `multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md` — A service running commands from multiple
   installations could be assigned to only one.
 - `plain-clicks-overwrite-clipboard-old-selection.md` — An ordinary terminal click can replace the clipboard with an old
@@ -48,8 +44,6 @@ triage.
 - `legacy-ssh-stanza-cleanup-has-own-destructive.md` — Legacy SSH cleanup has a separate configuration-loss window.
 - `installing-temporary-ssh-stanza-destroy-original-configuration.md` — Installing a test SSH stanza can leave the
   user's configuration incomplete.
-- `large-macos-environments-corrupt-otherwise-valid-hook-argument.md` — A large macOS environment could make valid hooks
-  lose argument evidence.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
 - `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md` — A space in the temporary
   root could redirect this fixture's write outside its directory.
