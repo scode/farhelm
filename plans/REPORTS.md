@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`helm-cli-fixes`](reports/helm-cli-fixes.report.md) landed 2026-10-10 in #1813: feedback and update/uninstall planning survive a closed page, a stopped host's connection cannot be orphaned, state-directory advice and ssh paths are right, and a Codex draft is not read as a question
 - [`dev-tooling-fixes`](reports/dev-tooling-fixes.report.md) landed 2026-10-10 in #1815: the CentOS test keeps the user's global ssh settings global, the tmux build works on macOS bash 3.2, the plans queue and watcher, test-run recorder, cutover probe, changelog sweep and desktop smoke stop misreporting
 - [`linux-test-false-failures`](reports/linux-test-false-failures.report.md) landed 2026-10-10 in #1814: Linux tests stop failing on correct code (partial witness reads, bash-as-sh, quoted paths, early notifications, a mis-timed silence window, an inherited state directory) and stop leaking tmux servers, units, files and stopped processes
 - [`setup-refusals`](reports/setup-refusals.report.md) landed 2026-10-10 in #1817: setup refuses install paths containing `$`, service files of a type other than simple read as unrecognised, and uninstall's lock advice is shell-quoted
