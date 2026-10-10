@@ -173,6 +173,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   maximum widths. Decide whether the width is remembered per device, like the terminal text size, or shared by every
   client.
 
+- **Improve the agent action approval card.** When an agent asks to do something that needs the user's approval, the
+  card that asks (SPEC.md: shown in a fixed corner of the window, offering Allow, Always allow and Deny) came up as a
+  giant vertical box along the very right edge of the screen the first time it was seen. Improve how it looks and where
+  it sits; details to be decided with the maintainer.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
