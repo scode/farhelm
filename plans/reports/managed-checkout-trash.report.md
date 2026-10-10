@@ -141,3 +141,62 @@ fresh cold reads.
 Implementation and investigation were local; only prescribed reviews and cold reads used agents. Opus runtime identity
 and structured usage were recorded. Native-reader and orchestrator usage are unavailable. Private review and usage
 records remain retained alongside the test evidence.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as four squash commits on main, in order: #1785 (managed checkout marks), #1786 (choosing a
+folder or a managed checkout as the destination), #1787 (the host side of listing and permanently deleting archives) and
+#1788 (the trash beside New). The stack was based on main right after uninstall-ends-tmux landed; main gained only plan
+bookkeeping before it merged, so the rebase was clean and the executor's runs were on effectively the same main.
+
+#### Review before merging
+
+A separate reviewer that had not worked on this plan read the stack by reading the code only, with permanent deletion as
+the priority. It found the deletion well confined: the browser and helm only ever send archive ids, never paths, and the
+host deletes only archives its own records name; every step works on opened directories rather than names, refusing
+symlinks and mount crossings (on Linux through a kernel call that refuses both), re-checking the root's and the
+archive's identity, and leaving a mount inside an archive untouched; any session's working directory, stopped sessions
+included, blocks cleanup, checked under the same lock that launches, restarts and Deletes take; and the per-session
+agent credential cannot reach listing or cleanup. The dangerous refusals (symlink, replaced root or archive, a folder
+swapped above the archive after opening, live and stopped session folders, a mount) all have tests.
+
+#### A fix made while landing
+
+The trash section of the session-list docs page said that a directory "changed since Farhelm archived it" stays
+untouched. The host only checks that the archive is the same directory, not that its contents are unchanged, so an
+archive you edited or added work to is still deleted, and the sentence invited exactly that loss. It now says an archive
+replaced or moved since archiving stays untouched, that changing its files does not protect it, and to copy out anything
+worth keeping first. In #1788 before it merged.
+
+#### Things to know from the review
+
+- This plan moves the helm-to-supervisor protocol from version 43 to 44. terminal-file-download, which is held for your
+  answers, also moves it to 44; when it lands it must move to 45 instead, or a mixed fleet would read its messages as
+  unknown.
+- A confirmed delete forgets an archive whose checkout root is missing at that moment (an unmounted disk, say) without
+  touching anything on disk, so after a "delete all" such an archive does not return to the trash when the disk comes
+  back. SPEC.md and the confirmation text disclose that unusable entries may be forgotten.
+- Remote uninstall keeps the checkout root, archives included, but the trash records live in the host's supervisor
+  state, which uninstall removes; after uninstalling and reinstalling, old archives are no longer listed. Not a
+  regression.
+- If another process removes a file inside an archive while cleanup runs, that archive's cleanup stops and reports a
+  failure; the record is kept and a retry finishes it.
+- The existing borrowed-checkout browser test, already recorded as timing out on WebKit on clean main, timed out again
+  in the executor's runs; this stack adds a little more work to it. Its FLAKES.md entry and Deflake TODO stand.
+
+#### Checks
+
+- Run now, on the stack rebased onto main: `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, `dprint check`, the
+  website build (32 pages, internal links), and the supervisor, helm, UI and protocol unit tests in full through the
+  recorder with pinned tmux 3.7c, four slots and no retries (run `bf328245`, 2669 of 2671). The two failures were the
+  helm's local and SSH provisioning tests, which start the built `farhelm` binary; it was stale from an earlier tree, at
+  the previous protocol version, and the logs show the version mismatch. After rebuilding, both passed (run `d509b27e`).
+- Reused from the executor: the browser runs for marks, destinations, templates, the trash dialog (including global
+  cleanup and its frozen selection) and the sidebar at its narrowest and default widths, on Chromium and WebKit, with
+  the borrowed-checkout timeout noted above; and its focused deletion-safety runs, including real mount refusals. The
+  landing changed only one docs paragraph, so nothing those cover changed.
+- Not covered: macOS filesystem behaviour, which the report already names, and the archive-rename permission refusal,
+  which the executor could only run as root.
+
+Nothing in the report above was made untrue by the landing.
