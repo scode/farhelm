@@ -173,11 +173,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for every
   release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
 
-- **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
-  conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
-  session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the
-  Claude screen fixtures so it stays covered. Plan: `plans/queue/claude-compaction-status.md`.
-
 - **Pin the Rust toolchain.** Nothing pins Rust today: there is no `rust-toolchain.toml`, CI's toolchain action installs
   whatever stable is current when the job runs, and a developer machine keeps whatever stable it last updated to. So
   local checks and CI can lint with different clippies without anyone choosing that. On 2026-10-09 CI was on 1.99 and
