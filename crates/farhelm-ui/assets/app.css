@@ -6553,9 +6553,19 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   margin: 0;
 }
 .approval-card-requester {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  /* Size requester rows from their text instead of equal columns: a short host
+     must not take room an ordinary session title needs. Whole rows wrap when
+     they cannot fit together; values still wrap inside a narrow row. */
+  display: flex;
+  flex-wrap: wrap;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border-row);
+}
+.approval-card-requester > .approval-card-row {
+  flex: 1 1 auto;
+}
+.approval-card-requester > :last-child {
+  flex-basis: 100%;
 }
 .approval-card-row {
   display: grid;
