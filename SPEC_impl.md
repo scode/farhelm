@@ -1825,20 +1825,24 @@ asset file is introduced.
   tick; the pane-death wake commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable
   launch evidence is logged and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay
   in generation-local memory for replies. Successful negative launch-sentinel and preparation reads settle for the
-  generation only after a durable terminal outcome and an owned pane seen dead, or a boot-change interruption. Same-boot
-  pane absence keeps retrying: an empty tmux query can be transient while the shim still writes. Read errors,
-  uncommitted failures and observers without recording authority never settle reads. Rename shares the latches; relaunch
-  and supervisor reload read again. Error artifacts are cleaned once after successful accepted-create evidence
-  preservation and removal, with failed cleanup retried. Report-backed identities still refresh under their capture
-  claim because accepted reports and decision-time Restart can change the row after the pane stops. An injected launch
-  holding no identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an
-  Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends
-  `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into
-  carriage returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's
-  own queries (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an
-  agent the user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery
-  is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock
-  to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
+  generation only after a durable terminal outcome and an owned pane seen dead, or proof that the launch's boot ended.
+  Schema 30 records that proof for all retained launches in the boot-change transaction, without altering already-ended
+  outcomes, and restores it on later same-boot supervisor reloads. Older rows default to unknown: a reboot an older
+  supervisor already consumed cannot be reconstructed. New launches clear the proof; a definitively aborted restart
+  restores it with the prior external run's facts under the advanced generation. Same-boot pane absence without such
+  proof keeps retrying: an empty tmux query can be transient while the shim still writes. Read errors, uncommitted
+  failures and observers without recording authority never settle reads. Rename shares the latches; relaunch and
+  supervisor reload read again. Error artifacts are cleaned once after successful accepted-create evidence preservation
+  and removal, with failed cleanup retried. Report-backed identities still refresh under their capture claim because
+  accepted reports and decision-time Restart can change the row after the pane stops. An injected launch holding no
+  identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an Enter
+  (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR`
+  to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into carriage
+  returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's own queries
+  (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an agent the
+  user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery is
+  `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock to
+  the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
   submitted-line rule applies. A paste large enough to span frames still has its middle frames judged without their
   markers. The spawn records whether its argv received the hook before tmux starts, fenced by launch generation. Reload
   restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant,
@@ -2855,6 +2859,8 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   before tmux starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision before spawn
   decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored conversations
   and notifications. No hook clock or diagnostic latch is persisted.
+- Schema 30 adds the supervisor session column `launch_boot_ended` (integer, default 0), the boot-finality proof
+  described under Runtime state. Older supervisors refuse this upgraded database on downgrade.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs

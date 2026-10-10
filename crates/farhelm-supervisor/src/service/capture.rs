@@ -535,6 +535,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: true,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),

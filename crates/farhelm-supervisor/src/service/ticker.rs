@@ -2092,6 +2092,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -3527,6 +3528,98 @@ mod tests {
         }
     }
 
+    /// An observed reboot ends an already-exited launch's evidence writers too.
+    /// Its Exited outcome must survive unchanged, while negative reads become
+    /// final even after another supervisor restart in the new boot. Poisoning
+    /// the sentinel after settlement proves that later passes skip the read.
+    #[farhelm_testtrace::test]
+    async fn pre_reboot_exited_launch_reads_settle_across_supervisor_restarts() {
+        let state = StateDir::new();
+        let seams = |boot: &'static str| SupervisorSeams {
+            boot_id: Arc::new(move || Ok(Some(boot.into()))),
+            ..SupervisorSeams::default()
+        };
+        let sup = supervisor_with(&state, seams("boot-a")).await;
+        let pane = spawn_pane(&sup, "fh-ended-boot", "exit 4").await;
+        install_durable_running_entry(
+            &sup,
+            "ended-boot",
+            Terminal {
+                tmux_name: "fh-ended-boot".into(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        observe_for_test(&sup).await;
+        let exited = LastOutcome::Exited {
+            exit_code: Some(4),
+            annotation: None,
+        };
+        assert_eq!(stored_outcome(&sup, "ended-boot").await, exited);
+        sup.tmux.kill_session("fh-ended-boot").await.unwrap();
+        assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+        drop(sup);
+
+        let same_boot = supervisor_with(&state, seams("boot-a")).await;
+        let entry = same_boot.sessions.lock().await["ended-boot"].clone();
+        assert!(!entry.run.launch_boot_ended);
+        observe_for_test(&same_boot).await;
+        assert!(
+            !entry.run.launch_reads_settled.load(Ordering::Relaxed),
+            "same-boot absence must remain retryable after supervisor restart"
+        );
+        drop(same_boot);
+
+        let spec = crate::launch::spec_path_for_launch(state.path(), "ended-boot", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        // Both constructions use boot-b: only the first witnesses the reboot.
+        // The second must recover finality from storage rather than that event.
+        for _ in 0..2 {
+            let sup = supervisor_with(&state, seams("boot-b")).await;
+            assert_eq!(stored_outcome(&sup, "ended-boot").await, exited);
+            assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+            let entry = sup.sessions.lock().await["ended-boot"].clone();
+            assert!(entry.run.launch_boot_ended);
+            assert!(!entry.run.launch_reads_settled.load(Ordering::Relaxed));
+            sup.may_record.store(false, Ordering::SeqCst);
+            observe_for_test(&sup).await;
+            assert!(!entry.run.launch_reads_settled.load(Ordering::Relaxed));
+            sup.may_record.store(true, Ordering::SeqCst);
+            std::fs::write(&sentinel, b"").unwrap();
+            assert!(
+                super::super::launch_artifacts::read_launch_sentinel(state.path(), "ended-boot", 0)
+                    .await
+                    .is_err(),
+                "premise: the negative read cannot succeed yet"
+            );
+            observe_for_test(&sup).await;
+            assert!(!entry.run.launch_reads_settled.load(Ordering::Relaxed));
+            std::fs::remove_file(&sentinel).unwrap();
+            observe_for_test(&sup).await;
+            assert!(entry.run.launch_reads_settled.load(Ordering::Relaxed));
+            std::fs::write(&sentinel, b"").unwrap();
+            assert!(
+                super::super::launch_artifacts::read_launch_sentinel(state.path(), "ended-boot", 0)
+                    .await
+                    .is_err(),
+                "premise: a repeated read would fail"
+            );
+            assert!(
+                observe_entry(
+                    &sup,
+                    &entry,
+                    &HashMap::new(),
+                    &super::super::status::KnownTmuxNames::default()
+                )
+                .await
+                .is_ok()
+            );
+            std::fs::remove_file(&sentinel).unwrap();
+        }
+    }
+
     /// Boot interruption is final without an owned pane: the previous boot's
     /// shim cannot write more evidence. Use the store's actual conversion so
     /// the fixture does not invent another meaning for Interrupted.
@@ -4511,6 +4604,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -5741,6 +5835,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),

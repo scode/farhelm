@@ -554,7 +554,7 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 /// committing a batch; replies only read the resulting durable and memory state.
 pub(crate) struct EntryObservation {
     /// Every applicable launch read succeeded and found no failure after an
-    /// owned pane died, or after a boot-change interruption. The caller may
+    /// owned pane died, or after its boot ended (including already-exited runs). The caller may
     /// settle future reads only once this entry's terminal outcome is durable.
     pub(crate) settle_launch_reads: bool,
     /// A launch-sentinel, wrapper-failure or interrupted-preparation detail found for this
@@ -615,7 +615,7 @@ pub(crate) async fn interrupted_preparation_detail(
 /// error details for replies. An unreadable sentinel returns an error so the
 /// observer can log and retry without recording a possibly false exit.
 /// Successful negative reads can become final only after owned pane death or
-/// a boot-change interruption and durable terminal classification. The caller
+/// proof that this launch's boot ended and durable terminal classification. The caller
 /// finishes that contract after committing any proposed outcome.
 pub(crate) async fn observe_entry(
     sup: &Supervisor,
@@ -732,12 +732,15 @@ pub(crate) async fn observe_entry(
         }
         // The shim finishes its evidence writes before its pane becomes dead.
         // An absent pane in the same boot is not that proof: tmux can briefly
-        // return an empty map while the shim still runs. Interrupted is written
-        // only by boot conversion, whose old shim cannot write any more.
+        // return an empty map while the shim still runs. A recorded reboot ends
+        // the writers of already-exited runs too; preserve Interrupted as
+        // equivalent proof for rows migrated without the new boot-finality bit.
         settle_launch_reads = sup.may_record()
             && !unattributed
             && !spec_stat_inconclusive
-            && (pane_dead || matches!(recorded, LastOutcome::Interrupted));
+            && (pane_dead
+                || entry.run.launch_boot_ended
+                || matches!(recorded, LastOutcome::Interrupted));
     }
 
     let transition = if sup.may_record() && !unattributed {

@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 29;
+const SCHEMA_VERSION: i64 = 30;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -819,17 +819,20 @@ pub struct PriorRun {
     /// abandoned generation — whose scope never existed — rather than the
     /// live run, whose does.
     pub scoped: bool,
+    /// Finality proof for the prior external run, restored only when the
+    /// failed restart provably started nothing outside the database.
+    pub launch_boot_ended: bool,
 }
 
 /// The columns [`SessionStore::begin_relaunch`] reads before deciding
 /// whether it may open a new generation: the outcome quartet, the pane,
 /// the current generation, the captured conversation, the current launch's
-/// scope selection, and ownership provenance — in that positional order.
+/// scope selection, ownership provenance and boot-finality proof — in that order.
 ///
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
 /// function's transaction.
-type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64);
+type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
@@ -1276,6 +1279,11 @@ pub struct StoredSession {
     /// silent-hook warning can start at the next qualifying Enter. Rows from
     /// before schema 29 default false; their argv cannot be reconstructed.
     pub launch_hooked: bool,
+    /// A recorded host reboot ended every possible writer of this launch.
+    /// This is finality proof, not a cached negative read: existing launch
+    /// failures still need inspection. New launches clear it; a definitive
+    /// aborted restart restores it with the previous external run's facts.
+    pub launch_boot_ended: bool,
     /// Provenance of the stored identity: `hook` for accepted reports, absent
     /// for historical identities or an empty binding. Resume does not reject an
     /// identity because its source is absent. This column also serves as launch
@@ -1489,6 +1497,9 @@ pub(crate) struct StoredSessionNotification {
 ///   them; the session's own stored launch is unaffected.
 /// - 28: notification resolution. A nullable timestamp preserves unresolved
 ///   history from older versions; reopening retains the unique launch/kind row.
+/// - 30: retain proof that a launch's boot ended, so already-exited rows
+///   can settle negative evidence across later supervisor restarts without
+///   treating same-boot pane absence as final.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1544,7 +1555,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  omp_reporter_asset TEXT,
                  omp_launch_program TEXT,
                  session_launch     TEXT,
-                 launch_hooked      INTEGER NOT NULL DEFAULT 0
+                 launch_hooked      INTEGER NOT NULL DEFAULT 0,
+                 launch_boot_ended  INTEGER NOT NULL DEFAULT 0
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1604,7 +1616,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 29;
+             PRAGMA user_version = 30;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2258,6 +2270,18 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 28 to 29")?;
         version = 29;
     }
+    if version == 29 {
+        // Old rows have no per-launch reboot proof. Defaulting false preserves
+        // same-boot absence retries; the next observed reboot establishes it.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN launch_boot_ended INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 30;
+             COMMIT;",
+        )
+        .context("migrating schema from version 29 to 30")?;
+        version = 30;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2484,9 +2508,9 @@ fn insert_session_row(
           canonical_cwd, captured_conversation, \
           generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, session_launch, \
-          capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked) \
+          capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2513,6 +2537,7 @@ fn insert_session_row(
             row.omp_reporter_asset,
             row.omp_launch_program,
             i64::from(row.launch_hooked),
+            i64::from(row.launch_boot_ended),
         ],
     )
     .context("inserting session row")?;
@@ -2563,7 +2588,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, tmux_name, pane, \
                                parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, \
                                session_launch, \
-                               capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked";
+                               capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2605,6 +2630,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             omp_reporter_asset: r.get(21)?,
             omp_launch_program: r.get(22)?,
             launch_hooked: r.get::<_, i64>(23)? != 0,
+            launch_boot_ended: r.get::<_, i64>(24)? != 0,
         },
         (r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?),
         r.get::<_, i64>(15)?,
@@ -3914,6 +3940,7 @@ impl SessionStore {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         created_at: preserved_created_at,
                         // Carried for `created_at`'s reason and with the same
                         // reach: the replaced row provably never launched (an
@@ -4014,6 +4041,8 @@ impl SessionStore {
     /// - the exit code and the error detail go for the same reason;
     /// - the pane is emptied, because the relaunch has not confirmed one
     ///   yet.
+    /// - boot-finality proof clears because a new shim can write. A definitive
+    ///   abort restores that proof with the prior external run's facts.
     /// - the captured identity, its ownership and its source are KEPT: every
     ///   restart resumes, and preserves the exact identity it will enter,
     ///   whether historical or reported.
@@ -4051,7 +4080,7 @@ impl SessionStore {
                         .query_row(
                             "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
                      generation, captured_conversation, launch_scoped, \
-                     capture_ownership_version \
+                     capture_ownership_version, launch_boot_ended \
                      FROM sessions WHERE id = ?1",
                             rusqlite::params![id],
                             |r| {
@@ -4062,6 +4091,7 @@ impl SessionStore {
                                     r.get(6)?,
                                     r.get(7)?,
                                     r.get(8)?,
+                                    r.get(9)?,
                                 ))
                             },
                         )
@@ -4074,6 +4104,7 @@ impl SessionStore {
                         captured_conversation,
                         scoped,
                         capture_ownership_version,
+                        launch_boot_ended,
                     )) = current
                     else {
                         return Ok(RelaunchDecision::Gone);
@@ -4093,6 +4124,7 @@ impl SessionStore {
                         .with_context(|| format!("session {id}"))?,
                         pane,
                         scoped: scoped != 0,
+                        launch_boot_ended: launch_boot_ended != 0,
                     };
                     let generation = generation + 1;
                     let (state, exit_code, annotation, error_detail) =
@@ -4105,7 +4137,7 @@ impl SessionStore {
                     tx.execute(
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
-                 omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0 \
+                 omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0 \
                  WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -4154,7 +4186,7 @@ impl SessionStore {
     /// The OMP reporter asset and launch program also stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, pane, and scope selection describe
-    /// the prior run; they are the facts this operation restores.
+    /// the prior run; they and its boot-finality proof are restored together.
     ///
     /// The generation itself is deliberately NOT rolled back — it is monotonic,
     /// and a reused number is exactly what would let a stale sentinel or a
@@ -4178,6 +4210,7 @@ impl SessionStore {
         );
         let pane = prior.pane.clone();
         let scoped = i64::from(prior.scoped);
+        let launch_boot_ended = i64::from(prior.launch_boot_ended);
         self.conn
             .call(
                 "relaunch abort task panicked",
@@ -4185,7 +4218,7 @@ impl SessionStore {
                     let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = ?6, launch_scoped = ?8 \
+                     error_detail = ?5, pane = ?6, launch_scoped = ?8, launch_boot_ended = ?9 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -4196,6 +4229,7 @@ impl SessionStore {
                         pane,
                         generation,
                         scoped,
+                        launch_boot_ended,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -5338,7 +5372,11 @@ impl SessionStore {
     /// like any other live session: the reboot destroyed the evidence of
     /// whether the kill ever landed, and inventing "stopped by user" for
     /// it would be a claim about a process nothing observed. Sessions
-    /// already `Exited` or `Error` keep everything they had.
+    /// already `Exited` or `Error` keep their outcome and metadata. Every
+    /// retained launch gains `launch_boot_ended` proof in this transaction,
+    /// because none of its old-boot writers can survive. Negative reads still
+    /// happen before caching, and this proof survives later same-boot reloads.
+    /// First-boot adoption establishes no such fact.
     ///
     /// The atomicity is the entire contract, and PLAN_M3.md item 2 spells
     /// out the failure it exists to exclude: were the boot id committed
@@ -5392,6 +5430,11 @@ impl SessionStore {
                     )
                     .context("storing boot id")?;
                     if interrupt_live {
+                        // Even already-exited rows lose their possible evidence
+                        // writers in a reboot. Persist this with the boot id, or
+                        // the next same-boot startup would lose that proof.
+                        tx.execute("UPDATE sessions SET launch_boot_ended = 1", [])
+                            .context("recording launch boot finality")?;
                         // Sentinel overrides FIRST: each affected row leaves the
                         // 'launching'/'running'/'stop_requested' states before the
                         // blanket UPDATE below ever runs, which is what makes the
@@ -6042,6 +6085,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -7273,7 +7317,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
+                "ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
             )
             .unwrap();
             assert!(
@@ -7288,6 +7332,131 @@ mod tests {
         drop(migrated);
         let reopened = SessionStore::open(&path, true).await.unwrap();
         assert_eq!(reopened.session("old-launch").await.unwrap().unwrap(), row);
+    }
+
+    /// Schema 29 cannot distinguish an old-boot exit from same-boot absence.
+    /// Migration must retain the row and leave finality unknown, rather than
+    /// inventing reboot evidence that would suppress a late launch failure.
+    #[farhelm_testtrace::test]
+    async fn launch_boot_finality_migration_preserves_unknown_rows() {
+        let (dir, store) = fresh_store().await;
+        let row = launching_row("old-boot-proof");
+        store.insert_session(row, None).await.unwrap();
+        let before = store.session("old-boot-proof").await.unwrap().unwrap();
+        drop(store);
+        let path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN launch_boot_ended; PRAGMA user_version = 29;",
+            )
+            .unwrap();
+            assert!(
+                conn.prepare("SELECT launch_boot_ended FROM sessions")
+                    .is_err()
+            );
+        }
+        let migrated = SessionStore::open(&path, true).await.unwrap();
+        let after = migrated.session("old-boot-proof").await.unwrap().unwrap();
+        assert_eq!(after, before);
+        assert!(!after.launch_boot_ended);
+        drop(migrated);
+        let reopened = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(
+            reopened.session("old-boot-proof").await.unwrap().unwrap(),
+            after
+        );
+    }
+
+    /// Reboot proof follows the external run, including a harmless abort.
+    /// A newly claimed launch clears it, while rollback restores it under
+    /// the advanced generation fence. A stale rollback cannot settle a newer
+    /// launch that may still write; first-boot adoption supplies no proof.
+    #[farhelm_testtrace::test]
+    async fn launch_boot_finality_resets_on_relaunch_and_restores_on_abort() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "boot-proof").await;
+        store
+            .record_boot("boot-a", false, HashMap::new(), None)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .session("boot-proof")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_boot_ended
+        );
+        let exited = LastOutcome::Exited {
+            exit_code: Some(7),
+            annotation: None,
+        };
+        force_outcome(&store, "boot-proof", &exited);
+        let fault: BootTxFault = Arc::new(|| anyhow::bail!("reboot rollback"));
+        assert!(
+            store
+                .record_boot("boot-b", true, HashMap::new(), Some(fault))
+                .await
+                .is_err()
+        );
+        assert_eq!(store.boot_id().await.unwrap().as_deref(), Some("boot-a"));
+        assert!(
+            !store
+                .session("boot-proof")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_boot_ended
+        );
+        store
+            .record_boot("boot-b", true, HashMap::new(), None)
+            .await
+            .unwrap();
+        let ended = store.session("boot-proof").await.unwrap().unwrap();
+        assert!(ended.launch_boot_ended);
+        assert_eq!(ended.outcome, exited);
+        let first = claimed(
+            store
+                .begin_relaunch("boot-proof", uncaptured_basis(), false)
+                .await
+                .unwrap(),
+        );
+        assert!(first.prior.launch_boot_ended);
+        assert!(
+            !store
+                .session("boot-proof")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch_boot_ended
+        );
+        assert!(
+            store
+                .abort_relaunch("boot-proof", first.generation, &first.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("boot-proof").await.unwrap().unwrap();
+        assert!(restored.launch_boot_ended);
+        assert_eq!(restored.outcome, exited);
+        assert_eq!(restored.generation, first.generation);
+        let second = claimed(
+            store
+                .begin_relaunch("boot-proof", uncaptured_basis(), false)
+                .await
+                .unwrap(),
+        );
+        assert!(
+            !store
+                .abort_relaunch("boot-proof", first.generation, &first.prior)
+                .await
+                .unwrap()
+        );
+        let fresh = store.session("boot-proof").await.unwrap().unwrap();
+        assert_eq!(fresh.generation, second.generation);
+        assert_eq!(fresh.outcome, LastOutcome::Launching);
+        assert!(!fresh.launch_boot_ended);
     }
 
     /// A hook belongs to one launch, even when Restart preserves its identity.
@@ -7601,6 +7770,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "demo".to_string(),
@@ -7654,6 +7824,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -8261,6 +8432,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     title: "demo".to_string(),
@@ -8340,6 +8512,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "structured".to_string(),
@@ -8426,6 +8599,7 @@ mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         parent: None,
                         title: "structured launch".to_string(),
                         created_at: now_unix(),
@@ -9075,7 +9249,7 @@ mod tests {
         let path = dir.path().join("supervisor.db");
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
+            conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
             assert!(
                 conn.prepare("SELECT resolved_at FROM session_notifications")
                     .is_err(),
@@ -9290,6 +9464,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -9368,6 +9543,7 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             launch_hooked: false,
+            launch_boot_ended: false,
             canonical_cwd: None,
             id: id.to_string(),
             parent: None,
@@ -10612,6 +10788,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -10635,6 +10812,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -10692,6 +10870,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     last_work_started_at: 0,
@@ -10813,6 +10992,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -11274,6 +11454,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -11398,9 +11579,9 @@ mod tests {
     /// command launch's command, a legacy launch's fields as they were.
     fn restore_pre_v26_launch_columns(conn: &Connection) {
         // These fixtures rewind a current database, unlike raw historical
-        // schemas. Remove later additive columns so the resolution and hook
-        // migrations exercise the same upgrade a real older database requires.
-        conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
+        // schemas. Remove later additive columns so the resolution, hook and
+        // boot-finality migrations exercise the same upgrade a real older database requires.
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
             .expect("restore pre-resolution notifications");
         let rows: Vec<(String, String)> = conn
             .prepare("SELECT id, session_launch FROM sessions")
@@ -11989,6 +12170,7 @@ mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         last_work_started_at: 0,
@@ -12691,6 +12873,7 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             launch_hooked: false,
+            launch_boot_ended: false,
             id: "s1".to_string(),
             parent: None,
             title: title.to_string(),
