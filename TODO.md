@@ -178,6 +178,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   giant vertical box along the very right edge of the screen the first time it was seen. Improve how it looks and where
   it sits; details to be decided with the maintainer.
 
+- **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
+  conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
+  session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the
+  Claude screen fixtures so it stays covered.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
