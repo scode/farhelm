@@ -1078,6 +1078,7 @@ mod tests {
                         generation: 0,
                         launch_scoped: false,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         conversation_source: None,
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,

@@ -2879,8 +2879,12 @@ fn republished_terminal(
 /// The activity and work-start timestamps are NOT run-scoped: they live in
 /// [`SessionCells`] and are shared rather than re-minted; the comment at that
 /// field below argues why fencing them would be a bug rather than a
-/// safeguard. A new cell joins one of the two groups, which is what decides
-/// its sharing here and in [`renamed_entry`].
+/// safeguard. `launch_boot_ended` is normally false for a new run; the failed
+/// restart path supplies the prior proof only after a definitive abort restores
+/// that external run. Advancing the generation does not by itself prove that
+/// the old launch's shim can no longer write.
+/// A new cell joins one of the two groups, which decides its sharing here
+/// and in [`renamed_entry`].
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
@@ -2888,6 +2892,7 @@ fn relaunched_entry(
     generation: i64,
     scope: Option<String>,
     outcome: LastOutcome,
+    launch_boot_ended: bool,
 ) -> Arc<SessionEntry> {
     let capture = entry
         .run
@@ -2899,6 +2904,7 @@ fn relaunched_entry(
         info,
         terminal,
         run: RunCells {
+            launch_boot_ended,
             launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_error: Arc::new(std::sync::Mutex::new(None)),
@@ -3732,9 +3738,10 @@ pub(crate) struct SessionEntry {
 /// generation): its liveness verdict, first-input anchor, capture state, hook
 /// flags, and activity classification.
 ///
-/// Held by value in [`SessionEntry`] and `Clone` because every cell is an
-/// `Arc`: cloning the group SHARES the cells, which is exactly what a rename
-/// needs (see [`renamed_entry`]), while a relaunch builds a fresh group so a
+/// Held by value in [`SessionEntry`] and `Clone`: mutable cells are `Arc`s,
+/// while boot-finality proof is immutable. Cloning SHARES the cells and copies
+/// that proof, which is exactly what a rename needs (see [`renamed_entry`]),
+/// while a relaunch builds a fresh group so a
 /// late writer holding the old entry cannot touch the new run (see
 /// [`relaunched_entry`]). A new cell that belongs to the run goes here; one
 /// that must survive a relaunch goes in [`SessionCells`]. Choosing the group
@@ -3742,9 +3749,14 @@ pub(crate) struct SessionEntry {
 /// entry's construction sites.
 #[derive(Clone)]
 pub(crate) struct RunCells {
+    /// Durable proof that this external run cannot write after a host reboot.
+    /// Copied on same-launch replacements, restored on a definitive abort,
+    /// and cleared when a new launch may exist. It permits negative caching
+    /// after successful reads; it is not itself a negative-read result.
+    pub(crate) launch_boot_ended: bool,
     /// Successful negative launch reads after this run could no longer write.
-    /// Only a durably terminal outcome with an owned dead pane, or a boot-change
-    /// interruption, can settle them. Same-boot absence is transient evidence;
+    /// Only a durably terminal outcome with an owned dead pane, or proof that
+    /// the launch's boot ended, can settle them. Same-boot absence is transient;
     /// read failures and uncommitted errors must keep retrying. Rename shares
     /// this latch; relaunch and reload begin with fresh evidence obligations.
     pub(crate) launch_reads_settled: Arc<std::sync::atomic::AtomicBool>,
@@ -5472,7 +5484,8 @@ impl Supervisor {
     ///   transaction that stores the new id (`SessionStore::record_boot`
     ///   owns the argument for why that atomicity is not optional).
     ///   Already-exited sessions keep their status, codes, and
-    ///   annotations.
+    ///   annotations. Every retained launch gains durable proof that its
+    ///   evidence writers ended, including already-exited launches.
     /// - **Same** — M2's per-row probing still rules, now also recording
     ///   what it observes so the NEXT reboot has ground to stand on.
     /// - **Absent stored id** — a database written before this milestone.
@@ -5685,6 +5698,7 @@ impl Supervisor {
             // loaded with a moment ago.
             if rebooted {
                 for row in &mut rows {
+                    row.launch_boot_ended = true;
                     if let Some(detail) = sentinel_overrides.get(&row.id) {
                         row.outcome = LastOutcome::Error {
                             detail: detail.clone(),
@@ -6117,6 +6131,7 @@ impl Supervisor {
             // Derived before `row.id` is moved into the entry's `info`.
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
             let launch_cleanup_done = cleaned_launches.contains(&row.id);
+            let launch_boot_ended = row.launch_boot_ended;
             let launch_error = if matches!(outcome, LastOutcome::Error { .. }) {
                 None
             } else {
@@ -6177,6 +6192,7 @@ impl Supervisor {
                     },
                     terminal,
                     run: RunCells {
+                        launch_boot_ended,
                         launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(
                             launch_cleanup_done,
@@ -8498,6 +8514,7 @@ impl Supervisor {
                 info: info.clone(),
                 terminal,
                 run: RunCells {
+                    launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
@@ -8784,6 +8801,7 @@ impl Supervisor {
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 launch_hooked: false,
+                launch_boot_ended: false,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -8923,6 +8941,7 @@ impl Supervisor {
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 launch_hooked: false,
+                launch_boot_ended: false,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -9772,6 +9791,7 @@ impl Supervisor {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
                 run: RunCells {
+                    launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
@@ -10651,6 +10671,7 @@ impl Supervisor {
                         claim.scoped
                     },
                 );
+                let mut launch_boot_ended = false;
                 if definitive {
                     // Nothing outside this process changed, so the previous
                     // run's outcome is still the truth about this session —
@@ -10660,7 +10681,8 @@ impl Supervisor {
                         .abort_relaunch(&id, claim.generation, &claim.prior)
                         .await
                     {
-                        Ok(_) => {
+                        Ok(restored) => {
+                            launch_boot_ended = restored && claim.prior.launch_boot_ended;
                             *entry.run.outcome.lock().expect("outcome mutex poisoned") =
                                 claim.prior.outcome.clone();
                         }
@@ -10733,6 +10755,7 @@ impl Supervisor {
                                 .lock()
                                 .expect("outcome mutex poisoned")
                                 .clone(),
+                            launch_boot_ended,
                         ),
                     );
                 }
@@ -11503,6 +11526,7 @@ impl Supervisor {
             generation,
             scope,
             outcome,
+            false,
         );
         // Raised on the NEW entry, whose cell `relaunched_entry` has just
         // minted `false` — this launch's own injection is the ONLY thing
@@ -13760,6 +13784,7 @@ impl Supervisor {
                 info,
                 terminal: None,
                 run: RunCells {
+                    launch_boot_ended: row.launch_boot_ended,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
@@ -15760,6 +15785,7 @@ pub(crate) mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -15867,6 +15893,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -15968,6 +15995,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -17210,6 +17238,7 @@ pub(crate) mod tests {
             },
             terminal,
             run: RunCells {
+                launch_boot_ended: false,
                 launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
@@ -17253,6 +17282,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: entry.info.id.clone(),
                     parent: None,
                     title: title.to_string(),
@@ -17571,6 +17601,7 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
+            false,
         );
         assert!(
             !relaunched
@@ -17697,6 +17728,7 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
+            false,
         );
         assert!(
             matches!(
@@ -17734,6 +17766,7 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
+            false,
         );
         assert_eq!(
             new.run.capture.lock().unwrap().committed_conversation(),
@@ -17774,6 +17807,7 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
+            false,
         );
         assert!(
             !relaunched.run.hooked.load(ordering),
@@ -17810,6 +17844,7 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
+            false,
         );
         {
             let fresh = relaunched.run.activity.lock().unwrap();
@@ -18653,6 +18688,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "renamed".to_string(),
                     parent: None,
                     title: "renamed".to_string(),
@@ -18751,6 +18787,7 @@ pub(crate) mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -18901,6 +18938,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: "error row".to_string(),
@@ -19058,6 +19096,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: scoped_id.clone(),
                     parent: None,
                     title: "scoped".to_string(),
@@ -19185,6 +19224,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.clone(),
                     parent: None,
                     title: "kind".to_string(),
@@ -19252,6 +19292,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: "codex".to_string(),
@@ -19296,6 +19337,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: "grok".to_string(),
@@ -19378,6 +19420,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                 },
                 None,
             )
@@ -19523,6 +19566,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                 },
                 None,
             )
@@ -20316,6 +20360,7 @@ pub(crate) mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         id: id.clone(),
                         parent: None,
                         title: "identity".to_string(),
@@ -20448,6 +20493,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                 },
                 None,
             )
@@ -21054,6 +21100,7 @@ exit 0
                         omp_reporter_asset: marker.map(str::to_string),
                         omp_launch_program: program.map(str::to_string),
                         launch_hooked: false,
+                        launch_boot_ended: false,
                     },
                     None,
                 )
@@ -22397,6 +22444,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                 },
                 None,
             )
@@ -22594,6 +22642,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: doomed.to_string(),
                     parent: None,
                     title: "hooked".to_string(),
@@ -22688,6 +22737,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
                     title: "unhooked".to_string(),
@@ -22768,6 +22818,7 @@ exit 0
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -22868,6 +22919,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -22961,6 +23013,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -23247,6 +23300,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
                     title: "pending archive".to_string(),
@@ -24113,9 +24167,10 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                29,
+                30,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
-                 session-notification, notification-resolution and launch-hook changes too"
+                 session-notification, notification-resolution, launch-hook and boot-finality \
+                 changes too"
             );
             assert_eq!(
                 conn.query_row(
@@ -24340,6 +24395,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -25380,6 +25436,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -25467,6 +25524,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "ended".to_string(),
                     parent: None,
                     title: "ended".to_string(),
@@ -25991,6 +26049,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26087,6 +26146,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26521,6 +26581,7 @@ exit 0
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        launch_boot_ended: false,
                         id: id.clone(),
                         parent: None,
                         title: "recorded title".to_string(),
@@ -26675,6 +26736,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -26826,6 +26888,7 @@ exit 0
             omp_reporter_asset: None,
             omp_launch_program: None,
             launch_hooked: false,
+            launch_boot_ended: false,
             id: "stranded".to_string(),
             parent: None,
             title: "as created".to_string(),
@@ -26989,6 +27052,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -27281,6 +27345,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    launch_boot_ended: false,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -31877,6 +31942,173 @@ exit 0
         assert!(
             observed.sentinel.is_none(),
             "settled preparation must not be reclassified from another read"
+        );
+    }
+
+    /// A reboot also makes Ready preparation final for an already-exited run.
+    /// Corrupting only its preparation after a successful negative observation
+    /// proves that the boot proof settles both evidence inputs, not just the
+    /// launch-failure file. No real host reboot is needed: the boot-id seam
+    /// drives the same durable startup transaction.
+    #[farhelm_testtrace::test]
+    async fn pre_reboot_exited_reads_do_not_reparse_ready_preparation() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let info = fresh_create(&sup, &checkout_fixture(&root), None)
+            .await
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&info.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = crate::launch::preparation_state_path(state.path(), &plan.id);
+        crate::launch::write_preparation_state(
+            &path,
+            &plan.id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let row = sup.store.session(&info.id).await.unwrap().unwrap();
+        assert!(!row.pane.is_empty(), "premise: accepted terminal");
+        assert!(
+            sup.store
+                .preparation_origin(&info.id, row.generation)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        std::fs::remove_file(crate::launch::spec_path_for_launch(
+            state.path(),
+            &info.id,
+            row.generation,
+        ))
+        .unwrap();
+        let entry = sup.sessions.lock().await[&info.id].clone();
+        let mut states = sup.tmux.pane_states().await.unwrap();
+        let pane = states.get_mut(&row.pane).unwrap();
+        assert_eq!(pane.session_name, row.tmux_name);
+        // The dummy shim never performs setup. Supply the owned-dead boundary
+        // explicitly so this test concerns evidence caching, not process timing.
+        pane.dead = true;
+        let known = super::super::status::KnownTmuxNames::from_sessions([(
+            info.id.as_str(),
+            Some(row.tmux_name.as_str()),
+        )]);
+        super::super::ticker::observe_entries(&sup, &[entry], &states, &known).await;
+        let exited = sup.store.session(&info.id).await.unwrap().unwrap().outcome;
+        assert!(matches!(
+            exited,
+            LastOutcome::Exited {
+                annotation: None,
+                ..
+            }
+        ));
+        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+        let seams = SupervisorSeams {
+            boot_id: Arc::new(|| Ok(Some("preparation-next-boot".into()))),
+            ..SupervisorSeams::default()
+        };
+        let (reloaded, _) =
+            Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+                .await
+                .unwrap();
+        let entry = reloaded[&info.id].clone();
+        assert!(entry.run.launch_boot_ended);
+        assert_eq!(*entry.run.outcome.lock().unwrap(), exited);
+        super::super::ticker::observe_entries(
+            &sup,
+            std::slice::from_ref(&entry),
+            &HashMap::new(),
+            &known,
+        )
+        .await;
+        assert!(
+            entry
+                .run
+                .launch_reads_settled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        std::fs::write(&path, b"invalid JSON").unwrap();
+        assert!(
+            crate::launch::read_preparation_state(&path, &plan.id).is_err(),
+            "premise: another parse would fail"
+        );
+        let observed = super::super::status::observe_entry(&sup, &entry, &HashMap::new(), &known)
+            .await
+            .unwrap();
+        assert!(observed.sentinel.is_none());
+    }
+
+    /// A harmless failed restart retains the prior external run's boot proof.
+    /// Obstructing the launch directory gives a real pre-spawn artifact failure
+    /// even under a privileged runner. After rollback both the row and published
+    /// entry must retain proof under the advanced generation; otherwise the next
+    /// tick would resume perpetual reads until another supervisor restart.
+    #[farhelm_testtrace::test]
+    async fn aborted_restart_republishes_prior_launch_boot_finality() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        seed_rename_session(&sup, "old run").await;
+        sup.store
+            .record_boot("ended-boot", true, HashMap::new(), None)
+            .await
+            .unwrap();
+        let seams = SupervisorSeams {
+            boot_id: Arc::new(|| Ok(Some("ended-boot".into()))),
+            ..SupervisorSeams::default()
+        };
+        let (reloaded, _) =
+            Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+                .await
+                .unwrap();
+        *sup.sessions.lock().await = reloaded;
+        let entry = sup.sessions.lock().await["s1"].clone();
+        assert!(entry.run.launch_boot_ended);
+        assert_eq!(*entry.run.outcome.lock().unwrap(), LastOutcome::Interrupted);
+        let snapshot = sup.session_snapshot("s1").await.unwrap().unwrap();
+        let launch_dir = state.path().join("launch");
+        // Startup prepares this directory even when no launch has written
+        // artifacts. Remove only an empty fixture directory before replacing
+        // it: unexpected evidence must fail setup rather than be discarded.
+        assert!(launch_dir.is_dir());
+        std::fs::remove_dir(&launch_dir).expect("fixture launch directory must be empty");
+        std::fs::write(&launch_dir, b"not a directory").unwrap();
+        assert!(std::fs::metadata(&launch_dir).unwrap().is_file());
+        let refused = sup
+            .relaunch(
+                &entry,
+                &snapshot,
+                RelaunchPlan {
+                    argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
+                    launch_cwd: "/tmp".into(),
+                    terminal_survives: false,
+                    restart_with: None,
+                },
+            )
+            .await;
+        refused.expect_err("artifact obstruction must refuse before spawn");
+        let row = sup.store.session("s1").await.unwrap().unwrap();
+        let recovered = sup.sessions.lock().await["s1"].clone();
+        assert_eq!(row.generation, entry.generation + 1);
+        assert_eq!(row.outcome, LastOutcome::Interrupted);
+        assert!(row.launch_boot_ended);
+        assert_eq!(recovered.generation, row.generation);
+        assert!(recovered.run.launch_boot_ended);
+        assert!(
+            !recovered
+                .run
+                .launch_reads_settled
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
     }
 
