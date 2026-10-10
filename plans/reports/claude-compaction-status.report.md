@@ -61,3 +61,39 @@ findings were corrected, the accepted false-positive risk was made explicit, and
 documented. An optional glyph blacklist was declined because the maintainer required the other guards to remain
 unchanged. Final formatting passed after the follow-up's wrapping finding. The review gate passed with local fixes; the
 commit and PR wording cold read passed.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1774 (Claude shows as running while it compacts), one squash commit on main, directly
+after host-icons, which touches no supervisor code. Since the plan was based, main also gained the shutdown quiet-down
+fix (#1780) and the previous round's supervisor change that made the two-second timer the only place sessions are
+sampled. The reviewer checked that interaction: the screen reader is called from the same sampling path as before, and a
+compaction now counts as activity, so a long compaction keeps the session's "last seen working" time fresh, which is
+what SPEC.md describes.
+
+#### Review before merging
+
+A separate reviewer that had not worked on this round's plans re-ran the new rule by hand over all 50 committed Claude
+screens: every 2.1.285 and 2.1.296 screen reads its named state, the only screen whose reading changes is the compaction
+screen (Idle before, Running now), and no other line on any screen matches the new rule. Waiting screens cannot read as
+Running, because working lines are only looked for when the input box is on screen and every dialog replaces it. Codex
+and the other agents' readers are untouched. The new captured screens contain no personal identifiers; they do mention,
+in Claude's own words, that a private skill was loaded at session start, as the earlier captures already did, which
+isolating the capture's Claude configuration (the report's possible follow-up) would avoid.
+
+#### A change made while landing
+
+SPEC_impl.md now records the false positive you accepted: reply text shaped like a spinner line just above the input box
+(`- Ran the suite… (2 failures)`) also reads as working. Without it there, a future review finding about that behavior
+would come back to you instead of being closed as already decided. The landing also closed an unbalanced parenthesis in
+the spec's compaction example.
+
+#### Checks
+
+- Run now, stacked on host-icons: the supervisor's screen reader and captured-screen tests, 14 of 14, in the recorded
+  run `aca47509` (its three failures were host-icons' helm tests, fixed there), with `cargo clippy --all-targets` and
+  `cargo clippy -p farhelm --bins` clean.
+- Reused from the executor: the real Claude capture and the per-version screen checks; the landing changed only spec
+  wording.
+
+Nothing in the report above was made untrue by the landing.
