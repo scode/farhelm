@@ -3,7 +3,7 @@
 //! A hook writes its report into the session's drop directory and exits
 //! (`crate::hook_report` owns the format and the layout). This module is the
 //! supervisor's half: on every reconciliation pass (`Supervisor::capture_now`,
-//! which the ticker runs every two seconds and which reply paths, startup,
+//! which the ticker runs every two seconds and which startup,
 //! reload and Restart run before reading capture state) it takes each waiting
 //! report, runs it through admission (the per-kind attribution and the
 //! five-step capture transaction, `Supervisor::report_conversation`), and
@@ -109,7 +109,7 @@ impl Supervisor {
     /// drop directories of sessions that no longer exist. See the module docs
     /// for the order and the settle/retry rule.
     ///
-    /// Drains never overlap: the ticker and reply paths may all call this,
+    /// Drains never overlap: the ticker, reload and Restart may all call this,
     /// and only one at a time gets the drain lock. That is what lets a pass
     /// treat a taken file it finds at its start as a leftover of a
     /// supervisor that died mid-pass (one supervisor holds a state directory
@@ -118,8 +118,8 @@ impl Supervisor {
     /// When another drain is already running, an ordinary caller
     /// (`wait: false`) skips draining rather than waiting: the running drain
     /// is applying the same files, and a drain can take as long as admission
-    /// does (exact-record reads, a busy capture claim), which a session
-    /// listing must not wait behind. A caller that needs every report
+    /// does (exact-record reads, a busy capture claim); a periodic pass need
+    /// not repeat work the existing drain is already doing. A caller that needs every report
     /// already on disk judged when it returns (`wait: true`: Restart, which
     /// is about to choose the conversation to resume, and the test seam)
     /// waits its turn instead.

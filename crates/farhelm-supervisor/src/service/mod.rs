@@ -35,8 +35,8 @@
 //! Every session carries its integration snapshot and any stored conversation
 //! identity. `crate::agent_kind` owns per-kind report and Resume rules; this
 //! module authenticates reports, persists them, and reconciles their mirrors.
-//! Reply paths refresh before answering, while `ticker` provides progress with
-//! nobody connected. Each refresh takes the session's capture claim and verifies
+//! Replies read cached reconciliation state, while `ticker` provides progress
+//! with nobody connected. Startup, reload and Restart retain their own refresh. Each refresh takes the session's capture claim and verifies
 //! only the exact files its accepted report requires. Input starts an in-memory
 //! diagnostic timer for injected hooks; it never identifies a conversation.
 //!

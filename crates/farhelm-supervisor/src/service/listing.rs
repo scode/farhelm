@@ -11,18 +11,15 @@
 //!
 //! [`list_all`] is the seam `handle_list_sessions` sits behind. It does the
 //! whole of what a list request DOES — snapshot, order, cut, probe tmux,
-//! and witness exits — and none of how it answers:
+//! and describe cached state — and none of how it answers:
 //! no reply channel, no transport, no `req_id`. That is what lets the
 //! listing be reasoned about, and tested, without a socket in sight.
 
 use super::core::{SessionEntry, Supervisor};
-use super::launch_artifacts::cleanup_launch_artifacts;
-use super::status::{KnownTmuxNames, entry_info, observe_entry};
-use crate::store::{LastOutcome, Transition};
+use super::status::{KnownTmuxNames, entry_info};
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::warn;
 
 /// The order a `SessionList` reply is in, and the order that decides
 /// which rows survive the cap: creation time descending, with session id
@@ -89,21 +86,14 @@ pub(crate) struct ListReply {
     pub(crate) truncated: bool,
 }
 
-/// Answer `ListSessions`: snapshot the session map, order and cap it, and
-/// describe every entry that survived.
+/// Answer from the last reconciliation, with one fresh pane query for exits and tabs.
 ///
-/// The tmux probe is BATCHED — taken once for the whole list rather than
-/// once per entry. That is a statement about the
-/// two reads and not a count of everything this function does: the
-/// observation loop below still reads a launch sentinel per entry that
-/// has one, and commits its transitions in one batched write.
-///
-/// Every failure is an `Err` carrying the original error verbatim, and
-/// every one of them fails the WHOLE request: an unreadable launch
-/// sentinel or an unclassified tmux failure would otherwise leave this
-/// list reporting an inference the unread file might contradict. Nothing
-/// observed is committed before such a failure — see the observation loop
-/// below.
+/// Lists never sample screens, apply reports, read launch artifacts or commit
+/// outcomes. Resume readiness, launch-error classification and notification
+/// resolution may therefore lag by one nominal two-second tick. A launch
+/// artifact read failure leaves lists available; the ticker logs and retries it.
+/// Unclassified tmux failures still fail the whole request because liveness
+/// and tabs cannot be described honestly without that snapshot.
 pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // The lock's own critical section is just the snapshot — clone every
     // `Arc<SessionEntry>` — nothing more: sorting and cutting the clone
@@ -115,7 +105,7 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // cost on every create and delete, and SPEC.md asks for none.
     //
     // The cut happens BEFORE any entry is status-annotated: the per-entry
-    // observation below is not free, and past the cap it would be work
+    // reply construction below is not free, and past the cap it would be work
     // for rows the reply cannot carry.
     //
     // Sessions mid-restart are off the map but still listed, from the rows
@@ -161,10 +151,6 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             Listed::Held(_) => None,
         })
         .collect();
-    // Refresh accepted reports before constructing offers. The ticker keeps
-    // unattended state moving; this pass gives the reply current row and
-    // exact-file evidence, serialized with reports per session.
-    sup.capture_now().await;
     // ONE query for every session's liveness, not one per
     // session (`TmuxDriver::pane_states`'s own docs on why
     // that multiplies subprocess spawns under a polling UI) —
@@ -191,133 +177,10 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     } else {
         HashMap::new()
     };
-    // A list request is one of the places this supervisor
-    // WITNESSES an exit (PLAN_M3.md item 2): the dead pane it
-    // just found may be gone entirely by the next reboot,
-    // taking its exit code with it, so the code is recorded
-    // now — while tmux still has it — rather than recomputed
-    // forever from a fact that expires. Every observation this
-    // pass produces commits in ONE transaction, and the store
-    // decides what each one means (`Transition::apply`), so a
-    // stop running concurrently cannot have its annotation
-    // erased by this list and this list cannot be misled by a
-    // stale reading of its own.
-    // A launch sentinel is READ regardless of whether this
-    // supervisor `may_record()` (item 2 of the review-swarm
-    // fix batch): a degraded supervisor (a handoff candidate,
-    // or one whose boot-id read failed) still has standing to
-    // REPORT what it can read, even though it must not WRITE a
-    // conclusion it has no standing to store — the two halves
-    // below are deliberately independent (`reply_status`
-    // always reflects a sentinel this pass found; only
-    // `observations` is gated on `may_record()`).
-    //
-    // A plain loop, not `observation()`'s pure `filter_map`
-    // closure, because the sentinel check below is real I/O
-    // (`read_launch_sentinel`) and therefore has to run
-    // between two lock scopes rather than inside one
-    // synchronous closure body: PLAN_M3.md item 3 wants the
-    // SAME observation offered here that `reload_sessions`
-    // offers — a non-terminal outcome whose pane is dead or
-    // gone entirely gets its sentinel checked before falling
-    // back to `observation()`'s plain exit inference, because
-    // the sentinel outranks that inference exactly as surely
-    // here as at reload, including (addition 18) for an entry
-    // ALREADY recorded as an inferred `Interrupted` or
-    // unannotated `Exited` — both are themselves only
-    // inferences a sentinel is defined to beat.
-    let mut observations: Vec<(String, i64, Transition)> = Vec::new();
-    // This pass's sentinel finds, id to detail — used both to
-    // gate post-commit file cleanup on the transition actually
-    // landing, and (`reply_status`, below) to surface the
-    // Error for THIS reply even when it could not be
-    // committed durably this pass (`may_record()` false, or
-    // the commit itself fails) — PLAN_M3.md item 3's
-    // write-inability note: retain the file, retry
-    // persistence on a later poll, but never let the reply
-    // itself regress to a stale `Exited` in the meantime.
-    let mut sentinel_hits: HashMap<String, String> = HashMap::new();
-    for entry in &entries {
-        // Loud propagation, not fall-through (item 1): the
-        // WHOLE request fails rather than silently basing
-        // this — or any other — entry's reply on an
-        // inference the unreadable sentinel might
-        // contradict. Nothing gathered so far this pass is
-        // committed: this `?` short-circuits before
-        // `transition_many` is ever called.
-        let observed = observe_entry(sup, entry, &pane_states, &known).await?;
-        if observed.settled_error {
-            if sup.may_record() {
-                cleanup_launch_artifacts(
-                    &sup.state_dir,
-                    &sup.store,
-                    &entry.info.id,
-                    entry.generation,
-                )
-                .await;
-            }
-            continue;
-        }
-        if let Some(detail) = observed.sentinel {
-            sentinel_hits.insert(entry.info.id.clone(), detail);
-        }
-        if let Some(transition) = observed.transition {
-            observations.push((entry.info.id.clone(), entry.generation, transition));
-        }
-    }
-    if !observations.is_empty() {
-        match sup.store.transition_many(observations).await {
-            Ok(committed) => {
-                for entry in &entries {
-                    if let Some(outcome) = committed.get(&entry.info.id) {
-                        sup.mirror_committed_outcome(entry, outcome);
-                    }
-                }
-                // Cleanup folded into this successful arm
-                // (item 7), not a separate loop afterward: see
-                // `reload_sessions`'s identical step for the
-                // full lifecycle rationale. The shared helper additionally
-                // preserves accepted-create evidence before unlinking a
-                // generation-zero sentinel. A failed outcome write must
-                // leave the files for another pass, hence gating on the
-                // commit rather than the sentinel observation alone.
-                for entry in &entries {
-                    if sentinel_hits.contains_key(&entry.info.id)
-                        && matches!(
-                            committed.get(&entry.info.id),
-                            Some(LastOutcome::Error { .. })
-                        )
-                    {
-                        cleanup_launch_artifacts(
-                            &sup.state_dir,
-                            &sup.store,
-                            &entry.info.id,
-                            entry.generation,
-                        )
-                        .await;
-                    }
-                }
-            }
-            // Logged, not fatal: the reply below is computed
-            // from what this pass OBSERVED plus what is
-            // durably recorded, both of which are still honest
-            // when the write fails — and the next list retries.
-            Err(e) => warn!(
-                error = %format!("{e:#}"),
-                "could not record observed session outcomes; \
-                 the next list will retry"
-            ),
-        }
-    }
     let sessions: Vec<SessionInfo> = listed
         .iter()
         .map(|row| match row {
-            Listed::Live(entry) => entry_info(
-                entry,
-                &pane_states,
-                &known,
-                sentinel_hits.get(&entry.info.id).map(String::as_str),
-            ),
+            Listed::Live(entry) => entry_info(entry, &pane_states, &known),
             Listed::Held(held) => held.as_ref().clone(),
         })
         .collect();

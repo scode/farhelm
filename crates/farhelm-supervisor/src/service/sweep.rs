@@ -1871,8 +1871,8 @@ impl StopFailure {
 /// usually leaves tmux nothing to reduce to a plain code, but where it
 /// does, that code is worth keeping — and `pane_states`, not
 /// `pane_process`, is what carries `#{pane_dead_status}` at all. A failed
-/// query costs the code, not the annotation, and a later list can still
-/// enrich the record (the store's transitions are monotonic).
+/// query costs the code, not the annotation, and a later tick's observation
+/// can still enrich the record (the store's transitions are monotonic).
 ///
 /// `root_identity` is the `(pid, start time)` pair the caller captured at its
 /// own liveness check. It is passed in rather than re-derived here so the

@@ -84,20 +84,12 @@ pub(crate) async fn wrapper_failure_detail(
     }
 }
 
-/// Async wrapper around [`crate::launch::read_launch_sentinel`] for its
-/// two service-side callers: `handlers`' `ListSessions` calls it on every
-/// poll for every eligible session, which makes it the genuinely hot one;
-/// `core`'s `reload_sessions` calls it only once per construction (or handoff), far
-/// off any hot path, but shares this wrapper anyway so the two call sites
-/// can never diverge on how the read reaches the filesystem.
+/// Read launch evidence off the async worker for observation and reload.
 ///
-/// `spawn_blocking` wraps what is usually a single `ENOENT`-returning
-/// `read` (cheap in the overwhelmingly common case: no launch has ever
-/// failed for this session) because a synchronous syscall run inline on
-/// an async worker thread blocks every OTHER session's terminal
-/// forwarding sharing that thread for however long the underlying I/O
-/// takes — worth paying on `ListSessions`'s polling path even though any
-/// one call is ordinarily fast.
+/// A missing file is an ordinary negative read. Even a usually cheap filesystem
+/// call can block on its underlying storage, so spawn_blocking keeps it from
+/// delaying terminal forwarding on the same worker. Replies never call this;
+/// the timer logs read failures and retries while lists remain available.
 pub(crate) async fn read_launch_sentinel(
     state_dir: &Path,
     id: &str,
@@ -116,7 +108,7 @@ pub(crate) async fn read_launch_sentinel(
 /// the read-time mirror of `Transition::apply`'s own `SentinelError` rule
 /// (`store.rs`), kept as one function so the two places that decide
 /// whether reading the file is even worth attempting (`core`'s
-/// `reload_sessions` and `handlers`' `ListSessions`) can never drift from what
+/// `reload_sessions` and the periodic observer) can never drift from what
 /// the store would actually do with the reading once it is offered.
 ///
 /// `false` only for an already-`Error` row (idempotent — nothing to gain)

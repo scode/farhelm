@@ -2986,7 +2986,7 @@ impl SessionStore {
 
     /// Preparation provenance for a still-current accepted terminal.
     ///
-    /// List refresh and startup observation can race Delete. Read the session
+    /// Periodic and startup observation can race Delete. Read the session
     /// and its origin under one connection lock: Delete may retain an origin
     /// registry row for borrowers after removing the session, which the strict
     /// mutation reader correctly treats as a mismatch. An observer instead has
@@ -4492,8 +4492,8 @@ impl SessionStore {
     ///
     /// Batched because the alternative is one autocommit — and therefore
     /// one journal sync — per session: the first startup after the schema-2
-    /// migration reconciles every migrated row at once, and a list pass on
-    /// a busy host can observe many exits in the same reply. The returned
+    /// migration reconciles every migrated row at once, and a periodic pass
+    /// on a busy host can observe many exits in the same pane snapshot. The returned
     /// map holds the committed outcome for every id that still exists;
     /// ids deleted concurrently are simply absent.
     pub async fn transition_many(

@@ -114,10 +114,9 @@ async fn listed_title(client: &SupervisorClient, session_id: &str) -> String {
 /// One session's captured conversation as the DATABASE holds it, read
 /// through a second store handle.
 ///
-/// Read-only and pass-free, which is the point wherever it is used. A list
-/// reply drives a capture pass and could commit the identity this helper
-/// is only meant to observe. `session_snapshot` is also pass-free; this
-/// helper reads the stored identity independently of reply construction.
+/// This reads durable identity independently of the reply's in-memory mirror,
+/// so agreement proves persistence rather than two surfaces sharing a cache.
+/// The helper runs no capture or observation pass.
 async fn stored_conversation(state: &std::path::Path, session_id: &str) -> Option<String> {
     let store = SessionStore::open(&state.join("supervisor.db"), false)
         .await
@@ -853,24 +852,11 @@ async fn a_rename_whose_client_vanishes_still_lands() {
     );
 }
 
-/// When the rename lands but its reply cannot be built, the caller is told
-/// exactly that — and the rename stays.
-///
-/// The two-part write commits before the reply is assembled, so a failure
-/// while reading the session's current state arrives AFTER the title has
-/// changed. Fabricating the dynamic fields to paper over it was rejected:
-/// the reply promises a live-probed `SessionInfo`, and inventing one is a
-/// worse answer than an honest error. What must not happen is the error
-/// implying the rename did not happen, since the caller's next poll will
-/// show the new title regardless.
-///
-/// The failure is provoked with an EMPTY launch sentinel, which the reader
-/// treats as corrupt state rather than as absence — the supervisor refuses
-/// to base a reply on an inference an unreadable sentinel might contradict
-/// (PLAN_M3.md item 3), and that refusal is what propagates here. It needs
-/// a dead pane, since that is the only state whose sentinel is consulted.
+/// Corrupt launch evidence cannot break rename's cached-state reply.
+/// Rename keeps its durable title and describes pane liveness without running
+/// reconciliation; the timer owns artifact failures and leaves them for retry.
 #[farhelm_testtrace::test]
-async fn a_rename_whose_reply_cannot_be_built_reports_that_it_landed_anyway() {
+async fn a_rename_reply_ignores_corrupt_launch_evidence() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let (chan, initial_replay, mut rx) = h
@@ -882,28 +868,18 @@ async fn a_rename_whose_reply_cannot_be_built_reports_that_it_landed_anyway() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_input(chan, b"quit\r".to_vec()).await;
     wait_for_non_live_status(&h.client, &session.id, 30).await;
-
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
-    std::fs::write(&status_path, "").expect("plant an empty (corrupt) sentinel");
-
-    let (kind, message) = refusal(rename(&h.sup, &session.id, "renamed-but-unreadable").await);
-    assert_eq!(kind, ErrorKind::Internal);
+    std::fs::write(&status_path, "").expect("plant empty corrupt sentinel");
     assert!(
-        message.contains("was renamed, but reading back its current state failed"),
-        "the error must say the rename itself landed: {message}"
+        status_path.exists(),
+        "fixture evidence exists before rename"
     );
-    assert_eq!(
-        stored_title(h.state.path(), &session.id).await,
-        "renamed-but-unreadable",
-        "the durable rename must stand even though the reply could not be built"
+    let info = renamed(rename(&h.sup, &session.id, "renamed-with-corrupt-evidence").await);
+    assert_eq!(info.title, "renamed-with-corrupt-evidence");
+    assert_eq!(stored_title(h.state.path(), &session.id).await, info.title);
+    assert!(
+        status_path.exists(),
+        "rename reply must leave evidence for the timer"
     );
-
-    // With the corrupt sentinel gone, the ordinary reply path recovers and
-    // the new title is simply there — the poll interval this costs is the
-    // whole price of refusing to fabricate a reply.
-    std::fs::remove_file(&status_path).expect("remove the planted sentinel");
-    assert_eq!(
-        listed_title(&h.client, &session.id).await,
-        "renamed-but-unreadable"
-    );
+    assert_eq!(listed_title(&h.client, &session.id).await, info.title);
 }

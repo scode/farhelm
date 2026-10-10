@@ -82,8 +82,8 @@ impl Supervisor {
     /// Mirror an outcome the store just committed for `entry` into its
     /// in-memory cell, hinting connected helms when that changes it.
     ///
-    /// Every path that records an observed exit or error (the ticker, a
-    /// listing, a single-session read) mirrors through here, because
+    /// Every path that records an observed exit or error (the timer, wake
+    /// or lifecycle operation) mirrors through here, because
     /// whichever of them commits a change first is the only one that sees
     /// it: the others then find the cell already current and have nothing
     /// to compare. A commit that returns the value already held is not a
@@ -97,6 +97,15 @@ impl Supervisor {
             let mut outcome = entry.run.outcome.lock().expect("outcome mutex poisoned");
             let changed = *outcome != *committed;
             *outcome = committed.clone();
+            if matches!(committed, crate::store::LastOutcome::Error { .. }) {
+                // Durable Error now supplies the detail; clear only then so a
+                // concurrent stop or failed write cannot erase the observation.
+                *entry
+                    .run
+                    .launch_error
+                    .lock()
+                    .expect("launch-error mutex poisoned") = None;
+            }
             changed
         };
         if changed {

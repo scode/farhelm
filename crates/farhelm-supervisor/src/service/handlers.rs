@@ -29,7 +29,7 @@ use super::launch_artifacts::{
     wrapper_failure_detail,
 };
 use super::listing::list_all;
-use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info, observe_entry};
+use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
     stop_live_agent,
@@ -74,7 +74,6 @@ impl CreateAdmission {
         }
     }
 }
-use anyhow::Context;
 use farhelm_proto::{
     AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame, MAX_SESSION_ID_BYTES,
     ResolvedGithubCheckout, SessionInfo, SessionLaunch, TerminalSelector,
@@ -452,88 +451,23 @@ async fn handle_create_session(
     }
 }
 
-/// One session's `SessionInfo` for a single-session reply, observed
-/// and recorded exactly as a `ListSessions` pass would (PLAN_M5.md
-/// item 3).
+/// Describe a renamed session with the same freshness contract as a list.
 ///
-/// The alternative — reading the entry's stored fields and probing
-/// only liveness — was the first shape of this and is wrong in a way
-/// that is easy to miss: a session whose agent never execed lists as
-/// **error** through the sentinel path alone, so a reply that skipped
-/// it would report `Exited` for a session every list reply calls
-/// `Error`, and a rename issued moments after a conversation became
-/// capturable would report `NotCaptured` where the list says `Resume`.
-/// `SessionRenamed`'s protocol contract is that its `SessionInfo` is
-/// built the way `ListSessions` builds one; this is that promise
-/// being kept rather than approximated.
-///
-/// Report reconciliation runs before building the reply so an accepted
-/// identity and any exact-file readiness change are reflected immediately.
-/// Each session claim serializes that refresh with incoming reports.
-///
-/// The tmux round trip is skipped for a terminal-less entry (the
-/// restart gap): its status comes entirely from its recorded outcome
-/// and it has no tmux session to hold tabs, so asking would be
-/// pointless and would let an unrelated tmux failure break a reply
-/// that needs nothing from it.
-///
-/// Every failure here is the caller's to report, including the durable
-/// write's — see the transition below for why this is stricter than the
-/// list path it otherwise mirrors.
+/// The timer supplies launch errors, Resume readiness and notifications;
+/// this reply only probes pane liveness and tabs. A terminal-less restart gap
+/// needs no tmux query, so an unrelated server failure cannot break its reply.
 async fn session_info_now(
     sup: &Arc<Supervisor>,
     entry: &Arc<SessionEntry>,
 ) -> anyhow::Result<SessionInfo> {
-    sup.capture_now().await;
     // Without a terminal there is no pane to classify, so neither the tmux
     // probe nor the registry snapshot is worth taking.
     let (pane_states, known) = match entry.terminal {
         Some(_) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
         None => (HashMap::new(), KnownTmuxNames::default()),
     };
-    let observed = observe_entry(sup, entry, &pane_states, &known).await?;
-    if observed.settled_error && sup.may_record() {
-        cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
-            .await;
-    }
-    if let Some(transition) = observed.transition {
-        // One entry's transition through the same batching API the
-        // list uses, so the store arbitrates it identically.
-        //
-        // A failed write PROPAGATES here, unlike on the list path where
-        // it is logged and the reply goes out anyway. The difference is
-        // what the two requests are: a list is a poll that retries in a
-        // second, so serving it from what was observed costs nothing,
-        // while this reply is the authoritative answer to a mutation and
-        // its caller has no reason to poll again. Silently returning a
-        // `SessionInfo` whose status this process could not record would
-        // hand that caller a success built on a write that did not
-        // happen; the handler above reports it as a failure that says
-        // the rename itself landed.
-        let committed = sup
-            .store
-            .transition_many(vec![(entry.info.id.clone(), entry.generation, transition)])
-            .await
-            .with_context(|| format!("recording session {}'s observed outcome", entry.info.id))?;
-        let committed = committed.get(&entry.info.id);
-        if let Some(outcome) = committed {
-            sup.mirror_committed_outcome(entry, outcome);
-        }
-        // Outcome durability precedes cleanup, whose shared helper also
-        // preserves the sentinel's accepted-create evidence. A failed write
-        // must leave both files for another pass.
-        if observed.sentinel.is_some() && matches!(committed, Some(LastOutcome::Error { .. })) {
-            cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
-                .await;
-        }
-    }
-    sup.with_checkout_metadata(entry_info(
-        entry,
-        &pane_states,
-        &known,
-        observed.sentinel.as_deref(),
-    ))
-    .await
+    sup.with_checkout_metadata(entry_info(entry, &pane_states, &known))
+        .await
 }
 
 /// Spawned onto its own task rather than awaited inline: this
@@ -7927,6 +7861,7 @@ mod tests {
                     pane: "%0".to_string(),
                 }),
                 run: RunCells {
+                    launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -8109,6 +8044,7 @@ mod tests {
             },
             terminal: None,
             run: RunCells {
+                launch_error: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -8303,6 +8239,7 @@ mod tests {
                 },
                 terminal: None,
                 run: RunCells {
+                    launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -8780,5 +8717,63 @@ mod tests {
         );
 
         host.release().await;
+    }
+    /// Rename's detail reply must read cached failure state without reconciliation.
+    /// Queued reports and launch artifacts belong to the timer; consuming them
+    /// here would reintroduce request-driven work through the single-row path.
+    #[farhelm_testtrace::test]
+    async fn session_info_reads_cached_error_without_capture_or_cleanup() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = "cached-reply".into();
+        *entry.run.launch_error.lock().unwrap() = Some("uncommitted failure".into());
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), Arc::clone(&entry));
+        let spec = crate::launch::spec_path_for_launch(state.path(), &entry.info.id, 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(&spec, b"retained launch evidence").unwrap();
+        let report_dir = crate::hook_report::session_dir(state.path(), &entry.info.id).unwrap();
+        std::fs::create_dir_all(&report_dir).unwrap();
+        let report = report_dir.join("latest.json");
+        std::fs::write(&report, b"invalid report").unwrap();
+        assert!(
+            spec.exists() && report.exists(),
+            "fixture evidence exists before reply"
+        );
+        let info = session_info_now(&sup, &entry).await.unwrap();
+        assert_eq!(
+            info.status,
+            SessionStatus::Error {
+                detail: "uncommitted failure".into()
+            }
+        );
+        *entry.run.outcome.lock().unwrap() = LastOutcome::Error {
+            detail: "durable failure".into(),
+        };
+        let settled = session_info_now(&sup, &entry).await.unwrap();
+        assert_eq!(
+            settled.status,
+            SessionStatus::Error {
+                detail: "durable failure".into()
+            },
+            "durable Error outranks a stale fallback cache"
+        );
+        assert!(spec.exists(), "info reply must not clean launch artifacts");
+        assert!(
+            report.exists(),
+            "info reply must not apply or discard reports"
+        );
+        assert_eq!(
+            *entry.run.outcome.lock().unwrap(),
+            LastOutcome::Error {
+                detail: "durable failure".into()
+            }
+        );
     }
 }

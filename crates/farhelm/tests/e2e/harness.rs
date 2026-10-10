@@ -1211,7 +1211,7 @@ pub(crate) async fn resumable_basic_session(
 /// into running/waiting/idle, and an equality here would silently start
 /// treating a merely-idle agent as settled the moment the sampler lands.
 ///
-/// Status is computed fresh from tmux at LIST time, never pushed
+/// Pane liveness is computed fresh from tmux at LIST time, never pushed
 /// (`service.rs`'s `ListSessions` handler) — so observing a transition
 /// (an agent exiting on its own, a stop's kill sweep completing) needs a
 /// bounded poll rather than a single read racing tmux's own
@@ -1273,7 +1273,9 @@ pub(crate) async fn wait_for_reconciled_listing(
 ///
 /// The first is the one [`wait_for_non_live_status`] documents: status is
 /// computed fresh from tmux at LIST time rather than pushed, so any
-/// transition is only observable by polling for it.
+/// transition in pane liveness is observable by polling for it. Launch errors,
+/// durable outcomes and report-driven state instead require explicit
+/// reconciliation in fixtures without a running supervisor timer.
 ///
 /// The second is that one list can be WRONG about a session that has not
 /// transitioned at all. `pane_states` tolerates three tmux diagnostics by
