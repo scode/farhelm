@@ -21,13 +21,13 @@ installTerminalSuiteHooks();
 /** Permit action-specific fields while keeping listing identity explicit in the fixture. */
 type Approval = { id: string; host_name: string; [field: string]: unknown };
 
-/** A mockup-sized launch with every decision field present and labelled. */
-function launchRequest(id: string, host = "devbox"): Approval {
+/** A complete launch card whose requester title can exercise real word wrapping. */
+function launchRequest(id: string, host = "devbox", title = "fix-flaky-ci"): Approval {
   return {
     id,
     host_id: host === "devbox" ? 1 : 2,
     host_name: host,
-    session: { id: "7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413", title: "fix-flaky-ci", host_name: host },
+    session: { id: "7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413", title, host_name: host },
     expires_at_ms: Date.now() + 540_000,
     action: {
       kind: "launch",
@@ -188,6 +188,45 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   await expect.poll(() => page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   await expect.poll(() => page.locator(".approval-always-allow").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   await page.screenshot({ path: info.outputPath("approval-narrow-long-host.png") });
+});
+
+/**
+ * A requester title uses the card's room before wrapping, but still fits a narrow pane.
+ * Equal requester columns can wrap an ordinary name while the adjacent host
+ * leaves unused space. Actual text line boxes catch that without blessing
+ * a nowrap rule that merely pushes long values beyond the card.
+ */
+test("a requester session title uses available card width before wrapping", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const title = "migrate authentication tokens";
+  await stageApprovals(page, [launchRequest("requester-width", "devbox", title)]);
+  await openSelected(page);
+  const value = page.locator(".approval-card-requester .approval-card-row")
+    .filter({ has: page.locator("dt", { hasText: /^from session$/ }) }).locator("dd .peer-value");
+  await expect(value).toHaveText(title);
+  // The vendored UI font is a layout input; a fallback's smaller glyphs can
+  // otherwise hide the cramped column before the real face finishes loading.
+  await page.evaluate(() => document.fonts.ready);
+  expect((await placement(page)).card.width).toBeCloseTo(660, 0);
+  /** Count text lines, independent of the containing row's height or padding. */
+  const lines = () => value.evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top))).size;
+  });
+  await page.screenshot({ path: info.outputPath("approval-requester-wide.png") });
+  await expect.poll(lines, { message: "ordinary requester title fits one line at the usual card width" }).toBe(1);
+
+  await page.setViewportSize({ width: 520, height: 800 });
+  // The shell can scroll horizontally at this width; reveal the pane so the
+  // narrow screenshot shows the same card whose text geometry is measured.
+  await page.locator(".app-shell").evaluate((node) => {
+    node.scrollLeft = (node.querySelector(".app-main") as HTMLElement).offsetLeft;
+  });
+  await expect.poll(async () => (await placement(page)).card.width).toBeLessThanOrEqual(296);
+  await expect.poll(lines, { message: "a genuinely narrow card wraps the complete requester title" }).toBeGreaterThan(1);
+  await expect.poll(() => page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
+  await page.screenshot({ path: info.outputPath("approval-requester-narrow.png") });
 });
 
 /** The sibling region must follow both the empty pane and a newly mounted session view. */
