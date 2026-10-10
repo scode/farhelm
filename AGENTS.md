@@ -383,6 +383,14 @@ land other work without review.
 agent never polls and only takes a turn when `deflake/bin/deflake wait` returns. A change to the driver or to those
 instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a few minutes with a low-power delegate.
 
+# Run all tests and fix
+
+"Run all tests and fix" (and similar wording asking for every test to be run and the failures fixed) means the procedure
+in `.agents/run-all-tests.md`: the checks a deflake sweep does not run, one deflake sweep, then the release gate and the
+CI baseline in GitHub, with straightforward fixes drafted as a jjstack stack and anything needing a judgment call left
+for the maintainer. Read it before starting. It is an explicit request, never a finishing step. When the "Finishing
+work" inventory above or the deflake sweep's phases change, update that file's lists in the same change.
+
 # plans/
 
 `plans/` holds a queue of planned work: one goal file per planned TODO entry or triaged outcome, executed unattended by
