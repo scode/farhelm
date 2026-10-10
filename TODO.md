@@ -153,6 +153,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   client scale" forbids upgrade-breaking changes outright; replace that rule with the epoch rule here. The overall plan
   is `lore/2026-10-05-release-brick-protection-plan.md`.
 
+- **Let releases publish new information without breaking older ones.** An installed Farhelm only learns about releases
+  through the files it already reads on get.farhelm.io, so anything a later release needs to tell existing installations
+  (that a release is revoked, say, and must not be installed or should be updated away from) can only reach them in a
+  shape they already accept. Today the app reads `/latest` as exactly one line, so adding anything there fails every
+  older app's update check. `SHA256SUMS` lookups go by name, so extra signed entries look harmless, but no installed
+  release fetches anything beyond `/latest` and its own version's files. Decide where new signed information goes and
+  make clients ignore what they do not understand there rather than refuse it. Ship a release that reads it, and test
+  that a release keeps accepting what newer releases publish. This must ship before the first release that needs to say
+  something new, the same way the upgrade epochs entry above handles new upgrade logic.
+
 - **Sweep on the timer only, and stop re-deriving known state.** The per-session sweep runs on the 2 s ticker and again
   at the start of every session-list and session-info request, including the lists the helm sends after every
   status-change hint: about one full sweep every 1.3 s, overlapping and contending, enough that ticks overrun. The
