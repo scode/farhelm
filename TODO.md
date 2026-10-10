@@ -61,14 +61,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the checkout into `farhelm-archived-working-copies` under the working-copy root. The only explanation is one line in
   Delete's confirmation ("moves it into the working-copy archive"), which does not say where that is or what it is for,
   and the docs site does not mention it. Decide whether archiving should stay at all; if it does, work out how a user
-  learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do.
+  learns that it happens, where the archived checkout went, and that cleaning the archive up is theirs to do. Plan:
+  `plans/queue/managed-checkout-trash.md`.
 
 - **Make `gh:` launches less magical.** In the maintainer's words, "the gh: stuff is kinda magical right now". A session
   in a fresh GitHub checkout behaves differently from one in an ordinary folder: a `gh:` launch clones into a new
   directory under the working-copy root and names it after the session, deleting the last session using it archives the
   checkout, and Clone is planned to make another checkout. Consider how the launcher and the session list could better
   surface what is going on, such as that a session lives in a checkout and of which repository, and what a `gh:` launch
-  or an action on such a session is about to do. Related to the checkout archiving entry above.
+  or an action on such a session is about to do. Related to the checkout archiving entry above. Plan:
+  `plans/queue/managed-checkout-trash.md`.
 
 - **Redesign the launcher's folder shortcuts.** Under the folder field, the launcher shows a grid of dotted-underline
   links: recently used folders, cut off so that several look identical, then "home" and "local home" on a row of their
@@ -179,7 +181,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
   conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
   session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the
-  Claude screen fixtures so it stays covered.
+  Claude screen fixtures so it stays covered. Plan: `plans/queue/claude-compaction-status.md`.
 
 - **Pin the Rust toolchain.** Nothing pins Rust today: there is no `rust-toolchain.toml`, CI's toolchain action installs
   whatever stable is current when the job runs, and a developer machine keeps whatever stable it last updated to. So
