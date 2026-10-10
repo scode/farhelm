@@ -20,9 +20,9 @@ use crate::boot_id_durable_outcome::{
 /// case landing on error rather than the interrupted a plain reboot
 /// conversion would otherwise produce.
 ///
-/// The sentinel is witnessed here through an ordinary `list_sessions`
-/// poll (`wait_for_non_live_status`), which is the common case: most
-/// exec failures WILL be listed at least once before anything restarts.
+/// Reconciliation witnesses the sentinel before the reply is inspected.
+/// This fixture does not run the timer, so the explicit pass represents
+/// the ordinary background observation before a supervisor restarts.
 /// [`a_reboot_never_interrupts_a_row_a_sentinel_already_claims_as_error`]
 /// below covers the harder case — a reboot landing before any list ever
 /// consumed the sentinel, with the row still `Running` in the store.
@@ -51,6 +51,7 @@ async fn unexecutable_invocation_lists_as_error_and_outranks_a_reboot() {
     // immediately, well before any list has a chance to observe it.
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
 
+    h.sup.reconcile_for_test().await;
     let before = wait_for_non_live_status(&h.client, &session.id, 30).await;
     let detail = match before.status {
         SessionStatus::Error { detail } => detail,
@@ -478,8 +479,8 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
 /// sentinel even READ (the live status wins outright, and the planted file is left
 /// untouched) — planting a sentinel behind a still-running agent is
 /// exactly the scenario that must NOT retroactively classify it error.
-/// Once the pane goes dead, the SAME planted file is read on the very next
-/// list and classifies error.
+/// Once the pane is absent, reconciliation reads the SAME planted file
+/// and the subsequent reply shows error.
 #[farhelm_testtrace::test]
 async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies() {
     let h = harness().await;
@@ -489,6 +490,7 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
     let detail = "exec_failed argv0=/nope errno=2".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant a sentinel behind a live pane");
+    h.sup.reconcile_for_test().await;
 
     assert!(
         listed(&h.client, &session.id).await.status.is_live(),
@@ -499,8 +501,7 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
         "an unconsulted sentinel must be left completely untouched"
     );
 
-    // Kill the real agent so the pane goes dead; the SAME file is what the
-    // next list reads.
+    // Remove the terminal; the next reconciliation reads the same file.
     let sock = h.state.path().join("tmux.sock");
     let out = tmux_query(
         &sock,
@@ -509,6 +510,7 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
     .await;
     assert!(out.status.success(), "test setup: killing the tmux session");
 
+    h.sup.reconcile_for_test().await;
     let status = listed(&h.client, &session.id).await.status;
     assert_eq!(
         status,

@@ -258,10 +258,10 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let h = harness_believing_boot("boot-a").await;
     let (live, _live_work) = basic_session(&h).await;
     let (stopped, _stopped_work) = basic_session(&h).await;
-    // A session that ends on its own AND is listed before the reboot: listing
-    // is where its exit code is witnessed, so what survives below is the
-    // supervisor's durable recording rather than anything recovered from the
-    // pane after it is gone.
+    // Reconcile an ended session before reboot destroys its pane. The
+    // surviving code must be durable knowledge, rather than a reconstruction
+    // from a terminal that no longer exists. Liveness polling alone does not
+    // establish that recording boundary in this timer-free fixture.
     let work = farhelm_teststate::tempdir().expect("workdir");
     let ended = h
         .client
@@ -275,6 +275,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         .await
         .expect("create the self-exiting session");
     let ended_settled = wait_for_exit_code(&h.client, &ended.id, 3, 30).await;
+    h.sup.reconcile_for_test().await;
 
     h.client
         .stop_session(&stopped.id)

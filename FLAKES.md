@@ -1692,3 +1692,63 @@ Error: element(s) not found
 Class: readiness
 
 Cause: established
+
+## 2026-10-10 — `structured_claude_resume_survives_supervisor_reconstruction` (crates/farhelm/tests/e2e/restart_with_resume.rs)
+
+The bounded Linux x86_64 container workspace run `1c7d2fa4-5c88-4696-8e8b-6f13ceac682c` failed this existing fixture
+while inspecting the reconstructed successor's argv: it extracted an 80-column prefix before establishing complete
+output. The same unmodified test failed one of one exact attempts in `308f7324-73d1-4e12-a5fd-1ff4591f2d66`, using
+`cargo nextest run --workspace --exclude farhelm-desktop -E 'test(=restart_with_resume::structured_claude_resume_survives_supervisor_reconstruction)'`.
+The failures took 0.780 s and 3.250 s, respectively, at an assertion rather than a timeout. Both recorded HEAD
+`fbdd8ad4a0ef8b86fe7ec5086f42ed56c945f4ae` plus dirty PR3 changes to settlement, cleanup, tests, SPEC_impl.md, TODO.md
+and its fragment. The full run's other failures were Codex attribution (a same-session missing reconciliation boundary)
+and the restart-consent fixture below; the exact attempt failed alone. Fixed in #1758 by attaching the structured branch
+wide and waiting for `FAKE-AGENT READY` before extracting argv, retaining its post-replay live exchange. Corrected run
+`0d7b4d8b-871b-4684-8aaa-6af53b1a7ea6` passed this case once in 2.979 s and the unstructured branch once; it still
+failed the Codex case at a later migration boundary. The corrections do not establish how much wrapping versus
+partial-frame timing contributed, or a long-term failure rate. The fixture predates this stack; no pre-stack product
+baseline was rebuilt. Both failing runs used four global nextest slots and zero retries, a four-CPU/32 GiB container on
+a shared 18-CPU host, kernel 6.8.0-146-generic, Rust 1.98.1, Python 3.14.4, nextest 0.9.143, and recorded tmux 3.7c
+executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale was `LC_CTYPE=C.UTF-8`,
+with LANG and LC_ALL absent; no ambient `FARHELM_*` names were present, and the recorder supplied
+`FARHELM_TEST_TRACE_DIR`. The container had no usable systemd user manager or passwordless SSH; host load and
+overlapping process inventory were not recorded for the failures. Full console, JUnit and traces are retained privately
+without hosted expiry.
+
+```
+the reconstructed Claude successor must use its default resume form: <owned fixture>/claude fake-agent --script hook-report --rec
+```
+
+Class: replay-live
+
+Cause: established
+
+## 2026-10-10 — `unconfirmed_restart_is_refused_only_while_the_agent_is_working` (crates/farhelm-supervisor/src/service/core.rs)
+
+The known restart-consent flake from 2026-10-06 recurred in workspace run `1c7d2fa4-5c88-4696-8e8b-6f13ceac682c` and
+failed one of one unchanged exact attempts in `d2b8c62d-0882-4efc-a251-a5968ac1fabd`, with
+`cargo nextest run --workspace --exclude farhelm-desktop -E 'test(=service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working)'`.
+Both failed the live-agent premise, in 0.381 s and 1.466 s, rather than a timeout. The supervisor fixture passed
+`dummy_exe()`, explicitly `/nonexistent/farhelm`, as its launch shim: the requested `sleep 300` never executes, and a
+briefly live login shell can satisfy the PID check before dying. This establishes the defect in this recurrence; the
+container had no systemd user manager, so one is not necessary for it, but that does not establish the cause of every
+historical failure. Fixed in #1758 with an owned executable stand-in that `exec`s `sleep 300` and a pinned `/bin/sh`
+launch shell, retaining same-PID refusal and different-live-PID accepted restart assertions for Idle and Waiting.
+Corrected run `0d7b4d8b-871b-4684-8aaa-6af53b1a7ea6` passed once in 3.309 s; this is correction evidence, not a
+long-term failure rate. The matching TODO and deflake exclusion are removed. The workspace run also failed the
+reconstruction fixture above and a same-session Codex migration; the exact attempt failed alone. Both failing runs
+recorded HEAD `fbdd8ad4a0ef8b86fe7ec5086f42ed56c945f4ae` plus dirty PR3 settlement, cleanup, tests, documentation and
+fragment changes. Four global nextest slots, zero retries; Linux x86_64, four-CPU/32 GiB owned container on a shared
+18-CPU host, kernel 6.8.0-146-generic, Rust 1.98.1, Python 3.14.4, nextest 0.9.143, recorded tmux 3.7c executable SHA256
+`3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale `LC_CTYPE=C.UTF-8`, LANG and LC_ALL absent;
+no ambient `FARHELM_*` names, only recorder-owned `FARHELM_TEST_TRACE_DIR` in the child. The container also lacked
+passwordless SSH. Host load and overlapping process inventory were not recorded. Full console, JUnit and traces remain
+privately retained without hosted expiry; the earlier release artifact's expiry is unchanged.
+
+```
+fixture premise: the agent is alive
+```
+
+Class: fixture-premise
+
+Cause: established

@@ -1140,6 +1140,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .await;
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
 
+    let resume_offset = std::fs::read(&hook_log).unwrap().len();
     h.client
         .restart_session(&session.id, true)
         .await
@@ -1172,6 +1173,18 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::Resume
     );
+    // A ready Resume offer can survive from the predecessor while the new
+    // foreground's startup report is still queued. Judge that report before
+    // poisoning its record, or its refusal could masquerade as Stop's verdict.
+    assert_hook_reply_since(
+        &h.sup,
+        &hook_log,
+        resume_offset,
+        &cleared_b,
+        "resume",
+        " acked ",
+    )
+    .await;
     // Post-relaunch survivor: the proven binding — exact target plus
     // provenance — survives the owner exit and the Resume relaunch that
     // replaced the foreground process, and the public offer still serves
@@ -1234,6 +1247,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         failure.to_string().contains("missing or inconsistent"),
         "{failure:#}"
     );
+    // Restart withdraws the durable offer at decision time. The timer mirrors
+    // that row into replies and resolves notifications; listing alone does not.
+    h.sup.reconcile_for_test().await;
     let after = listed(&h.client, &session.id).await;
     assert_eq!(
         h.sup

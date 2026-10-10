@@ -202,22 +202,16 @@ async fn the_rename_reply_rediscovers_tabs_from_tmux() {
     );
 }
 
-/// A rename reply reports the launch-sentinel **error** a list reply would
-/// — a status no stored field holds and no pane probe can produce.
+/// Rename and list must agree on a launch failure already observed in the background.
 ///
-/// The sharpest form of the built-like-ListSessions contract. A failed exec
-/// leaves an ordinary dead pane, indistinguishable from a command that ran
-/// and exited, so the only thing that can tell them apart is the sentinel
-/// the launch shim wrote. A reply that probed liveness but skipped the
-/// sentinel — the obvious cheap implementation — would answer **exited**
-/// here while every list reply for the same session says **error**, which
-/// is the reply lying about the one field the user acts on.
+/// A failed exec and an ordinary exit leave the same dead pane. Reconciliation
+/// reads the launch shim's sentinel and records the distinction; replies must
+/// preserve that Error rather than replacing it with pane-derived Exited.
+/// The fixture has no timer, so it advances that observation explicitly before
+/// renaming and checks both replies against the durable record and cleanup.
 ///
-/// The sentinel is planted at its own derived path rather than raced out
-/// of a real failed launch, exactly as the sentinel tests do (see
-/// `launch_sentinel_error_status`): reaching this class end to end means
-/// corrupting supervisor-internal state either way, and planting it tests
-/// the reader rather than whichever shim path produced the file.
+/// Planting the sentinel tests the supervisor's reader independently of the
+/// shim path that produced it, as in `launch_sentinel_error_status`.
 #[farhelm_testtrace::test]
 async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     let h = harness().await;
@@ -237,6 +231,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     let detail = "exec failed: no such file or directory".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::write(&status_path, &detail).expect("plant the sentinel");
+    h.sup.reconcile_for_test().await;
 
     let reply = renamed(rename(&h.sup, &session.id, "renamed-after-a-failed-launch").await);
     assert_eq!(reply.title, "renamed-after-a-failed-launch");
@@ -248,11 +243,8 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
         "the reply must surface the sentinel, exactly as a list reply does"
     );
 
-    // The reply is only half of what a list pass does with a sentinel: it
-    // also RECORDS the outcome and consumes the file. Both are asserted
-    // from outside this process before anything lists, because a later
-    // `ListSessions` would perform them itself and mask a rename that had
-    // done neither — the reply would look right for the wrong reason.
+    // Inspect durable state independently of either reply. Agreement between
+    // two replies alone could be the same uncommitted in-memory error twice.
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open the database a second time");
@@ -266,7 +258,7 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
         LastOutcome::Error {
             detail: detail.clone()
         },
-        "the rename's own pass must have recorded the sentinel's outcome durably"
+        "reconciliation must have recorded the sentinel's outcome durably"
     );
     assert!(
         !status_path.exists(),
