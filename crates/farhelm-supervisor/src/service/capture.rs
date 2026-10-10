@@ -5,8 +5,8 @@
 //! record by searching a directory. Each refresh takes the session's report claim
 //! before copying the stored binding into its mirror. It never reads Codex or
 //! Grok vendor files; reports establish readiness and Restart checks it when used.
-//! The ticker and reply paths both refresh, so durable state converges even when no
-//! helm polls the supervisor.
+//! The ticker refreshes without a polling helm. Startup, reload and Restart
+//! also reconcile; ordinary replies read the state those passes leave.
 
 use super::core::{SessionEntry, Supervisor};
 use crate::agent_kind::screen_reader::ScreenState;
@@ -93,7 +93,7 @@ const REPORT_WARNING_AFTER: Duration = Duration::from_secs(65);
 
 impl Supervisor {
     /// Apply the reports hooks have dropped, then refresh report-backed
-    /// readiness, before replies and on the periodic ticker. Each session's
+    /// readiness on the periodic ticker, startup, reload and Restart. Each session's
     /// capture claim serializes its row and mirror update with report
     /// admission; dropped reports are applied first so a refresh, and any
     /// Restart that reads capture state after this pass, sees them — unless
@@ -617,7 +617,6 @@ mod tests {
             &entry,
             &std::collections::HashMap::new(),
             &Default::default(),
-            None,
         );
         assert_eq!(
             info.notifications, silent,
@@ -1083,8 +1082,7 @@ mod tests {
     /// offer marks a change hint before it returns, with no further await.
     ///
     /// Why: a capture pass publishes session by session and can be
-    /// cancelled partway (a listing whose connection closes aborts the
-    /// sweep it runs). Marking only when the whole pass finished would lose
+    /// cancelled partway (for example during supervisor shutdown). Marking only when the whole pass finished would lose
     /// the hint for an offer already published, and the next pass would
     /// take that offer as its baseline and find nothing to hint.
     #[farhelm_testtrace::test]

@@ -1291,10 +1291,11 @@ drain earlier. The supervisor owes a hint whenever a value it would list actuall
 transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
 merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
 hints into at most one per 200 ms and sends each on every full-authority connection's ordinary writer queue, dropping it
-rather than blocking when that queue is full. The helm refreshes the hinted host at once, unless a refresh that started
-with a hint pending began less than that same 200 ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both
-ends use); then it waits out the rest of the gap, and the one refresh that follows answers every hint that arrived
-meanwhile. Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the
+rather than blocking when that queue is full. Replies never run a capture sweep or commit outcomes; a pane-death wake
+hints before observation and an outcome change hints again. The helm refreshes the hinted host at once, unless a refresh
+that started with a hint pending began less than that same 200 ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate,
+which both ends use); then it waits out the rest of the gap, and the one refresh that follows answers every hint that
+arrived meanwhile. Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the
 supervisor's spacing. Only a hint's own wake waits: the poll, a user's refresh and a nudge do not. A refresh a hint
 caused always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes
 leaves the cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps
@@ -1727,23 +1728,28 @@ evidence, but cannot authorize another directory move.
   `agent_kind/records.rs` verify exact reported files; they never discover a conversation. The in-memory state holds
   either no identity or one stored identity with its ownership version. Reload preserves historical identities
   regardless of source, without re-verifying old scan locators. Each refresh takes the per-session capture claim before
-  reloading the durable row into its mirror; it performs no Codex transcript or Grok record-pair verification. Reply
-  paths and the ticker both run this reconciliation, without a global pass lock or coalescing. An injected launch
-  holding no identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an
-  Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends
-  `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into
-  carriage returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's
-  own queries (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an
-  agent the user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery
-  is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock
-  to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
-  submitted-line rule applies. A paste large enough to span frames still has its middle frames judged without their
-  markers. The spawn records whether its argv received the hook before tmux starts, fenced by launch generation. Reload
-  restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant,
-  reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at
-  the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its
-  identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
-  rule.
+  reloading the durable row into its mirror; it performs no Codex transcript or Grok record-pair verification. The
+  ticker runs this reconciliation, as do startup, reload and decision-time Restart, without a global pass lock or
+  coalescing. Ordinary list and rename replies read the state those passes leave. They perform one pane-state query for
+  immediate exits and tab changes, but no capture, launch-artifact reads, cleanup or outcome writes. Resume readiness,
+  launch-error classification and notification resolution may lag by one nominal two-second tick; the pane-death wake
+  commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable launch evidence is logged
+  and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay in generation-local memory
+  for replies. An injected launch holding no identity warns once after 65 seconds from the first input frame delivered
+  to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC
+  (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame
+  (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk tmux confirmed. The terminal's
+  automatic replies to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports)
+  never carry a carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the
+  latest screen reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An
+  outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path. With no reading
+  yet, or no dedicated reader, the existing submitted-line rule applies. A paste large enough to span frames still has
+  its middle frames judged without their markers. The spawn records whether its argv received the hook before tmux
+  starts, fenced by launch generation. Reload restores that flag; older rows default unhooked and stay unchecked. The
+  anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch and supervisor restart, so
+  a picked-up launch starts its clock at the next qualifying Enter after reload rather than recovering the time of an
+  earlier Enter. A Resume carries its identity and therefore stays silent even if its new hook never reports. The
+  warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -1951,9 +1957,9 @@ evidence, but cannot authorize another directory move.
   second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass while the
   supervisor runs or across an outage, and is then refused, which is an accepted gap.
 
-  The supervisor applies waiting reports at the start of every reconciliation pass (`capture_now`: the 2 s ticker, reply
-  paths, startup, reload, Restart) and does nothing while it is not recording. It takes a slot by renaming it to a
-  private name, so a hook refilling the slot meanwhile is not deleted with it, checks the report (the vendor naming the
+  The supervisor applies waiting reports at the start of every reconciliation pass (`capture_now`: the 2 s ticker,
+  startup, reload, Restart) and does nothing while it is not recording. It takes a slot by renaming it to a private
+  name, so a hook refilling the slot meanwhile is not deleted with it, checks the report (the vendor naming the
   session's durable kind, the conversation's size bound, the sub-agent marker, each vendor's source vocabulary), anchors
   its chain at the current pane, and runs the five-step admission. An accepted or definitively refused report is
   deleted; one that could not be read from disk, or was refused for an `Internal` failure (a store or tmux that could
@@ -1967,9 +1973,8 @@ evidence, but cannot authorize another directory move.
   as the old launch's. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
   `written` line: `acked`, or `refused` with the error kind and reason. Delete removes the drop directory; a pass
   removes one whose session no longer exists, which a hook racing the delete can recreate. There is no file watcher: a
-  report is applied within one ticker interval, or at the next reply. A report made while no supervisor runs waits on
-  disk for the next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is
-  accepted.
+  report is applied within one nominal ticker interval. A report made while no supervisor runs waits on disk for the
+  next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is accepted.
 
   Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
   per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for
@@ -2503,17 +2508,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   list silently stopped advancing; dropping it re-asks the identity question against the row as it now stands.
 - A connected host's cache refresh is one request and one replacement: a single `ListSessions`, whose reply carries the
   host's whole list, then that host's whole cache slice replaced in one identity-bound write. One request per refresh
-  matters beyond round-trip count, because the supervisor's conversation-capture sweep rides the `ListSessions` handler,
-  so every request refreshes reported identities across the host, including bounded exact-file checks where required. A
-  failed refresh records the failure and keeps the previous cache, never wiping it: the cache's whole job is to answer
-  "what did this host have, last we knew" while the host is unavailable, so clearing it on failure would destroy the
-  answer exactly when it becomes the only one available, and would make a transient failure look identical to "this host
-  genuinely has no sessions". A host whose supervisor reports no identity at all connects and serves live but writes no
-  cache, since the identity binding has nothing to bind to. The reply is checked at ingress and refused whole — an
-  ordinary failed refresh that keeps the previous cache — when it is longer than `LIST_SESSIONS_CAP` (a peer ignoring
-  the one bound on what this side retains), when a session id exceeds the id length cap, or when an id appears twice; a
-  reply cut AT the cap is accepted and remembered as truncated, which is what the served list's own `truncated` flag
-  carries forward.
+  bounds round trips and pane-state queries; report reconciliation stays on the supervisor's timer rather than
+  multiplying with polls and hints. A failed refresh records the failure and keeps the previous cache, never wiping it:
+  the cache's whole job is to answer "what did this host have, last we knew" while the host is unavailable, so clearing
+  it on failure would destroy the answer exactly when it becomes the only one available, and would make a transient
+  failure look identical to "this host genuinely has no sessions". A host whose supervisor reports no identity at all
+  connects and serves live but writes no cache, since the identity binding has nothing to bind to. The reply is checked
+  at ingress and refused whole — an ordinary failed refresh that keeps the previous cache — when it is longer than
+  `LIST_SESSIONS_CAP` (a peer ignoring the one bound on what this side retains), when a session id exceeds the id length
+  cap, or when an id appears twice; a reply cut AT the cap is accepted and remembered as truncated, which is what the
+  served list's own `truncated` flag carries forward.
 - The served session list is a MERGE, and it is served from what the helm has already recorded rather than from the
   hosts. Every connected host's actor records its supervisor's whole list into helm.db; the list endpoint then merges
   what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one order, tagging each row
@@ -2608,7 +2612,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   session under another's name. Writes are serialized against the host's own refresh, and a refresh whose drain predates
   one of them declines to commit rather than erasing it.
 - One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
-  is explicit that `ListSessions` is the only reply computing a real liveness answer and that everywhere else `unknown`
+  is explicit that list and rename replies compute fresh pane liveness, while create and restart replies' `unknown`
   means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
   the instant they are built the pane exists but the agent's own exec inside it has not been observed. Recording that
   verbatim answered a successful restart with a badge saying the helm had no idea, for a session it had definite

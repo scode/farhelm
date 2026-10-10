@@ -1438,7 +1438,7 @@ pub(crate) const HANDLER_ADMISSION_PERMITS: usize = 8;
 /// management stayed busy. Listing needs no management slot for
 /// correctness (it holds the session map only briefly and takes no
 /// lifecycle, intent or directory lock), so this limit only bounds what a
-/// list build costs: its tmux subprocesses and its capture sweep. The status
+/// list build costs: its pane query and cached row construction. The status
 /// sampler's `sampling_admission` is the precedent for giving periodic or
 /// read-only work its own limiter rather than a share of the request pool.
 ///
@@ -2786,7 +2786,7 @@ pub fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
 /// holder of the old entry is still a legitimate writer about the SAME
 /// run: the input path writes the first-input anchor through whatever
 /// entry its `InputRoute` pinned at attach time, a capture pass advances
-/// state it gathered before the rename, and a list pass commits an
+/// state it gathered before the rename, and an observation pass commits an
 /// outcome it observed a moment ago. Snapshotting instead would strand
 /// every one of those writes in a cell nothing reads again — silently, and
 /// most damagingly for capture, whose window would never open (see the
@@ -2889,6 +2889,7 @@ fn relaunched_entry(
         info,
         terminal,
         run: RunCells {
+            launch_error: Arc::new(std::sync::Mutex::new(None)),
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
             first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -3645,7 +3646,7 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// need OPPOSITE things from them.
 ///
 /// A RELAUNCH must isolate the run: the new generation gets a fresh
-/// [`RunCells`], so a list pass or report refresh still holding the previous
+/// [`RunCells`], so an observation or report refresh still holding the previous
 /// entry writes its late conclusion into the abandoned run's cells and cannot
 /// contaminate the new one (the generation fence does the same job durably;
 /// this is its in-memory half). The [`SessionCells`] (the activity and
@@ -3656,7 +3657,7 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// A RENAME must share both groups: it describes the SAME run, so its
 /// replacement clones them (cloning a group clones the `Arc`s). Anything still
 /// holding the pre-rename entry — an `InputRoute` pinned at attach time, a
-/// list pass mid-flight, a report refresh in flight — keeps writing into the very
+/// observation mid-flight, a report refresh in flight — keeps writing into the very
 /// cells the published entry reads. Snapshotting the values instead would
 /// strand input diagnostics and report updates in an entry no reply reads.
 pub(crate) struct SessionEntry {
@@ -3729,6 +3730,11 @@ pub(crate) struct SessionEntry {
 /// entry's construction sites.
 #[derive(Clone)]
 pub(crate) struct RunCells {
+    /// A launch failure observed but not yet stored, retained for cached replies.
+    /// A read-only supervisor or failed write must still show Error rather than
+    /// lose the only classification a dead pane cannot supply. Successful Error
+    /// persistence clears this mirror; a relaunch resets it, and a rename shares it.
+    pub(crate) launch_error: Arc<std::sync::Mutex<Option<String>>>,
     /// In-memory mirror of this session's durable last-known outcome
     /// (`crate::store::LastOutcome`, PLAN_M3.md item 2), so the common
     /// case — a `ListSessions` reply for a session whose outcome has not
@@ -6028,6 +6034,11 @@ impl Supervisor {
             );
             // Derived before `row.id` is moved into the entry's `info`.
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
+            let launch_error = if matches!(outcome, LastOutcome::Error { .. }) {
+                None
+            } else {
+                sentinel_hits.get(&row.id).cloned()
+            };
             sessions.insert(
                 row.id.clone(),
                 Arc::new(SessionEntry {
@@ -6083,6 +6094,7 @@ impl Supervisor {
                     },
                     terminal,
                     run: RunCells {
+                        launch_error: Arc::new(std::sync::Mutex::new(launch_error)),
                         outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
                         // already there.
@@ -8397,6 +8409,7 @@ impl Supervisor {
                 info: info.clone(),
                 terminal,
                 run: RunCells {
+                    launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -9668,6 +9681,7 @@ impl Supervisor {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
                 run: RunCells {
+                    launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     // Input starts only the diagnostic timer, never identity admission.
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -9990,7 +10004,7 @@ impl Supervisor {
             )
             .into());
         }
-        // A `Reply` pass, exactly like the list path's: this is about to
+        // Decision-time reconciliation: Restart is about to
         // validate the session's offer, and a
         // pass that began before this request cannot answer for it — a
         // sweep still in flight may be one commit away from changing that
@@ -9998,7 +10012,7 @@ impl Supervisor {
         // staleness this whole contract exists to exclude. A restart is a
         // rare, user-initiated operation; waiting out report reconciliation
         // is free. That includes waiting for a report drain already running
-        // rather than skipping it the way a listing does: a report waiting on
+        // rather than skipping it like a contended timer pass: a report waiting on
         // disk may name the conversation this restart must resume.
         self.capture_pass(true).await;
         let entry = self.sessions.lock().await.get(session_id).cloned();
@@ -13653,6 +13667,7 @@ impl Supervisor {
                 info,
                 terminal: None,
                 run: RunCells {
+                    launch_error: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -13939,7 +13954,7 @@ impl Supervisor {
     ///   restart landing inside the divergence resumes the reported
     ///   conversation regardless of what memory holds.
     /// - **The mirror catches up on its own.** All integrated kinds reconcile
-    ///   their durable row before replies and on the ticker, without reading
+    ///   their durable row on the ticker and at decision-time Restart, without reading
     ///   vendor files. Reports establish readiness; Restart verifies the exact
     ///   target when used. A reload restores the stored identity directly.
     ///
@@ -14472,9 +14487,9 @@ impl Supervisor {
     /// observation retries.
     ///
     /// Errors are returned, not swallowed: `StopSession` turns one into a
-    /// failed reply (SPEC.md surfaces every failure), while the list path
-    /// logs and carries on, because a list that failed to WRITE has still
-    /// computed an honest answer to READ.
+    /// failed reply (SPEC.md surfaces every failure). Lists no longer call
+    /// this at all; the ticker's observer commits what it sees in its own
+    /// batch and retries on its next tick.
     pub(crate) async fn record(
         &self,
         session: &str,
@@ -17099,6 +17114,7 @@ pub(crate) mod tests {
             },
             terminal,
             run: RunCells {
+                launch_error: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(outcome)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -17289,7 +17305,7 @@ pub(crate) mod tests {
     /// The property every writer that resolved an entry BEFORE the rename
     /// depends on: an attachment's input path writes the first-input
     /// anchor through the entry its route pinned, a capture pass advances
-    /// state it gathered earlier, and a list pass commits an outcome it
+    /// state it gathered earlier, and an observation pass commits an outcome it
     /// observed a moment ago. With copies, each of those lands in an
     /// object nothing reads again — silently, and for capture
     /// permanently, since a window that never opens never closes.
@@ -19715,8 +19731,7 @@ pub(crate) mod tests {
             super::super::status::entry_info(
                 &entry,
                 &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-                None
+                &super::super::status::KnownTmuxNames::default()
             )
             .restart_offer,
             RestartOffer::Resume,
@@ -19757,8 +19772,7 @@ pub(crate) mod tests {
             super::super::status::entry_info(
                 &entry,
                 &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-                None
+                &super::super::status::KnownTmuxNames::default()
             )
             .restart_offer,
             RestartOffer::NotCaptured,
@@ -20330,8 +20344,7 @@ pub(crate) mod tests {
             super::super::status::entry_info(
                 &entry,
                 &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-                None
+                &super::super::status::KnownTmuxNames::default()
             )
             .restart_offer,
             RestartOffer::Resume
@@ -20352,8 +20365,7 @@ pub(crate) mod tests {
             super::super::status::entry_info(
                 &entry,
                 &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-                None
+                &super::super::status::KnownTmuxNames::default()
             )
             .restart_offer,
             RestartOffer::NotCaptured
@@ -26321,8 +26333,7 @@ exit 0
             crate::service::status::entry_info(
                 &live,
                 &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-                None,
+                &super::super::status::KnownTmuxNames::default()
             )
             .last_activity_at,
             observed_at,
@@ -30618,11 +30629,11 @@ exit 0
         }
     }
 
-    /// List must preserve accepted-create evidence through both initial Error
+    /// Reconciliation must preserve accepted-create evidence through initial Error
     /// classification and an already-Error retry. A read-only observer may
     /// report the failure but cannot settle the key or remove its artifacts.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn list_error_cleanup_preserves_replay_and_read_only_artifacts() {
+    async fn reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts() {
         for already_error in [false, true] {
             let PendingSentinelFixture {
                 state,
@@ -30651,11 +30662,12 @@ exit 0
             let sentinel = crate::launch::status_path_for_spec(&spec);
             sup.may_record
                 .store(false, std::sync::atomic::Ordering::SeqCst);
+            sup.reconcile_for_test().await;
             let listed = crate::service::listing::list_all(&sup).await.unwrap();
             assert!(listed.sessions.iter().any(|info| info.id == row.id));
             assert!(
                 sentinel.exists() && spec.exists(),
-                "read-only List must retain launch artifacts"
+                "read-only reconciliation must retain launch artifacts"
             );
             assert_eq!(
                 sup.store
@@ -30668,7 +30680,7 @@ exit 0
             );
             sup.may_record
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            crate::service::listing::list_all(&sup).await.unwrap();
+            sup.reconcile_for_test().await;
             assert!(!sentinel.exists());
             assert_sentinel_replay(&sup, &claim, checkout.as_ref(), &row).await;
         }

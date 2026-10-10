@@ -246,7 +246,7 @@ pub const LIST_SESSIONS_CAP: usize = 500;
 ///
 /// Both ends hold to it, for different reasons. Each hint costs the helm a
 /// whole `ListSessions` round trip (an ssh round trip for a remote host,
-/// plus the capture sweep that listing runs), and each refresh that answers
+/// plus the supervisor's pane query), and each refresh that answers
 /// one raises a fleet-wide event that makes every open client re-read the
 /// list and every open session view do a live read of its own host. An
 /// honest supervisor spaces its hints this far apart to bound that during a
@@ -674,9 +674,9 @@ pub enum SessionStatus {
     /// can already be dead by the time that reply reaches the caller, so
     /// claiming a live status there would itself be a fabricated liveness
     /// claim.
-    /// `ListSessions` is the only reply that computes a REAL answer (from
-    /// tmux, via `service.rs`'s `session_status`); every other place this
-    /// value is produced is honestly saying "not yet known", not "known
+    /// List and rename replies compute fresh pane liveness from tmux and
+    /// read the supervisor's cached classification. Create and restart
+    /// replies instead use this placeholder: "not yet known", not "known
     /// to be running".
     ///
     /// ## Internal/compat vocabulary: this variant MUST NEVER RENDER
@@ -2904,7 +2904,8 @@ pub enum ControlMsg {
     /// `SessionRestarted` deliberately: the caller gets the authoritative
     /// answer back, not an ack it must follow with a fetch. `session` is
     /// built the same way `ListSessions` builds one — live-probed
-    /// `status`, rediscovered `tabs`, freshly computed `restart_offer` —
+    /// `status`, rediscovered `tabs`, the same cached `restart_offer` a list
+    /// carries —
     /// never a stale stored row with the new title spliced in.
     /// `SessionInfo` is more than a stored title (see its own docs), and
     /// echoing the rest of it stale would hand the caller a `SessionInfo`

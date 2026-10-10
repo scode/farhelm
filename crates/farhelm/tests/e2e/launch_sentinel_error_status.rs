@@ -420,23 +420,15 @@ async fn stop_before_any_list_on_an_exec_failed_session_still_ends_error() {
     );
 }
 
-/// Review-swarm fix batch item 1: a corrupt (invalid-UTF-8) sentinel must
-/// fail the WHOLE `ListSessions` request rather than silently classifying
-/// its row (or any other entry sharing the reply) from pane state alone.
-/// Pinned against the list path specifically, since that is the site the
-/// fix batch calls out as returning `Internal` for the request; the file
-/// must survive the failed attempt, and a later pass with it repaired
-/// (removed, here) must classify correctly.
+/// Unreadable launch evidence must defer persistence without breaking lists.
+/// The ticker retains the corrupt file and retries; cached replies still show
+/// pane-derived liveness. Repairing the evidence lets a later reconciliation
+/// record the exit, rather than silently misclassifying it during the read error.
 #[farhelm_testtrace::test]
-async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
+async fn a_corrupt_sentinel_defers_reconciliation_but_lists_succeed() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     wait_for_live_status(&h.client, &session.id, 30).await;
-
-    // A genuinely alive pane never has its sentinel checked at all (the
-    // dead-or-absent gate), so the pane is killed first — this is the
-    // absent-terminal half of the gate, exercised deliberately rather than
-    // the live half (covered by the dead-or-absent test elsewhere).
     let sock = h.state.path().join("tmux.sock");
     let out = tmux_query(
         &sock,
@@ -444,33 +436,40 @@ async fn a_corrupt_sentinel_fails_the_whole_list_request_and_survives() {
     )
     .await;
     assert!(out.status.success(), "test setup: killing the tmux session");
-
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
-    std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).expect("plant a corrupt sentinel");
-
-    let err = h
-        .client
-        .list_sessions()
-        .await
-        .expect_err("a corrupt sentinel must fail the whole list request");
-    assert!(
-        format!("{err:#}").contains("launch sentinel"),
-        "the failure must name what went wrong: {err:#}"
+    std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).expect("plant corrupt sentinel");
+    assert_eq!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Exited { exit_code: None },
+        "fixture premise: the pane is absent before reconciliation"
     );
+    h.sup.reconcile_for_test().await;
     assert!(
         status_path.exists(),
-        "the corrupt file must survive a failed read for a later, repaired pass"
+        "failed observation must preserve evidence"
     );
-
-    // Repaired (by removing the corrupt file outright): a later list must
-    // classify normally rather than staying wedged on the earlier failure.
-    std::fs::remove_file(&status_path).expect("remove the corrupt sentinel");
-    let status = listed(&h.client, &session.id).await.status;
+    let store =
+        farhelm_supervisor::store::SessionStore::open(&h.state.path().join("supervisor.db"), false)
+            .await
+            .unwrap();
     assert_eq!(
-        status,
-        SessionStatus::Exited { exit_code: None },
-        "once repaired, a later pass must classify normally again: {status:?}"
+        store.session(&session.id).await.unwrap().unwrap().outcome,
+        farhelm_supervisor::store::LastOutcome::Running,
+        "unreadable evidence must not commit an exit"
+    );
+    std::fs::remove_file(&status_path).unwrap();
+    h.sup.reconcile_for_test().await;
+    assert!(
+        matches!(
+            store.session(&session.id).await.unwrap().unwrap().outcome,
+            farhelm_supervisor::store::LastOutcome::Exited { .. }
+        ),
+        "repair permits the next observation to commit"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Exited { exit_code: None }
     );
 }
 

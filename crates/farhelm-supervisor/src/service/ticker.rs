@@ -12,24 +12,15 @@
 //! may have discarded at EOF. The periodic snapshot remains the fallback for
 //! a missed hook or an attachment registered after the earlier observation.
 //!
-//! Until PLAN_M6_75.md item 1 this supervisor had no internal cadence at
-//! all. Everything periodic rode a request — conversation capture advanced
-//! because `ListSessions` happened to run a pass on its way to building a
-//! reply. That worked, and it is still what makes a poll's answer fresh,
-//! but it made the supervisor a hostage: the cadence belonged to whoever
-//! dialled in, no contract promised one, and a helm that stopped polling
-//! (or a supervisor nobody had connected to yet) simply stopped capturing.
-//! A supervisor responsible for its own state has to be able to make
-//! progress with nobody watching, which is what this task is.
+//! # Timer-owned reconciliation
 //!
-//! # Report refresh on the ticker and reply paths
-//!
-//! The ticker guarantees progress without a polling helm; reply paths refresh
-//! before answering so their restart offers reflect current durable reports.
-//! Each pass uses the session's capture claim, shared with report admission,
-//! then verifies any exact reported file and updates its in-memory mirror.
-//! There is no global pass lock or coalescing: a row read per integrated
-//! session and bounded exact-file checks are the remaining cost.
+//! The timer observes launch outcomes and applies report files without a polling
+//! helm. Lists and rename replies read that state, plus fresh pane liveness and
+//! tabs: launch-error classification, Resume readiness and notifications may lag
+//! by one nominal tick. The pane-death wake promptly commits newly dead owned
+//! agent panes, without sampling screens or sweeping the stopped population.
+//! Startup, reload and decision-time Restart retain their capture pass.
+//! There is no global pass lock or reply-driven coalescing.
 //!
 //! # The sampling rule
 //!
@@ -69,7 +60,7 @@
 //!
 //! Report refresh applies the store's write-standing and generation checks
 //! before changing durable readiness. Its per-session claim keeps a refresh
-//! from overwriting a newer report while the ticker and replies overlap.
+//! from overwriting a newer report while the ticker and Restart overlap.
 //!
 //! # What the samples are for
 //!
@@ -1013,16 +1004,12 @@ fn pane_death_wait(
     })
 }
 
-/// Reap exited tabs now, outside the periodic schedule: the pane-death
-/// wakeup's half of [`start_ticker`].
+/// Reap dead tabs and commit newly dead owned agents between ticks.
 ///
-/// Death publication and the reap. Sampling and capture keep their own cadence, which a pane
-/// death says nothing about, and running them here would let every agent
-/// exit or tab exit pull the whole tick forward. The permit, the fresh
-/// pane-state read, the budget, and the stop check are the tick's own, so a
-/// wakeup reap behaves exactly like the reap at the start of a tick. A pane
-/// death that was an agent's rather than a tab's finds nothing to close, but
-/// still wakes its live attachment to recover any final output tmux dropped.
+/// The wake hints before its pane query, and successful outcome changes hint
+/// again. It shares sampling admission with ticks but runs neither screen
+/// sampling nor capture: a tab death must not pull the fleet sweep forward.
+/// Already-terminal outcomes and absent or unattributed panes wait for the tick.
 async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     // A pane died, which listings show at once: a dead tab drops out of its
     // session's list before any reap, and a dead agent pane is an exit. That
@@ -1049,6 +1036,25 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     };
     publish_pane_deaths(sup, &states, probe_started);
     reap_dead_tabs(sup, &states, &entries, stop).await;
+    // A dead tab must not turn the wake into a fleet sweep. Only an owned
+    // dead agent pane with an unsettled outcome needs prompt persistence;
+    // absent panes and already-stopped sessions remain the timer's work.
+    let newly_dead: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                *entry.run.outcome.lock().expect("outcome mutex poisoned"),
+                LastOutcome::Running | LastOutcome::StopRequested
+            ) && entry.terminal.as_ref().is_some_and(|terminal| {
+                states
+                    .get(&terminal.pane)
+                    .is_some_and(|state| state.session_name == terminal.tmux_name && state.dead)
+            })
+        })
+        .cloned()
+        .collect();
+    let known = sup.known_tmux_names().await;
+    observe_entries(sup, &newly_dead, &states, &known).await;
 }
 
 /// Latch death before tab reaping can discard its pane, without waiting for
@@ -1185,8 +1191,8 @@ pub(super) async fn observe_entries(
                 if observed.settled_error {
                     // A prior writer may have crashed between recording
                     // the durable error and deleting launch artifacts.
-                    // Matching LIST's idempotent cleanup keeps that
-                    // credential-bearing residue from waiting for a poll.
+                    // The periodic retry removes that credential-bearing
+                    // residue without depending on another client request.
                     if sup.may_record() {
                         cleanup_launch_artifacts(
                             &sup.state_dir,
@@ -1198,7 +1204,20 @@ pub(super) async fn observe_entries(
                     }
                     continue;
                 }
-                if observed.sentinel.is_some() {
+                if let Some(detail) = observed.sentinel {
+                    let changed = {
+                        let mut cached = entry
+                            .run
+                            .launch_error
+                            .lock()
+                            .expect("launch-error mutex poisoned");
+                        let changed = cached.as_ref() != Some(&detail);
+                        *cached = Some(detail);
+                        changed
+                    };
+                    if changed {
+                        sup.hint_sessions_changed();
+                    }
                     sentinel_hits.insert(entry.info.id.clone());
                 }
                 if let Some(transition) = observed.transition {
@@ -1400,22 +1419,11 @@ async fn sample_pass(
     publish_pane_deaths(sup, &states, probe_started);
     reap_dead_tabs(sup, &states, &entries, stop).await;
 
-    // This sampling pass observes absent and owned dead panes before it
-    // discards them from screen sampling. Foreign names remain outside this
-    // selection; the shared observer still receives the complete owner set.
-    let observed_entries: Vec<_> = entries
-        .iter()
-        .filter(|entry| {
-            entry.terminal.as_ref().is_none_or(|terminal| {
-                states
-                    .get(&terminal.pane)
-                    .is_none_or(|state| state.session_name == terminal.tmux_name && state.dead)
-            })
-        })
-        .cloned()
-        .collect();
+    // Ownership classification belongs to the shared observer. In particular,
+    // an unattributed pane permits sentinel evidence, and a pane recycled into
+    // another session is absent for this launch even while that pane is alive.
     let known = sup.known_tmux_names().await;
-    observe_entries(sup, &observed_entries, &states, &known).await;
+    observe_entries(sup, &entries, &states, &known).await;
     let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
         .into_iter()
         .filter_map(|entry| {
@@ -3139,10 +3147,8 @@ mod tests {
     ///
     /// Why: that shape is what an out-of-band `rename-session` or
     /// `move-pane` on the private socket leaves, and the pane is then most
-    /// likely still this session's agent. Stop and restart refuse to record
-    /// an exit for it, and the ticker skips it (the test above); the list
-    /// path used to disagree and durably stamp an exit on the next helm
-    /// poll, for an agent that was still running.
+    /// likely still this session's agent. A list must neither infer a durable exit nor change the outcome;
+    /// the tick also refuses exit inference from this unattributed pane.
     #[farhelm_testtrace::test]
     async fn a_list_never_records_an_exit_for_a_pane_renamed_out_of_band() {
         let state = StateDir::new();
@@ -3176,16 +3182,16 @@ mod tests {
         );
     }
 
-    /// Spec: a list reply that is the first to record a session's exit
-    /// hints connected helms.
+    /// A pane-death wake preserves an owned agent's exit before the next tick.
+    /// Lists show that exit immediately but never store it; the wake must
+    /// commit so losing the pane cannot discard its final exit code.
     ///
-    /// Why: whichever path commits an exit first is the only one that sees
-    /// the change; once a listing has mirrored it, the ticker finds nothing
-    /// to transition and has nothing to hint. A listing from some other
-    /// client (not the helm) can be that first observer, and the helm
-    /// would then learn of the exit only from its backstop poll.
+    /// The hint check only shows that the wake told the helm something
+    /// changed: `reap_pass` hints unconditionally on entry, because a pane
+    /// death is visible to lists before any reap, so it cannot tell whether
+    /// the commit hinted again. The durable outcome is what pins the commit.
     #[farhelm_testtrace::test]
-    async fn a_list_that_first_records_an_exit_hints() {
+    async fn a_pane_death_wake_commits_an_exit_and_hints() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         let name = "fh-list-exit";
@@ -3202,7 +3208,18 @@ mod tests {
         wait_for_dead_pane(&sup, &pane).await;
         let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
 
-        super::super::listing::list_all(&sup).await.expect("list");
+        let reply = super::super::listing::list_all(&sup).await.expect("list");
+        assert_eq!(
+            reply.sessions[0].status,
+            SessionStatus::Exited { exit_code: Some(3) }
+        );
+        assert_eq!(
+            stored_outcome(&sup, "list-exit").await,
+            LastOutcome::Running,
+            "a list must not commit even a positively owned dead pane"
+        );
+        let (_stop_tx, mut stop) = never_stopped();
+        reap_pass(&sup, &mut stop).await;
 
         assert_eq!(
             stored_outcome(&sup, "list-exit").await,
@@ -3210,12 +3227,90 @@ mod tests {
                 exit_code: Some(3),
                 annotation: None,
             },
-            "fixture premise: the listing recorded the exit"
+            "fixture premise: the wake recorded the exit"
         );
-        hints.expect_hint("the exit the listing recorded").await;
+        hints.expect_hint("the pane death the wake observed").await;
     }
 
-    /// Spec: a list reply still reports a launch sentinel for a session
+    /// A read-only observer retains launch errors for repeated cached replies.
+    /// The failure detail cannot be reconstructed from a dead pane, and neither
+    /// listing nor a pane-death wake may consume queued hook reports.
+    #[farhelm_testtrace::test]
+    async fn a_wake_caches_uncommitted_launch_errors_without_sweeping_reports() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-wake-failure", "exit 7").await;
+        let entry = install_durable_running_entry(
+            &sup,
+            "wake-failure",
+            Terminal {
+                tmux_name: "fh-wake-failure".into(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        let spec = crate::launch::spec_path_for_launch(state.path(), "wake-failure", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        let report_dir = crate::hook_report::session_dir(state.path(), "wake-failure").unwrap();
+        std::fs::create_dir_all(&report_dir).unwrap();
+        let report = report_dir.join("latest.json");
+        std::fs::write(&report, b"invalid report").unwrap();
+        assert!(
+            sentinel.exists() && report.exists(),
+            "fixture evidence must precede the wake"
+        );
+        sup.may_record.store(false, Ordering::SeqCst);
+        let (_stop_tx, mut stop) = never_stopped();
+        reap_pass(&sup, &mut stop).await;
+        assert_eq!(
+            stored_outcome(&sup, "wake-failure").await,
+            LastOutcome::Running
+        );
+        assert!(report.exists(), "wake must not drain hook reports");
+        std::fs::remove_file(&sentinel).unwrap();
+        for _ in 0..2 {
+            let reply = super::super::listing::list_all(&sup).await.unwrap();
+            assert!(
+                matches!(&reply.sessions[0].status, SessionStatus::Error { detail }
+                if detail.contains("exec_failed")),
+                "cached launch failure survives without a file"
+            );
+            assert!(
+                report.exists(),
+                "list must not run capture or discard queued reports"
+            );
+        }
+        assert!(entry.run.launch_error.lock().unwrap().is_some());
+        sup.may_record.store(true, Ordering::SeqCst);
+        let before = stored_outcome(&sup, "wake-failure").await;
+        super::super::listing::list_all(&sup).await.unwrap();
+        assert!(report.exists(), "a recording list must not run capture");
+        assert_eq!(
+            stored_outcome(&sup, "wake-failure").await,
+            before,
+            "recording authority does not let lists commit"
+        );
+        // Restore the authoritative evidence for a recording observer to retry.
+        std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        reap_pass(&sup, &mut stop).await;
+        assert!(matches!(
+            stored_outcome(&sup, "wake-failure").await,
+            LastOutcome::Error { .. }
+        ));
+        assert!(
+            entry.run.launch_error.lock().unwrap().is_none(),
+            "durable Error replaces the cache"
+        );
+        assert!(
+            report.exists(),
+            "even a recording wake must leave capture to the timer"
+        );
+    }
+
+    /// Spec: the tick observes a launch sentinel for a session
     /// whose pane is unattributed, and records the Error.
     ///
     /// Why: the sentinel is the shim's report that this launch never
@@ -3223,7 +3318,7 @@ mod tests {
     /// pane. Declining to infer anything from a renamed pane must not also
     /// bury a failed launch that was renamed before anyone looked.
     #[farhelm_testtrace::test]
-    async fn a_list_still_reports_the_launch_sentinel_of_an_unattributed_pane() {
+    async fn a_tick_reports_the_launch_sentinel_of_an_unattributed_pane() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         let pane = spawn_pane(&sup, "renamed-by-hand", "sleep 600").await;
@@ -3244,6 +3339,10 @@ mod tests {
         )
         .unwrap();
 
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = never_stopped();
+        sample_pass(&sup, &mut cursor, 0, &mut stop).await;
+
         let reply = super::super::listing::list_all(&sup).await.expect("list");
         let info = reply
             .sessions
@@ -3261,7 +3360,7 @@ mod tests {
         ));
     }
 
-    /// Spec: a list reply still reads a recorded pane id that tmux now
+    /// Spec: the tick reads a recorded pane id that tmux now
     /// reports under ANOTHER farhelm session's name as this session's pane
     /// having gone, and records the exit.
     ///
@@ -3270,7 +3369,7 @@ mod tests {
     /// sessions. Treating every foreign owner as unattributable (the fix the
     /// test above pins) must not also freeze those rows as running forever.
     #[farhelm_testtrace::test]
-    async fn a_list_reads_a_pane_recycled_into_another_farhelm_session_as_gone() {
+    async fn a_tick_reads_a_pane_recycled_into_another_farhelm_session_as_gone() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         let pane = spawn_pane(&sup, "fh-newer", "sleep 600").await;
@@ -3292,6 +3391,10 @@ mod tests {
             },
         )
         .await;
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = never_stopped();
+        sample_pass(&sup, &mut cursor, 0, &mut stop).await;
 
         let reply = super::super::listing::list_all(&sup).await.expect("list");
         let info = reply
@@ -4999,6 +5102,7 @@ mod tests {
                 resume_template: None,
             },
             run: RunCells {
+                launch_error: Arc::new(std::sync::Mutex::new(None)),
                 activity: ActivitySample::reloaded(),
                 ..base.run
             },

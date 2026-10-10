@@ -124,16 +124,16 @@ pub(crate) enum PaneEvidence<'a> {
     Owned(&'a PaneState),
     /// Not present, or present under ANOTHER farhelm session's name. Pane ids
     /// restart at `%0` on a fresh tmux server, so a known owner is read as the
-    /// id having been recycled after ours went away. (The ticker is stricter
-    /// and skips every foreign owner; the list and reload record the exit.)
+    /// id having been recycled after ours went away. The tick and reload
+    /// can record the exit; screen sampling still requires positive ownership.
     Absent,
     /// Present under a name no session here answers to — most cheaply
     /// explained by an out-of-band `rename-session` or `move-pane` on the
     /// private socket, in which case it is still our agent. Neither liveness
     /// nor an exit can be concluded from it, so observers draw no pane-based
     /// inference and report an unresolved outcome as `Unknown`, the same way
-    /// the stop, restart and delete verbs refuse to act on it and the ticker
-    /// skips it. A launch sentinel still counts: it is evidence about this
+    /// the stop, restart and delete verbs refuse to act on it. The ticker
+    /// skips screen sampling but can still read launch evidence. A launch sentinel still counts: it is evidence about this
     /// launch, not about the pane. The state is carried so a caller that keeps
     /// the recorded terminal needs no second lookup.
     Unattributed(&'a PaneState),
@@ -395,12 +395,9 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// would be invisible: both would still be `SessionInfo`s, differing only
 /// in which fields told the truth.
 ///
-/// `sentinel` is a launch-sentinel (or wrapper-failure) detail the CALLER
-/// found for this entry in the pass it is replying from, and it OUTRANKS
-/// `session_status` — that is the whole point of PLAN_M3.md item 3's
-/// write-inability note: a failed exec is not something a pane can show,
-/// so a reply must surface it whether or not the transition could also be
-/// committed durably this pass. Callers that have not looked pass `None`.
+/// A cached launch failure outranks pane-derived status even when recording
+/// was unavailable. Replies read the observer's generation-local mirror and
+/// never touch launch artifacts themselves.
 ///
 /// `pane_states` must be the map the caller's own liveness probe returned;
 /// an empty map is correct only for an entry with no terminal (the restart
@@ -410,7 +407,6 @@ pub(crate) fn entry_info(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
     known: &KnownTmuxNames,
-    sentinel: Option<&str>,
 ) -> SessionInfo {
     let mut info = entry.info.clone();
     info.restart_offer = session_restart_offer(entry);
@@ -460,18 +456,24 @@ pub(crate) fn entry_info(
             .collect()
         })
         .unwrap_or_default();
-    match sentinel {
-        Some(detail) => {
-            info.status = SessionStatus::Error {
-                detail: detail.to_string(),
-            };
-            info.annotation = None;
-        }
-        None => {
-            let (status, annotation) = session_status(entry, pane_states, known);
-            info.status = status;
-            info.annotation = annotation;
-        }
+    let (status, annotation) = session_status(entry, pane_states, known);
+    let launch_error = entry
+        .run
+        .launch_error
+        .lock()
+        .expect("launch-error mutex poisoned")
+        .clone();
+    // A concurrent observer can retain a fallback after another writer has
+    // committed Error. Durable failure still wins, including its stored detail.
+    if matches!(status, SessionStatus::Error { .. }) {
+        info.status = status;
+        info.annotation = annotation;
+    } else if let Some(detail) = launch_error {
+        info.status = SessionStatus::Error { detail };
+        info.annotation = None;
+    } else {
+        info.status = status;
+        info.annotation = annotation;
     }
     info
 }
@@ -489,7 +491,7 @@ pub(crate) fn entry_info(
 ///
 /// A failed query is logged and degrades to `None` rather than failing the
 /// stop: it costs the exit code, never the annotation, and the store's
-/// monotonic enrichment lets a later list fill the code in.
+/// monotonic enrichment lets a later tick fill the code in.
 pub(crate) async fn dead_pane_exit_code(
     sup: &Supervisor,
     terminal: Option<&Terminal>,
@@ -547,16 +549,14 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
     }
 }
 
-/// What one pre-reply observation of a session concluded — the
-/// per-entry half of a `ListSessions` pass, hoisted out so a
-/// single-session reply can reach the same conclusions (PLAN_M5.md
-/// item 3's `SessionRenamed`, whose `SessionInfo` must be built the
-/// way a list builds one).
+/// Launch evidence and the generation-fenced transition one observer found.
+/// The tick, pane-death wake and deterministic seam collect these before
+/// committing a batch; replies only read the resulting durable and memory state.
 pub(crate) struct EntryObservation {
     /// A launch-sentinel, wrapper-failure or interrupted-preparation detail found for this
     /// entry NOW. Outranks whatever `session_status` would compute,
     /// whether or not the matching transition also commits — see
-    /// [`entry_info`]'s `sentinel` parameter.
+    /// the generation-local launch-error mirror read by [`entry_info`].
     pub(crate) sentinel: Option<String>,
     /// The transition this observation wants committed, or `None`
     /// when nothing changed or this supervisor may not record.
@@ -601,36 +601,15 @@ pub(crate) async fn interrupted_preparation_detail(
     )))
 }
 
-/// Look at one entry the way a `ListSessions` pass looks at it:
-/// classify what its pane and launch artifacts say, without
-/// committing anything.
+/// Classify pane and launch evidence without committing it.
 ///
-/// Extracted from that pass rather than reimplemented, and shared
-/// with it, because the precedence here is subtle and duplicating it
-/// would eventually mean two different answers to "what happened to
-/// this session" depending on which request asked. The order is
-/// itself the contract (PLAN_M3.md items 2, 3 and 4): an entry
-/// already durably `Error` is settled; otherwise a launch sentinel —
-/// or the wrapper-failure shape that stands in for one — outranks
-/// every inference, because a failed exec leaves an ordinary dead
-/// pane that no probe can tell from a command that ran and finished;
-/// A stopped accepted fresh terminal also requires durable Ready setup;
-/// only then does the plain pane observation apply. Incomplete preparation
-/// never overrides a live pane or supplies launch evidence for a pending create.
-/// An unattributed pane ([`PaneEvidence::Unattributed`]) still has its
-/// sentinel read, and nothing else: the wrapper-failure, preparation and exit
-/// inferences all depend on a pane this session cannot claim.
-///
-/// Deliberately does NOT commit: the list pass batches every entry's
-/// transition into ONE transaction, and taking that apart per entry
-/// would turn one poll into a write per session. Callers commit what
-/// they collect (`SessionStore::transition_many`) and then mirror
-/// what it reports.
-///
-/// An unreadable sentinel is an `Err`, never a fall-through: basing a
-/// reply on an inference the unreadable file might contradict is
-/// exactly the silent-wrong-answer this refuses to give. The error
-/// already names the session, so callers report it verbatim.
+/// The timer and wake share this precedence: durable Error is settled;
+/// a shim failure, wrapper failure or incomplete accepted preparation outranks
+/// an inferred exit. An unattributed pane permits only launch-sentinel evidence,
+/// while a pane recycled into another known session counts as absent.
+/// Callers batch transitions, mirror committed outcomes and retain uncommitted
+/// error details for replies. An unreadable sentinel returns an error so the
+/// observer can log and retry without recording a possibly false exit.
 pub(crate) async fn observe_entry(
     sup: &Supervisor,
     entry: &Arc<SessionEntry>,
