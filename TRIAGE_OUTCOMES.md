@@ -7229,7 +7229,8 @@
   (`git rev-parse --local-env-vars` lists them); the agent's own environment is unchanged; a regression test passes a
   `GIT_DIR` to the preparation path through injection, never by changing the test process's environment, and shows the
   other repository untouched. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/git-env-isolation.md`.
+- Execution: complete in jj change `xuosqsmxvlzolqktzonktqtqwxsnxkrk`, bookmark
+  `plan/git-env-isolation/01-scrub-git-env`; [PR #1798](https://github.com/scode/farhelm/pull/1798/changes).
 
 ## git-fixture-setup-modify-delete-callers-repository.md
 
@@ -7244,7 +7245,8 @@
   `Command`). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the fixture's git children run without the repository-selecting and `GIT_CONFIG_*` variables;
   only the child environment changes, never the test process's own. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/git-env-isolation.md`.
+- Execution: complete in jj change `xuosqsmxvlzolqktzonktqtqwxsnxkrk`, bookmark
+  `plan/git-env-isolation/01-scrub-git-env`; [PR #1798](https://github.com/scode/farhelm/pull/1798/changes).
 
 ## unsupported-c-escapes-become-different-executable-instead.md
 
