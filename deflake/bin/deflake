@@ -507,6 +507,10 @@ def phases(profile: str = "full") -> list[Phase]:
                "--", "--show-output", "--test-threads=4"]),
         Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
               ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
+        # The release gate runs this suite, so a sweep that skipped it would
+        # leave a release-blocking battery without flake discovery.
+        Phase("omp-js", "monolithic", "OMP reporter asset scenarios", "node default discovery", "none",
+              ["bash", "-c", "cd crates/farhelm-supervisor/asset-js-tests && node --test"]),
         Phase("install-sh", "monolithic", "install.sh harness", "single process", "none",
               ["bash", "scripts/test-install-sh.sh"]),
         Phase("provision-centos", "monolithic", "CentOS provisioning over ssh", "one container", "none",
