@@ -1155,6 +1155,126 @@ fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
     }
 }
 
+/// Observe and commit the caller's session snapshot without sampling screens.
+///
+/// The ticker, pane-death wake and deterministic test seam need the same
+/// launch-failure precedence and generation-fenced outcome writes. Keeping
+/// this phase separate lets tests advance durable state without changing
+/// activity classifications or waiting for the timer. The caller decides
+/// which entries its pane evidence permits it to observe.
+///
+/// A failed artifact read defers that entry; a failed batch keeps its
+/// launch evidence for the next observation. Neither failure prevents the
+/// rest of the fleet from making progress.
+pub(super) async fn observe_entries(
+    sup: &Supervisor,
+    entries: &[Arc<SessionEntry>],
+    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
+    known: &super::status::KnownTmuxNames,
+) {
+    // Persist exit evidence before the pane disappears. The shared observer
+    // checks launch failures first: a failed exec and an ordinary exit leave
+    // the same dead pane, but only the former must become Error. Ownership
+    // comes from the caller's complete name snapshot, even when it selects
+    // only a subset of entries for this pass.
+    let mut observations = Vec::new();
+    let mut sentinel_hits = HashSet::new();
+    for entry in entries {
+        match observe_entry(sup, entry, states, known).await {
+            Ok(observed) => {
+                if observed.settled_error {
+                    // A prior writer may have crashed between recording
+                    // the durable error and deleting launch artifacts.
+                    // Matching LIST's idempotent cleanup keeps that
+                    // credential-bearing residue from waiting for a poll.
+                    if sup.may_record() {
+                        cleanup_launch_artifacts(
+                            &sup.state_dir,
+                            &sup.store,
+                            &entry.info.id,
+                            entry.generation,
+                        )
+                        .await;
+                    }
+                    continue;
+                }
+                if observed.sentinel.is_some() {
+                    sentinel_hits.insert(entry.info.id.clone());
+                }
+                if let Some(transition) = observed.transition {
+                    observations.push((entry.info.id.clone(), entry.generation, transition));
+                }
+            }
+            Err(e) => error!(
+                session = %entry.info.id, error = %format!("{e:#}"),
+                "could not read this session's launch sentinel; deferring its ticker exit \
+                 observation rather than risking a durable misclassification from pane state alone"
+            ),
+        }
+    }
+    if !observations.is_empty() {
+        match sup.store.transition_many(observations).await {
+            Ok(committed) => {
+                // `transition_many` returns the current durable value when
+                // a restart beat this snapshot. Mirroring that
+                // value, rather than the proposed transition, prevents an
+                // old pane's death from overwriting a fresh launch in RAM.
+                for entry in entries {
+                    if let Some(outcome) = committed.get(&entry.info.id) {
+                        sup.mirror_committed_outcome(entry, outcome);
+                    }
+                }
+                // A sentinel is disposable only after its Error reached
+                // SQLite. Retaining it after a failed batch lets the next
+                // tick retry instead of turning a real launch failure into
+                // an ordinary exit.
+                for entry in entries {
+                    if sentinel_hits.contains(&entry.info.id)
+                        && matches!(
+                            committed.get(&entry.info.id),
+                            Some(LastOutcome::Error { .. })
+                        )
+                    {
+                        cleanup_launch_artifacts(
+                            &sup.state_dir,
+                            &sup.store,
+                            &entry.info.id,
+                            entry.generation,
+                        )
+                        .await;
+                    }
+                }
+            }
+            Err(e) => warn!(
+                error = %format!("{e:#}"),
+                "could not record ticker-observed session outcomes; the next tick will retry"
+            ),
+        }
+    }
+}
+
+/// Run the observation half of a pass for tests that do not start `serve`.
+///
+/// Lists will no longer advance durable state. This seam deliberately
+/// observes every entry using the shared ownership rules, then its caller
+/// applies hook reports; it never samples screens or moves activity stamps.
+#[cfg(any(test, feature = "test-seams"))]
+pub(super) async fn observe_for_test(sup: &Supervisor) {
+    let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
+    if entries.is_empty() {
+        return;
+    }
+    let states = match sup.tmux.pane_states().await {
+        Ok(states) => states,
+        Err(error) => {
+            error!(error = %format!("{error:#}"), "could not observe test reconciliation pane states");
+            return;
+        }
+    };
+    let known = sup.known_tmux_names().await;
+    observe_entries(sup, &entries, &states, &known).await;
+}
+
 /// Snapshot a BUDGETED slice of the live agent panes into their entries'
 /// [`ActivitySample`] cells.
 ///
@@ -1280,111 +1400,22 @@ async fn sample_pass(
     publish_pane_deaths(sup, &states, probe_started);
     reap_dead_tabs(sup, &states, &entries, stop).await;
 
-    // The ticker has just witnessed the same exit evidence a list request
-    // would. Keep that evidence before the liveness filter discards dead
-    // and missing panes: a reboot can erase the pane — and its exit code —
-    // before any client next asks, while a generation-fenced durable
-    // outcome remains knowledge rather than a later reconstruction.
-    //
-    // `observe_entry` is also the launch-failure precedence rule shared by
-    // listing. In particular, it reads a sentinel before offering a
-    // pane-based exit, so a command that never exec'd is not misreported as
-    // one that ran and finished. A sentinel read failure defers only that
-    // entry; sampling the rest of the fleet remains useful and the next
-    // tick retries the unread file.
-    let mut observations = Vec::new();
-    let mut sentinel_hits = HashSet::new();
-    // `observe_entry` classifies every pane it is handed, but the filter just
-    // below already skips every foreign owner (recognized or not), so for
-    // the entries that reach it this set cannot change the answer. It is
-    // passed rather than faked so that loosening the filter later cannot
-    // quietly turn every renamed pane into an inferred exit.
+    // This sampling pass observes absent and owned dead panes before it
+    // discards them from screen sampling. Foreign names remain outside this
+    // selection; the shared observer still receives the complete owner set.
+    let observed_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            entry.terminal.as_ref().is_none_or(|terminal| {
+                states
+                    .get(&terminal.pane)
+                    .is_none_or(|state| state.session_name == terminal.tmux_name && state.dead)
+            })
+        })
+        .cloned()
+        .collect();
     let known = sup.known_tmux_names().await;
-    for entry in &entries {
-        let terminal_is_dead_or_absent = entry.terminal.as_ref().is_none_or(|terminal| {
-            let Some(state) = states.get(&terminal.pane) else {
-                return true;
-            };
-            // A pane now named under another session is not a vanished
-            // pane: it is evidence we cannot attribute to this entry. The
-            // ticker must leave it alone instead of letting an id-only
-            // match stamp a recycled or moved pane's state onto this row.
-            state.session_name == terminal.tmux_name && state.dead
-        });
-        if !terminal_is_dead_or_absent {
-            continue;
-        }
-        match observe_entry(sup, entry, &states, &known).await {
-            Ok(observed) => {
-                if observed.settled_error {
-                    // A prior writer may have crashed between recording
-                    // the durable error and deleting launch artifacts.
-                    // Matching LIST's idempotent cleanup keeps that
-                    // credential-bearing residue from waiting for a poll.
-                    if sup.may_record() {
-                        cleanup_launch_artifacts(
-                            &sup.state_dir,
-                            &sup.store,
-                            &entry.info.id,
-                            entry.generation,
-                        )
-                        .await;
-                    }
-                    continue;
-                }
-                if observed.sentinel.is_some() {
-                    sentinel_hits.insert(entry.info.id.clone());
-                }
-                if let Some(transition) = observed.transition {
-                    observations.push((entry.info.id.clone(), entry.generation, transition));
-                }
-            }
-            Err(e) => error!(
-                session = %entry.info.id, error = %format!("{e:#}"),
-                "could not read this session's launch sentinel; deferring its ticker exit \
-                 observation rather than risking a durable misclassification from pane state alone"
-            ),
-        }
-    }
-    if !observations.is_empty() {
-        match sup.store.transition_many(observations).await {
-            Ok(committed) => {
-                // `transition_many` returns the current durable value when
-                // a restart beat this snapshot. Mirroring that
-                // value, rather than the proposed transition, prevents an
-                // old pane's death from overwriting a fresh launch in RAM.
-                for entry in &entries {
-                    if let Some(outcome) = committed.get(&entry.info.id) {
-                        sup.mirror_committed_outcome(entry, outcome);
-                    }
-                }
-                // A sentinel is disposable only after its Error reached
-                // SQLite. Retaining it after a failed batch lets the next
-                // tick retry instead of turning a real launch failure into
-                // an ordinary exit.
-                for entry in &entries {
-                    if sentinel_hits.contains(&entry.info.id)
-                        && matches!(
-                            committed.get(&entry.info.id),
-                            Some(LastOutcome::Error { .. })
-                        )
-                    {
-                        cleanup_launch_artifacts(
-                            &sup.state_dir,
-                            &sup.store,
-                            &entry.info.id,
-                            entry.generation,
-                        )
-                        .await;
-                    }
-                }
-            }
-            Err(e) => warn!(
-                error = %format!("{e:#}"),
-                "could not record ticker-observed session outcomes; the next tick will retry"
-            ),
-        }
-    }
+    observe_entries(sup, &observed_entries, &states, &known).await;
     let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
         .into_iter()
         .filter_map(|entry| {

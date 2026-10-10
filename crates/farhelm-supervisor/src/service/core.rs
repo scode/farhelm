@@ -14242,9 +14242,12 @@ impl Supervisor {
         )
     }
 
-    /// Run one reconciliation pass now: apply every report the session
-    /// hooks have dropped, then refresh report-backed readiness, exactly as
-    /// the ticker's next pass would.
+    /// Advance durable outcomes and hook-backed readiness without sampling screens.
+    ///
+    /// In-process tests do not start the ticker. They must explicitly observe
+    /// exits and launch failures before checking durable state, then apply
+    /// every report the hooks have dropped. Screen classification and activity
+    /// stamps stay untouched so polling this seam cannot make a test agent idle.
     ///
     /// Reports are applied asynchronously, on that pass, so a test that has
     /// just watched a hook exit needs a way to say "and now the supervisor
@@ -14252,6 +14255,7 @@ impl Supervisor {
     /// the `test-seams` feature (which the e2e tests enable).
     #[cfg(any(test, feature = "test-seams"))]
     pub async fn reconcile_for_test(&self) {
+        super::ticker::observe_for_test(self).await;
         self.capture_pass(true).await;
     }
 
@@ -17799,9 +17803,26 @@ pub(crate) mod tests {
         use crate::agent_kind::screen_reader::ScreenState;
         for quiet in [ScreenState::Idle, ScreenState::Waiting] {
             let state = StateDir::new();
-            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                .await
-                .expect("supervisor");
+            // Consent needs a process that stays alive across the refusal.
+            // The nonexistent dummy shim only leaves a briefly live shell;
+            // it never starts the sleep declared by create_resumable_session.
+            // This stand-in isolates consent from argv compilation and hooks.
+            let shim = state.path().join("consent-shim");
+            std::fs::write(&shim, "#!/bin/sh\nexec sleep 300\n")
+                .expect("write a live consent stand-in");
+            std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .expect("make the consent stand-in executable");
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                shim,
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    launch_shell: Some("/bin/sh".into()),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor");
             let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
             let entry = sup
                 .sessions

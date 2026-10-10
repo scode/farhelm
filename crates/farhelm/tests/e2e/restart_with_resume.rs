@@ -962,6 +962,10 @@ fn resumed_record_file(
 /// fixture.
 async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let kind = "claude";
+    // The structured branch extracts argv from terminal output. Use the wide
+    // grid for creation and both attachments, and wait for READY before parsing;
+    // an 80-column replay or a partial output frame can truncate that witness.
+    let cols = if structured { WIDE_COLS } else { 80 };
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
@@ -1029,15 +1033,15 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
                 &work.path().to_string_lossy(),
                 launch,
                 None,
-                80,
-                24,
+                cols,
+                ROWS,
                 farhelm_helm::CreateExtras::default(),
             )
             .await
             .expect("create the hook-reporting session");
 
         let (chan, initial_replay, mut rx) = client
-            .attach_live(&session.id, 80, 24)
+            .attach_live(&session.id, cols, ROWS)
             .await
             .expect("attach");
         let mut seen = initial_replay;
@@ -1059,8 +1063,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
         report_client(&sup, &client, chan, &mut rx, &mut seen, &conversation).await;
 
-        // An accepted report commits before the hook returns. Check both the
-        // identity and its source so the scanner cannot satisfy this premise.
+        // The report helper crosses the explicit reconciliation boundary.
+        // Check both identity and source so a scan cannot satisfy this premise.
         let snapshot = sup
             .session_snapshot(&session.id)
             .await
@@ -1168,12 +1172,14 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     );
 
     let (chan, initial_replay, mut rx) = client
-        .attach_live(&session.id, 80, 24)
+        .attach_live(&session.id, cols, ROWS)
         .await
         .expect("the relaunch built a fresh terminal to attach to");
     let mut seen = initial_replay;
     if structured {
-        wait_for(&mut rx, &mut seen, "FAKE-AGENT ARGV:", 30).await;
+        // READY follows the complete argv line; the marker alone could be
+        // only the first chunk of live output.
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
         let argv = crate::harness::argv_marker(&seen);
         let expected = format!("--resume {conversation}");
         assert!(
@@ -1188,7 +1194,6 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             words.windows(options.len()).any(|window| window == options),
             "reconstructed Claude argv lost selected options {options:?}: {argv}"
         );
-        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
         crate::structured_launches::assert_live_exchange(
             &client,
             chan,
@@ -1652,6 +1657,7 @@ async fn a_restart_clears_a_previous_launch_error() {
         .await;
 
     wait_for_dead_pane(&sock, &format!("fh-{}", session.id)).await;
+    h.sup.reconcile_for_test().await;
     let errored = wait_for_non_live_status(&h.client, &session.id, 30).await;
     assert!(
         matches!(errored.status, SessionStatus::Error { .. }),

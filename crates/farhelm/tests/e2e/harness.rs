@@ -1238,6 +1238,33 @@ pub(crate) async fn wait_for_non_live_status(
     .expect("the predicate above matched this id")
 }
 
+/// Advance background reconciliation while waiting for a reply-visible condition.
+///
+/// Most in-process fixtures do not run `serve`, so they have no timer to
+/// observe launch errors, commit outcomes or apply hook reports. Callers
+/// testing those effects use this helper; liveness-only tests keep using
+/// `wait_for_listing` so their requests exercise the ordinary read path.
+/// No screens are sampled, and intentionally unobserved boundaries must not
+/// call this helper before the action that depends on them.
+pub(crate) async fn wait_for_reconciled_listing(
+    sup: &Supervisor,
+    client: &SupervisorClient,
+    secs: u64,
+    what: &str,
+    settled: impl Fn(&[SessionInfo]) -> bool,
+) -> Vec<SessionInfo> {
+    wait_for_listing_with(
+        || async {
+            sup.reconcile_for_test().await;
+            client.list_sessions().await.map(|listing| listing.sessions)
+        },
+        secs,
+        what,
+        |sessions: &Vec<SessionInfo>| settled(sessions),
+    )
+    .await
+}
+
 /// Poll `list_sessions` until one whole reply satisfies `settled`, and
 /// return THAT reply's sessions.
 ///

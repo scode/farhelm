@@ -6168,7 +6168,21 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
     std::fs::write(&spec, b"{}").expect("plant an unconsumed launch spec");
 
-    let found = wait_for_non_live_status(&h.client, &session.id, 15).await;
+    let found = wait_for_reconciled_listing(
+        &h.sup,
+        &h.client,
+        15,
+        "wrapper failure classified as error",
+        |sessions| {
+            sessions.iter().any(|row| {
+                row.id == session.id && matches!(row.status, SessionStatus::Error { .. })
+            })
+        },
+    )
+    .await
+    .into_iter()
+    .find(|row| row.id == session.id)
+    .expect("the error predicate matched this session");
     let SessionStatus::Error { detail } = &found.status else {
         panic!("a launch that never reached the shim must classify as error, got {found:?}");
     };
