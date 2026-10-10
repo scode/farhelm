@@ -1816,32 +1816,34 @@ asset file is introduced.
   regardless of source, without re-verifying old scan locators. Each refresh takes the per-session capture claim before
   reloading the durable row into its mirror; it performs no Codex transcript or Grok record-pair verification. The
   ticker runs this reconciliation, as do startup, reload and decision-time Restart, without a global pass lock or
-  coalescing. Ordinary list and rename replies read the state those passes leave. They perform one pane-state query for
-  immediate exits and tab changes, but no capture, launch-artifact reads, cleanup or outcome writes. Resume readiness,
-  launch-error classification and notification resolution may lag by one nominal two-second tick; the pane-death wake
-  commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable launch evidence is logged
-  and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay in generation-local memory
-  for replies. Successful negative launch-sentinel and preparation reads settle for the generation only after a durable
-  terminal outcome and an owned pane seen dead, or a boot-change interruption. Same-boot pane absence keeps retrying: an
-  empty tmux query can be transient while the shim still writes. Read errors, uncommitted failures and observers without
-  recording authority never settle reads. Rename shares the latches; relaunch and supervisor reload read again. Error
-  artifacts are cleaned once after successful accepted-create evidence preservation and removal, with failed cleanup
-  retried. Report-backed identities still refresh under their capture claim because accepted reports and decision-time
-  Restart can change the row after the pane stops. An injected launch holding no identity warns once after 65 seconds
-  from the first input frame delivered to the agent pane that holds an Enter (`capture::submits_a_line`): a carriage
-  return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline) and not inside a
-  bracketed paste of the same frame (xterm.js turns pasted newlines into carriage returns), in a frame whose every chunk
-  tmux confirmed. The terminal's automatic replies to the agent TUI's own queries (device attributes, cursor position,
-  colour answers, focus reports) never carry a carriage return, so an agent the user opened but has not typed into
-  cannot trip it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized dialog and
-  does not start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture runs on the
-  input path. With no reading yet, or no dedicated reader, the existing submitted-line rule applies. A paste large
-  enough to span frames still has its middle frames judged without their markers. The spawn records whether its argv
-  received the hook before tmux starts, fenced by launch generation. Reload restores that flag; older rows default
-  unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the diagnostic latch on every
-  relaunch and supervisor restart, so a picked-up launch starts its clock at the next qualifying Enter after reload
-  rather than recovering the time of an earlier Enter. A Resume carries its identity and therefore stays silent even if
-  its new hook never reports. The warning changes no offer or admission rule.
+  coalescing. The ticker's pass skips a session whose capture claim is busy admitting a report and catches it on a later
+  tick; Restart waits for the claim. Ordinary list and rename replies read the state those passes leave. They perform
+  one pane-state query for immediate exits and tab changes, but no capture, launch-artifact reads, cleanup or outcome
+  writes. Resume readiness, launch-error classification and notification resolution may lag by one nominal two-second
+  tick; the pane-death wake commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable
+  launch evidence is logged and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay
+  in generation-local memory for replies. Successful negative launch-sentinel and preparation reads settle for the
+  generation only after a durable terminal outcome and an owned pane seen dead, or a boot-change interruption. Same-boot
+  pane absence keeps retrying: an empty tmux query can be transient while the shim still writes. Read errors,
+  uncommitted failures and observers without recording authority never settle reads. Rename shares the latches; relaunch
+  and supervisor reload read again. Error artifacts are cleaned once after successful accepted-create evidence
+  preservation and removal, with failed cleanup retried. Report-backed identities still refresh under their capture
+  claim because accepted reports and decision-time Restart can change the row after the pane stops. An injected launch
+  holding no identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an
+  Enter (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends
+  `ESC CR` to insert a newline) and not inside a bracketed paste of the same frame (xterm.js turns pasted newlines into
+  carriage returns), in a frame whose every chunk tmux confirmed. The terminal's automatic replies to the agent TUI's
+  own queries (device attributes, cursor position, colour answers, focus reports) never carry a carriage return, so an
+  agent the user opened but has not typed into cannot trip it. An Enter while the latest screen reading before delivery
+  is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting reading can defer the clock
+  to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated reader, the existing
+  submitted-line rule applies. A paste large enough to span frames still has its middle frames judged without their
+  markers. The spawn records whether its argv received the hook before tmux starts, fenced by launch generation. Reload
+  restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant,
+  reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at
+  the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its
+  identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
+  rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -2049,24 +2051,33 @@ asset file is introduced.
   second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass while the
   supervisor runs or across an outage, and is then refused, which is an accepted gap.
 
-  The supervisor applies waiting reports at the start of every reconciliation pass (`capture_now`: the 2 s ticker,
-  startup, reload, Restart) and does nothing while it is not recording. It takes a slot by renaming it to a private
-  name, so a hook refilling the slot meanwhile is not deleted with it, checks the report (the vendor naming the
-  session's durable kind, the conversation's size bound, the sub-agent marker, each vendor's source vocabulary), anchors
-  its chain at the current pane, and runs the five-step admission. An accepted or definitively refused report is
-  deleted; one that could not be read from disk, or was refused for an `Internal` failure (a store or tmux that could
-  not be read), or was judged while a relaunch moved the session to a new generation, is put back unless the slot was
-  refilled, in which case the newer report wins, and ends that session's pass. A report made under an earlier launch, or
-  whose pane no longer exists, fails the anchor and is discarded. Reports of a session that is not published yet wait
-  for the pass after publication. Drains never overlap; a taken slot found at the start of a drain belongs to a
-  supervisor that died mid-drain and is put back. A pass that finds another drain running skips draining rather than
-  waiting behind a slow admission; Restart is the exception and waits for it, then drains again, because a report
-  waiting on disk may name the conversation it is about to resume, and after the relaunch that report would be discarded
-  as the old launch's. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
+  The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
+  (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
+  by renaming it to a private name, so a hook refilling the slot meanwhile is not deleted with it, checks the report
+  (the vendor naming the session's durable kind, the conversation's size bound, the sub-agent marker, each vendor's
+  source vocabulary), anchors its chain at the current pane, and runs the five-step admission. An accepted or
+  definitively refused report is deleted; one that could not be read from disk, or was refused for an `Internal` failure
+  (a store or tmux that could not be read), or was judged while a relaunch moved the session to a new generation, is put
+  back unless the slot was refilled, in which case the newer report wins, and ends that session's pass. A report made
+  under an earlier launch, or whose pane no longer exists, fails the anchor and is discarded. Reports of a session that
+  is not published yet wait for the pass after publication. Drains never overlap; a taken slot found at the start of a
+  drain belongs to a supervisor that died mid-drain and is put back. A pass that finds another drain running skips
+  draining rather than waiting behind a slow admission; Restart is the exception and waits for it, then drains again,
+  because a report waiting on disk may name the conversation it is about to resume, and after the relaunch that report
+  would be discarded as the old launch's. The watch task also waits for the drain lock, so an event is never lost to an
+  already-running drain. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
   `written` line: `acked`, or `refused` with the error kind and reason. Delete removes the drop directory; a pass
-  removes one whose session no longer exists, which a hook racing the delete can recreate. There is no file watcher: a
-  report is applied within one nominal ticker interval. A report made while no supervisor runs waits on disk for the
-  next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is accepted.
+  removes one whose session no longer exists, which a hook racing the delete can recreate. The supervisor creates the
+  report root with mode 0700 before attaching notify's recommended recursive watcher (inotify on Linux, default FSEvents
+  on macOS). An independent task drains the whole root; a single stored wake coalesces bursts and retains events during
+  a drain. A 100 ms pause between drains bounds the feedback from retried reports linked back into place. Access events
+  are ignored so the drain's own reads cannot keep waking it. The timer remains the backstop. Watch setup or backend
+  failure logs once and disables the watch for that supervisor lifetime, without changing periodic pickup. The ticker
+  handle owns the watcher's cooperative stop; in-flight admission completes before backend drop requests native shutdown
+  (notify's inotify thread finishes asynchronously). A closed supervisor lifetime channel ends an idle watch when the
+  last supervisor reference disappears. macOS backend batching can add latency; pickup on Linux is normally well below a
+  second. A report made while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary
+  (mid-update) may miss reports briefly, which is accepted.
 
   Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
   per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for

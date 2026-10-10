@@ -20,9 +20,9 @@
 //!
 //! ## When a report is applied
 //!
-//! The hook only drops its report; the supervisor applies it on its next
-//! reconciliation pass, which its ticker runs every two seconds. Tests do
-//! not wait for the ticker: [`report`] runs a pass explicitly once the hook
+//! The hook only drops its report; the supervisor applies it on watch events,
+//! with the two-second reconciliation ticker as its backstop. Most tests do
+//! not depend on asynchronous pickup: [`report`] runs a pass explicitly once the hook
 //! has exited, so "the report was accepted or refused" holds when it
 //! returns. [`hook_harness`] still starts the real accept loop, so these
 //! sessions run under a supervisor that is serving the way production's
@@ -46,6 +46,133 @@ pub(crate) async fn hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
     let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let task = ServeTask::spawn(&h.sup, h.state.path()).await;
     (h, fixtures, task)
+}
+
+/// Start a long-ticker supervisor and wait for the watch's initial empty scan.
+/// A report written after this boundary cannot be picked up by startup catchup;
+/// only a later filesystem event may drive its drain before the first tick.
+async fn watched_hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
+    let scanned = Arc::new(tokio::sync::Notify::new());
+    let (h, fixtures) = fixture_harness_with_seams(|seams| {
+        seams.ticker_interval = Duration::from_secs(600);
+        seams.faults.report_drain_listed = Some(Arc::new({
+            let scanned = Arc::clone(&scanned);
+            move || {
+                scanned.notify_one();
+                Box::pin(async {})
+            }
+        }));
+    })
+    .await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    tokio::time::timeout(Duration::from_secs(5), scanned.notified())
+        .await
+        .expect("initial empty watch scan");
+    (h, fixtures, serving)
+}
+
+/// Wait for an accepted identity without a reconciliation call. Listings and
+/// snapshots only read state, so this observes what the watcher actually applied.
+/// Timeout diagnostics retain the live supervisor and its session's hook log.
+async fn wait_for_watched_identity(h: &Harness, id: &str, conversation: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = snapshot_of(h, id).await;
+        if snapshot.captured_conversation.as_deref() == Some(conversation) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "watch never accepted {conversation}; status={:?}; {}",
+            snapshot.restart_offer,
+            hook_log(h, id)
+        );
+        // sleep-ok: polling accepted identity without driving reconciliation.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// The first report creates a new session directory after watcher startup.
+/// A ten-minute ticker cannot explain acceptance within this five-second budget;
+/// the real hook, ancestry admission and durable identity must all succeed.
+#[farhelm_testtrace::test]
+async fn watch_applies_first_report_before_a_long_ticker_interval() {
+    let started = tokio::time::Instant::now();
+    let (h, fixtures, serving) = watched_hook_harness().await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let report_dir =
+        farhelm_supervisor::hook_report::session_dir(h.state.path(), &session.id).unwrap();
+    assert!(
+        !report_dir.exists(),
+        "first report must create a fresh watched directory"
+    );
+    assert!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .is_none()
+    );
+    write_report_client(&h.client, chan, &mut rx, &mut seen, "conv-watched-first").await;
+    wait_for_watched_identity(&h, &session.id, "conv-watched-first").await;
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "no ten-minute tick may explain pickup"
+    );
+    wait_for_hook_log_words(h.state.path(), &session.id, "acked", 1).await;
+    assert!(
+        !report_dir.join("latest.json").exists(),
+        "accepted report is settled"
+    );
+    drop(rx);
+    serving.stop().await;
+}
+
+/// Several first reports in newly created directories may arrive as one backend
+/// burst. Every session must gain its own identity without an explicit drain or
+/// a tick; the assertion is correctness, not how many drains the backend chose.
+#[farhelm_testtrace::test]
+async fn watch_applies_a_burst_of_reports_from_several_sessions() {
+    let started = tokio::time::Instant::now();
+    let (h, fixtures, serving) = watched_hook_harness().await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let mut peers = Vec::new();
+    for n in 0..3 {
+        let session = hook_session(&h, &fixtures, work.path()).await;
+        let (chan, rx, seen) = attach_ready(&h, &session).await;
+        assert!(
+            snapshot_of(&h, &session.id)
+                .await
+                .captured_conversation
+                .is_none()
+        );
+        peers.push((session, chan, rx, seen, format!("conv-watched-burst-{n}")));
+    }
+    for (_, chan, _, _, conversation) in &peers {
+        h.client
+            .send_input(*chan, format!("report {conversation}\r").into_bytes())
+            .await;
+    }
+    for (session, _, rx, seen, conversation) in &mut peers {
+        wait_for_after_from(
+            rx,
+            seen,
+            0,
+            &format!("HOOK-REPORTED:{conversation}"),
+            "HOOK-STDOUT-EMPTY",
+            30,
+        )
+        .await;
+        wait_for_watched_identity(&h, &session.id, conversation).await;
+        wait_for_hook_log_words(h.state.path(), &session.id, "acked", 1).await;
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(600),
+        "no tick may explain burst pickup"
+    );
+    drop(peers);
+    serving.stop().await;
 }
 
 /// The supervisor's accept loop, stopped on drop and never silent about a
@@ -237,6 +364,20 @@ pub(crate) async fn report_client(
     seen: &mut Vec<u8>,
     conversation: &str,
 ) {
+    write_report_client(client, chan, rx, seen, conversation).await;
+    sup.reconcile_for_test().await;
+}
+
+/// Run the real hook to completion without causing a supervisor drain.
+/// Watch pickup tests use this boundary so a timer or explicit reconciliation
+/// cannot explain their result. The transcript still proves silence and success.
+async fn write_report_client(
+    client: &SupervisorClient,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    conversation: &str,
+) {
     let from = seen.len();
     client
         .send_input(chan, format!("report {conversation}\r").into_bytes())
@@ -260,7 +401,6 @@ pub(crate) async fn report_client(
         "the hook exited non-zero, which Claude shows the user as a hook error; \
          transcript:\n{text}"
     );
-    sup.reconcile_for_test().await;
 }
 
 /// [`wait_for_after`], restricted to the transcript received from `from`

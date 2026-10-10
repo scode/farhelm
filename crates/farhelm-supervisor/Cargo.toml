@@ -26,6 +26,9 @@ base64.workspace = true
 farhelm-proto.workspace = true
 getrandom.workspace = true
 libc.workspace = true
+# Conversation report folders are watched (inotify on Linux, FSEvents on
+# macOS) so hook reports apply promptly; only the supervisor needs it.
+notify = "8.2"
 rusqlite.workspace = true
 rustix.workspace = true
 serde.workspace = true

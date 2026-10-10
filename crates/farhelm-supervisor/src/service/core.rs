@@ -749,6 +749,15 @@ macro_rules! fault_hooks {
 }
 
 fault_hooks! {
+    /// Fail report watcher creation without consuming shared kernel watch limits.
+    /// Production always creates the real recommended watcher.
+    report_watch_creation: Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>,
+    /// Hold a report drain after its directory snapshot. Tests write a new
+    /// directory here to prove an event during the drain owes another pass.
+    report_drain_listed: SinkReservationGate,
+    /// Suppress backend event delivery only for the imposed-event latch proof,
+    /// so a late kernel event cannot rescue a lost Notify permit.
+    suppress_report_watch_events: Arc<std::sync::atomic::AtomicBool>,
     /// See [`CreateCrashSeam`]. `None` in production.
     create_crash: CreateCrashSeam,
     /// See [`LifecycleMutationPanic`]. `None` in production.
@@ -4504,6 +4513,10 @@ pub struct Supervisor {
     /// start as a leftover of a supervisor that died mid-drain. Ordinary
     /// passes skip the drain while another holds this rather than waiting.
     pub(super) report_drain: tokio::sync::Mutex<()>,
+    /// The sole sender is owned here: its closure wakes the report watcher when
+    /// the last supervisor reference disappears, even with no filesystem events.
+    /// The watcher keeps only a receiver and a Weak, so it cannot prolong ownership.
+    pub(super) report_watch_lifetime: tokio::sync::watch::Sender<()>,
     /// Sessions whose waiting report has already been warned about as being
     /// retried. A retry repeats every pass for as long as its cause lasts (a
     /// store or tmux that cannot be read), so it warns once per session and
@@ -5418,6 +5431,7 @@ impl Supervisor {
             user_home,
             capture_locks: Arc::new(KeyedLocks::default()),
             report_drain: tokio::sync::Mutex::new(()),
+            report_watch_lifetime: tokio::sync::watch::channel(()).0,
             report_retry_warned: std::sync::Mutex::new(std::collections::HashSet::new()),
         });
         // Reconcile reports and exact-file readiness before serving the
@@ -6681,7 +6695,9 @@ impl Supervisor {
                 // advancing for any session nobody happens to poll, with
                 // no symptom until Restart read as unavailable where a
                 // resume was expected. `watch` reports it loudly and
-                // then parks forever, so this arm fires at most once.
+                // then parks forever, so this arm fires at most twice: once
+                // for the ticker, and once if the report watch's task ends
+                // first (which falls back to the ticker's pickup).
                 // Deliberately NOT fatal and deliberately not restarted:
                 // status and capture are both best-effort, and taking a
                 // whole host's sessions offline — or spinning up a

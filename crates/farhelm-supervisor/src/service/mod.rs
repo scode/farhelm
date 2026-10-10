@@ -36,8 +36,10 @@
 //! identity. `crate::agent_kind` owns per-kind report and Resume rules; this
 //! module authenticates reports, persists them, and reconciles their mirrors.
 //! Replies read cached reconciliation state, while `ticker` provides progress
-//! with nobody connected. Startup, reload and Restart retain their own refresh. Each refresh takes the session's capture claim and verifies
-//! only the exact files its accepted report requires. Input starts an in-memory
+//! with nobody connected. A file watcher applies hook reports promptly, with the
+//! ticker as its backstop. Startup, reload and Restart retain their own refresh.
+//! Refresh verifies only the exact files its accepted report requires, under the
+//! session's capture claim; the periodic pass skips a claim held by admission. Input starts an in-memory
 //! diagnostic timer for injected hooks; it never identifies a conversation.
 //!
 //! A data channel has a second meaning beyond terminal bytes: attachment
@@ -92,6 +94,7 @@ mod launch_artifacts;
 mod listing;
 pub(crate) mod notifications;
 mod report_files;
+mod report_watch;
 mod status;
 mod sweep;
 mod teardown;
