@@ -606,8 +606,15 @@ test("guardedCapture contains a hostile toString: the original console call stil
   assert.equal(
     box.consoleErrorCalls.length,
     2,
-    "the re-entrancy guard must have reset so a later, unrelated capture is not silently dropped",
+    "the later call must still reach the original console",
   );
+  // The console runs before the capture guard. Only a flushed entry proves
+  // the guard recovered rather than silently dropping every later message.
+  box.sandbox.window.__farhelmClientLog.arm({ base: "http://127.0.0.1:7433", secret: "s" });
+  runPendingTimers(box);
+  assert.equal(box.fetchCalls.length, 1);
+  const entries = JSON.parse(box.fetchCalls[0].options.body).entries;
+  assert.equal(entries.some((entry) => entry.message === "normal-after-hostile"), true);
 });
 
 test("guardedCapture stops a console argument whose own toString re-enters console.error", () => {

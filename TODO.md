@@ -238,6 +238,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fixture restores its URL mappings, causing later WebKit fixture premises to resolve to an earlier repository. Ensure
   restoration runs even when session cleanup fails; that fixes the cascade, not necessarily the original timeout.
 
+- **Rollback browser test sees skew before its first retry.** The unchanged WebKit case
+  `a-rolled-back-helm-gets-no-automatic-attach` in `e2e/tests/terminal-reconnect.spec.ts` failed once in the six-spec
+  terminal run and once in three exact repetitions (FLAKES.md, 2026-10-10). Its simulated rolled-back build can arrive
+  on an approvals reply before the first reconnect rung, correctly disabling automatic retry while the test still
+  expects an attempt. Stage the mismatch after the first witnessed attempt, keeping ordinary displacing attaches
+  observable throughout the rollback window; increasing the wait cannot repair the premature mismatch.
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

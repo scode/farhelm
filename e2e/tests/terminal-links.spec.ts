@@ -793,12 +793,10 @@ test("a drag starting and ending inside one URL selects and copies without openi
   const openedLinks = await recordWindowOpen(page);
   const dialogs = recordDialogs(page);
 
-  // A near-row-width URL on ONE row (sized after measuring nothing: the
-  // 100-character filler fits every viewport this suite runs at without
-  // wrapping, and the test asserts the single-row premise below), so the
-  // drag's start and end cells are unambiguously inside one link.
+  // The full URL must fit on one row. A repeated tail is not a witness:
+  // it can also occur before a wrap, leaving the release outside the link.
   const stamp = Date.now();
-  const url = `https://example.com/drag-${stamp}/${"c".repeat(60)}`;
+  const url = `https://example.com/drag-${stamp}/${"c".repeat(40)}`;
   const prefix = `DRAG-${stamp} `;
   const urlStart = prefix.length;
   const invocation = gatedShellInvocation(`printf "${prefix}${url}\\n"`);
@@ -844,12 +842,12 @@ test("a drag starting and ending inside one URL selects and copies without openi
 
     // The single-row premise: the URL's head and tail share one viewport
     // row, so the drag below cannot accidentally cross a wrap boundary.
-    const headRow = await findViewportRow(page, url.slice(0, 20));
-    const tailRow = await findViewportRow(page, url.slice(-15));
+    const headRow = await findViewportRow(page, url);
     expect(
-      tailRow.rowIndex,
-      "the drag URL must fit on one row",
-    ).toBe(headRow.rowIndex);
+      headRow.rowText,
+      "the entire drag URL must fit on its head row",
+    ).toContain(url);
+    expect(urlStart + url.length, "both drag endpoints must be inside the measured row").toBeLessThanOrEqual(headRow.cols);
 
     // Start AND end inside the URL, well clear of both ends: this is the
     // gesture xterm's Linkifier would activate (matching press/release

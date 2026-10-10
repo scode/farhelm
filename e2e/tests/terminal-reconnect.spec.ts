@@ -1499,6 +1499,8 @@ for (const when of [
     test.setTimeout(90_000);
     const pings: string[] = [];
     page.on("websocket", (ws) => {
+      // Fleet/feed sockets cannot establish an outstanding terminal probe.
+      if (!new URL(ws.url()).pathname.endsWith("/term")) return;
       ws.on("framesent", (frame) => {
         if (typeof frame.payload === "string" && frame.payload.includes("\"ping\"")) {
           pings.push(frame.payload);
@@ -1542,11 +1544,27 @@ for (const when of [
       // Silence the island so the idle window actually elapses: the socket
       // stays open and healthy, it simply has nothing to say to this island.
       await page.evaluate(() => {
-        (window as any).__farhelmIslands["terminal"].ws.onmessage = () => {};
+        const ws = (window as any).__farhelmIslands["terminal"].ws;
+        const send = ws.send.bind(ws);
+        (window as any).__farhelmPostSilencePings = 0;
+        // Count on this socket at the same page-local boundary as silencing.
+        // A runner-side baseline taken afterward could discard a probe sent
+        // during the round trip and wait for a different heartbeat instead.
+        ws.send = (payload: any) => {
+          if (typeof payload === "string" && payload.includes("\"ping\"")) {
+            (window as any).__farhelmPostSilencePings += 1;
+          }
+          send(payload);
+        };
+        ws.onmessage = () => {};
       });
+      // Earlier probes may already have been answered. Only a send after
+      // silencing establishes the outstanding-answer variant's premise.
       if (when.awaitProbe) {
         await expect
-          .poll(() => pings.length, { timeout: 15_000, message: "the probe must go out first" })
+          .poll(() => page.evaluate(() => (window as any).__farhelmPostSilencePings), {
+            timeout: 15_000, message: "this terminal must send a probe after silencing",
+          })
           .toBeGreaterThan(0);
       }
 
@@ -1627,15 +1645,22 @@ test("view-changes-do-not-postpone-a-recovery", async ({ page, request }) => {
       "retrying",
     );
 
-    // Churn the view while the agent terminal waits out its rung: each of
-    // these is a `sync()` with a different desired set.
-    for (let i = 0; i < 4; i++) {
+    // Keep producing desired-set changes until a replacement is observed.
+    // Ending churn early would let a reset deadline expire afterward and
+    // pass as recovery on the original schedule.
+    let remounted = false;
+    for (let i = 0; Date.now() - lostAt < 4_000; i++) {
       await selectTerminal(page, i % 2 === 0 ? "agent" : tabId);
+      remounted = await page.evaluate(() => {
+        const island = (window as any).__farhelmIslands?.terminal;
+        return !!island && island.ws !== (window as any).__farhelmPriorWs;
+      });
+      if (remounted) break;
       // sleep-ok: pace the desired-set churn that challenges the original retry schedule.
       await page.waitForTimeout(250);
     }
 
-    await waitForRemount(page, "terminal", 20_000);
+    expect(remounted, "recovery must occur while view changes are still challenging its deadline").toBe(true);
     const recoveredAfterMs = Date.now() - lostAt;
     expect(
       recoveredAfterMs,

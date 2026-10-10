@@ -1878,3 +1878,36 @@ NOT OK - G2-G4 (pre /latest): nothing but /latest was requested
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-10 — `a-rolled-back-helm-gets-no-automatic-attach` (e2e/tests/terminal-reconnect.spec.ts)
+
+The six changed terminal specs passed 157/157 Chromium cases and 156/157 WebKit cases in recorded run
+`75991cc8-e095-4d86-a1c2-483aac3053db`; this unchanged rollback case was the only failure, timing out after 15 seconds
+with no automatic reconnect attempt. Exact WebKit repetition on the same source, run
+`2a5f5e3b-5aab-42df-a844-6b7e196094fc`, failed once and passed twice in three executions, one worker and zero retries
+(`npx playwright test --project=webkit-terminal-reconnect -g 'a-rolled-back-helm-gets-no-automatic-attach' --workers=1 --retries=0 --repeat-each=3`).
+The failing full-run trace shows an approvals reply carrying the simulated rolled-back build fulfilled about 100 ms
+after socket close, before the configured 200 ms first reconnect rung. The screenshot shows the build-mismatch banner
+and manual-only state: the page correctly withdrew automatic reconnect before the fixture's claimed rollback window was
+established. `feed.notify(1)` precedes the broad API interceptor and does not settle all resulting reads, so a late read
+can acquire that interceptor's rollback header. Tested source was base `d8d43e77` with the terminal-test repair diff
+(fingerprint `09779718`); neither this case nor its helpers changed. Linux x86_64, kernel 6.8, Node 26.11.1, Playwright
+1.64.0, locale `C.UTF-8`, pinned tmux 3.7c with recorded executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`. Ambient `FARHELM_*` was scrubbed; the strict run
+supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, the generic repetition only the latter.
+Exact browser build and concurrent machine load are unavailable; the watchdog recorded ample disk and memory headroom.
+No earlier entry was found for this test. Full failed-run evidence and the repetition's attachments are retained
+privately. Disposition: open (TODO.md); stage the simulated mismatch only after the first witnessed attempt rather than
+repairing this unrelated case as part of the nine-outcome plan.
+
+```
+Error: a ladder that never attempted proves nothing about what it attempted with
+expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+Timeout 15000ms exceeded while waiting on the predicate
+```
+
+Class: fixture-premise
+
+Cause: established

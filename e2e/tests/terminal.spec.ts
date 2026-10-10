@@ -1728,11 +1728,15 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     const deleteBHeld = new Promise<void>((resolve) => {
       releaseDeleteB = resolve;
     });
-    await page.route(`**/api/sessions/${idB}`, async (route) => {
+    // The ended-session guard travels in the query; pathname matching keeps
+    // the actual guarded DELETE inside this observation window.
+    let deleteBArrived = false;
+    await page.route((url) => url.pathname === `/api/sessions/${idB}`, async (route) => {
       if (route.request().method() !== "DELETE") {
         await route.continue();
         return;
       }
+      deleteBArrived = true;
       await deleteBHeld;
       await route.continue();
     });
@@ -1740,6 +1744,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     await rowByTitle(page, titleB)
       .locator(".session-row-delete")
       .click();
+    await expect.poll(() => deleteBArrived, { message: "the DELETE must reach its hold" }).toBe(true);
     await expect(rowByTitle(page, titleB)).toHaveCount(1);
     await expect(rowByTitle(page, titleB).locator(".confirm-consequence")).toHaveCount(
       0,
@@ -2116,11 +2121,15 @@ test("exited session deletes immediately with no confirming state", async ({
   const deleteHeld = new Promise<void>((resolve) => {
     releaseDelete = resolve;
   });
-  await page.route(`**/api/sessions/${id}`, async (route) => {
+  // Ended-session deletion adds a guard query. Match the resource pathname
+  // so that query cannot bypass the hold that gives these assertions meaning.
+  let deleteArrived = false;
+  await page.route((url) => url.pathname === `/api/sessions/${id}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
     }
+    deleteArrived = true;
     await deleteHeld;
     await route.continue();
   });
@@ -2134,6 +2143,7 @@ test("exited session deletes immediately with no confirming state", async ({
 
     await openRowMenu(row);
     await row.locator(".session-row-delete").click();
+    await expect.poll(() => deleteArrived, { message: "the DELETE must reach its hold" }).toBe(true);
     // The DELETE is stalled, so the row is still here — and, while it
     // is, the confirm prompt has never appeared at all, a synchronous
     // property of `on_delete`'s Exited arm (see lib.rs), not merely a
@@ -2144,6 +2154,8 @@ test("exited session deletes immediately with no confirming state", async ({
     releaseDelete();
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   } finally {
+    // Route-draining teardown must not wait forever after an assertion fails.
+    releaseDelete();
     await request.delete(`/api/sessions/${id}`).catch(() => {});
   }
 });
