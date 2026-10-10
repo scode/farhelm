@@ -1,58 +1,78 @@
-## What this was about
+### Since the last review
 
-For OMP sessions launched through a custom Bun or npm command, Farhelm could offer a nested conversation as the
-session's Resume target when it could not read the terminal pane's command arguments (for example, because they exceeded
-the argument-read budget). The ownership check already refused that shape for the installed `omp` command, but custom
-launches had a pane exemption. During triage the maintainer chose a small code fix, with a complexity gate and one
-gpt-6.1-sol high reviewer.
+PR #1779 is amended in place; no PR was added or dropped. The original exact-launcher test at the terminal's top process
+is replaced by the agreed unreadable-arguments rule. The unrealistic npm positive control and non-exact-launcher refusal
+expectations are replaced by readable npm-style and Bun-wrapper controls. The specification and changelog now describe
+that narrower rule.
 
-## Things you should know
+### What this was about
 
-The same launcher evidence now applies at an interpreted terminal pane for every supported OMP launch type. Missing
-arguments refuse attribution, and exact supported Bun/npm package launchers remain accepted. Installed `omp` launches
-keep their existing behavior. The change stayed within the agreed shape: about ten runtime lines, three unit tests, and
-the implementation specification correction, plus required bookkeeping and changelog.
+An OMP session launched through a custom Bun or npm command could offer a nested OMP conversation as the session's own
+Resume target if the terminal's top Bun or Node process had unreadable arguments. Without those arguments, Farhelm could
+miss an outer OMP and take a reporting child for the session's agent. This is a conditional code-path gap: no live
+nested OMP reproduction established the required separately interactive child loading Farhelm's reporter.
 
-Version-pinned package selections or unsupported launcher flags at the terminal pane can now lose Resume. They already
-refused elsewhere in the process chain; the pane now follows that same rule. This affects Resume attribution, not
-whether the command can run.
+Triage initially chose a small guard requiring the top process to match the launch method's expected launcher. Landing
+found that npm rewrites its command line, so that check could remove Resume from real npm/npx launches on macOS. The
+maintainer chose option 1: refuse only unreadable top-process arguments, for every OMP launch program, and keep the
+change small.
 
-The original live trigger remains unverified: no live OMP reproduction established that a nested interactive child can
-produce this shape. The tests establish the supplied process-chain boundary directly, including unreadable Bun and Node
-panes, an accepted npm launcher at the pane, and refused version-pinned launchers. The existing Bun positive control
-remains.
+### Things you should know
 
-## Open questions and possible follow-ups
+The implementation uses one arguments-availability condition in the existing guard. A Bun or Node top process above the
+reporting OMP refuses when its arguments cannot be read, including when they exceed the read budget. Readable arguments
+need no expected-launcher match. The reporting OMP must still be recognized, and recognized nested OMP runtimes and
+unrecognized programs between the top process and OMP still refuse.
 
-None required to complete this plan. A live reproduction would provide additional evidence about the rare trigger, but
-was outside the small fix agreed during triage.
+The latest every-program decision also changes installed `omp` behavior: a readable Bun or Node process at the
+terminal's top may now allow Resume for the reporting OMP below it, subject to the other checks. Main previously refused
+that case. The tests, specification and changelog disclose this. The exception applies only to the terminal's top
+process; an intervening nested OMP or an unrecognized intervening program still prevents Resume.
 
-## PRs
+### Open questions and possible follow-ups
 
-- [PR #1779](https://github.com/scode/farhelm/pull/1779/changes): uniform OMP pane ownership check; one commit on
-  bookmark `plan/omp-pane-guard-all-launches/01-omp-pane-guard`, change `uouxtvtp`. Delivered as a draft; the executor
-  did not mark it ready or merge it.
+No maintainer decision remains. The older documentation claim that npx launchers are recognized is tracked separately in
+TODO.md and is outside this plan. This change does not establish that live npm/npx launches on macOS receive Resume: the
+tests supply process-chain shapes, and no live macOS or nested OMP integration was run. A readable top process may still
+be an arbitrary wrapper; that is the agreed boundary, rather than proof of an expected launcher.
 
-## Checks run, reused and skipped
+### PRs
 
-- Ran the focused supervisor process tests through the recorder:
-  `cargo nextest run -p farhelm-supervisor --lib -E 'test(procs::tests::)'`, four slots, zero retries, tmux mode `none`.
-  All 79 selected tests passed; run `54bf35c0-2989-43e4-968f-1c670af5d510`. This covers the synthetic ownership boundary
-  and existing launch compatibility controls.
-- Ran `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`, `cargo fmt --all -- --check`, changed-Markdown
-  `dprint check`, and `python3 releasing/check-changelog.py format`; all passed. Ran the isolated test-delay checker:
-  276 files inspected, zero missing rationales.
-- Reused the process-test and Clippy results after the review correction, which changed comments only, and the final
-  ledger URL amendment. Formatting and Markdown checks were repeated for the affected text. A fresh fetch found no main
-  changes since the claim base `c39871e9`, so no rebase was needed.
-- Skipped broad Rust, browser, desktop, installer and live vendor tests: the runtime change is a pure process-chain
-  predicate, with focused positive and refusal coverage; it changes no UI, transport, reporter asset or lifecycle
-  mechanism.
+- [#1779 — refuse OMP Resume when top-process arguments are unreadable](https://github.com/scode/farhelm/pull/1779/changes),
+  draft, based on main; pushed commit `83a0238522e104f7900bda85d9d45e67c208c489`.
 
-## Review gate outcome
+### Checks run, reused and skipped
 
-The prescribed fresh-context gpt-6.1-sol high reviewer found no correctness or design issue, verified unchanged
-installed-`omp` behavior and the complexity bound, and identified one stale helper comment describing the removed
-exemption. That comment was corrected and a separate documentation pass completed. The wording cold reader recovered the
-motivation and custom-launch caveat without contradictions. Native actual-model identity and usage counters were not
-exposed; the requested selections and review artifacts are retained privately.
+- Run now: `cargo nextest run -p farhelm-supervisor --lib -E 'test(procs::tests::) & test(omp)'` through the recorder,
+  run `73f45de2-6b43-4266-b147-d94b86a41c86`, passed all 13 selected tests with four slots and zero retries. The 1066
+  skipped entries were selection exclusions; no selected test reported a runtime skip. The run covered the amended
+  seven-file tree on main `1ea4f69e`, before the final commit description was assigned. It covers unreadable Bun/Node
+  panes across installed/Bun/npm launches, readable rewritten npm and arbitrary Bun panes, and existing runtime/corridor
+  controls.
+- Run now: supervisor all-targets Clippy with warnings denied, workspace Rust formatting, dprint on the changed
+  specification/ledger/feedback index, changelog format lint (32 fragments), and the isolated-interpreter test-delay
+  check (278 delays, zero missing rationales) passed.
+- The original round's 79 process tests are historical evidence, not reused as a verdict for the changed rule. Current
+  focused execution covers that rule. No failed runtime run occurred in this resumed round.
+- The careful rebase audit read the full intervening main diff: host appearance, managed-checkout naming/trash and
+  protocol 44, remote uninstall, stop-expiry fallback, Claude compaction and bookkeeping. None changes the
+  process-chain, arguments or OMP admission contracts used here. The later OMP documentation TODO and queue-only changes
+  likewise have no runtime interaction; current focused evidence remains applicable.
+- Full workspace, browser, desktop, installer and release suites were skipped because the change is confined to
+  process-chain attribution and has targeted tests and crate lint coverage. No affected browser integration or broader
+  uncovered interaction was identified. Hosted CI was not dispatched; this repository does not start CI for draft PR
+  updates. Live npm/macOS and nested-OMP lifecycle coverage remain the explicit limits above.
+
+### Review gate outcome
+
+The required fresh source reviewer, requested as native GPT-6.1-sol at high effort, read the complete amended diff, the
+plan and latest Decisions, and the full test-authoring checklist. It found no actionable correctness, design, Rust
+idiom, test-contract or documentation issue and no unnecessary complexity. It specifically confirmed the installed-omp
+readable-pane delta follows the latest decision. The executor inspected the diff and retained test results
+independently; the reviewer ran no tests.
+
+Implementation and investigation stayed local. The required VCS wording cold read passed; its readers were requested as
+native GPT-6.1-sol at medium effort. The resume and report cold reads used fresh native agents with the executing model
+inherited by request. A separate documentation pass covered every touched file. Actual native model attribution and
+usage counters are unavailable; requested model names are not proof of runtime attribution. Private delegation evidence
+is retained under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf`.
