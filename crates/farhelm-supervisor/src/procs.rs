@@ -3018,26 +3018,15 @@ mod tests {
         assert!(refusal.contains("nested OMP"), "{refusal}");
     }
 
-    /// Spec: for a launch of the installed `omp` command, a Bun or Node pane
-    /// process that is not the emitter refuses, including one whose
-    /// arguments could not be read; a pane that is itself the reporting
-    /// runtime and a package launcher pane of a Bun launch stay admitted.
-    /// (A shell pane above the runtime is admitted by
-    /// `an_installed_omp_runtime_with_a_direct_hook_child_is_admitted`.)
-    ///
-    /// Why: the pane is accepted by position, and a runtime whose arguments
-    /// are missing (an over-budget command line reads as none) is not
-    /// recognized as a runtime. Without this check, a nested OMP below such
-    /// a pane was the only runtime found, so its report was taken for the
-    /// session's and Resume reopened the nested conversation. The admitted
-    /// controls show the refusal is confined to the shape that cannot be a
-    /// legitimate `omp` launch.
+    /// An unreadable interpreted pane must not hide an outer runtime above
+    /// the reporting OMP. Direct runtime and readable package-launcher panes
+    /// remain valid controls, so refusal cannot be explained by a broken
+    /// emitter search or by refusing every Bun pane.
     #[farhelm_testtrace::test]
-    fn an_omp_launch_refuses_an_unclassified_runtime_pane_above_the_emitter() {
+    fn an_omp_launch_refuses_an_unreadable_runtime_pane_above_the_emitter() {
         for pane in [
             corridor_link_no_argv(11, "/opt/bun/bin/bun"),
             corridor_link_no_argv(11, "/opt/node/bin/node"),
-            corridor_link(11, "/opt/bun/bin/bun", &["bun", "/opt/other/tool.js"]),
         ] {
             let chain = vec![
                 corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
@@ -3283,9 +3272,9 @@ mod tests {
     /// installed-`omp` launch: the installed command runs its runtime
     /// directly under the pane, so a package manager in between is not
     /// this launch's shape. (The pane anchor is otherwise accepted by
-    /// position, apart from an installed-`omp` launch's Bun or Node pane
-    /// that is not the emitter; this test keeps a shell anchor above the
-    /// launcher to pin the middle-link rule rather than the anchor rule.)
+    /// position, apart from an unreadable Bun or Node pane above the emitter;
+    /// this test keeps a shell anchor above the launcher to pin the
+    /// middle-link rule rather than the anchor rule.)
     #[farhelm_testtrace::test]
     fn a_launcher_above_an_installed_omp_launch_is_refused() {
         let chain = vec![
@@ -3327,6 +3316,78 @@ mod tests {
         let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
             .expect("an exact npm selection must be admitted");
         assert_eq!(emitter.pid, 12);
+    }
+
+    /// A missing pane command line must not turn a nested OMP into the
+    /// session's Resume target, even for a custom Bun or npm launch.
+    ///
+    /// The chain contains one recognizable runtime below an interpreted
+    /// pane whose arguments are unavailable, as when they exceed the read
+    /// budget. Refusal at the pane boundary distinguishes this from the
+    /// ordinary no-runtime and unclassified-middle-link refusals.
+    #[farhelm_testtrace::test]
+    fn every_omp_launch_refuses_an_unreadable_runtime_pane() {
+        use crate::agent_kind::omp::OmpLaunchProgram;
+        for program in [
+            OmpLaunchProgram::Omp,
+            OmpLaunchProgram::Bun,
+            OmpLaunchProgram::Npm,
+        ] {
+            for image in ["/opt/bun/bin/bun", "/opt/node/bin/node"] {
+                let chain = vec![
+                    corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+                    omp_runtime_link(12, &[]),
+                    corridor_link_no_argv(11, image),
+                ];
+                let refusal = omp_corridor(&chain, &program)
+                    .expect_err("an unreadable interpreted pane cannot exclude an outer runtime");
+                assert!(
+                    refusal.contains("not the reporting OMP runtime"),
+                    "{program:?}, {image}: {refusal}"
+                );
+            }
+        }
+    }
+
+    /// npm rewrites its command line into a process title, so under a Bun
+    /// or npm launch a readable pane need not retain an exact launcher
+    /// shape; the emitter must still be the recognized OMP below that pane.
+    /// An installed `omp` launch is the exception: no launcher sits at its
+    /// pane, so a readable Bun or Node pane that is not the emitter still
+    /// refuses there, as it did before this rule covered other launches.
+    #[farhelm_testtrace::test]
+    fn package_launches_admit_a_readable_non_emitter_pane() {
+        use crate::agent_kind::omp::OmpLaunchProgram;
+        for program in [
+            OmpLaunchProgram::Omp,
+            OmpLaunchProgram::Bun,
+            OmpLaunchProgram::Npm,
+        ] {
+            for pane in [
+                corridor_link(11, "/opt/node/bin/node", &["npm exec omp"]),
+                corridor_link(11, "/opt/bun/bin/bun", &["bun", "/opt/other/tool.js"]),
+            ] {
+                assert!(pane.argv.is_some(), "the pane arguments must be readable");
+                let chain = vec![
+                    corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+                    omp_runtime_link(12, &[]),
+                    pane,
+                ];
+                let result = omp_corridor(&chain, &program);
+                if matches!(program, OmpLaunchProgram::Omp) {
+                    let refusal =
+                        result.expect_err("installed omp refuses a non-emitter runtime pane");
+                    assert!(
+                        refusal.contains("not the reporting OMP runtime"),
+                        "{program:?}: {refusal}"
+                    );
+                } else {
+                    let emitter =
+                        result.expect("readable pane arguments need no package-launcher match");
+                    assert_eq!(emitter.pid, 12, "{program:?}: the pane is not the emitter");
+                }
+            }
+        }
     }
 
     /// An npm command string refuses even with an otherwise valid OMP

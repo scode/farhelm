@@ -2144,17 +2144,20 @@ asset file is introduced.
   because the installed `omp` command is one), `Ob` (the compiled target with TUI grammar), `L` (an exact `bun x`/`bunx`
   or npm/npx package selection above the runtime, Bun-resulting only), `S` (a known transparent `sh -c 'exec <runtime>'`
   trampoline, or an exec'd-away shell that leaves no link). Nested or additional session-hosting runtimes of any kind,
-  unclassified intermediaries, Node-executed OMP, unknown wrappers, ambiguous package scripts, and, for a launch of the
-  installed `omp` command, a Bun or Node pane process that is not the runtime itself (one whose arguments could not be
-  read, for example, which would otherwise let a nested runtime below it stand as the emitter) all refuse; the live
-  runtime argv is re-read through the same grammar injection uses, so a process that exec'd from a TUI launch into a
-  utility or print shape refuses too. Attribution repeats around the evidence and the identities are compared. The
-  source vocabulary is the asset's four tags (`session_start`, `session_switch` with its opaque upstream reason,
-  `session_branch`, `agent_end`), allowlisted at the doorway and re-checked at admission; `agent_id` stays a rejection
-  signal. The session-file header stays a pre-resume file↔id check, not ownership evidence, and a parent lineage field
-  never rejects. Supported versions are 18.2.4 and 18.2.6 with equal gate-semantic pins verified at the pinned sources
-  (static claim, no runtime probe). Compiled and package-launcher forms have chain-level shape coverage; live lifecycle
-  evidence covers the Bun-executed entry. Node execution and unknown wrapper shapes remain refused, as described in
+  unclassified intermediaries, Node-executed OMP, unknown wrappers, ambiguous package scripts, and a Bun or Node pane
+  process above the reporting runtime whose arguments cannot be read (which would otherwise let a nested runtime below
+  it stand as the emitter) all refuse, for every launch program. Under a `bun x` or npm launch, a readable pane keeps
+  its positional exemption without an expected-launcher match, because npm rewrites its process arguments and that match
+  would refuse real launchers. An installed `omp` launch has no launcher at its pane, so there any Bun or Node pane that
+  is not the reporting runtime refuses, readable or not. The live runtime argv is re-read through the same grammar
+  injection uses, so a process that exec'd from a TUI launch into a utility or print shape refuses too. Admission checks
+  the report's recorded ancestry once, anchored to the current owned pane. The source vocabulary is the asset's four
+  tags (`session_start`, `session_switch` with its opaque upstream reason, `session_branch`, `agent_end`), allowlisted
+  at the doorway and re-checked at admission; `agent_id` stays a rejection signal. The session-file header stays a
+  pre-resume file↔id check, not ownership evidence, and a parent lineage field never rejects. Supported versions are
+  18.2.4 and 18.2.6 with equal gate-semantic pins verified at the pinned sources (static claim, no runtime probe).
+  Compiled and package-launcher forms have chain-level shape coverage; live lifecycle evidence covers the Bun-executed
+  entry. Node execution and unknown wrapper shapes remain refused, as described in
   `website/src/content/docs/docs/agents/omp.md`.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with

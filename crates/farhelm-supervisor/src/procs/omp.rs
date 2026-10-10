@@ -252,12 +252,14 @@ pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
 /// be the supported hook invocation; exactly one link must be the launched
 /// runtime's descriptor (Bun plus the selected entry, or the compiled
 /// target with TUI grammar); the pane anchor (last link) is accepted by
-/// position, except that an `omp` launch refuses a Bun or Node pane that is
-/// not the emitter; links below the runtime must be narrow hook
-/// trampolines, and links above it must be recognized launchers or
-/// transparent shell trampolines for the launch's own program. Any
-/// additional session-hosting runtime of any kind and every unclassified
-/// intermediary refuses.
+/// position, except that a Bun or Node pane above the emitter needs readable
+/// arguments, and refuses outright under an installed `omp` launch. Readable
+/// panes need no launcher match.
+///
+/// Links below the runtime must be narrow hook trampolines, and links above
+/// it must be recognized launchers or transparent shell trampolines for the
+/// launch's own program. Any additional session-hosting runtime of any kind and
+/// every unclassified intermediary refuses.
 ///
 /// `program` is the durable launch's program classification: it selects
 /// which launcher spellings may appear above the runtime, so a chain whose
@@ -326,22 +328,23 @@ pub(crate) fn omp_corridor(
         }
         return Err("the hook has no attributable OMP runtime".to_string());
     };
-    // The pane anchor is accepted by position, but for a launch of the
-    // installed `omp` command nothing launches the runtime: the pane either
-    // IS the runtime or a shell above it. A Bun or Node pane that is not
-    // the emitter is therefore a runtime the search above could not
-    // classify (its arguments unreadable, say, past the argv budget), and
-    // the emitter it found is a nested OMP below it. Admitting that would
-    // let the nested conversation's report stand for the session's own.
-    if matches!(program, OmpLaunchProgram::Omp) {
-        let pane_index = chain.len() - 1;
-        let pane = &chain[pane_index];
-        if pane_index != emitter_index && (is_bun_image(&pane.exe) || is_node_image(&pane.exe)) {
-            return Err(
-                "the pane runs a Bun or Node process that is not the reporting OMP runtime"
-                    .to_string(),
-            );
-        }
+    // Position alone cannot prove that an interpreted pane launches the
+    // emitter: unreadable arguments can hide an outer OMP runtime and let
+    // a nested conversation stand for the session's own. For Bun and npm
+    // launches a readable pane keeps its positional exemption, because npm
+    // rewrites its argv and a launcher match would refuse legitimate package
+    // launches. An installed `omp` launch has no launcher at the pane at
+    // all, so any Bun or Node pane that is not the emitter still refuses
+    // there, as it did before (`omp-corridor-uncounted-pane-runtime`).
+    let pane_index = chain.len() - 1;
+    let pane = &chain[pane_index];
+    if pane_index != emitter_index
+        && (is_bun_image(&pane.exe) || is_node_image(&pane.exe))
+        && (pane.argv.is_none() || matches!(program, OmpLaunchProgram::Omp))
+    {
+        return Err(
+            "the pane runs a Bun or Node process that is not the reporting OMP runtime".to_string(),
+        );
     }
     // The live runtime argv must still describe an interactive TUI
     // conversation: the launch passed this grammar at spawn, but a process
@@ -404,8 +407,8 @@ pub(super) fn no_omp_launcher(_argv: &[Vec<u8>]) -> bool {
 
 /// Whether one non-reporter link is an OMP runtime image: Bun (the entry
 /// check needs its argv, so an argv-less Bun link is not a candidate here;
-/// downstream it refuses as an unclassified intermediary, or as the pane of
-/// an installed-`omp` launch, and is accepted as any other launch's pane)
+/// downstream it refuses as an unclassified intermediary or as a pane
+/// with unreadable arguments, for every supported launch program)
 /// or the compiled target.
 ///
 /// The entry may be named through a symlink: the installed `omp` command
