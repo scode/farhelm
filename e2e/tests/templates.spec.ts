@@ -22,6 +22,45 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
 
+/** Committing an IME candidate is still editing, not consent to save the
+ * template. Edit to a distinct final name before ordinary Enter so an async
+ * save started by composition cannot masquerade as that later authorized save. */
+test("save as template leaves composing Enter with the name editor", async ({ page, request }) => {
+  const name = `e2e-ime-${Date.now()}`;
+  const unfinished = `${name}-unfinished`;
+  let writes = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && new URL(request.url()).pathname.startsWith("/api/templates/")) writes++;
+  });
+  try {
+    const form = await openNew(page);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await form.locator(".launch-composer-save-template").click();
+    const panel = form.locator(".save-template-panel");
+    const field = panel.locator(".save-template-name");
+    await expect(panel).toBeVisible();
+    await field.fill(unfinished);
+    await expect(field).toBeFocused();
+    await field.evaluate((node) => {
+      const event = new KeyboardEvent("keydown", { key: "Enter", code: "Enter", isComposing: true, bubbles: true, cancelable: true });
+      node.dispatchEvent(event);
+    });
+    await expect(panel).toBeVisible();
+    await expect(field).toHaveValue(unfinished);
+    expect(writes, "composition must not submit a template write").toBe(0);
+    await expect(field).toBeEnabled();
+    await field.fill(name);
+    await field.press("Enter");
+    await expect(page.locator('.templates-dialog[role="dialog"]')).toBeVisible();
+    expect(writes).toBe(1);
+    expect((await storedTemplate(request, name)).fields.agent).toBe("codex");
+    expect(await storedTemplate(request, unfinished)).toBeUndefined();
+  } finally {
+    await deleteTemplate(request, name);
+    await deleteTemplate(request, unfinished);
+  }
+});
+
 /** Open New and return its form. */
 async function openNew(page: Page) {
   await page.goto("/");

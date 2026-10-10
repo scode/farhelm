@@ -861,7 +861,8 @@ pub(crate) fn ListView(
     let mut bell_open = use_signal(|| None::<OpenBell>);
     // The read mark each list this page closed sent, by session id, so a
     // list reopened before the next listing arrives does not show the same
-    // entries as new again.
+    // entries as new again. Failed writes release only their own current mark,
+    // allowing the next close to repair it without erasing a later close.
     let bell_read_sent = use_hook(|| Rc::new(RefCell::new(HashMap::<String, u64>::new())));
     // Both menus close on a pointer-down outside them; the relay button that
     // listener clicks is rendered at the top of this view (see there).
@@ -2238,6 +2239,10 @@ pub(crate) fn ListView(
                 match replace_session(&base, &id, guard, allow_yolo).await {
                     Ok((session, notice)) => {
                         delete_notice.publish(notice);
+                        // A pre-replace listing cannot establish the new
+                        // session's absence. Fence it before selecting the reply;
+                        // the explicit refresh supplies the authoritative view.
+                        listing_reads.write().fence();
                         // The source row's host fields: the reply is bare,
                         // and the row may be gone from the listing by now.
                         let session = super::with_source_host(session, &source);
@@ -2948,10 +2953,17 @@ pub(crate) fn ListView(
         }
         let (closed, through) = (closed.id, closed.shown);
         bell_read_sent.borrow_mut().insert(closed.clone(), through);
+        let sent = bell_read_sent.clone();
         let base = read_base.clone();
         spawn(async move {
             if let Err(error) = crate::api::mark_notifications(&base, &closed, through, false).await
             {
+                // An older failure must not erase a newer close's mark. Only
+                // release our still-current mark so the next close can retry.
+                let mut sent = sent.borrow_mut();
+                if sent.get(&closed) == Some(&through) {
+                    sent.remove(&closed);
+                }
                 dioxus::logger::tracing::warn!(
                     session_id = closed.as_str(),
                     error = error.as_str(),
@@ -3484,23 +3496,10 @@ pub(crate) fn ListView(
                             session,
                             submitted_launch,
                         } = created;
-                        // Read BEFORE any of the clearing below: a
-                        // successful replace-with's closing prefill is the
-                        // only place this handler can still tell the
-                        // create it just finished apart from an ordinary
-                        // one, and every other write in this handler is
-                        // about to erase it. That the prefill still
-                        // describes THIS create rests on the shared ops
-                        // lock: `clone_is_refused` (via `ops.busy_now()`)
-                        // refuses every clone and replace-with click while
-                        // a create is in flight, so nothing can swap the
-                        // prefill between submit and this handler. Relax
-                        // that guard and this read silently describes the
-                        // wrong create.
-                        let was_replace_with = clone_prefill
-                            .peek()
-                            .as_ref()
-                            .is_some_and(|prefill| prefill.replace_source.is_some());
+                        // Reads begun before creation cannot prove this new
+                        // session absent. Invalidate them before its selection
+                        // can trigger reconciliation against a late old reply.
+                        listing_reads.write().fence();
                         // Creation is a user-initiated selection too.
                         remember_selection(&created_base, preferences, &session.id);
                         // Mirror the structured launch THIS client submitted
@@ -3538,17 +3537,10 @@ pub(crate) fn ListView(
                         ordinary_new_cwd.set(None);
                         on_open.call(session);
                         focus_new_session_button();
-                        // A plain create has nothing else to announce — the
-                        // fleet just gained a row, and the ordinary feed or
-                        // fallback poll will say so soon enough. A
-                        // replace-with's create ALSO removed the source row,
-                        // and nobody else has been told: request the same
-                        // explicit re-read `do_replace` requests on its own
-                        // success path, so the source leaves the list
-                        // without waiting on the feed.
-                        if was_replace_with {
-                            created_listing(Trigger::Explicit);
-                        }
+                        // The fence needs a fresh authoritative successor even
+                        // when a healthy feed has no further notice to deliver.
+                        // Replace-with also needs this read to retire its source.
+                        created_listing(Trigger::Explicit);
                     },
                 }
             }

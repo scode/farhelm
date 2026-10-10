@@ -54,7 +54,7 @@ use crate::api;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
 use crate::launch_controls::{LaunchControls, enter_choice};
 use crate::modal_isolation;
-use crate::peer::display_peer;
+use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
 
 /// The changed launch Restart with sends, one per launch kind.
@@ -647,7 +647,11 @@ pub(crate) fn RestartWithDialog(
                     p { class: "restart-with-catalog-error", role: "status", "model catalog unavailable: {message}" }
                 }
                 if let Some(message) = error {
-                    p { class: "restart-with-error", role: "alert", "{message}" }
+                    // The reply can quote supervisor-authored values. Ordinary
+                    // Restart uses this same escaping and direction isolation.
+                    div { role: "alert",
+                        PeerLine { class: "restart-with-error".to_string(), parts: vec![DetailPart::peer(message)] }
+                    }
                 }
                 if let Some(ask) = yolo_confirmation {
                     crate::yolo_confirm::YoloConfirmation {

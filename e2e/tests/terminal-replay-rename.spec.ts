@@ -37,6 +37,42 @@ import { waitForSessionMounted, waitForSessionRevealed } from "./helpers/termina
 
 installTerminalSuiteHooks({ tabSweep: true });
 
+/** Rename shows the exact title's hidden characters without changing the raw
+ * editable value. A peer-authored refusal uses the same isolated display rule. */
+test("rename exposes peer title and refusal characters while retaining the raw draft", async ({ page, request }) => {
+  const title = `rename-peer-${Date.now()}\u202Etitle\u200B`;
+  const shown = title.replace("\u202E", "<U+202E>").replace("\u200B", "<U+200B>");
+  const session = await createTabSession(request, title);
+  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+    await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
+  });
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${session.id}"]`);
+    await expect(row.locator(".session-title")).toHaveText(shown);
+    await openRowMenu(row);
+    await row.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    const current = dialog.locator(".rename-current-title");
+    const draft = dialog.locator(".rename-input");
+    await expect(current).toHaveText(shown);
+    await expect(current).toHaveAttribute("dir", "ltr");
+    expect(await current.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
+    await expect(draft).toHaveValue(title);
+    await draft.fill(`${title}-edited`);
+    await draft.press("Enter");
+    const error = dialog.locator(".rename-error .peer-value");
+    await expect(error).toHaveText("refused <U+202E>host<U+200B>");
+    await expect(error).toHaveAttribute("dir", "ltr");
+    expect(await error.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
+    await expect(draft).toHaveValue(`${title}-edited`);
+    const response = await request.get(`/api/sessions/${session.id}`);
+    expect(response.ok()).toBe(true);
+    expect((await response.json()).title).toBe(title);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
 /**
  * Arm terminal.js's test-only replay controls for every attach the page
  * makes from its NEXT navigation onward (`window.__farhelmTestReplay`,

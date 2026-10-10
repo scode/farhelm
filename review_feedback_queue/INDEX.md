@@ -22,8 +22,6 @@ triage.
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
 - `snapshot-root.md` — Writable snapshot may pass replacement checkout ownership.
-- `grok-trust.md` — Choosing Grok preserves incompatible workspace trust.
-- `font-focus.md` — Text-size buttons leave focus outside the terminal at the limits.
 - `installer-directory-target.md` — An update can report false success or redirect file writes into an external
   directory.
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the
@@ -43,14 +41,11 @@ triage.
   unreachable host.
 - `build-mismatch-turns-unattended-mounts-into-displacing.md` — Build mismatch can turn automatic recovery into an
   unsolicited takeover.
-- `selecting-osc-hyperlink-open-it-unintentionally.md` — Selecting hyperlink text can also open its target.
 - `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
 - `automatic-updates-overwrite-newer-manual-installation.md` — A delayed automatic update can undo a newer manual
   installation.
 - `retrying-through-unchanged-permission-choice-launch-duplicate.md` — An unchanged permission choice can make a launch
   retry create a duplicate.
-- `older-listing-replace-newly-opened-session-another.md` — An older listing can permanently switch away from a newly
-  launched session.
 - `newer-completed-run-leaves-older-update-permanently.md` — An old update can remain busy after a newer run has
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
@@ -95,7 +90,6 @@ triage.
 - `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
 - `publisher-copy-race.md` — Screenshot publication may certify pixels different from those it checked.
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
-- `template-dot-name.md` — Dot-only template names pass validation but cannot be saved.
 
 - `failed-confirmation-discard-session-despite-failed-process.md` — Failed create recovery could discard the session
   needed to retry process cleanup.
@@ -197,9 +191,6 @@ triage.
   behind.
 - `no-directory-created-assertion-requires-directory-exist.md` — The no-directory-creation test requires the directory
   to have been created.
-- `update-popup-stops-following-current-step-opening.md` — The update popup stops keeping the current step visible.
-- `non-ascii-template-names-lose-exact-match-priority.md` — A complete non-ASCII template name selects a broader match
-  first.
 - `stored-template-commands-bypass-safe-display-seeding.md` — The launcher can display a template command differently
   from its retained bytes.
 - `stored-template-resume-commands-have-same-independent.md` — The template resume seed conceals bytes kept for later
@@ -207,16 +198,12 @@ triage.
 - `scrollbar-dragging-reverses-very-short-terminal.md` — A very short terminal reverses scrollbar dragging.
 - `ordinary-creation-never-refreshes-sidebar-under-build.md` — Creation under build mismatch could leave the new session
   absent from navigation.
-- `failed-notification-read-mark-suppresses-subsequent-retries.md` — One failed notification read mark prevents ordinary
-  retries.
 - `successful-notification-reads-leave-bell-unread-under.md` — A successful notification read leaves the bell stale
   under build mismatch.
 - `clearing-notifications-leaves-cleared-bell-entries-visible.md` — Cleared notifications reappear under build mismatch.
 - `manual-read-unread-toggles-cannot-visibly-toggle.md` — A manual read toggle cannot visibly reverse under build
   mismatch.
 - `ship-font-license-embedded-ui.md` — Release bundles could omit the license required with embedded fonts.
-- `earlier-setup-uninstall-error-hides-later-update.md` — An earlier planning error hides the reason a later Update
-  failed.
 - `hyperlink-starting-final-content-cell-disappears.md` — A hyperlink beginning in the row's final content cell
   disappears.
 - `resizing-resurrects-cleared-selection-highlight.md` — Resizing brings back a selection highlight that was cleared.
@@ -226,18 +213,10 @@ triage.
   character also collapses columns in a new span.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
-- `rename-refusal-text-bypasses-peer-text-rendering.md` — Rename refusal text can visually conceal peer-controlled
-  content.
-- `restart-refusal-text-bypasses-peer-text-rendering.md` — Restart with displays refusals without the ordinary restart
-  protection.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
   partial settings.
-- `ime-confirmation-save-template-prematurely.md` — An IME confirmation could save a template before editing is
-  finished.
 - `session-refresh-failures-silently-retain-apparently-current.md` — Failed detail refreshes leave old session
   information looking current.
-- `rename-original-title-display-conceals-title-characters-original-title-original-title-display.md` — Rename's
-  original-title comparison hides meaningful title characters.
 - `deflake-duplicates-bounded-evidence-into-unlimited-logs.md` — Test sweeps duplicate bounded evidence into unbounded
   logs.
 - `opt-in-real-agent-smoke-launches-fake-claude-executable.md` — The opted-in real-agent smoke still launches the fake

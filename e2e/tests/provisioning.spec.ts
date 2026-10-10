@@ -361,6 +361,68 @@ test.beforeEach(async () => {
   await configureBackend();
 });
 
+/** An earlier uninstall refusal occupies the same display slot as Update.
+ * Starting Update must retire it before its own planning result is painted. */
+test("Update replaces an earlier uninstall action error with its own refusal", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "action-error-update");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  for (const [action, body] of [["uninstall", "old uninstall refusal"], ["update", "new update refusal"]]) {
+    await page.route(`**/api/hosts/${accepted.host_id}/${action}`, async (route) => {
+      await route.fulfill({ status: 400, headers: { "x-farhelm-build": HELM_BUILD, "content-type": "text/plain" }, body });
+    });
+  }
+  await page.goto("/");
+  await openHostsPanel(page);
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
+  await row.locator(".provisioning-uninstall").click();
+  await expect(row.locator(".provisioning-error")).toContainText("old uninstall refusal");
+  await openHostMenu(row);
+  await row.locator(".provisioning-update").click();
+  await expect(row.locator(".provisioning-error")).toContainText("new update refusal");
+  await expect(row.locator(".provisioning-error")).not.toContainText("old uninstall refusal");
+});
+
+/** An open, unscrollable popup must follow progress, not just its first step.
+ * A controlled long step list makes the next step start outside its clip;
+ * the existing geometry oracle distinguishes scrolling from text repaint. */
+test("an open Update popup follows the new current step in a short viewport", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "popup-follow");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
+  const feed = await stubFeed(page);
+  await page.goto("/");
+  await feed.waitForConnection(1);
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
+  await row.locator(".provisioning-update").click();
+  await expect(row.locator(".host-update-step")).toHaveText(" create-directories");
+  const live = await progress(request, accepted.host_id);
+  expect(live.status).toBe("running");
+  expect(live.operation).toBe("update");
+  let current = 0;
+  await page.route(`**/api/hosts/${accepted.host_id}/provisioning`, async (route) => {
+    await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: {
+      ...live,
+      steps: Array.from({ length: 16 }, (_, index) => ({ step: `fixture-step-${index}`, status: index === current ? "running" : index < current ? "completed" : "pending", message: null })),
+    } });
+  });
+  feed.notify(1);
+  await expect(row.locator(".host-update-step")).toHaveText(" fixture-step-0");
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await row.locator(".host-update-count").hover();
+  const popup = row.locator(".host-update-popup");
+  await expect(popup).toBeVisible();
+  await expect.poll(() => popupTextVisible(popup)).toEqual({ current: true, count: true, elapsed: true });
+  expect(await popup.locator(".host-update-popup-steps").evaluate((node) => node.scrollHeight > node.clientHeight), "the step list must actually be clipped").toBe(true);
+  current = 15;
+  feed.notify(2);
+  await expect(popup.locator(".host-update-popup-step")).toHaveText("fixture-step-15");
+  await expect.poll(() => popupTextVisible(popup), { message: "the already-open popup must scroll to step 15" }).toEqual({ current: true, count: true, elapsed: true });
+});
+
 test.afterEach(async ({ request }) => {
   // A test that failed while `holdLockWithAdd` still held its setup POST
   // must not let that POST reach the helm later. WebKit forwards a held

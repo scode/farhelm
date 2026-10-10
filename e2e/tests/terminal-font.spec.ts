@@ -73,8 +73,36 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession, pinAutoSelect } from "./helpers/fleet";
-import { termText, waitForTermText } from "./helpers/term";
+import { attachSession, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionSocketOpen } from "./helpers/terminal-readiness";
+
+/** The limit button still owes its focus handoff. Reading unchanged size
+ * alone would miss the bug: real typed input must reach the owned session. */
+for (const [size, direction] of [[9, "smaller"], [28, "larger"]] as const) {
+  test(`terminal text size ${size} keeps input focus at its limit`, async ({ page, request }) => {
+    const marker = `font-limit-${size}-${Date.now()}`;
+    await page.addInitScript((size) => localStorage.setItem("farhelm.terminal-font-size", String(size)), size);
+    const session = await createSession(request, { title: marker, invocation: "sh -c 'printf \"FONTREADY\\n\"; read line; printf \"received:%s\\n\" \"$line\"; sleep 300'", cwd: "/tmp" });
+    try {
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FONTREADY");
+      const terminal = page.locator("#terminal .xterm-helper-textarea");
+      await expect(terminal).toBeFocused();
+      expect(await page.evaluate(() => (window as any).__farhelmTerm.options.fontSize)).toBe(size);
+      const button = page.locator(`[data-text-size="${direction}"]`);
+      await expect(button).toBeEnabled();
+      await button.click();
+      await expect(terminal).toBeFocused();
+      expect(await page.evaluate(() => (window as any).__farhelmTerm.options.fontSize)).toBe(size);
+      await page.keyboard.type(marker);
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, `received:${marker}`);
+    } finally {
+      await cleanupSession(request, session.id);
+    }
+  });
+}
 
 /**
  * Open a session at the font mount boundary this suite tests.

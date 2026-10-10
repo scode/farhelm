@@ -9,6 +9,8 @@
 //! is sent verbatim, and every rule about what a title may contain lives
 //! in the supervisor (see `api::rename_session`).
 
+use crate::list::PeerTitle;
+use crate::peer::{DetailPart, PeerLine};
 use dioxus::prelude::*;
 
 /// Keep Tab inside the one-purpose rename dialog while it is mounted.
@@ -257,7 +259,7 @@ pub(crate) fn RenameDialog(
                     on_cancel.call(generation);
                 }
             },
-            span { class: "rename-current-title", "{current_title}" }
+            PeerTitle { class: "rename-current-title", title: current_title, quoted: false, tooltip: false }
             if unavailable {
                 p {
                     class: "rename-unavailable",
@@ -265,7 +267,9 @@ pub(crate) fn RenameDialog(
                 }
             }
             if let Some(error) = error {
-                p { class: "rename-error", "{error}" }
+                // Refusals can quote peer values just as titles can. Keep the
+                // display escaping separate from the raw editable draft.
+                PeerLine { class: "rename-error".to_string(), parts: vec![DetailPart::peer(error)] }
             }
             RenameForm {
                 draft,

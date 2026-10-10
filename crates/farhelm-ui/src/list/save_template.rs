@@ -205,7 +205,9 @@ pub(super) fn SaveTemplatePanel(
                     aria_label: "template name", "data-tooltip": "template name: choose a new name for this setup",
                     disabled: saving(), oninput: move |event| name.set(event.value()),
                     onkeydown: move |event| {
-                        if event.key() == Key::Enter {
+                        // Enter belongs to the IME until its candidate is committed;
+                        // saving here would persist an unfinished name and close it.
+                        if event.key() == Key::Enter && !event.is_composing() {
                             event.prevent_default(); event.stop_propagation(); save.call(());
                         }
                     },

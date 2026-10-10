@@ -52,6 +52,7 @@ mod templates;
 mod trash;
 mod view;
 
+pub(crate) use row::PeerTitle;
 pub(crate) use shared::{OpenDestination, with_source_host};
 pub(crate) use view::{
     DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, SharedPreferences,

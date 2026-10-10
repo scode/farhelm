@@ -38,6 +38,27 @@ const BASELINE = {
   workspace_trust: null,
 };
 
+/** Restart refusal text can quote a peer's hidden characters. Its display
+ * must expose them and isolate direction while the editable dialog stays open.
+ * Restart requires an edited launch choice; an unchanged draft never submits
+ * the request whose refusal this test is meant to observe. */
+test("Restart with escapes and isolates peer refusal text", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
+  });
+  const dialog = await openInjectedDialog(page);
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  const submit = dialog.locator(".restart-with-submit");
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  const error = dialog.locator(".restart-with-error .peer-value");
+  await expect(error).toHaveText("refused <U+202E>host<U+200B>");
+  await expect(error).toHaveAttribute("dir", "ltr");
+  expect(await error.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
+  await expect(dialog).toBeVisible();
+});
+
 /**
  * Publish one controlled row through the real listing response.
  *

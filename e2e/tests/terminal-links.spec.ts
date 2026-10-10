@@ -45,6 +45,63 @@ import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
 import { replayRecord } from "./helpers/terminal-readiness";
+import fs from "node:fs";
+import path from "node:path";
+import { stackScratchDir } from "./helpers/scratch";
+
+/** OSC spans have their own activation adapter. A drag within one span must
+ * retain selection without opening a web target or requesting a file save;
+ * a subsequent plain click must still dispatch that same target. */
+for (const kind of ["web", "file"] as const) {
+  test(`an OSC 8 ${kind} span ignores a selection drag and still accepts a click`, async ({ page, request }) => {
+    const opened = await recordWindowOpen(page);
+    const stamp = Date.now();
+    const directory = kind === "file" ? stackScratchDir("osc-drag-") : undefined;
+    const filename = directory && path.join(directory, "report.txt");
+    if (filename) {
+      fs.writeFileSync(filename, "OSC drag fixture");
+      expect(fs.readFileSync(filename, "utf8")).toBe("OSC drag fixture");
+    }
+    const target = kind === "web" ? `https://example.com/osc-drag-${stamp}` : `file://${filename}`;
+    const text = `OSC-DRAG-${stamp}-${"c".repeat(60)}`;
+    const session = await createSession(request, {
+      title: `osc-drag-${kind}-${stamp}`, cwd: "/tmp",
+      invocation: gatedShellInvocation(`printf "\\033]8;;${target}\\007${text}\\033]8;;\\007\\n"`),
+    });
+    let downloads = 0;
+    page.on("request", (request) => { if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) downloads++; });
+    try {
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await assertLinkWiring(page);
+      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, text);
+      const head = await findViewportRow(page, text.slice(0, 20));
+      const tail = await findViewportRow(page, text.slice(-15));
+      expect(tail.rowIndex, "the OSC span must fit on one row").toBe(head.rowIndex);
+      await hoverLink(page, text, text.slice(0, 30));
+      if (kind === "file") await expect(page.locator("#terminal .terminal-file-target")).toContainText("click to download");
+      await dragRowSpan(page, text, 4, text.length - 9);
+      const selected = await getSelection(page);
+      expect(selected.length).toBeGreaterThan(40);
+      expect(text.includes(selected)).toBe(true);
+      expect(await opened(), "a selection drag must not navigate").toEqual([]);
+      expect(downloads, "a selection drag must not request a download").toBe(0);
+      const cell = await hoverLink(page, text, text.slice(0, 30));
+      if (kind === "file") await expect(page.locator("#terminal .terminal-file-target")).toContainText("click to download");
+      await page.mouse.click(cell.x, cell.y);
+      if (kind === "web") {
+        await expect.poll(opened).toEqual([{ url: target, target: "_blank", features: "noopener" }]);
+      } else {
+        await expect.poll(() => downloads).toBe(1);
+      }
+    } finally {
+      await cleanupSession(request, session.id);
+      if (directory) fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 /** One recorded `window.open` call: destination plus the isolation args. */
 interface OpenedLink {
