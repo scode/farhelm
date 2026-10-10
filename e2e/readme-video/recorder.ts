@@ -165,7 +165,7 @@ export class Recorder {
    * would invent before one.
    *
    * Fails if the screencast API is missing (it arrived in Playwright 1.59;
-   * e2e's lockfile pins 1.62 while `package.json` still admits older
+   * e2e's lockfile pins 1.64 while `package.json` still admits older
    * versions), if no frame arrives within {@link FIRST_FRAME_TIMEOUT_MS},
    * if the first frame is not the viewport's size, or if `<name>-stills/`
    * exists but is not one the recorder may replace.

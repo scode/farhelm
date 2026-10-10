@@ -853,8 +853,8 @@ class RecorderTest(unittest.TestCase):
         for name in ("playwright", "@playwright/test"):
             package = e2e / "node_modules" / name
             package.mkdir(parents=True, exist_ok=True)
-            (package / "package.json").write_text(json.dumps({"version": "1.62.0"}))
-            packages[f"node_modules/{name}"] = {"version": "1.62.0"}
+            (package / "package.json").write_text(json.dumps({"version": "1.64.0"}))
+            packages[f"node_modules/{name}"] = {"version": "1.64.0"}
         (e2e / "package-lock.json").write_text(json.dumps({"packages": packages}))
         (e2e / "node_modules/playwright/cli.js").write_text("fixture CLI")
         (e2e / "playwright.config.ts").write_text("fixture config")
@@ -866,13 +866,13 @@ class RecorderTest(unittest.TestCase):
             f"#!{PYTHON}\n"
             "import json, os, pathlib, signal, sys, time\n"
             "if sys.argv[1:] == ['--version']: print('v24.16.0'); sys.exit(0)\n"
-            "if sys.argv[-1:] == ['--version']: print('Version 1.62.0'); sys.exit(0)\n"
+            "if sys.argv[-1:] == ['--version']: print('Version 1.64.0'); sys.exit(0)\n"
             "output = sys.argv[sys.argv.index('--output') + 1]\n"
             "projects = [{'id': e, 'name': e, 'retries': 0, 'repeatEach': 1, 'outputDir': output} for e in ('chromium', 'webkit')]\n"
             "def finish(interrupted=False):\n"
             "    actual = 'interrupted' if interrupted else 'passed'\n"
             "    outcome = 'skipped' if interrupted else 'expected'\n"
-            "    report = {'config': {'version': '1.62.0', 'workers': 1, 'forbidOnly': True, 'failOnFlakyTests': True, 'shard': None, 'projects': projects}, 'errors': [],\n"
+            "    report = {'config': {'version': '1.64.0', 'workers': 1, 'forbidOnly': True, 'failOnFlakyTests': True, 'shard': None, 'projects': projects}, 'errors': [],\n"
             "              'suites': [{'specs': [{'id': 'case', 'file': 'fixture.spec.ts', 'title': 'fixture', 'tests': [{'projectId': e, 'expectedStatus': 'passed', 'status': outcome, 'results': [{'status': actual, 'retry': 0}]} for e in ('chromium', 'webkit')]}]}],\n"
             "              'stats': {'expected': 0 if interrupted else 2, 'unexpected': 0, 'flaky': 0, 'skipped': 2 if interrupted else 0}}\n"
             "    policy = {'schema_version': 1, 'completed': True, 'status': 'interrupted' if interrupted else 'passed', 'workers': 1, 'forbidOnly': True, 'failOnFlakyTests': True, 'projects': [{**p, 'engine': p['name']} for p in projects]}\n"
