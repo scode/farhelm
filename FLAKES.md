@@ -1764,3 +1764,29 @@ Error: no feed socket is open to notify on
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-10-09 — `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e)
+
+The deflake sweep's workspace nextest phase (run `cba04f06-39b5-4fd9-bfa7-3b2dcb1df22c`, retained run
+`4d3f498f-ae89-4925-b95f-f313bf716980`) failed this test once on clean commit `42351f3a30de7c4dd807aa517ae91d31d552bc74`
+(a dependency-update stack: refreshed Cargo.lock and tooling pins over main), selection `workspace Rust targets`, four
+nextest slots, zero retries. It failed on its reset assertion after 11.9s; the three classification reruns
+(`24210386-9d75-4b28-a0ca-5ffda7955268`, `b45bc530-d343-458c-8de0-2481a6a8e2ca`,
+`61bfb8d8-ccdf-4e54-a7b2-61df5fba317f`), each the test alone, passed in 13.0 to 13.7s. It was the only failure in the
+phase up to that point. The machine was shared with other agents' work, at load average about 20 shortly after; memory
+pressure and the tests sharing its slot were not recorded. tmux 3.7c, executable SHA256
+`f660bd3c43f0708a8580b64bbab53cc799885d37e56b4e70fa44b2b2a36c05d9`, locale `C.UTF-8`; ambient `FARHELM_*` names were
+scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The trace ring had evicted the early events, so the pause
+and resume timing was not extracted. The test's reset check covers everything delivered from the pause through the
+10-second drain after resume, so a stall past tmux's `pause-after` window anywhere in that drain would cause a correct
+reset; that is a hypothesis, not established. The 2026-09-03 entry for this test was a different failure (an initial
+wait timeout, fixed in #357). Full evidence is retained privately on the executing machine. Disposition: open (TODO.md).
+
+```
+panicked at crates/farhelm/tests/e2e/terminal_backpressure.rs:1739:5:
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Class: budget
+
+Cause: hypothesis
