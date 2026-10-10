@@ -786,6 +786,30 @@ class TransitionTest(QueueTestCase):
         self.assertEqual([heading for heading, _, _ in pq._section_spans(text)], ["Real"])
         self.assertEqual(pq.splice_problems("````md\n```bash\n## x\n```\n````\n"), [])
 
+    def test_heading_spellings_cannot_strand_a_blocked_question(self):
+        """Refuse formatter-normalized sibling headings before a block can lose its suffix.
+
+        Deeper headings and fenced examples still round-trip through block
+        and answer, so the guard cannot solve corruption by refusing Markdown.
+        """
+        h = self.harness(index(line("in-flight 0a1b2c", "a")), a=plan())
+        original = h.fake.files()[pq.plan_path("a")]
+        for heading in (" ## Options", "   #\tOptions", "##", "Options\n---", "Options\n  ==="):
+            with self.subTest(heading=heading):
+                question = h.text_file("q.md", f"Why?\n\n{heading}\n\nKeep this suffix.\n")
+                self.assertEqual(h.run("block", "a", "--claim", "0a1b2c", "--question", question)[0], pq.EXIT_USAGE)
+                self.assertEqual(h.fake.files()[pq.plan_path("a")], original)
+                self.assertEqual(h.state("a"), "in-flight 0a1b2c")
+        body = "Why?\n\n### Options\n\n```md\n  ## Example\nOptions\n---\n```\n\nKeep this suffix.\n"
+        question = h.text_file("q.md", body)
+        self.assertEqual(h.run("block", "a", "--claim", "0a1b2c", "--question", question)[0], 0)
+        decision = h.text_file("d.md", "Keep the existing choice.\n")
+        self.assertEqual(h.run("answer", "a", "--decision", decision)[0], 0)
+        archived = h.fake.files()[pq.plan_path("a")]
+        self.assertEqual(pq.blocked_sections(archived), [])
+        self.assertIn("> Keep this suffix.", archived)
+        self.assertEqual(pq.splice_problems("Paragraph.\n\n---\n"), [])
+
     def test_unclosed_fence_is_refused_in_spliced_text(self):
         """An unclosed fence in a decision would hide the next `## Blocked` heading, so the next block would fail."""
         h = self.harness(index(line("blocked", "a")), a=plan() + "\n## Blocked\n\nWhy?\n")

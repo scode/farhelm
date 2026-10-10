@@ -396,6 +396,9 @@ test -s "$run_dir/known_hosts" || {
   printf '    UserKnownHostsFile %s\n' "$run_dir/known_hosts" || exit 1
   printf '    StrictHostKeyChecking yes\n' || exit 1
   printf '    BatchMode yes\n' || exit 1
+  # The original file may begin with global options. Reset the Host scope
+  # inside our removable block so unrelated hosts keep receiving them.
+  printf 'Match all\n' || exit 1
   printf '\n' || exit 1
   printf '%s\n' "$config_end" || exit 1
   cat "$ssh_config"

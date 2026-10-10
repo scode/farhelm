@@ -400,13 +400,20 @@ def splice_problems(text: str, section_level: int = 2) -> list[str]:
     heading the same way, so the next `block` could not find its own section.
     """
     lines, open_fence = _scan_fences(text)
-    forbidden = tuple("#" * level + " " for level in range(1, section_level + 1))
     deeper = "#" * (section_level + 1)
-    found = [
-        f"heading too high for a spliced section (use {deeper} or deeper): {line.strip()}"
-        for line, fenced in lines
-        if not fenced and line.startswith(forbidden)
-    ]
+    found = []
+    for position, (line, fenced) in enumerate(lines):
+        if fenced:
+            continue
+        # Formatting can normalize indented ATX and setext headings into
+        # sibling sections. An underline after text can end our section;
+        # a separator after a blank line cannot and remains permitted.
+        atx = re.match(r"^ {0,3}(#{1,6})(?:[ \t]|$)", line.rstrip("\n"))
+        setext = re.match(r"^ {0,3}(=+|-+)[ \t]*$", line.rstrip("\n"))
+        setext_level = 1 if setext and setext[1].startswith("=") else 2
+        follows_text = position > 0 and not lines[position - 1][1] and bool(lines[position - 1][0].strip())
+        if (atx and len(atx[1]) <= section_level) or (setext and follows_text and setext_level <= section_level):
+            found.append(f"heading too high for a spliced section (use {deeper} or deeper): {line.strip()}")
     if open_fence:
         # An unclosed fence would swallow every heading after it once spliced, including a later ## Blocked.
         found.append("a code fence that is never closed")

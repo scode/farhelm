@@ -1315,7 +1315,9 @@ for _ in $(seq 1 10); do
 done
 [ -n "$OK" ] || fail "typed input never reached the pane"
 
-curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up smoke session"
+# Bash can consume the full five-second graceful stop; allow the same
+# escalation-and-response budget used by the default headless leg.
+curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up smoke session"
 SID=""
 close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
 

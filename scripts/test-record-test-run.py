@@ -1102,6 +1102,66 @@ class RecorderTest(unittest.TestCase):
                         self.assertEqual(manifest["recorder"]["error"], "required console forwarding was incomplete")
                     self.assertEqual(injected, phase == "publication")
 
+    def test_first_terminal_write_failure_preserves_observed_child_facts(self) -> None:
+        """A successful fallback must retain facts observed before the first write failed.
+
+        Fail exactly the first terminal manifest publication, not a later
+        report write. Exercise success, failure, timeout and interruption;
+        publication still fails the recorder even when its child succeeded.
+        """
+        for outcome, code, child in [
+            ("completed", 0, 0), ("completed", 7, 7),
+            ("timed_out", 124, -9), ("interrupted", 130, -15),
+        ]:
+            with self.subTest(outcome=outcome, child=child):
+                actual_write = RECORDER.Manifest.write
+                injected = False
+
+                def write_with_one_fault(manifest):
+                    """Leave running publication intact and fail one observed terminal write."""
+                    nonlocal injected
+                    if manifest.data.get("finished_at") and not injected:
+                        injected = True
+                        raise OSError("injected initial terminal publication failure")
+                    actual_write(manifest)
+
+                observed = RECORDER.CommandResult(
+                    outcome, code, child, 9.5, True,
+                    cleanup_limit="fixture cleanup limit", output_eof_observed=True,
+                )
+                with mock.patch.object(RECORDER.pathlib.Path, "cwd", return_value=self.repo), \
+                        mock.patch.object(RECORDER, "run_command", return_value=observed), \
+                        mock.patch.object(RECORDER.Manifest, "write", write_with_one_fault):
+                    returned = RECORDER.run(self.cli([PYTHON, "-c", "pass"])[2:])
+                self.assertTrue(injected)
+                self.assertEqual(returned, 125)
+                manifest = self.latest_manifest()[1]
+                self.assertEqual(manifest["outcome"], "recorder-error")
+                self.assertEqual(manifest["child_status"]["raw_returncode"], child)
+                self.assertEqual(manifest["command"]["duration_seconds"], 9.5)
+                self.assertTrue(manifest["recorder"]["forced_cleanup"])
+                self.assertEqual(manifest["recorder"]["cleanup_limit"], "fixture cleanup limit")
+                self.assertTrue(manifest["output"]["eof_observed"])
+                self.assertIn("initial terminal publication failure", manifest["recorder"]["error"])
+
+    def test_checkout_discovery_preserves_trailing_whitespace(self) -> None:
+        """A legal path suffix must not make identity probes measure a sibling checkout.
+
+        Use real Git discovery with both the suffixed repository and its
+        trimmed sibling present; a fake response could miss Git's newline.
+        """
+        sibling = self.repo.parent / "checkout"
+        sibling.mkdir()
+        run_checked(["git", "init", "-q", str(sibling)], self.repo)
+        for suffix in (" ", "\t", "\n"):
+            with self.subTest(suffix=repr(suffix)):
+                checkout = self.repo.parent / ("checkout" + suffix)
+                checkout.mkdir()
+                run_checked(["git", "init", "-q", str(checkout)], self.repo)
+                found, probe = RECORDER.discover_checkout(checkout, dict(os.environ), RECORDER.SignalIntent())
+                self.assertTrue(probe.complete)
+                self.assertEqual(found, checkout.resolve())
+
     def test_nextest_policy_refusal_happens_before_spawn(self) -> None:
         """A short outer grace or injected retry setting must not start the selected runner."""
 

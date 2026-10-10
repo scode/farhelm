@@ -9018,7 +9018,8 @@
 - Completion criteria: End the inserted block with a `Match all` (or `Host *`) line so the original configuration is
   read with global scope again. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## tmux-build-script-bash32.md
 
@@ -9034,7 +9035,8 @@
 - Completion criteria: Expand the optional arrays with the portable empty-safe form, or refuse bash older than 4.4 up
   front. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## plans-heading-splice.md
 
@@ -9051,7 +9053,8 @@
 - Completion criteria: Make the guard also catch indented ATX headings and setext underlines at or above the section
   level, with a round-trip test. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## watcher-revision-cache.md
 
@@ -9068,7 +9071,8 @@
 - Completion criteria: Resolve the branch to one commit per poll and use it for both reads. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## checkout-discovery-strips-valid-trailing-path-characters.md
 
@@ -9084,7 +9088,8 @@
   triage."
 - Completion criteria: Remove only git's trailing newline. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## initial-result-publication-failure-erases-observed-child-result.md
 
@@ -9101,7 +9106,8 @@
 - Completion criteria: Keep the observed result available to the fallback write so it is preserved. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## cutover-probe-ignores-output-asserted-boundary.md
 
@@ -9117,7 +9123,8 @@
 - Completion criteria: Assert that no output notification appears before the cutover point. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## non-fragment-files-satisfy-changelog-coverage.md
 
@@ -9134,7 +9141,8 @@
 - Completion criteria: Apply the loader's top-level `*.md` rule (README excluded) to the paths the sweep counts. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## video-recording-use-stale-builds-successful-build.md
 
@@ -9207,7 +9215,8 @@
 - Completion criteria: Raise that delete's time limit to 30 seconds, matching the default leg. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
+- Execution: complete in jj change `qxuumwpy`, bookmark `plan/dev-tooling-fixes/01-dev-tooling-fixes`;
+  [draft PR #1815](https://github.com/scode/farhelm/pull/1815/changes).
 
 ## directory-witness-read-pwd-writes-it.md
 

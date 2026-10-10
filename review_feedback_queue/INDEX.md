@@ -74,7 +74,6 @@ triage.
   dollar-containing paths.
 - `incomplete-latest-response-select-wrong-release.md` — A truncated latest-version response could install an unintended
   older release.
-- `centos-test-changes-meaning-existing-global-ssh.md` — The CentOS test changes the scope of existing SSH settings.
 - `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
   against argument expansion.
 - `archive-rename-move-replacement-directory.md` — Checkout archiving could move a foreign replacement directory.
@@ -93,17 +92,13 @@ triage.
   sidebar keeps deleted/stale rows.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
-- `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
-  under `set -u`.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
 
 - `birth-oracle.md` — Birth-time oracle treats execution errors as absent capability.
 - `template-catalog-error.md` — Template discovery failure looks like an empty catalog.
 - `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
-- `plans-heading-splice.md` — Legal Markdown headings can strand part of a plan question.
 - `publisher-copy-race.md` — Screenshot publication may certify pixels different from those it checked.
-- `watcher-revision-cache.md` — Plans watcher can cache an ignore verdict against the wrong revision.
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
 - `template-dot-name.md` — Dot-only template names pass validation but cannot be saved.
 
@@ -335,8 +330,6 @@ triage.
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
   global serialization guard.
-- `initial-result-publication-failure-erases-observed-child-result.md` — A failed first result write discards known
-  test-run facts.
 - `yolo-refusal-fixture-unintentionally-puts-page-into.md` — The YOLO-refusal fixture silently changes the page into
   build mismatch.
 - `saving-restoring-cursor-attributes-loses-extended-formatting.md` — Cursor restore leaves extended formatting changed
@@ -370,9 +363,6 @@ triage.
   claiming the current queue entry.
 - `retained-failed-tags-become-mandatory-upgrade-test-inputs.md` — Failed release tags could make standard upgrade
   validation impossible.
-- `cutover-probe-ignores-output-asserted-boundary.md` — The cutover probe ignores early output between reply blocks.
-- `optional-desktop-interaction-smoke-times-out-during.md` — The optional desktop smoke times out during normal
-  deletion.
 - `cancelled-attach-retain-abandoned-terminal-channel.md` — Cancellation before attach transmission could retain local
   terminal-routing metadata.
 - `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` — The wedged-browser test observes a detach that does
@@ -482,9 +472,5 @@ triage.
   early.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
   after timeout.
-- `checkout-discovery-strips-valid-trailing-path-characters.md` — The test recorder identifies the wrong checkout when
-  its name ends in whitespace.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
   repeated attempts.
-- `non-fragment-files-satisfy-changelog-coverage.md` — Changelog coverage accepts files that fragment discovery never
-  loads.

@@ -621,24 +621,35 @@ def bounded_probe(
     )
 
 
-def probe_text(result: ProbeResult) -> str | None:
-    """Decode a complete small probe response when it is valid UTF-8."""
+def probe_text(result: ProbeResult, *, trim: bool = True) -> str | None:
+    """Decode a complete UTF-8 probe, preserving path bytes when whitespace is meaningful.
+
+    Ordinary diagnostic responses are trimmed. Path discovery opts out so a
+    legal directory suffix cannot silently redirect source identity probes.
+    """
 
     if not result.complete or result.stdout_sample_truncated:
         return None
     try:
-        return result.stdout_sample.decode("utf-8").strip()
+        text = result.stdout_sample.decode("utf-8")
+        return text.strip() if trim else text
     except UnicodeDecodeError:
         return None
 
 
 def discover_checkout(cwd: pathlib.Path, env: dict[str, str], intent: SignalIntent) -> tuple[pathlib.Path | None, ProbeResult]:
-    """Find the checkout before selecting a safe evidence directory."""
+    """Locate the tested checkout without changing legal trailing path characters.
+
+    Evidence storage and source probes depend on this identity. Remove only
+    Git's record terminator; whitespace belonging to the directory stays.
+    """
 
     probe = bounded_probe(
         ["git", "rev-parse", "--show-toplevel"], cwd=cwd, env=env, intent=intent
     )
-    text = probe_text(probe)
+    text = probe_text(probe, trim=False)
+    if text is not None:
+        text = text.removesuffix("\n")
     return (pathlib.Path(text).resolve() if text else None, probe)
 
 
@@ -1620,6 +1631,9 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
     output: OutputStore | None = None
     console: ConsoleForwarder | None = None
     trace_fd: int | None = None
+    # Retain observed child facts across a failed first terminal publication;
+    # the fallback reports its IO failure without inventing an unknown result.
+    result: CommandResult | None = None
     try:
         args = parse_args(argv)
         require_wait_ownership()
@@ -1865,11 +1879,17 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             try:
                 if output is not None:
                     manifest.data["output"] = output.evidence()
+                    if result is not None:
+                        manifest.data["output"]["eof_observed"] = result.output_eof_observed
                 finalize(
                     manifest,
                     outcome="recorder-error",
                     recorder_exit=125,
                     total_started=total_started,
+                    child_returncode=result.child_returncode if result is not None else None,
+                    command_duration=result.command_duration if result is not None else None,
+                    forced_cleanup=result.forced_cleanup if result is not None else False,
+                    cleanup_limit=result.cleanup_limit if result is not None else None,
                     error=message,
                 )
             except OSError:
