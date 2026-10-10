@@ -64,3 +64,51 @@ client's live/output-enabled premise and retained no-output state. The wording c
 best-effort limitation without contradicted claims or convention violations. A separate documentation pass covered every
 touched code file. Requested native model selections are known; actual model attribution and usage counters were not
 exposed. Review artifacts and evidence remain private.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1780 (quiet terminal clients when a supervisor stop runs out of time), one squash commit
+on main. Main had gained the three plans of the previous round (compact approval card, resizable sidebar, supervisor
+sweeps on the timer) and plan bookkeeping since the stack was based; the rebase was clean, and none of them touches the
+stop path or tmux client handling this plan changes. Other plans reviewed in the same round (host-icons,
+claude-compaction-status, terminal-file-download, omp-pane-guard-all-launches) do not touch these files either.
+
+#### Review before merging
+
+A separate reviewer that had not worked on this round's plans checked the change against the triage decision and its
+completion criteria, which it meets, and confirmed the ledger and review-queue bookkeeping. It confirmed the extra two
+seconds are a hard bound (both tmux commands are killed if the bound expires, and nothing waits after it), that the
+attempt runs only when the ordinary ten-second stop ran out, and that a tmux server that is already gone ends the
+attempt quietly rather than hanging.
+
+#### A fix made while landing
+
+The reviewer found that one client failing to take the no-output command ended the whole attempt, skipping every client
+listed after it. That failure is the likely case exactly when this fallback runs: the ordinary teardown keeps closing
+attachments in the background after its budget ran out, so a listed client can be gone by the time it is reached, and
+the clients after it may still be sending output. The landing made each client's command independent, with the failures
+logged together at the end, the same way the supervisor's startup cleanup already treats its clients. That puts the
+plan's Rust changes at about 165 lines instead of 144, slightly over the roughly 150 the triage decision set; the extra
+lines are this per-client handling and its comment.
+
+The landing also corrected two references in SPEC_impl.md that the new paragraphs had separated from what they pointed
+at ("that same cutover" now names the cutover's final refresh), and a comment on how long a stopping supervisor holds
+its lock (now up to the ten-second budget plus the two-second attempt).
+
+Not changed: a client that is still being attached when the budget runs out starts with output off, so the attempt does
+nothing for it, and its own setup can switch output back on before the process exits. The new SPEC_impl.md text already
+says the attempt does not guarantee every client closes safely, and the triage decision rules out more code for this
+without an observed abort on tmux 3.7c or later.
+
+#### Checks
+
+- Run now, on the plan with the landing's fix: `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and the supervisor's unit tests in full through the recorder with
+  pinned tmux 3.7c, four slots and no retries (run `aa8cc4c8`, 1060 passed; the two skipped are the suite's usual
+  substrate skips), which include the plan's real-tmux test that a live control client is quieted without being killed.
+- Reused from the executor: its focused stop and teardown runs, formatting and the changelog lint. The landing's change
+  is the per-client loop, comments and spec wording, all covered by the run above.
+- Skipped: browser, desktop and installer checks, since nothing outside the supervisor's stop path changed.
+
+The report's line count (144) no longer holds after the landing's fix, as described above; nothing else in it was made
+untrue.

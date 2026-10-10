@@ -5,3 +5,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`approval-card-layout`](reports/approval-card-layout.report.md) landed 2026-10-10 in #1760: the agent request card moves to the top of the main pane, compact, one request expanded at a time
 - [`resizable-sidebar`](reports/resizable-sidebar.report.md) landed 2026-10-10 in #1759: drag the sidebar's edge to resize it (240–600px), remembered per device
 - [`sweep-on-timer`](reports/sweep-on-timer.report.md) landed 2026-10-10 in #1758, #1761, #1766: the supervisor sweeps on its 2 s timer only, and stops re-reading settled stopped sessions
+- [`shutdown-expiry-quiesce`](reports/shutdown-expiry-quiesce.report.md) landed 2026-10-10 in #1780: a supervisor stop that runs out of time still briefly tells tmux to stop sending output first; the spec stops further defenses against the old tmux crash unless it recurs on 3.7c or later
