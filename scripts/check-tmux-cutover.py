@@ -189,6 +189,12 @@ def run_trial(client: ControlClient, pane: str, history: int) -> None:
     snapshot_numbers = [int(match) for match in NUMBER.findall(snapshot)]
     assert snapshot_numbers, "capture contained no numbered records"
     cutover_index = events.index(blocks[-1])
+    # Notifications between replies are outside command bodies, but they are
+    # still before output was enabled and must not escape the cutover oracle.
+    assert not any(
+        isinstance(event, LineEvent) and event.line.startswith(b"%output ")
+        for event in events[:cutover_index + 1]
+    ), "%output appeared before the final refresh reply"
     live_lines = [
         event.line
         for event in events[cutover_index + 1 :]

@@ -8,7 +8,7 @@
 # started it. Each case below pins one of those edges.
 #
 # The stub stands in for `gh api`, and it is deliberately strict so the tests exercise the real request rather than a
-# canned answer: it refuses any argv other than `api repos/owner/name/git/trees/<ref> --jq <filter>`, logs the ref,
+# canned answer: it accepts only commit and tree reads with their expected filters, logs the ref,
 # and answers by running the watcher's own --jq filter through jq over a fixture tree listing shaped like GitHub's. A
 # wrong endpoint, a broken filter, or a dropped truncation check therefore fails here. The stub is put first on the
 # child's PATH; nothing changes this script's own environment.
@@ -40,6 +40,7 @@ A=aaaaaaaaaa1111111111aaaaaaaaaa1111111111
 B=bbbbbbbbbb2222222222bbbbbbbbbb2222222222
 A_UPPER=AAAAAAAAAA1111111111AAAAAAAAAA1111111111
 C=cccccccccc3333333333cccccccccc3333333333
+P=eeeeeeeeee4444444444eeeeeeeeee4444444444
 SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 
 failed=0
@@ -55,6 +56,7 @@ make_stub() {
 	local dir=$1
 	mkdir -p "$dir/bin"
 	: >"$dir/calls"
+	: >"$dir/commit-calls"
 	cat >"$dir/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 dir=$(cd "$(dirname "$0")/.." && pwd)
@@ -63,10 +65,19 @@ if [ $# -ne 4 ] || [ "$1" != api ] || [ "$3" != --jq ]; then
 	exit 98
 fi
 case "$2" in
+repos/owner/name/git/ref/heads/*)
+	[ "$4" = .object.sha ] || { echo "BAD COMMIT FILTER: $4" >>"$dir/calls"; exit 98; }
+	echo "${2#repos/owner/name/git/ref/heads/}" >>"$dir/commit-calls"
+	if [ -f "$dir/commit-error" ]; then cat "$dir/commit-error" >&2; exit 1; fi
+	printf '{"object":{"sha":"eeeeeeeeee4444444444eeeeeeeeee4444444444"}}\n' | jq -r "$4"
+	exit 0 ;;
 repos/owner/name/git/trees/*) ref=${2#repos/owner/name/git/trees/} ;;
 *) echo "BAD ENDPOINT: $2" >>"$dir/calls"; exit 98 ;;
 esac
 echo "$ref" >>"$dir/calls"
+# In this case the branch advances after the immutable tree was read.
+# The check must still inspect that tree's revision, rather than current main.
+[ ! -f "$dir/race" ] || [ "$ref" != eeeeeeeeee4444444444eeeeeeeeee4444444444 ] || echo claimed >"$dir/branch-state"
 n=$(wc -l <"$dir/calls")
 total=$(wc -l <"$dir/responses")
 [ "$n" -le "$total" ] || n=$total
@@ -164,7 +175,7 @@ expect_line() {
 d=$(case_dir change "tree $A" "tree $A" "tree $B")
 run_case "$d" --baseline "$A" --interval 1 --max-wait 60
 if expect "change after unchanged polls" "$d" 0 "changed $A $B"; then
-	if [ "$(calls "$d")" = "main main main" ]; then pass "change after unchanged polls"; else
+	if [ "$(calls "$d")" = "$P $P $P" ]; then pass "change after unchanged polls"; else
 		fail "change after unchanged polls" "calls '$(calls "$d")'"
 	fi
 fi
@@ -187,7 +198,7 @@ expect "plans/ created" "$d" 0 "changed none $A" && pass "plans/ created"
 d=$(case_dir branch "tree $B")
 run_case "$d" --baseline "$A" --branch trunk --interval 1 --max-wait 60
 if expect "custom branch" "$d" 0 "changed $A $B"; then
-	if [ "$(calls "$d")" = trunk ]; then pass "custom branch"; else fail "custom branch" "calls '$(calls "$d")'"; fi
+	if [ "$(cat "$d/commit-calls")" = trunk ] && [ "$(calls "$d")" = "$P" ]; then pass "custom branch"; else fail "custom branch" "calls '$(calls "$d")'"; fi
 fi
 
 # SHA-256 object ids are accepted as baselines and as responses.
@@ -201,7 +212,7 @@ expect "SHA-256 hashes" "$d" 0 "changed $SHA256 $A" && pass "SHA-256 hashes"
 d=$(case_dir from "tree $A" "tree $A" "tree $B")
 run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60
 if expect "baseline from commit" "$d" 0 "changed $A $B"; then
-	if [ "$(calls "$d")" = "$C main main" ]; then pass "baseline from commit"; else
+	if [ "$(calls "$d")" = "$C $P $P" ]; then pass "baseline from commit"; else
 		fail "baseline from commit" "calls '$(calls "$d")'"
 	fi
 fi
@@ -238,6 +249,14 @@ make_check() {
 #!/usr/bin/env bash
 dir=$(cd "$(dirname "$0")/.." && pwd)
 echo "$*" >>"$dir/checks"
+if [ -f "$dir/race" ]; then
+	[ "$(cat "$dir/branch-state")" = claimed ] || exit 99
+	case " $* " in
+	*" --ref eeeeeeeeee4444444444eeeeeeeeee4444444444 "*) echo wake ;;
+	*) echo ignore ;;
+	esac
+	exit 0
+fi
 n=$(wc -l <"$dir/checks")
 total=$(wc -l <"$dir/verdicts")
 [ "$n" -le "$total" ] || n=$total
@@ -254,13 +273,13 @@ STUB
 check_count() { grep -c . "$1/checks"; }
 
 # An ignored tree is not re-checked on later polls that still see it; the next new tree is checked again and wakes.
-# The check gets the repository, the baseline commit, and the branch.
+# The check gets the repository, the baseline commit, and the immutable poll commit.
 d=$(case_dir wake-ignore "tree $A" "tree $B" "tree $B" "tree $SHA256")
 make_check "$d" ignore wake
 run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check"
 if expect "wake check ignores, then wakes" "$d" 0 "changed $A $SHA256"; then
 	if [ "$(check_count "$d")" -eq 2 ] &&
-		[ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main --for executor" ]; then
+		[ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref $P --for executor" ]; then
 		pass "wake check ignores, then wakes"
 	else
 		fail "wake check ignores, then wakes" "checks: $(tr '\n' ';' <"$d/checks")"
@@ -273,7 +292,7 @@ d=$(case_dir wake-lander "tree $A" "tree $B")
 make_check "$d" wake
 run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check" --wake-for lander
 if expect "wake check gets the lander role" "$d" 0 "changed $A $B"; then
-	if [ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main --for lander" ]; then
+	if [ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref $P --for lander" ]; then
 		pass "wake check gets the lander role"
 	else
 		fail "wake check gets the lander role" "checks: $(tr '\n' ';' <"$d/checks")"
@@ -289,6 +308,23 @@ if expect "unchanged tree skips the check" "$d" 10 "idle $A"; then
 		fail "unchanged tree skips the check" "ran $(check_count "$d") checks"
 	fi
 fi
+
+# A claim between tree and verdict must not cache a newer verdict against
+# the pending tree. The stub moves main before the check and only the frozen
+# revision still offers work; asking main instead would idle here.
+d=$(case_dir wake-revision "tree $A" "tree $B")
+make_check "$d" ignore
+touch "$d/race"
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 2 --wake-check "$d/bin/wake-check"
+expect "wake check uses the tree's revision after main advances" "$d" 0 "changed $A $B" &&
+	pass "wake check uses the tree's revision after main advances"
+
+# Commit lookup failures share the bounded poll failure accounting; no tree
+# read may turn an unresolved revision into an ignore or wake verdict.
+d=$(case_dir commit-fails "tree $B")
+echo 'HTTP 502 resolving main' >"$d/commit-error"
+run_case "$d" --baseline "$A" --interval 1 --max-wait 60 --max-failures 2
+expect_line "commit lookup failure" "$d" 3 'HTTP 502 resolving main' && pass "commit lookup failure"
 
 # A failing check is a failed poll with its own message, and a garbled verdict is never a change.
 d=$(case_dir wake-fails "tree $A" "tree $B")

@@ -37,7 +37,7 @@
 # watcher's start would otherwise become the baseline and never wake anyone.
 #
 # --wake-check PATH needs --baseline-from, since it compares against that commit. The watcher runs
-# `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <branch> --for <role>` (scripts/plans-queue.py has
+# `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <poll-commit> --for <role>` (scripts/plans-queue.py has
 # exactly that interface), which must print `wake` or `ignore`. The role comes from --wake-for: `executor` for a
 # draining executor, `lander` for the monitor. It runs under the same timeout and failure accounting as a request:
 # a check that fails or prints anything else is a failed poll, never a change.
@@ -209,6 +209,21 @@ bounded() {
 # out), or on a response that is neither shape, leaving a one-line reason in $tmp/err. Validating the shape is what
 # keeps an error body or an empty response from being mistaken for "plans/ changed".
 result=""
+# Resolve a moving branch once per poll. A tree ignored using another
+# revision's verdict would hide work if those exact tree contents returned.
+# The ref endpoint returns only the id; the commits endpoint would also carry
+# the head commit's whole file list and patches, which GitHub can refuse or
+# slow down for a very large commit.
+branch_commit() {
+	bounded gh api "repos/$repo/git/ref/heads/$branch" --jq .object.sha || return 1
+	result=$(cat "$tmp/out")
+	if is_object_id "$result"; then
+		return 0
+	fi
+	echo "unexpected commit response: $(printf '%s' "$result" | head -c 100)" >"$tmp/err"
+	return 1
+}
+
 plans_tree() {
 	local out
 	bounded gh api "repos/$repo/git/trees/$1" \
@@ -223,11 +238,11 @@ plans_tree() {
 	return 1
 }
 
-# Sets $result to the --wake-check verdict, `wake` or `ignore`, for the branch against the baseline commit. Anything
+# Sets $result to the --wake-check verdict, `wake` or `ignore`, for the poll commit against the baseline. Anything
 # else, like a failed or hung check, is a failure with its reason in $tmp/err.
 verdict() {
 	local out
-	bounded "$wake_check" --repo "$repo" wake-check --baseline "$baseline_from" --ref "$branch" --for "$wake_for" ||
+	bounded "$wake_check" --repo "$repo" wake-check --baseline "$baseline_from" --ref "$1" --for "$wake_for" ||
 		return 1
 	out=$(cat "$tmp/out")
 	case "$out" in
@@ -304,8 +319,11 @@ ignored=""
 current=""
 decision=same
 poll() {
+	local commit
 	decision=same
-	plans_tree "$branch" || return 1
+	branch_commit || return 1
+	commit=$result
+	plans_tree "$commit" || return 1
 	current=$result
 	if [ "$current" = "$baseline" ] || [ "$current" = "$ignored" ]; then
 		return 0
@@ -314,7 +332,7 @@ poll() {
 		decision=wake
 		return 0
 	fi
-	verdict || return 1
+	verdict "$commit" || return 1
 	if [ "$result" = wake ]; then
 		decision=wake
 	else

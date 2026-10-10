@@ -107,8 +107,10 @@ case "$target" in
     ;;
 esac
 
-(cd "$work/libevent-$LIBEVENT_VERSION" && ./configure "${configure_host[@]}" --prefix="$prefix" --disable-shared --enable-static --disable-openssl --disable-thread-support --disable-libevent-regress --disable-samples && make -j"$(getconf _NPROCESSORS_ONLN)" && make install)
-(cd "$work/ncurses-$NCURSES_VERSION" && BUILD_CC=cc BUILD_CFLAGS=-O2 ./configure "${configure_host[@]}" --prefix="$prefix" --without-shared --with-normal --with-termlib --without-debug --without-ada --without-cxx --without-manpages --without-progs --without-tests --enable-widec "${ncurses_configure[@]}" && make -j"$(getconf _NPROCESSORS_ONLN)" && make install)
+# Bash 3.2 treats an empty array as unset under nounset. The guarded expansion
+# contributes no argument on macOS while retaining every Linux configure flag.
+(cd "$work/libevent-$LIBEVENT_VERSION" && ./configure ${configure_host[@]+"${configure_host[@]}"} --prefix="$prefix" --disable-shared --enable-static --disable-openssl --disable-thread-support --disable-libevent-regress --disable-samples && make -j"$(getconf _NPROCESSORS_ONLN)" && make install)
+(cd "$work/ncurses-$NCURSES_VERSION" && BUILD_CC=cc BUILD_CFLAGS=-O2 ./configure ${configure_host[@]+"${configure_host[@]}"} --prefix="$prefix" --without-shared --with-normal --with-termlib --without-debug --without-ada --without-cxx --without-manpages --without-progs --without-tests --enable-widec ${ncurses_configure[@]+"${ncurses_configure[@]}"} && make -j"$(getconf _NPROCESSORS_ONLN)" && make install)
 # tmux 3.7b's configure appends -lncurses after finding ncursesw whenever the
 # wide header is named ncurses.h. Both names must resolve to the same private
 # archive or the final link falls through to a host library.
@@ -121,7 +123,7 @@ export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
 # module and archive inside the prefix instead.
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
 export CPPFLAGS="-I$prefix/include -I$prefix/include/ncursesw"
-export LDFLAGS="-L$prefix/lib ${static_link[*]}"
+export LDFLAGS="-L$prefix/lib ${static_link[*]+${static_link[*]}}"
 tmux_source="$work/tmux-$TMUX_VERSION"
 # Release tarballs carry the generated parser newer than its grammar. Using it
 # keeps the reproducible build independent of whichever yacc happens to be on
@@ -132,5 +134,5 @@ mkdir "$work/build-tools"
 # current. The shim is never invoked by make; it only lets that obsolete
 # configure-time probe accept the release tarball's own generated source.
 ln -s /usr/bin/true "$work/build-tools/bison"
-(cd "$tmux_source" && PATH="$work/build-tools:$PATH" ./configure "${configure_host[@]}" "${tmux_configure[@]}" && make -j"$(getconf _NPROCESSORS_ONLN)")
+(cd "$tmux_source" && PATH="$work/build-tools:$PATH" ./configure ${configure_host[@]+"${configure_host[@]}"} ${tmux_configure[@]+"${tmux_configure[@]}"} && make -j"$(getconf _NPROCESSORS_ONLN)")
 install -m 0755 "$work/tmux-$TMUX_VERSION/tmux" "$output"

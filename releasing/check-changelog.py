@@ -511,7 +511,11 @@ def sweep(repo: Path, since: str | None = None) -> tuple[str, list[CommitCoverag
         status = _git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", sha, "--", str(FRAGMENTS_DIR))
         for line in filter(None, status.split("\n")):
             code, _tab, name = line.partition("\t")
-            if Path(name).name == FRAGMENT_README:
+            # Count only files discovery can load. A rename's destination is
+            # the candidate; arbitrary files beneath this directory are not notes.
+            name = name.split("\t")[-1] if code.startswith("R") else name
+            path = Path(name)
+            if path.parent != FRAGMENTS_DIR or path.suffix != ".md" or path.name == FRAGMENT_README:
                 continue
             if code.startswith("A"):
                 added.append(name)
@@ -520,8 +524,7 @@ def sweep(repo: Path, since: str | None = None) -> tuple[str, list[CommitCoverag
             elif code.startswith("D"):
                 deleted.append(name)
             elif code.startswith("R"):
-                # A rename lists `old\tnew`; the new name is what exists now.
-                added.append(name.split("\t")[-1])
+                added.append(name)
         commits.append(CommitCoverage(sha, subject, required, pr, added, modified, deleted, claims.get(pr or -1, [])))
 
     stale: list[str] = []
@@ -856,6 +859,30 @@ def self_test() -> int:
         expect(tag == "v0.2.0", "the newest stable tag wins")
         expect([commit.pr for commit in commits] == [9], "only commits after the new merge base are in range")
         expect(stale == [f"{fragments}/late.md"], "a fragment left behind by curation is reported stale")
+
+    # Coverage must use discovery's file boundary, including destinations of
+    # moves. Notes in nested folders or another format never reach curation.
+    with tempfile.TemporaryDirectory() as work:
+        repo = Path(work)
+        _run_git(repo, "init", "-q", "-b", "main")
+        fragments = str(FRAGMENTS_DIR)
+        note = "---\nkind: fixed\n---\n\nA correction.\n"
+        _commit(repo, "chore: baseline", {"baseline": "b"})
+        _run_git(repo, "tag", "v0.1.0")
+        for pr, name in enumerate(("ignored.txt", "extensionless", "nested/ignored.md", FRAGMENT_README), 20):
+            _commit(repo, f"fix: invalid note (#{pr})", {f"{fragments}/{name}": note})
+        _commit(repo, "fix: invalid edit (#24)", {f"{fragments}/ignored.txt": note + "Context.\n"})
+        _commit(repo, "fix: move into discovery (#25)", {
+            f"{fragments}/extensionless": None, f"{fragments}/recognized.md": note,
+        })
+        _commit(repo, "fix: move out of discovery (#26)", {
+            f"{fragments}/recognized.md": None, f"{fragments}/nested/recognized.md": note,
+        })
+        _tag, commits, _stale = sweep(repo)
+        by_pr = {commit.pr: commit for commit in commits}
+        expect(all(not by_pr[pr].covered for pr in range(20, 25)), "non-fragments cannot satisfy added or modified coverage")
+        expect(by_pr[25].covered, "a move into a top-level Markdown fragment supplies coverage")
+        expect(not by_pr[26].covered, "a move to nested Markdown cannot supply coverage")
 
     stable_manifest = {
         "announcement_is_prerelease": False,
