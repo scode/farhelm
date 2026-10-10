@@ -109,8 +109,8 @@ created_ssh_config=no
 
 # Every write to `~/.ssh/config` is a read-modify-write through a scratch
 # file, and every run on this machine shares that one file. Without a lock,
-# run B can snapshot the config in the instant after run A truncated it and
-# before A refilled it, and B's write-back then drops A's stanza (A's test
+# run B can snapshot the config before run A adds its stanza, and B's
+# write-back then drops A's stanza (A's test
 # dials a name that no longer resolves) or the user's own stanzas. The lock
 # is an flock on a fixed file next to the config, held only across the
 # sweep-and-write at setup and the removal at teardown, never across the
@@ -139,6 +139,24 @@ unlock_ssh_config() {
   ssh_config_locked=no
 }
 
+# Publish a complete replacement without exposing an empty or partial config.
+# Callers hold the config lock and must check content generation separately.
+# Resolve symlinks before placing the temporary beside the target: rename then
+# stays on one filesystem and preserves the user's symlink and file mode. The
+# inode changes; an interruption before rename leaves the old config intact
+# and may leave only a recognisable temporary file beside it.
+replace_ssh_config() {
+  local target replacement
+  target=$(readlink -f -- "$ssh_config") || return 1
+  replacement=$(mktemp "$target.farhelm-centos-ci.XXXXXX") || return 1
+  if ! cat -- "$1" >"$replacement" ||
+    ! chmod --reference="$target" -- "$replacement" ||
+    ! mv -f -- "$replacement" "$target"; then
+    rm -f -- "$replacement"
+    return 1
+  fi
+}
+
 # Remove one alias's block: this run's own by default, or the alias named by
 # `$1`. Only exact markers match, so a concurrent run's block (a different
 # alias, hence different markers) is left alone. Callers hold the ssh config
@@ -151,16 +169,17 @@ remove_ssh_config_block() {
     end="# END farhelm-centos-ci $1"
   fi
   test -f "$ssh_config" || return 0
+  # Publishing replaces the file, which breaks a hard link to it and resets
+  # its owner and extended attributes; only pay that when there is a block
+  # to remove, so a run that failed before adding one leaves the file as is.
+  grep -qxF -- "$begin" "$ssh_config" || return 0
   scrubbed="$run_dir/ssh-config.scrubbed"
   awk -v begin="$begin" -v end="$end" '
     $0 == begin { skip = 1; next }
     $0 == end   { skip = 0; next }
     !skip       { print }
-  ' "$ssh_config" >"$scrubbed"
-  # Write THROUGH the existing file rather than renaming over it: the config
-  # keeps its inode and its 0600 mode, and a symlinked config keeps pointing
-  # where the user aimed it.
-  cat "$scrubbed" >"$ssh_config"
+  ' "$ssh_config" >"$scrubbed" || return 1
+  replace_ssh_config "$scrubbed" || return 1
   if [ "$created_ssh_config" = yes ] && [ ! -s "$ssh_config" ]; then
     rm -f "$ssh_config"
   fi
@@ -175,7 +194,9 @@ cleanup() {
   # still held; lock_ssh_config is a no-op in that case, and the unlock
   # afterwards releases either acquisition.
   if lock_ssh_config; then
-    remove_ssh_config_block || true
+    if ! remove_ssh_config_block; then
+      echo "could not remove this run's ssh config block; leaving the config intact" >&2
+    fi
     unlock_ssh_config || true
   else
     echo "skipping ssh config cleanup: could not take $ssh_config_lock" >&2
@@ -321,7 +342,7 @@ if [ -f "$ssh_config" ]; then
     ' "$ssh_config")
     if [ -z "$identity" ] || [ ! -e "$identity" ]; then
       echo "   removing stale ssh config block for $stale_alias"
-      remove_ssh_config_block "$stale_alias"
+      remove_ssh_config_block "$stale_alias" || exit 1
     fi
   done <<EOF
 $(awk -v prefix="$config_begin_prefix " -v alias_prefix="$ssh_alias_prefix-" \
@@ -337,8 +358,8 @@ EOF
       $0 == begin { skip = 1; next }
       $0 == end   { skip = 0; next }
       !skip       { print }
-    ' "$ssh_config" >"$scrubbed"
-    cat "$scrubbed" >"$ssh_config"
+    ' "$ssh_config" >"$scrubbed" || exit 1
+    replace_ssh_config "$scrubbed" || exit 1
   fi
 fi
 if [ ! -e "$ssh_config" ]; then
@@ -364,21 +385,22 @@ test -s "$run_dir/known_hosts" || {
 # ssh configuration — which is how provisioning reaches every real host, and
 # what keeps the port, the key, and the account out of the test's own code.
 {
-  printf '%s\n' "$config_begin"
-  printf 'Host %s\n' "$ssh_alias"
-  printf '    HostName 127.0.0.1\n'
-  printf '    Port %s\n' "$port"
-  printf '    User %s\n' "$container_user"
-  printf '    IdentityFile %s\n' "$run_dir/id_ed25519"
-  printf '    IdentitiesOnly yes\n'
-  printf '    UserKnownHostsFile %s\n' "$run_dir/known_hosts"
-  printf '    StrictHostKeyChecking yes\n'
-  printf '    BatchMode yes\n'
-  printf '\n'
-  printf '%s\n' "$config_end"
+  # Explicit guards also hold when the surrounding command disables errexit.
+  printf '%s\n' "$config_begin" || exit 1
+  printf 'Host %s\n' "$ssh_alias" || exit 1
+  printf '    HostName 127.0.0.1\n' || exit 1
+  printf '    Port %s\n' "$port" || exit 1
+  printf '    User %s\n' "$container_user" || exit 1
+  printf '    IdentityFile %s\n' "$run_dir/id_ed25519" || exit 1
+  printf '    IdentitiesOnly yes\n' || exit 1
+  printf '    UserKnownHostsFile %s\n' "$run_dir/known_hosts" || exit 1
+  printf '    StrictHostKeyChecking yes\n' || exit 1
+  printf '    BatchMode yes\n' || exit 1
+  printf '\n' || exit 1
+  printf '%s\n' "$config_end" || exit 1
   cat "$ssh_config"
-} >"$run_dir/ssh-config.new"
-cat "$run_dir/ssh-config.new" >"$ssh_config"
+} >"$run_dir/ssh-config.new" || exit 1
+replace_ssh_config "$run_dir/ssh-config.new" || exit 1
 unlock_ssh_config
 
 # Readiness is TWO conditions, and the second is the one that matters. ssh

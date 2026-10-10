@@ -8295,7 +8295,8 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/ssh-config-atomic.md`.
+- Execution: complete in jj change `spqslwpw`, bookmark `plan/ssh-config-atomic/01-ssh-config-atomic`, PR
+  https://github.com/scode/farhelm/pull/1805/changes.
 
 ## legacy-ssh-stanza-cleanup-has-own-destructive.md
 
@@ -8313,7 +8314,8 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/ssh-config-atomic.md`.
+- Execution: complete in jj change `spqslwpw`, bookmark `plan/ssh-config-atomic/01-ssh-config-atomic`, PR
+  https://github.com/scode/farhelm/pull/1805/changes.
 
 ## installing-temporary-ssh-stanza-destroy-original-configuration.md
 
@@ -8330,7 +8332,8 @@
   over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
   the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/ssh-config-atomic.md`.
+- Execution: complete in jj change `spqslwpw`, bookmark `plan/ssh-config-atomic/01-ssh-config-atomic`, PR
+  https://github.com/scode/farhelm/pull/1805/changes.
 
 ## update-temporaries-briefly-permit-cross-account-writes.md
 
