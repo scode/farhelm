@@ -97,12 +97,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   new token, set it as `FEEDBACK_GITHUB_TOKEN` in Vercel, and deploy again (`docs/feedback-endpoint.md`). The endpoint
   allows five requests per IP per 10 minutes, so space test sends out.
 
-- **Download files named in the terminal.** When text in a session's terminal looks like a file path (an agent saying "I
-  wrote the file here"), hovering it should mark it as clickable, and clicking it should download that file from the
-  session's host to the user's machine. Which text counts as a path, how relative paths resolve, and what happens for a
-  missing file, a directory, or a very large file are to be decided when this is picked up. Plan:
-  `plans/queue/terminal-file-download.md`.
-
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps

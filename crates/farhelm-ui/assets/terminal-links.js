@@ -9,19 +9,12 @@
 //
 // ## The opener is shared; the policy is not
 //
-// `openTerminalUrl` is deliberately dumb: it opens whatever URI its caller
-// hands it, through whichever branch the page needs (main-webview
-// navigation under `dioxus:`, where Dioxus intercepts the navigation into
-// the system browser, else `window.open` with `_blank` + `noopener`). It
-// does NO scheme filtering of its own. Each adapter owns its own input
-// boundary instead: OSC 8 relies on xterm's `OscLinkProvider`, which
-// already rejects non-HTTP(S) URIs unless `allowNonHttpProtocols` is set
-// (it is not, and this file is not the place to change that), while the
-// plain-text adapter — which turns ARBITRARY printed bytes into links —
-// gets the explicit allowlist in `isPlainWebUrl`. Putting the policy in
-// the opener would silently re-filter OSC 8 targets through a second,
-// divergent rule; putting it in the plain-link adapter keeps each path's
-// contract in exactly one place.
+// `openTerminalUrl` opens its caller-validated URI through main-webview
+// navigation under `dioxus:`, else window.open with noopener. It performs
+// no scheme filtering. terminal.js's OSC handler explicitly permits only
+// http(s) here and routes file targets to terminal-files.js; every other
+// scheme is ignored. The plain WebLinks adapter has its own stricter
+// isPlainWebUrl boundary. File lookup/transfer never reaches this opener.
 //
 // ## What this does NOT do
 //
@@ -372,7 +365,8 @@
    * @param {string | null} [text]
    */
   function showLinkTarget(event, uri, owner, text) {
-    let display = owner.querySelector(':scope > .terminal-link-target');
+    // Files share visual CSS only; their async evidence owns another element.
+    let display = owner.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)');
     if (!display) {
       display = document.createElement('div');
       display.className = 'terminal-link-target';
@@ -437,7 +431,7 @@
    * @param {HTMLElement} owner
    */
   function hideLinkTarget(owner) {
-    const display = owner.querySelector(':scope > .terminal-link-target');
+    const display = owner.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)');
     if (display) display.hidden = true;
   }
 

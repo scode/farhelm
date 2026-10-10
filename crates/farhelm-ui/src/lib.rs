@@ -1209,6 +1209,8 @@ declare_assets! {
     // four helpers above: `node --test` must run the exact shipped
     // functions, and terminal.js treats this global as a mount
     // precondition so no link can activate half-loaded.
+    // File recognition and hover ownership are shared with the JS test harness.
+    const TERMINAL_FILES_JS: Asset = asset!("/assets/terminal-files.js");
     const TERMINAL_LINKS_JS: Asset = asset!("/assets/terminal-links.js");
     const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
     // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
@@ -1500,6 +1502,7 @@ fn AppBody() -> Element {
         document::Script { src: COPY_ON_SELECT_JS }
         document::Script { src: CLIPBOARD_WRITER_JS }
         document::Script { src: TERMINAL_LINKS_JS }
+        document::Script { src: TERMINAL_FILES_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         document::Script { src: SIDEBAR_WIDTH_JS }

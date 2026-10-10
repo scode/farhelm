@@ -3254,6 +3254,7 @@
           window.farhelmTooltip &&
           window.farhelmClipboardWriter &&
           window.farhelmTerminalLinks &&
+          window.farhelmTerminalFiles &&
           fontSettled &&
           document.getElementById(spec.el)
         ) {
@@ -3446,6 +3447,13 @@
             observation.regularPending = regularFont.isPending();
           }
         }
+        // The addon owns file lookups/transfers for the retained terminal,
+        // not for a particular WebSocket attachment or tab render.
+        const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
+          endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
+          secret: deviceSecret,
+          native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
+        });
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -3497,55 +3505,27 @@
           // reason to risk when simply omitting the key is known to
           // preserve the intended fallback.
           ...(fontReady ? { fontFamily: '"JetBrains Mono", monospace' } : {}),
-          // OSC 8 hyperlinks (the kind Claude Code and other modern CLIs
-          // emit) open directly. Without a `linkHandler` xterm falls back
-          // to its own `confirm()` — "Do you want to navigate to …?
-          // WARNING: This link could potentially be dangerous" — on every
-          // click, a blanket warning that tells the user nothing they can
-          // act on. `noopener` keeps the target from reaching back into
-          // this page.
-          //
-          // Desktop takes a different route. dioxus-desktop (checked
-          // against 0.7.9's webview.rs) installs a wry NAVIGATION handler
-          // that catches any `http(s)://`/`mailto:` navigation of the main
-          // webview, hands the URL to the system browser via `webbrowser`,
-          // and refuses the navigation itself — but sets NO new-window
-          // handler, so `window.open` is a silent no-op there (verified by
-          // hand on the macOS build: clicks did nothing). Navigating the
-          // page itself is therefore the desktop path, and it is safe
-          // precisely because that handler never lets the webview leave
-          // the app. The page origin is `dioxus://` only in the desktop
-          // webview, which is what the protocol check keys on; in a real
-          // browser `location.assign` would leave Farhelm, so the web
-          // keeps `window.open`. That branch lives in the shared
-          // `farhelmTerminalLinks.openTerminalUrl` rather than inline
-          // here, because the plain-text WebLinks adapter below opens
-          // through the identical call — one opener, two adapters, no
-          // divergent copy. OSC 8 behavior itself is unchanged by the
-          // sharing: xterm's `OscLinkProvider` still owns this path's
-          // input boundary (it rejects non-HTTP(S) URIs; Farhelm does not
-          // set `allowNonHttpProtocols`), and it still registers first,
-          // so an OSC 8 span keeps precedence over any plain-text match
-          // under it.
+          // OSC 8 file targets need all-scheme dispatch. That makes this
+          // handler the security boundary: only http(s) reaches the existing
+          // opener; files go through host lookup, and other schemes do nothing.
+          // OSC spans still take precedence over plain web/path providers.
           linkHandler: {
+            allowNonHttpProtocols: true,
             activate(_event, uri) {
-              window.farhelmTerminalLinks.openTerminalUrl(uri);
+              const target = window.farhelmTerminalFiles.oscTarget(uri);
+              if (target?.kind === 'web') window.farhelmTerminalLinks.openTerminalUrl(uri);
+              else if (target?.kind === 'file') fileLinks.download(target.path);
             },
-            // An OSC 8 link's underlined text can differ from where it goes,
-            // so hovering shows the exact target (SPEC.md, Terminal
-            // experience), and turns into a loud warning when the text is
-            // itself a URL naming somewhere else. Activation above stays a
-            // direct open: the hover display is the whole safeguard, never
-            // a confirmation. xterm passes the link's range on the hovered
-            // row as the third argument; the underlined text is read from
-            // it (see `linkRowText` for what that means for wrapped links).
-            // The display is placed inside this terminal's own element, so
-            // it goes away with the terminal (see `showLinkTarget`).
             hover(event, uri, range) {
-              const links = window.farhelmTerminalLinks;
-              links.showLinkTarget(event, uri, term.element, links.linkRowText(term, range));
+              const target = window.farhelmTerminalFiles.oscTarget(uri);
+              if (target?.kind === 'file') fileLinks.hover(event, target.path);
+              else if (target?.kind === 'web') {
+                const links = window.farhelmTerminalLinks;
+                links.showLinkTarget(event, uri, term.element, links.linkRowText(term, range));
+              }
             },
             leave() {
+              fileLinks.leave();
               window.farhelmTerminalLinks.hideLinkTarget(term.element);
             },
           },
@@ -3629,6 +3609,7 @@
             window.farhelmTerminalLinks.openTerminalUrl(uri);
           }),
         );
+        term.loadAddon(fileLinks);
         term.open(el);
         fit.fit();
 
