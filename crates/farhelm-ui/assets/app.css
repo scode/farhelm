@@ -1779,7 +1779,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    gaps, in the same variables that grid uses. Zero gap because the colon is
    punctuation inside the string, not a separator between fields; the host,
    the colon, and the path are still three spans so the path can keep its
-   own left-truncating rtl clipper (see `.session-cwd`). */
+   own left-truncating rtl clipper (see `.session-cwd`). Managed rows use a
+   spaced dot instead: `host:owner/repo` would suggest a filesystem path. */
 .session-row-meta {
   gap: 0;
   padding-left: calc(2 * var(--row-slot) + 2 * var(--row-slot-gap));
@@ -3439,6 +3440,37 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   flex: 0 0 auto;
 }
 
+/* Checkout lifetime stays visible even when compact titles ellipsize. The
+   repository uses ordinary foreground; only the glyph is secondary text. */
+.managed-checkout-mark {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--fg-1);
+  gap: 5px;
+}
+
+.session-row-meta .managed-checkout-mark {
+  flex: 0 1 auto;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.managed-checkout-glyph {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.session-repository {
+  color: var(--fg-0);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .permission-glyph[data-glyph="yolo"],
 .permission-glyph[data-glyph="unknown"] {
   color: var(--warn);
@@ -3542,6 +3574,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--fg-1);
   font-size: 12px;
   flex: 0 0 auto;
+}
+
+/* Repositories are identities, so managed rows separate them from the host
+   with a spaced dot rather than the colon used for a host:path. */
+.session-host-separator[data-separator="dot"] {
+  margin-inline: 4px;
 }
 
 .session-cwd,

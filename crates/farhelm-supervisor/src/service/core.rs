@@ -6899,7 +6899,7 @@ impl Supervisor {
                 .into()),
                 None => Err(RequestError::new(
                     ErrorKind::Conflict,
-                    "this intent key has no compatible fresh-checkout recovery snapshot",
+                    "this intent key has no compatible managed-checkout recovery snapshot",
                 )
                 .into()),
             };
@@ -6908,7 +6908,7 @@ impl Supervisor {
             .map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
-                    "this intent key has no compatible fresh-checkout recovery snapshot",
+                    "this intent key has no compatible managed-checkout recovery snapshot",
                 )
             })?;
         if let FreshCreateFingerprint::RefusedGithubCheckout {
@@ -7165,7 +7165,7 @@ impl Supervisor {
                 if !cwd.trim().is_empty() {
                     return Err(RequestError::new(
                         ErrorKind::InvalidRequest,
-                        "a fresh GitHub checkout create must leave cwd empty: the checkout \
+                        "a managed checkout create must leave cwd empty: the checkout \
                          directory is allocated by the supervisor, not chosen by the caller",
                     )
                     .into());
@@ -7776,7 +7776,7 @@ impl Supervisor {
                     }
                 } {
                     return Err(anyhow::Error::new(RetainedCreateRefusal(format!(
-                        "the fresh checkout's planned path {} is occupied but its registry \
+                        "the managed checkout's planned path {} is occupied but its registry \
                      row recorded no directory identity before the interrupted attempt \
                      ended, so it cannot be proven to be this create's own checkout; the \
                      session is retained as an error with its plan, and the directory is \
@@ -7869,7 +7869,7 @@ impl Supervisor {
         validated.map_err(|error: anyhow::Error| {
             if retain_origin {
                 error.context(RetainedCreateRefusal(
-                    "fresh checkout retry validation refused".into(),
+                    "managed checkout retry validation refused".into(),
                 ))
             } else {
                 error
@@ -8985,7 +8985,7 @@ impl Supervisor {
                                 )
                             ) && !matches!(reserved, Reserved::Retry(_));
                             let error = anyhow::Error::new(allocation_failure).context(format!(
-                                "allocating the fresh checkout directory for session {id}"
+                                "allocating the managed checkout directory for session {id}"
                             ));
                             // The allocator's EEXIST is positive evidence that
                             // this first attempt created nothing. Publish that
@@ -9052,7 +9052,7 @@ impl Supervisor {
                         }
                         Ok((status, _)) => {
                             return Err(self.retain_create_refusal(reserved, anyhow::anyhow!(
-                                "the fresh checkout's allocated directory for session {id} is \
+                                "the managed checkout's allocated directory for session {id} is \
                                  no longer the object its registry row captured ({status:?}); \
                                  the session is retained with its registry evidence and \
                                  nothing will be cloned into the replacement"
@@ -9078,7 +9078,7 @@ impl Supervisor {
                         .retain_create_refusal(
                             reserved,
                             anyhow::anyhow!(
-                                "the fresh checkout's registry row for session {id} is in state \
+                                "the managed checkout's registry row for session {id} is in state \
                          {other:?} and cannot carry this create forward; the session is \
                          retained with its registry evidence"
                             ),
@@ -9335,7 +9335,7 @@ impl Supervisor {
                         .retain_create_refusal(
                             reserved,
                             error.context(
-                                "writing the launch spec; the fresh checkout itself was allocated \
+                                "writing the launch spec; the managed checkout itself was allocated \
                          and is kept for inspection and deletion",
                             ),
                             retained_snapshot
@@ -9434,7 +9434,7 @@ impl Supervisor {
                         // allocation.
                         if allocated_checkout.is_some() {
                             return Err(self.retain_create_refusal(reserved, error.context(
-                                "tmux refused to create the session; the fresh checkout itself \
+                                "tmux refused to create the session; the managed checkout itself \
                                  was allocated and is kept for inspection and deletion",
                             ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
                         }
@@ -9671,7 +9671,7 @@ impl Supervisor {
                 // allocated checkout is the user's to inspect and delete.
                 if allocated_checkout.is_some() {
                     result = self.retain_create_refusal(reserved, result.context(
-                        "confirming the fresh checkout session's launch in the database; the \
+                        "confirming the managed checkout session's launch in the database; the \
                          checkout itself was allocated and is kept for inspection and deletion",
                     ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await;
                 } else {
@@ -10013,7 +10013,7 @@ impl Supervisor {
             let cwd = origin
                 .canonical_path
                 .as_deref()
-                .context("fresh checkout has no accepted directory")?;
+                .context("managed checkout has no accepted directory")?;
             self.recover_checkout_destination(&origin, cwd)?;
             let state_path = crate::launch::preparation_state_path(&self.state_dir, &origin.id);
             let state = crate::launch::read_preparation_state(&state_path, &origin.id)?;
@@ -29547,11 +29547,11 @@ exit 0
                 false,
             )
             .await
-            .expect_err("an ordinary create's key is not a fresh checkout's"),
+            .expect_err("an ordinary create's key is not a managed checkout's"),
         );
         assert_eq!(kind, ErrorKind::Conflict);
         assert!(
-            plain.contains("no compatible fresh-checkout recovery snapshot"),
+            plain.contains("no compatible managed-checkout recovery snapshot"),
             "{plain}"
         );
     }

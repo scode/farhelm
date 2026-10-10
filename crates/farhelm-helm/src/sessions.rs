@@ -373,7 +373,7 @@ pub(crate) async fn github_checkout_preview(
         return http_error(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
-            message: "fresh checkout preview requires a host with a stable installation identity"
+            message: "managed checkout preview requires a host with a stable installation identity"
                 .into(),
         }));
     };
@@ -1028,8 +1028,9 @@ fn accepted_checkout_preview<'a>(
     let preview = checkout.preview.as_ref().ok_or_else(|| SupervisorError {
         origin: crate::client::ErrorOrigin::Helm,
         kind: ErrorKind::InvalidRequest,
-        message: "fresh checkout requires an accepted preview; request a preview before launching"
-            .into(),
+        message:
+            "managed checkout requires an accepted preview; request a preview before launching"
+                .into(),
     })?;
     if preview.host != claim.host.to_string()
         || preview.installation_identity.is_empty()
@@ -1108,7 +1109,7 @@ async fn github_checkout_resolution(
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message:
-                "fresh checkout requires an accepted preview; request a preview before launching"
+                "managed checkout requires an accepted preview; request a preview before launching"
                     .into(),
         })));
     };
@@ -1127,7 +1128,7 @@ async fn github_checkout_resolution(
         return Some(Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
-            message: "fresh checkout cwd must be empty or match the accepted preview".into(),
+            message: "managed checkout cwd must be empty or match the accepted preview".into(),
         })));
     }
     Some(Ok(Some(farhelm_proto::ResolvedGithubCheckout {
@@ -1919,7 +1920,7 @@ async fn create_fresh_session(
             return Err(anyhow::Error::new(SupervisorError {
                 origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
-                message: "fresh checkout and session titles must agree".into(),
+                message: "managed checkout and session titles must agree".into(),
             }));
         }
         if req.title.is_none() {
@@ -2436,7 +2437,7 @@ pub(crate) struct DeleteQuery {
 /// Same empty-object success body as `stop_session`, except that a delete
 /// which completed but left something the user must know about answers
 /// `{"notice": "..."}` (today a checkout it could not archive and left in
-/// place; SPEC.md "Fresh GitHub checkouts"). An unknown `id` maps to 404.
+/// place; SPEC.md "Managed checkouts"). An unknown `id` maps to 404.
 ///
 /// A successful delete FORGETS the session from the helm's own records
 /// before it answers ([`forget_session`]), so the merged list stops showing
@@ -3136,7 +3137,7 @@ async fn finish_replacement(
     // A replacement in the same folder keeps its source's checkout, but one
     // with an overridden folder or a fresh checkout can release the source's
     // last reference, and that delete's notice must reach the user like any
-    // other Delete's (SPEC.md "Fresh GitHub checkouts").
+    // other Delete's (SPEC.md "Managed checkouts").
     // As for an ordinary delete: requests the source has waiting for the
     // user, or on their way to a card, would otherwise hold the delete behind
     // their request fence. Held until the delete answers.

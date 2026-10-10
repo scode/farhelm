@@ -452,8 +452,8 @@ shipping uninstall support.
 
 ### Creation
 
-Session creation is one action, not a wizard. Choose an existing directory or explicitly request a fresh GitHub
-checkout; the agent choice is independent of that destination:
+Session creation is one action, not a wizard. Choose an existing directory or explicitly request a managed checkout; the
+agent choice is independent of that destination:
 
 - Host: The session launcher's host picker shows each host's mark and name in the list's existing order, including
   unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End browse; Enter
@@ -497,7 +497,7 @@ checkout; the agent choice is independent of that destination:
   preselecting YOLO for another harness. Explicit YOLO on a harness with a non-YOLO default is remembered; an explicit
   workspace-trust choice on Codex, Muse, or Pi is remembered separately after a successful user launch. `trust:true` and
   `trust:false` are single search actions on those harnesses. Codex true and false set that launch's exact working
-  directory to `trusted` and `untrusted` through its per-run project configuration; a fresh checkout's path is filled
+  directory to `trusted` and `untrusted` through its per-run project configuration; a managed checkout's path is filled
   only after the supervisor has resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and
   `--no-approve` respectively. Each setting applies to one launch and never writes vendor trust state; Muse false adds
   no flag and cannot revoke trust from YOLO or vendor settings. Without a choice, the harness retains its own trust
@@ -549,16 +549,16 @@ checkout; the agent choice is independent of that destination:
   agent type clears the choices incompatible with it exactly as picking that agent type by hand does. A template's
   agent-launch fields and command-launch fields apply to the launch kind active once its own launch kind, if any, is
   applied. A template may set any launcher field: launch kind, agent type, model, effort, permissions, workspace trust,
-  command, YOLO assertion, resume command, host, destination (a folder or a fresh GitHub checkout), and session name.
-  Fields a template leaves out keep whatever the launcher already holds, so templates stack: applying `my-codex` and
-  then `myproject-webbuilder` applies both, the later one winning where they overlap. A template whose field does not
-  apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
-  chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
+  command, YOLO assertion, resume command, host, destination (a folder or a managed checkout), and session name. Fields
+  a template leaves out keep whatever the launcher already holds, so templates stack: applying `my-codex` and then
+  `myproject-webbuilder` applies both, the later one winning where they overlap. A template whose field does not apply
+  to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the chosen
+  agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
   template that sets a field the current dialog holds fixed, such as the host in Replace with; Restart with does not
   offer templates. A template names its host by the host's recorded install identity, exactly like the host default
   below, so a registry row retargeted to another install makes the template's host field inapplicable rather than
   silently aiming at the successor. A launch made after applying templates is, for remembered defaults, recent setups,
-  and fresh-checkout previews, exactly the launch the same hand edits would have made: the resulting choices count as
+  and managed-checkout previews, exactly the launch the same hand edits would have made: the resulting choices count as
   the user's explicit selection, and a template that changes host, installation, destination, title, or agent
   invalidates a pending checkout preview as the equivalent hand edit does. Because a template pins only what it
   contains, a field the launch requires and no template set still has to be filled in by hand; that friction is
@@ -635,16 +635,23 @@ the create with a visible error and no session; launch failures of a session tha
 the session itself — **error** when the agent process could not be started at all (exec failure, command not found),
 **exited** when it started and then ended, however quickly, with its exit code visible.
 
-### Fresh GitHub checkouts
+### Managed checkouts
+
+The user-facing name is managed checkout: a repository clone Farhelm made for a session, rather than an ordinary
+directory the user supplied. Session rows with a current checkout association show a branch glyph and the repository in
+place of the directory. Compact rows put the glyph after the name. Its tooltip names the repository and actual checkout
+path and explains that the directory moves to the trash when its last session is deleted. The session view shows the
+same mark beside its directory. Sessions using another session's checkout, including its subdirectories, carry the mark
+too; requesting a checkout at launch does not establish current membership.
 
 Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with both
 launch kinds. Selecting a folder or editing the ordinary directory returns to an existing-directory launch without
-changing the agent choice. Clone of a session associated with a GitHub checkout starts on a fresh checkout of that
-repository, preferring its current checkout association over its launch provenance. This includes sessions opened in an
-existing checkout and replacements of the session that created it. A source in a checkout subdirectory clones to the new
+changing the agent choice. Clone of a session in a managed checkout starts on a managed checkout of that repository,
+preferring its current checkout association over its launch provenance. This includes sessions opened in an existing
+checkout and replacements of the session that created it. A source in a checkout subdirectory clones to the new
 checkout's top level. Clone of other sessions, Replace with, and plain Replace start from the source's actual directory;
-a fresh checkout then requires an explicit repository selection, a saved repository setup, or a template that sets one.
-`farhelm agent clone` keeps its existing-directory behavior.
+a managed checkout then requires an explicit repository selection, a saved repository setup, or a template that sets
+one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
 root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
@@ -670,7 +677,7 @@ name field shows the effective name, and preview and launch use it alike. Changi
 suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch re-previews and
 may advance the default name, but still needs another click on Launch for the newly shown path.
 
-Replace with into a fresh checkout, Clone into a different repository, and Clone of a source with no repository ignore
+Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
 remains unnamed. Whenever a checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder
 text. Choosing an existing folder again restores the source's original directory and copied title; choosing the source
@@ -698,10 +705,10 @@ that prevents this key from allocating later. That refusal resolves even an earl
 the preview and requires another explicit submission. An ordinary conflict without that proof retains the original
 request and key.
 
-In fresh-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
+In managed-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
 or error state while no path is available. An ambiguous retry keeps displaying the original request's path. Browse and
 recent folders remain available; `use existing folder` deliberately leaves checkout mode and restores an editable path.
-Typing into the checkout path cannot turn a fresh checkout into an existing-folder launch.
+Typing into the checkout path cannot turn a managed checkout into an existing-folder launch.
 
 An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
 visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved
@@ -721,7 +728,7 @@ directory or its canonical subdirectories also retain references, including refe
 exited, and errored sessions still count. Delete releases its reference; only the final reference causes the recorded
 checkout to move into `farhelm-archived-working-copies` under its original root, using its original basename plus a
 timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
-A foreign object replacing the recorded path must remain untouched.
+A foreign object replacing the recorded path must remain untouched. The UI calls this archive the trash.
 
 Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
 safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
@@ -797,13 +804,13 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   effect the next time it is cloned or replaced. This action is available exactly when Restart is. Its header button
   remains visible but greyed out otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
-  fresh-conversation counterpart to restart's resumed one. A session associated with a GitHub checkout starts on a fresh
-  checkout of the same repository, named `<title>-clone` with the first free numeric suffix when taken, as described
-  under Fresh GitHub checkouts. Other sessions keep their working directory; choosing an existing folder restores the
-  source's directory and title. The source session is untouched: cloning starts a brand-new, independent create through
-  the same form and the same confirmation described under Creation and identity above, so every field can be edited
-  before submitting and the request can be cancelled like any other create. The source's stored launch is carried into
-  the launcher verbatim: an agent launch's choices including omitted default fields, never rediscovered by parsing its
+  fresh-conversation counterpart to restart's resumed one. A session in a managed checkout starts on a managed checkout
+  of the same repository, named `<title>-clone` with the first free numeric suffix when taken, as described under
+  Managed checkouts. Other sessions keep their working directory; choosing an existing folder restores the source's
+  directory and title. The source session is untouched: cloning starts a brand-new, independent create through the same
+  form and the same confirmation described under Creation and identity above, so every field can be edited before
+  submitting and the request can be cancelled like any other create. The source's stored launch is carried into the
+  launcher verbatim: an agent launch's choices including omitted default fields, never rediscovered by parsing its
   composed command, or a command launch's command, YOLO assertion, declared agent type, and resume command. Cloning does
   not deduplicate titles — a duplicate is allowed, the same as any other create.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and launch,
@@ -1593,7 +1600,7 @@ release notes say so.
 
 ## VCS neutrality
 
-Ordinary session operation is version-control-agnostic. Explicit fresh-checkout creation is the bounded exception:
+Ordinary session operation is version-control-agnostic. Explicit managed-checkout creation is the bounded exception:
 
 - Sessions launch in any existing directory: detached HEAD, no `.git`, colocated or pure `jj` workspaces, nested
   repositories, and plain directories all work identically.
@@ -1741,7 +1748,7 @@ like a GUI launch, with the same refusals naming the field, and the remembered G
 same templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag
 required by the verb, such as `--cwd` or the target host, may be omitted when an applied template sets that field, and
 an explicit flag wins over a template. `farhelm spawn` targets its own host, so a template that sets a host is refused
-there. A template whose destination is a fresh GitHub checkout is refused on the CLI, which does not create checkouts.
+there. A template whose destination is a managed checkout is refused on the CLI, which does not create checkouts.
 `--inherit-agent` is exclusive with every launch flag. A command flag repeated or contradicted (`--yolo` with
 `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
 `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
@@ -1777,11 +1784,11 @@ write, and replacing the whole template would silently drop that text. To drop a
 `farhelm agent template delete <name>` and create it again; the same goes for turning an agent-launch template into a
 command-launch one or back, which an edit refuses, since a template mixing the two could never apply. A command line
 given to a template write needs `--yolo` or `--no-yolo` with it, since a YOLO assertion is about one command line. A
-fresh GitHub checkout destination is refused, as it is when applying a template from the CLI. These writes go through
-the same path as the GUI's template editor, with one difference: an agent's write or delete lands only on the template
-its card showed, and is refused, with nothing written, if that template changed or appeared while the card waited. This
-is the one exception to last-write-wins for templates (Concepts), and it exists because an approval covers exactly what
-the card showed.
+managed checkout destination is refused, as it is when applying a template from the CLI. These writes go through the
+same path as the GUI's template editor, with one difference: an agent's write or delete lands only on the template its
+card showed, and is refused, with nothing written, if that template changed or appeared while the card waited. This is
+the one exception to last-write-wins for templates (Concepts), and it exists because an approval covers exactly what the
+card showed.
 
 Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
 with their values except a command line or resume command, which are listed as set without their text. Discovery also

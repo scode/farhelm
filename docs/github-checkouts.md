@@ -1,4 +1,4 @@
-# Fresh GitHub checkouts
+# Managed checkouts
 
 Type `gh:owner/repo` in the launch composer's search field and select the repository to launch an agent in a new clone
 on the selected host. Choose the agent independently: structured harnesses and raw commands both work. Ordinary folder
@@ -31,7 +31,7 @@ farhelm helm checkout-config set-post-clone 'jj git init --colocate'
 
 `clear-post-clone` removes the global hook. With `--host <id>`, it restores inheritance instead. To disable an inherited
 hook for one host, set that host's post-clone command to the empty string (`''`). Configuring the hook authorizes that
-shell command to run for future fresh checkouts; cloning itself is built in and does not require a hook.
+shell command to run for future managed checkouts; cloning itself is built in and does not require a hook.
 
 ## Launch and reuse
 
@@ -47,10 +47,11 @@ reuses the checkout without repeating clone or hook. Interrupted or uncertain pr
 
 Suggestions come from this host installation's recent launches and immediate clones under its configured root, without
 querying GitHub. You can still enter a valid pair when discovery is incomplete. Repository input accepts `owner/repo`,
-not a URL or `@branch` suffix. Reusing a saved repository setup creates another fresh checkout. Ordinary Clone and
-Replace reuse the source session's actual directory; explicitly select a repository to request a fresh checkout instead.
+not a URL or `@branch` suffix. Reusing a saved repository setup creates another managed checkout. Clone of a session in
+a managed checkout starts another checkout of that repository, even from a subdirectory. Replace reuses the source
+session's actual directory; explicitly select a repository to request a managed checkout instead.
 
-Selecting a folder result or editing the ordinary folder field leaves fresh-checkout mode while preserving the agent
+Selecting a folder result or editing the ordinary folder field leaves managed-checkout mode while preserving the agent
 choice. Unlabelled folder search still works; `folder:` restricts it to folders.
 
 If a launch reply is lost, leave the request unchanged and click Launch again to recover its outcome. Farhelm keeps the
@@ -60,7 +61,7 @@ connection error or ordinary conflict alone does not authorize a second checkout
 
 ## Repository caches
 
-Repeated fresh checkouts of the same repository are faster because each host keeps a cache of its Git objects. Before
+Repeated managed checkouts of the same repository are faster because each host keeps a cache of its Git objects. Before
 each checkout, Git fetches new branches, tags and objects into that cache in the session terminal, then makes an
 independent clone with the ordinary GitHub origin. Git uses the host's own credentials for both commands; a private
 repository without a credential helper can ask for credentials twice. A cache error stops the clone stage and names the
@@ -83,9 +84,9 @@ An ordinary session that borrows a managed checkout can be its final reference, 
 move. Same-directory replacement keeps a reference throughout. Moving a replacement elsewhere releases the old checkout
 only when no other session retains it. Directories that Farhelm never allocated remain unmanaged and are not moved.
 
-A failed archive move leaves recoverable session metadata and reports the failure. Resolve the reported condition and
-retry Delete. Farhelm does not overwrite a foreign directory, copy across filesystems, or recursively remove checkout
-contents as a fallback.
+A failed archive move never blocks Delete. The session is removed, Farhelm stops managing the checkout, and a visible
+notice names the directory left behind and the reason. Farhelm does not overwrite a foreign directory, copy across
+filesystems, or recursively remove checkout contents as a fallback.
 
 A rare interruption can occur after Farhelm creates the directory but before it records the directory's identity.
 Recovery leaves an error session because the pathname alone cannot prove ownership. Deleting that session removes its

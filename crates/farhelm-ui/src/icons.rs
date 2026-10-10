@@ -50,6 +50,71 @@
 
 use dioxus::prelude::*;
 
+// ===== Managed-checkout marks =========================================
+
+/// Draw the repository-neutral mark for a checkout Farhelm manages.
+///
+/// The caller owns the accessible word and any tooltip: the same shape is
+/// used beside a session's directory or name.
+#[component]
+pub(crate) fn BranchIcon() -> Element {
+    rsx! {
+        svg {
+            class: "managed-checkout-glyph",
+            "data-glyph": "branch",
+            view_box: "0 0 12 12",
+            "aria-hidden": "true",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "1.2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            circle { cx: "3.5", cy: "2.8", r: "1.2" }
+            circle { cx: "3.5", cy: "9.2", r: "1.2" }
+            circle { cx: "8.5", cy: "4.2", r: "1.2" }
+            path { d: "M3.5 4v4M8.5 5.4c0 2-5 1.4-5 2.6" }
+        }
+    }
+}
+
+/// Explain current checkout membership, including sessions borrowing it.
+///
+/// The working-copy association, rather than launch provenance, establishes
+/// this mark. Peer values are escaped in the tooltip just as they are in the
+/// visible row; the hidden word gives the decorative SVG an accessible name.
+/// The full row shows the repository within the hover target and says its
+/// accessible name once. Other callers retain that name in hidden text. A
+/// cwd differing byte for byte from the recorded root, including a symlink
+/// spelling, is shown separately so a subdirectory's location remains known.
+#[component]
+pub(crate) fn ManagedCheckoutMark(
+    checkout: crate::github_checkout::WorkingCopyInfo,
+    cwd: String,
+    #[props(default = false)] show_repository: bool,
+) -> Element {
+    let repo = crate::peer::display_peer(&checkout.repo.identifier());
+    let path = crate::peer::display_peer(&checkout.canonical_path);
+    let mut tooltip = format!("managed checkout of {repo} at {path}.");
+    if cwd != checkout.canonical_path {
+        tooltip.push_str(&format!(
+            " Session folder: {}.",
+            crate::peer::display_peer(&cwd)
+        ));
+    }
+    tooltip.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
+    rsx! {
+        span { class: "managed-checkout-mark", "data-tooltip": tooltip,
+            BranchIcon {}
+            if show_repository {
+                span { class: "visually-hidden", "managed checkout" }
+                span { class: "session-repository peer-value", dir: "ltr", "{repo}" }
+            } else {
+                span { class: "visually-hidden", "managed checkout of {repo}" }
+            }
+        }
+    }
+}
+
 /// The harness identity a sidebar badge can establish without trusting a
 /// display label. `Terminal` is deliberately the fallback: it says that the
 /// stored command exists without pretending Farhelm knows what runs it.

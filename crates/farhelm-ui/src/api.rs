@@ -1769,10 +1769,9 @@ fn replace_with_payload(
 /// source's Delete carried when there was one (the helm adds it to the
 /// session object as `delete_notice`; see the helm's `replace_reply`).
 ///
-/// The notice matters because a replacement in another folder can release
-/// the source's last checkout reference, and a checkout that could not be
-/// archived must never be released silently (SPEC.md "Fresh GitHub
-/// checkouts"). An older helm sends no such field, which reads as no notice.
+/// The notice matters because a replacement in another folder can release the source's last
+/// checkout reference, and a checkout that could not be archived must never be released silently
+/// (SPEC.md "Managed checkouts"). An older helm sends no such field, which reads as no notice.
 async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<String>), String> {
     let mut body = resp
         .json::<serde_json::Value>()
@@ -2585,7 +2584,7 @@ pub(crate) async fn replace_session(
 ///
 /// `Ok(Some(notice))` is a completed delete that left something the user
 /// must be told about, today a checkout the host could not archive and left
-/// in place (SPEC.md "Fresh GitHub checkouts": that outcome is never
+/// in place (SPEC.md "Managed checkouts": that outcome is never
 /// silent). The notice is peer text from the host. A success whose body
 /// cannot be read or decoded is still a completed delete, but it may have
 /// carried such a notice, so it yields a notice saying so rather than
@@ -3662,7 +3661,7 @@ mod tests {
     /// been lost.
     ///
     /// Why it matters: a checkout Delete could not archive is released from
-    /// Farhelm's management, and SPEC.md "Fresh GitHub checkouts" forbids
+    /// Farhelm's management, and SPEC.md "Managed checkouts" forbids
     /// that outcome being silent. Reading a failed body as "no notice" would
     /// make a lost notice indistinguishable from a delete with nothing to
     /// report.

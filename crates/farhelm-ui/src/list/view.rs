@@ -211,10 +211,9 @@ fn focus_rename_toggle(id: &str) {
 #[derive(Clone, Copy)]
 pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 
-/// The newest notice a completed Delete carried: today a checkout its host
-/// could not archive and left in place, unmanaged (SPEC.md "Fresh GitHub
-/// checkouts": that outcome is never silent). The session list shows it
-/// until dismissed or replaced by a newer one.
+/// The newest notice a completed Delete carried: today a checkout its host could not archive and
+/// left in place, unmanaged (SPEC.md "Managed checkouts": that outcome is never silent). The
+/// session list shows it until dismissed or replaced by a newer one.
 ///
 /// Shared app-wide, not local to the list, because a Replace deletes its
 /// source too, and a Replace can start from the session view or the create

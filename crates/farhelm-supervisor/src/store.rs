@@ -1345,7 +1345,7 @@ pub struct DeleteSettlement {
     pub retired: Vec<String>,
     /// Checkouts the teardown saw as missing whose absence could not be
     /// re-proved at commit time, released unarchived instead. The Delete
-    /// owes the user a notice for each (SPEC.md "Fresh GitHub checkouts").
+    /// owes the user a notice for each (SPEC.md "Managed checkouts").
     pub late_released: Vec<LateRelease>,
 }
 
@@ -3413,9 +3413,8 @@ impl SessionStore {
                                     "membership {working_copy_id} names a missing registry row"
                                 )
                             })?;
-                            // Delete could not archive this checkout safely
-                            // and gives it up instead (SPEC.md "Fresh GitHub
-                            // checkouts": archiving never blocks Delete).
+                            // Delete could not archive this checkout safely and gives it up instead
+                            // (SPEC.md "Managed checkouts": archiving never blocks Delete).
                             if released.contains(&working_copy_id) {
                                 crate::working_copies::release_unarchived(&tx, &working_copy_id)
                                     .context("releasing the unarchived checkout's record")?;

@@ -173,7 +173,7 @@ pub(crate) fn resolve(
         Some(TemplateDestination::Folder(folder)) if !folder.is_empty() => folder,
         Some(TemplateDestination::Github(repo)) => {
             return Err(invalid(format!(
-                "a template sets a fresh checkout of {repo} as the destination, and the CLI \
+                "a template sets a managed checkout of {repo} as the destination, and the CLI \
                  does not create checkouts; pass --cwd with an existing folder"
             )));
         }

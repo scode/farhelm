@@ -105,7 +105,7 @@ async function selectRepo(page: Page) {
   const form = page.locator('.create-session-form[role="dialog"]');
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("gh:acme/bar");
-  const choice = form.getByRole("option", { name: "Fresh checkout: acme/bar", exact: true });
+  const choice = form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true });
   await expect(choice).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
   await expect(search).toHaveValue("");
@@ -324,7 +324,7 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
 
 /** Why: Clone and Replace with copy the source's title, and a fresh checkout
  * named after that title collides with the source's own checkout, so every
- * such launch used to be refused. Spec (SPEC.md, Fresh GitHub checkouts):
+ * such launch used to be refused. Spec (SPEC.md, Managed checkouts):
  * while a fresh checkout is the destination and the copied title is
  * unedited, the preview and the launch body both carry an empty title, the
  * name field is empty with the unnamed `repo-N` as its placeholder, a return
@@ -561,7 +561,7 @@ test("Escape dismisses repository suggestions before closing the composer", asyn
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("gh:acme/bar");
   await expect(search).toBeFocused();
-  await expect(form.getByRole("option", { name: "Fresh checkout: acme/bar", exact: true })).toBeVisible();
+  await expect(form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true })).toBeVisible();
   await search.press("Escape");
   await expect(form).toBeVisible();
   await expect(search).toBeFocused();

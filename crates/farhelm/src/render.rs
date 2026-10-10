@@ -220,7 +220,7 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
             parts.push(format!("folder {}", quoted(folder)))
         }
         Some(TemplateDestination::Github(repo)) => {
-            parts.push(format!("fresh checkout {}", quoted(repo)))
+            parts.push(format!("managed checkout {}", quoted(repo)))
         }
         None => {}
     }
@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(
             command,
             "command launch, command (set), no-yolo, resume command default, host \"builder\", \
-             fresh checkout \"o/r\""
+             managed checkout \"o/r\""
         );
         assert_eq!(cell(TemplateFields::default(), None), "nothing");
     }

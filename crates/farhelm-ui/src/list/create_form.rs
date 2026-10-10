@@ -1703,7 +1703,7 @@ fn reseed_cloned_field(
 /// Clone and Replace with copy the source's title into the name field, and
 /// for an existing-folder launch that copy is what the new session should be
 /// called. A fresh checkout is different: its directory is named after the
-/// title, and SPEC.md (Fresh GitHub checkouts) refuses an explicit name that
+/// title, and SPEC.md (Managed checkouts) refuses an explicit name that
 /// is taken rather than suffixing it. The copied title usually names the
 /// source's own checkout, so treating it as typed made every Clone or
 /// Replace with into `gh:` of the same repository fail with a directory
@@ -1806,7 +1806,7 @@ fn search_result_tooltip(
             "apply this template's settings to the draft".to_string()
         }
         ComposerSearchResult::Github(_) => {
-            "start in a fresh checkout of this repository".to_string()
+            "start in a managed checkout of this repository".to_string()
         }
         ComposerSearchResult::Model { .. } => "use this model for the session".to_string(),
         ComposerSearchResult::Effort(_) => "use this reasoning effort for the session".to_string(),
@@ -4992,7 +4992,7 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
                                                         crate::launch_composer::ComposerSearchResult::Template(name) => rsx! { "Template: {display_peer(name)}" },
-                                                        crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
+                                                        crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
                                                         crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
@@ -5175,7 +5175,7 @@ pub(super) fn CreateSessionForm(
                         PreviewState::Ready { .. } => "ready",
                         PreviewState::Failed { .. } => "failed",
                     },
-                    "fresh checkout of {repo.identifier()} on {selected_host_label}"
+                    "managed checkout of {repo.identifier()} on {selected_host_label}"
                     if let Some(preview) = &displayed_preview {
                         div { dir: "ltr", "{display_peer(&preview.cwd)}" }
                     }
@@ -5211,7 +5211,7 @@ pub(super) fn CreateSessionForm(
                                     // existing folder rather than "this path"
                                     // while checkout mode is active.
                                     aria_label: if checkout_mode { "browse existing folders" } else { "browse this path" },
-                                    "data-tooltip": if checkout_mode { "browse the existing folders on this host instead of a fresh checkout" } else { "browse: list the folders under this path on the host" },
+                                    "data-tooltip": if checkout_mode { "browse the existing folders on this host instead of a managed checkout" } else { "browse: list the folders under this path on the host" },
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) { return; }
                                         request_directory_browse(
@@ -5271,7 +5271,7 @@ pub(super) fn CreateSessionForm(
                                 button {
                                     r#type: "button",
                                     class: "launch-composer-existing-folder",
-                                    "data-tooltip": "use an existing folder instead of a fresh checkout",
+                                    "data-tooltip": "use an existing folder instead of a managed checkout",
                                     disabled: busy,
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) { return; }
@@ -6541,15 +6541,13 @@ mod tests {
         assert_eq!(prefill.replace_source_opened, None);
     }
 
-    /// Why this matters: Clone and Replace with copy the source's title, and
-    /// a fresh checkout names its directory after the title and refuses a
-    /// taken one, so the copied title (usually the source's own checkout)
-    /// made every Clone or Replace with into `gh:` of the same repository
-    /// fail with a directory conflict. Spec (SPEC.md, Fresh GitHub
-    /// checkouts): with a fresh checkout as the destination, an unedited
-    /// copied title is sent empty so the session is unnamed and gets
-    /// `repo-N`; an edited title, a form with no copied seed, and every
-    /// existing-folder launch keep `submitted_field`'s rule unchanged.
+    /// Why this matters: Clone and Replace with copy the source's title, and a fresh checkout names
+    /// its directory after the title and refuses a taken one, so the copied title (usually the
+    /// source's own checkout) made every Clone or Replace with into `gh:` of the same repository
+    /// fail with a directory conflict. Spec (SPEC.md, Managed checkouts): with a fresh checkout as
+    /// the destination, an unedited copied title is sent empty so the session is unnamed and gets
+    /// `repo-N`; an edited title, a form with no copied seed, and every existing-folder launch keep
+    /// `submitted_field`'s rule unchanged.
     #[farhelm_testtrace::test]
     fn a_copied_unedited_title_is_sent_empty_only_for_a_fresh_checkout() {
         let copied = Some("bar-fix");

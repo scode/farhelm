@@ -160,7 +160,7 @@ fn error_frame(req_id: u64, kind: ErrorKind, message: impl Into<String>) -> Fram
 /// identify only fields and sizes, since hook bodies may contain credentials.
 fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, String> {
     if checkout.client_identity.is_empty() {
-        return Err("fresh checkout requires a nonempty client request identity".into());
+        return Err("managed checkout requires a nonempty client request identity".into());
     }
     for (field, value) in [
         ("root", checkout.root.as_str()),
@@ -170,7 +170,7 @@ fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, 
     ] {
         if value.len() > 4096 {
             return Err(format!(
-                "fresh checkout {field} exceeds the 4096-byte limit"
+                "managed checkout {field} exceeds the 4096-byte limit"
             ));
         }
     }
@@ -179,7 +179,7 @@ fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, 
         .as_ref()
         .is_some_and(|hook| hook.len() > 16 * 1024)
     {
-        return Err("fresh checkout post-clone command exceeds the 16384-byte limit".into());
+        return Err("managed checkout post-clone command exceeds the 16384-byte limit".into());
     }
     let bytes = serde_json::to_vec(checkout)
         .expect("resolved checkout is always serializable")
@@ -339,7 +339,7 @@ async fn handle_create_session(
             Some("request fingerprint must be 64 lowercase hexadecimal characters".to_string())
         }
         Some(_) if github_checkout.is_some() => Some(
-            "a create cannot carry both a request fingerprint and a fresh checkout".to_string(),
+            "a create cannot carry both a request fingerprint and a managed checkout".to_string(),
         ),
         // Without a key there is nothing to compare it with, and a helm that
         // sent one had meant the create to be keyed: refusing says so,
@@ -7386,7 +7386,7 @@ mod tests {
         checkout.post_clone.as_mut().unwrap().push('x');
         assert_eq!(
             validate_checkout_fields(&checkout).unwrap_err(),
-            "fresh checkout post-clone command exceeds the 16384-byte limit"
+            "managed checkout post-clone command exceeds the 16384-byte limit"
         );
 
         checkout.post_clone = None;
@@ -7450,7 +7450,7 @@ mod tests {
         let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
         assert!(matches!(reply, ControlMsg::Error {
             req_id: 98, kind: ErrorKind::InvalidRequest, message,
-        } if message.contains("request fingerprint and a fresh checkout")));
+        } if message.contains("request fingerprint and a managed checkout")));
         assert!(
             sup.store
                 .reservation("checkout-and-fingerprint")

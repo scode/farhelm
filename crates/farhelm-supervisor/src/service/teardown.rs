@@ -669,21 +669,21 @@ impl Supervisor {
                         // window): an explicit Delete retires the record
                         // without moving the unknown directory — no
                         // rename, no adoption. The user is told, not just
-                        // the log (SPEC.md "Fresh GitHub checkouts": Delete
+                        // the log (SPEC.md "Managed checkouts": Delete
                         // names the preserved path), and a path that could
                         // not be checked is reported as such rather than
                         // read as absent.
                         let path = PathBuf::from(&row.canonical_root).join(&row.original_basename);
                         let notice = match tokio::fs::symlink_metadata(&path).await {
                             Ok(_) => Some(format!(
-                                "The checkout at {} was never fully set up, so Farhelm cannot \
+                                "The managed checkout at {} was never fully set up, so Farhelm cannot \
                                  tell whether the folder there is its own; it was left untouched \
                                  for you to inspect.",
                                 path.display()
                             )),
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                             Err(e) => Some(format!(
-                                "The checkout at {} was never fully set up, and that path could \
+                                "The managed checkout at {} was never fully set up, and that path could \
                                  not be checked ({e}); if a folder is there, Farhelm left it \
                                  untouched for you to inspect.",
                                 path.display()
@@ -719,16 +719,13 @@ impl Supervisor {
                         let registry = self.store.working_copy_rows().await.map_err(|e| {
                             format!("reading the registry for the reference check: {e:#}")
                         })?;
-                        // Archiving never blocks Delete (SPEC.md "Fresh
-                        // GitHub checkouts", confirmed 2026-09-28). When the
-                        // checkout cannot be archived safely, for any
-                        // reason, the session is still deleted: the checkout
-                        // is released from Farhelm's management, its folder
-                        // stays where it is, and the reply carries a notice
-                        // naming it. Before this, each of these failures kept
-                        // the session, and several could never clear (a
-                        // removed or remounted root, a filesystem without
-                        // no-replace rename, a path too long to archive).
+                        // Archiving never blocks Delete (SPEC.md "Managed checkouts", confirmed
+                        // 2026-09-28). When the checkout cannot be archived safely, for any reason,
+                        // the session is still deleted: the checkout is released from Farhelm's
+                        // management, its folder stays where it is, and the reply carries a notice
+                        // naming it. Before this, each of these failures kept the session, and
+                        // several could never clear (a removed or remounted root, a filesystem
+                        // without no-replace rename, a path too long to archive).
                         if let Err(skipped) = self
                             .archive_last_reference(&row, &registry, session_id)
                             .await
@@ -760,7 +757,7 @@ impl Supervisor {
                                  longer managed"
                             );
                             notices.push(format!(
-                                "The checkout at {path} was not archived and {whereabouts}; \
+                                "The managed checkout at {path} was not archived and {whereabouts}; \
                                  Farhelm no longer manages it. Reason: {reason}"
                             ));
                             released.push(row.id.clone());
@@ -795,7 +792,7 @@ impl Supervisor {
                          it is no longer managed"
                     );
                     notices.push(format!(
-                        "The checkout at {} was not archived and whatever is at that path now \
+                        "The managed checkout at {} was not archived and whatever is at that path now \
                          stays there; Farhelm no longer manages it. Reason: {}",
                         late.path, late.reason
                     ));
@@ -918,7 +915,7 @@ impl Supervisor {
     ///
     /// `Err` carries what the user is told, not a failure of the Delete: the
     /// caller releases the checkout and completes the Delete with a notice
-    /// (SPEC.md "Fresh GitHub checkouts": archiving never blocks deleting its
+    /// (SPEC.md "Managed checkouts": archiving never blocks deleting its
     /// session). Every safety check that used to fail the Delete still
     /// decides whether the folder is MOVED: the move happens only when the
     /// root and the checkout still match what was recorded and no other
@@ -2280,14 +2277,12 @@ mod tests {
     /// when Delete commits, is released with a notice instead of rolling the
     /// Delete back.
     ///
-    /// Why it matters: the final transaction re-proves a missing source before
-    /// dropping its record, and the filesystem can change in between (the
-    /// folder reappears, the root is unmounted). Failing there would make an
-    /// archive outcome block Delete after all, which SPEC.md "Fresh GitHub
-    /// checkouts" rules out. Specified: settling the last reference to an
-    /// allocated checkout whose folder is present (the state a reappeared
-    /// folder leaves) deletes the session and the record, leaves the folder
-    /// untouched, and reports the path as released late.
+    /// Why it matters: the final transaction re-proves a missing source before dropping its record,
+    /// and the filesystem can change in between (the folder reappears, the root is unmounted).
+    /// Failing there would make an archive outcome block Delete after all, which SPEC.md "Managed
+    /// checkouts" rules out. Specified: settling the last reference to an allocated checkout whose
+    /// folder is present (the state a reappeared folder leaves) deletes the session and the record,
+    /// leaves the folder untouched, and reports the path as released late.
     #[farhelm_testtrace::test]
     async fn a_missing_checkout_that_reappears_before_commit_is_released_not_fatal() {
         let state = StateDir::new();
@@ -2613,7 +2608,7 @@ mod tests {
         let result = sup
             .teardown_session(&entry, "s-swap", test_admission(&sup).await)
             .await;
-        // Archiving never blocks Delete (SPEC.md "Fresh GitHub checkouts"):
+        // Archiving never blocks Delete (SPEC.md "Managed checkouts"):
         // the session goes, the checkout is released, and the reply names
         // the folder left in place. What must never happen is the move.
         let Ok(Some(notice)) = result else {
@@ -2647,7 +2642,7 @@ mod tests {
     /// or treating that diagnostic path as authority to archive unknown content.
     ///
     /// The name goes into the Delete's own notice as well as the log: SPEC.md
-    /// "Fresh GitHub checkouts" makes the user, who deleted the session from
+    /// "Managed checkouts" makes the user, who deleted the session from
     /// the UI and never sees the supervisor log, the one who must learn a
     /// folder was left behind.
     #[farhelm_testtrace::test]
@@ -2903,7 +2898,7 @@ mod tests {
     ///
     /// Why it matters: a removed, recreated or symlink-swapped root used to
     /// make every Delete (and restart) of the session fail forever. SPEC.md
-    /// "Fresh GitHub checkouts" makes archiving never block Delete; the
+    /// "Managed checkouts" makes archiving never block Delete; the
     /// safety that remains is that the checkout, wherever it now lives, is
     /// neither moved nor treated as gone. Specified: the delete succeeds with
     /// a notice, the checkout's record is released, and the real checkout
@@ -2956,10 +2951,9 @@ mod tests {
                 .get("missing-origin")
                 .cloned()
                 .unwrap();
-            // Archiving never blocks Delete (SPEC.md "Fresh GitHub
-            // checkouts"): a replaced root completes the delete with a notice
-            // and releases the checkout. What must never happen is treating
-            // the checkout as gone and touching it, wherever it now lives.
+            // Archiving never blocks Delete (SPEC.md "Managed checkouts"): a replaced root
+            // completes the delete with a notice and releases the checkout. What must never happen
+            // is treating the checkout as gone and touching it, wherever it now lives.
             let Ok(Some(notice)) = sup
                 .teardown_session(&entry, "missing-origin", test_admission(&sup).await)
                 .await
@@ -3393,10 +3387,9 @@ mod tests {
             let result = sup
                 .teardown_session(&entry, "sync-origin", test_admission(&sup).await)
                 .await;
-            // Archiving never blocks Delete (SPEC.md "Fresh GitHub
-            // checkouts"). The rename has already happened when the durability
-            // barrier fails, so the notice must not claim the folder stayed
-            // put.
+            // Archiving never blocks Delete (SPEC.md "Managed checkouts"). The rename has already
+            // happened when the durability barrier fails, so the notice must not claim the folder
+            // stayed put.
             let Ok(Some(notice)) = result else {
                 panic!("a failed archive barrier still deletes the session, with a notice");
             };

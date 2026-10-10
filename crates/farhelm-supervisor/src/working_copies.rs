@@ -1925,7 +1925,7 @@ fn reconcile_archive_with_effects(
 /// archive safely: the registry row goes, and the folder stays wherever it is.
 ///
 /// Deliberately not [`retire`], whose `retired` state promises the directory
-/// was archived or confirmed gone. SPEC.md "Fresh GitHub checkouts" makes
+/// was archived or confirmed gone. SPEC.md "Managed checkouts" makes
 /// archiving never block Delete, so this is the outcome for every archive
 /// failure, including a removed or remounted root, a filesystem without
 /// no-replace rename, and an archive destination too long for the system.
