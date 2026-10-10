@@ -187,10 +187,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for every
   release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
 
-- **Resizable sidebar.** Let the user resize the sidebar by dragging a handle on its edge, with sensible minimum and
-  maximum widths. Decide whether the width is remembered per device, like the terminal text size, or shared by every
-  client. Plan: `plans/queue/resizable-sidebar.md`.
-
 - **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
   conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
   session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the

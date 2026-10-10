@@ -611,7 +611,7 @@ The macOS desktop WindowBuilder retains native decorations while making the titl
 title text, and extending the webview into the full content area. Tao positions the native traffic lights in logical
 coordinates, and the root-mounted Wry webview retains the same inset because its content view replaces Tao's. The
 desktop macOS shell class reserves matching space in the sticky sidebar app bar and aligns the session header's height.
-In narrow windows, a fixed app row sits above both scrolling panes; the existing sidebar width, main-pane floor, and
+In narrow windows, a fixed app row sits above both scrolling panes; the current sidebar width, main-pane floor, and
 horizontal scrolling remain intact without moving controls under the native buttons. The native window still has a title
 for system menus. A dedicated empty Dioxus element owns native window actions for primary-button presses; the press
 handler is not attached to a parent containing controls or text. Double-click zoom/restore is decided on the press's own
@@ -723,6 +723,14 @@ xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-
 above) applies the identical vendored face to the rest of the chrome, so the whole app reads as one typeface. Chrome and
 terminal share the same two cached `.woff2` files rather than each vendoring its own copy; whichever surface asks first
 pays the fetch, and the other reads it back from the browser's cache.
+
+Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
+(`farhelm.sidebar-width`): plain digits only, clamped to 240–600px, with 340px for absent, malformed or unreadable
+storage. The root's `--sidebar-width` survives authenticated-tree remounts. A shell-level separator owns pointer
+capture, double-click reset and 10px arrow steps; completed gestures store the width. Width-derived root classes replace
+the fixed narrow-window and row-menu-pointer media cutoffs. The existing terminal ResizeObserver sends each resulting
+grid change without debounce. A focused separator prevents terminal reveal from taking keyboard focus. Desktop
+persistence has the same webview-localStorage assumptions as terminal text size below.
 
 Terminal text size lives entirely in `terminal.js`. It reads the remembered size once, at script load, from the page's
 localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or

@@ -1210,6 +1210,8 @@ declare_assets! {
     // either; `feed::FleetFeed`'s snippet waits for the global this file
     // assigns.
     const EVENTS_JS: Asset = asset!("/assets/events.js");
+    // Width is a per-device DOM preference, shared by web and desktop.
+    const SIDEBAR_WIDTH_JS: Asset = asset!("/assets/sidebar-width.js");
     // Farhelm's own hover tooltip (see the file's module docs for why the
     // browser's `title` tooltip is not used anywhere). It installs one
     // delegated listener set on `document` when it loads; components only
@@ -1491,6 +1493,7 @@ fn AppBody() -> Element {
         document::Script { src: TERMINAL_LINKS_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
+        document::Script { src: SIDEBAR_WIDTH_JS }
         // Above both views and outside the match, deliberately: a build
         // mismatch is a fact about this whole PAGE rather than about
         // whatever it happens to be showing, and it must not disappear
@@ -1559,8 +1562,7 @@ fn AppBody() -> Element {
                         // scrolling — the sidebar's usual case.
                         onscroll: move |_| layout_epoch += 1,
                         // A window resize does not scroll anything, but it can
-                        // still move every row: the sidebar's width is fixed
-                        // (see this class's own app.css comment), so a resize
+                        // still move every row: dragging the sidebar edge or a resize
                         // narrow enough to trigger `.app-shell`'s horizontal
                         // scroll changes what is under the fold without any
                         // `onscroll` firing on its own. `ResizeObserver`-backed
@@ -1624,6 +1626,28 @@ fn AppBody() -> Element {
                             header_delete,
                             deleting,
                         }
+                    }
+                    // Outside the sidebar's clipping/scrolling context. Its
+                    // mounted hook waits for the asynchronous asset, then the
+                    // page owns gestures and current ARIA value on both builds.
+                    div {
+                        class: "sidebar-resize-handle",
+                        role: "separator",
+                        tabindex: "0",
+                        "aria-label": "Sidebar width",
+                        "aria-orientation": "vertical",
+                        "aria-valuemin": "240",
+                        "aria-valuemax": "600",
+                        "aria-valuenow": "340",
+                        "data-tooltip": "Drag to resize the sidebar; double-click to reset",
+                        onmounted: move |_| {
+                            document::eval(r#"(async () => {
+                                while (!window.farhelmSidebarWidth) {
+                                    await new Promise(resolve => setTimeout(resolve, 25));
+                                }
+                                window.farhelmSidebarWidth.mount();
+                            })();"#);
+                        },
                     }
                     div { class: "app-main",
                         match &*current.read() {

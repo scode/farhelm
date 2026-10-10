@@ -1851,7 +1851,7 @@ pub(crate) fn HostsPanel(
 // TODO.md's near-term entry this section closes: `edit destination` and
 // `remove` used to sit on `.host-row-main` as ordinary flex children
 // beside `adopt`/`retry`/`profiles`, and on an ssh host the five of them
-// together ran wider than the 340px sidebar leaves room for — `remove`
+// together ran wider than the default sidebar leaves room for — `remove`
 // rendered clipped off the right edge by `.app-sidebar`'s
 // `overflow: hidden auto`, invisible and unclickable, with nothing in the
 // DOM or in Playwright's `toBeVisible` to notice. Folding every verb but

@@ -130,6 +130,8 @@
    the layering item in the 2026-08 UI refresh is where the fold could be
    a deliberate decision, and this is that change. */
 :root {
+  /* A fresh profile keeps the old geometry before the width asset loads. */
+  --sidebar-width: 340px;
   /* Surfaces. THREE levels are in use, and which level a thing sits on
      is a decision recorded here rather than something each rule picks
      for itself: ground for content, one step up for the chrome around
@@ -437,7 +439,7 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 341px;
+  width: calc(var(--sidebar-width) + 1px);
 }
 
 /* Minimal M1 chrome: dark, terminal-first, nothing decorative. */
@@ -526,10 +528,10 @@ samp {
   font-family: inherit;
 }
 
-/* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
- * holding the session list, and a main pane holding the selected session.
- * The sidebar width is FIXED by decision (no drag handle, no persistence);
- * wider than the bare minimum because rows carry aligned status/locality,
+/* The two-pane shell holds the session list and selected session.
+ * sidebar-width.js owns the per-device width, bounded to 240–600px with
+ * a 340px default. A shell-level separator survives sidebar scrolling.
+ * Rows carry aligned status/locality,
  * title, agent, and activity columns above a host/directory line. Every ancestor of
  * .terminal-panes must keep a definite
  * height, which is why the chain here is all height:100%/flex — a
@@ -542,10 +544,11 @@ samp {
    * usable, and the shell overflowing is the honest rendering of a window
    * that is genuinely too small for both panes. */
   overflow-x: auto;
+  position: relative;
 }
 
 .app-sidebar {
-  width: 340px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   /* x is clipped, y scrolls (shorthand order: x then y). Session and host
    * rows stack and ellipsize per line; their fixed menus escape this
@@ -571,7 +574,7 @@ samp {
    * painted itself over the column's right edge and covered the row menu
    * toggles and controls that live there (seen on 0.5.0-rc.1), and a
    * classic always-visible scrollbar, which the OS can force on, would
-   * instead reserve a gutter the 340px column cannot spare. Hiding it
+   * instead reserve a gutter the narrow column cannot spare. Hiding it
    * touches nothing about scrollability: wheel, trackpad, touch, and
    * keyboard scrolling, and the browser's own scroll-on-focus when Tab
    * lands on a row's control below the fold, all work on a scroller with
@@ -600,11 +603,44 @@ samp {
   background: var(--bg-1);
 }
 
+/* The border retains its old geometry. The five-pixel hit strip starts at
+ * that border, keeping the row menu toggles inside the sidebar untouched.
+ * Its remaining four pixels fit in the terminal's existing padding, so
+ * terminal text and mouse input are not covered by the separator.
+ * This sibling never scrolls vertically with the session list. */
+.sidebar-resize-handle {
+  position: relative;
+  flex: 0 0 5px;
+  width: 5px;
+  margin-left: -1px;
+  margin-right: -4px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+}
+.sidebar-resize-handle:focus-visible::before {
+  outline: 2px solid var(--fg-1);
+  outline-offset: -2px;
+}
+html:has(.sidebar-resize-handle[data-resizing]),
+html:has(.sidebar-resize-handle[data-resizing]) * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 .app-main {
   flex: 1;
   /* A floor, not zero: with a shrinkable main pane a legal narrow window
    * would silently squeeze the selected terminal to nothing while the
-   * unshrinkable sidebar kept its full width. Below 340+320px the shell
+   * unshrinkable sidebar kept its full width. Below the sidebar width plus 320px the shell
    * scrolls (see `.app-shell`) instead. */
   min-width: 320px;
   height: 100%;
@@ -672,23 +708,21 @@ samp {
    horizontally. At narrow widths, give it its own fixed top band and start
    BOTH scrolling panes below it. The sidebar width and main-pane minimum
    remain unchanged. */
-@media (max-width: 661px) {
-  .macos-window {
-    box-sizing: border-box;
-    padding-top: 48px;
-  }
-
-  .macos-window .app-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-  }
-
-  .macos-root:has(.build-skew) .app-bar {
-    width: auto;
-    right: 0;
-  }
+/* The script derives this class from the current sidebar width; CSS
+   media queries cannot use that value. At 340px the old 661px cutoff holds. */
+.sidebar-narrow-window .macos-window {
+  box-sizing: border-box;
+  padding-top: 48px;
+}
+.sidebar-narrow-window .macos-window .app-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.sidebar-narrow-window .macos-root:has(.build-skew) .app-bar {
+  width: auto;
+  right: 0;
 }
 
 /* The wordmark leads the bar at the window's top-left corner. Sized by
@@ -810,6 +844,9 @@ samp {
 .session-heading,
 .hosts-heading {
   display: flex;
+  /* At the supported 240px minimum, keep Add host and Templates reachable
+     instead of clipping the trailing actions outside the sidebar. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -2012,11 +2049,9 @@ samp {
 /* Below the sidebar plus flyout width there is no edge-to-edge tether:
    the clamped panel overlaps the list, so a left-edge notch would point
    away from the toggle it claims to identify. Placement stays the same. */
-@media (max-width: 601px) {
-  .session-row-menu-pointer,
-  .host-row-menu-pointer {
-    display: none;
-  }
+.sidebar-menu-overlaps .session-row-menu-pointer,
+.sidebar-menu-overlaps .host-row-menu-pointer {
+  display: none;
 }
 
 /* The header is context for the command list, outside its menu role.
