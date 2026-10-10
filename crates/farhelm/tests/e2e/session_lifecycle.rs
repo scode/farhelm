@@ -5514,7 +5514,16 @@ async fn stop_kills_a_reparented_marked_daemon() {
 /// like `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
 #[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
-    let h = harness().await;
+    // A scope kill would reach the survivor even if the dead-pane sweep were
+    // broken. Disable that competing mechanism and verify the stored launch.
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -5539,6 +5548,11 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let daemon_pid = wait_for_pid_file(&work.path().join("reparented.pid"), 10).await;
 
+    assert_eq!(launch_scope_of(&h, &session.id).await, None);
+    assert!(
+        !process_is_gone(daemon_pid),
+        "the survivor must be alive before the pane dies"
+    );
     // Kill the pane's own process directly: the pane goes dead
     // (remain-on-exit keeps the terminal), leaving no live pid for
     // kill_process_tree to walk ancestry from at all.
@@ -5587,7 +5601,16 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
         (parent, state.to_string())
     }
 
-    let h = harness().await;
+    // Scope cleanup must not substitute for discovering the unmarked child
+    // through its marked parent; only the portable closure is under test.
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -5602,6 +5625,7 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
         .expect("create");
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
+    assert_eq!(launch_scope_of(&h, &session.id).await, None);
     let (_chan, rx_replay, mut rx) = h
         .client
         .attach_live(&session.id, 80, 24)
@@ -6613,7 +6637,15 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
 /// must never be left disabled in the source.
 #[farhelm_testtrace::test]
 async fn stop_quiesce_survives_no_marked_process() {
-    let h = harness().await;
+    // Killing a launch scope could end the storm before quiescing ever runs.
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -6640,6 +6672,7 @@ async fn stop_quiesce_survives_no_marked_process() {
     // it has forked yet. Observe its next generation before stopping;
     // the marker scan alone could see only the agent and storm shell.
     let storm_pid = extract_pid(&seen, "CHILD-PID:");
+    assert_eq!(launch_scope_of(&h, &session.id).await, None);
     wait_for_child(storm_pid, 10).await;
     assert!(
         !marked_pids(&session.id).is_empty(),

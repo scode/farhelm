@@ -280,12 +280,16 @@ impl ScriptedFleet {
     /// host's refresh has to be able to tell that host's next request from
     /// some other host's, which the fleet-wide counter above cannot do. See
     /// [`Harness::refresh_to_completion`].
-    fn host_requests(&self, host: HostId) -> usize {
+    pub(crate) fn host_requests(&self, host: HostId) -> usize {
         self.gate.per_host.borrow().get(&host).copied().unwrap_or(0)
     }
 
-    /// Wait until `host` has received at least `n` list requests.
-    async fn await_host_requests(&self, host: HostId, n: usize) {
+    /// Wait until `host` has claimed its hold for at least `n` list requests.
+    ///
+    /// This is a drain-start boundary, not proof that its reply was applied.
+    /// Observers may arm a successor hold after it returns without replacing
+    /// the hold belonging to the request they just observed.
+    pub(crate) async fn await_host_requests(&self, host: HostId, n: usize) {
         let mut rx = self.gate.per_host.subscribe();
         let _ = rx
             .wait_for(|seen| seen.get(&host).copied().unwrap_or(0) >= n)
@@ -482,10 +486,14 @@ impl ListGate {
     /// test is about to make, and the barrier would deadlock the very race
     /// it exists to stage.
     fn admit(&self, host: HostId) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        // Publish arrival only after claiming its hold. An observer may arm
+        // the successor as soon as the counter advances; it must not replace
+        // a hold this request still needs to remove.
+        let held = self.holds.lock().expect("hold mutex").remove(&host);
         self.requests.send_modify(|seen| *seen += 1);
         self.per_host
             .send_modify(|seen| *seen.entry(host).or_insert(0) += 1);
-        self.holds.lock().expect("hold mutex").remove(&host)
+        held
     }
 }
 

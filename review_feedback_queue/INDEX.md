@@ -111,12 +111,6 @@ triage.
   intended sequence.
 - `tampering-regression-fails-reaching-tampering-boundary-macos.md` — The tampering test never reaches byte tampering on
   native macOS.
-- `empty-chunk-test-accepts-upload-stalls-only-traffic.md` — The empty-chunk upload test can pass the wrong timeout
-  behavior.
-- `releasing-both-relay-gates-establish-reverse-reply.md` — The relay test can pass without replies arriving in reverse
-  order.
-- `concurrent-list-test-silently-accepts-failure-polling-participant.md` — The concurrent-list test ignores failure of
-  its observer.
 - `live-processes-reported-dead-macos.md` — macOS process checks can certify death without observing the process.
 - `child-discovery-always-times-out-macos.md` — Child-discovery fixtures cannot reach lifecycle checks on macOS.
 - `unavailable-process-scan-certifies-no-marked-processes.md` — A missing process scan can make cleanup assertions pass
@@ -126,13 +120,9 @@ triage.
 - `checkout-recovery-compares-canonical-roots-unresolved-fixture.md` — Checkout recovery tests reject correctly resolved
   directory roots.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
-- `later-refresh-hide-stale-refresh-regression.md` — A later refresh can repair the regression before the stale-refresh
-  test checks it.
 - `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
   covering the operation.
 - `browse-routing-test-discards-wrong-host-assertion.md` — The browse test ignores an observed wrong-host request.
-- `malformed-message-test-pass-through-ordinary-eof.md` — The malformed-message test can pass because the peer closes
-  normally.
 - `idle-flush-test-permits-deadline-extension-it-claims.md` — The idle-flush test allows the renewed deadline it is
   meant to reject.
 - `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
@@ -166,10 +156,6 @@ triage.
 - `restart-test-requires-screen-content-restart-correctly.md` — The restart test waits for screen content that correct
   restart erases.
 - `cgroup-cleanup-masks-marker-discovery-regression.md` — Scope cleanup hides a broken portable marker-discovery path.
-- `cgroup-cleanup-masks-dead-pane-sweep-regression.md` — The dead-pane sweep test can pass because scope cleanup kills
-  the survivor.
-- `cgroup-cleanup-masks-closure-seeding-regression.md` — Scope teardown masks failure to discover an unmarked child.
-- `cgroup-cleanup-masks-fork-quiescing-regression.md` — A scope can eliminate the fork storm before quiescing is tested.
 - `readiness-failure-leave-systemd-probe-child-running.md` — Readiness failure could leave a systemd probe child without
   cleanup ownership.
 - `pipe-scan-assertion-failures-leave-fixture-processes-running.md` — Failed pipe-scan tests leave children and
@@ -189,7 +175,6 @@ triage.
   after fallible setup.
 - `orphan-client-test-accepts-failed-inspection-proof-no.md` — The orphan-client test accepts unknown inspection as
   proof of no writer leak.
-- `signal-cleanup-test-interrupts-cleanup-exists.md` — The signal-cleanup test interrupts before staging or traps exist.
 - `orderly-shutdown-assertion-vacuous-macos.md` — The orderly-shutdown death assertion is always satisfied on macOS.
 - `eof-replacement-test-cannot-detect-overlap-macos.md` — The replacement-entry test cannot detect old/new client
   overlap on macOS.
@@ -338,8 +323,6 @@ triage.
   independent producers.
 - `commit-race-test-exercise-only-pre-commit-abort-path.md` — The upload-abort test could finish before commit is
   actually in flight.
-- `distinct-payload-test-observe-payload-bytes.md` — The distinct-payload test could accept installing the wrong
-  executable bytes.
 - `concurrent-first-use-barrier-guarantees-disputed-interleaving.md` — The first-use test could pass without exercising
   concurrent absent observations.
 - `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an

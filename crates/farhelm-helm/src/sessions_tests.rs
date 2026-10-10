@@ -6873,7 +6873,7 @@ async fn resolve_owner_rejects_a_later_contested_claimant_after_a_self_claim() {
 /// has already been told its session exists; the list and the routing
 /// would then contradict the answer they just gave it.
 ///
-/// Driven by a BARRIER rather than by timing: the scripted host's second
+/// Driven by a BARRIER rather than by timing: the scripted host's next
 /// list reply is held until the create has completed, so the
 /// interleaving under test is the one that actually happens rather than
 /// whichever one a sleep happened to produce.
@@ -6907,12 +6907,12 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
         }
     });
 
-    // Refreshing briskly, so a second walk really is in flight while the
-    // create runs. The host's canned list never mentions the new
-    // session — which is the point: it describes the world before it.
+    // Drive refreshes explicitly so no automatic successor can repair a
+    // stale publication before it is inspected. The initial canned list
+    // omits the new session: it describes the world before the create.
     let harness = rest_harness::FleetBuilder::new()
         .await
-        .refresh_every(std::time::Duration::from_millis(20))
+        .refresh_every(std::time::Duration::from_secs(3600))
         .local(rest_harness::HostScript {
             identity: Some("local-identity".to_string()),
             sessions: vec![rest_harness::session("pre-existing", 100)],
@@ -6928,8 +6928,13 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     // Arm the barrier, then wait until the held walk has actually
     // STARTED: from here on, whatever it eventually replies describes a
     // world that predates the create below.
+    let before = harness.fleet.host_requests(local);
     let release = harness.fleet.hold_next_list(local);
-    harness.fleet.await_list_requests(2).await;
+    harness.manager.refresh_now(local);
+    harness.fleet.await_host_requests(local, before + 1).await;
+    // The successor must not repair an erroneously published stale snapshot
+    // before either the list or routing assertion observes it.
+    let successor = harness.fleet.hold_next_list(local);
 
     let (status, body) = post_text(
         &harness,
@@ -6954,7 +6959,8 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     // The held walk has committed (or declined to) by the time the NEXT
     // one has started, which is a state the fleet reports rather than a
     // duration this test has to guess at.
-    harness.fleet.await_list_requests(3).await;
+    harness.manager.refresh_now(local);
+    harness.fleet.await_host_requests(local, before + 2).await;
 
     let (status, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -6971,6 +6977,7 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
         .await
         .expect("the created session must still have an owner");
     assert_eq!(host, local);
+    let _ = successor.send(());
     peer.abort();
 }
 

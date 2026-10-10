@@ -2035,7 +2035,23 @@ HOMETERM="$WORKDIR/hometerm"
 INSTALLTERM="$HOMETERM/.local/bin"
 mkdir -p "$HOMETERM"
 run_install_bg "$TOOLCHAIN_FULL" "$HOMETERM" "$BASE/slow" 1.2.3
-sleep 0.5
+# The checksum download precedes staging. SHA256SUMS inside staging is
+# written only after the traps are installed, so its presence proves this
+# interruption exercises cleanup while the later archive download is slow.
+STAGINGTERM=""
+for ((attempt = 0; attempt < 200; attempt++)); do
+  STAGINGTERM=$(find "$INSTALLTERM" -maxdepth 1 -type d -name '.farhelm-install.*' 2>/dev/null || true)
+  if [ -n "$STAGINGTERM" ] && [ -s "$STAGINGTERM/SHA256SUMS" ]; then
+    break
+  fi
+  kill -0 "$BG_PID" 2>/dev/null || break
+  sleep 0.05
+done
+check "SIGTERM mid-run: staging and cleanup traps exist before signalling" \
+  [ -n "$STAGINGTERM" ]
+check "SIGTERM mid-run: staging holds verified checksums" \
+  [ -s "$STAGINGTERM/SHA256SUMS" ]
+check "SIGTERM mid-run: the installer is still live" kill -0 "$BG_PID"
 if kill -0 "$BG_PID" 2>/dev/null; then
   kill -TERM "$BG_PID"
 fi

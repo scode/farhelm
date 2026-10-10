@@ -9644,7 +9644,8 @@
 - Completion criteria: Run it on a harness with cgroup scopes disabled and check the launch really ran unscoped. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## cgroup-cleanup-masks-closure-seeding-regression.md
 
@@ -9660,7 +9661,8 @@
 - Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## cgroup-cleanup-masks-fork-quiescing-regression.md
 
@@ -9676,7 +9678,8 @@
 - Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## signal-cleanup-test-interrupts-cleanup-exists.md
 
@@ -9693,7 +9696,8 @@
 - Completion criteria: Send the signal only once the staging directory exists. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## distinct-payload-test-observe-payload-bytes.md
 
@@ -9710,7 +9714,8 @@
 - Completion criteria: Use the fake backend's stateful mode, as other tests do, and assert the bytes at both
   destinations. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
   user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## empty-chunk-test-accepts-upload-stalls-only-traffic.md
 
@@ -9727,7 +9732,8 @@
 - Completion criteria: Require the abort to arrive while the flood is still running. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## releasing-both-relay-gates-establish-reverse-reply.md
 
@@ -9743,7 +9749,8 @@
 - Completion criteria: Release the second session, await its answer, then release the first. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## concurrent-list-test-silently-accepts-failure-polling-participant.md
 
@@ -9759,7 +9766,8 @@
 - Completion criteria: Make the poller fail on a list error and assert that it polled successfully. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## later-refresh-hide-stale-refresh-regression.md
 
@@ -9776,7 +9784,8 @@
 - Completion criteria: Hold the successor listing until the assertions finish and wait on this host's count relative to
   the hold. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## malformed-message-test-pass-through-ordinary-eof.md
 
@@ -9793,7 +9802,8 @@
 - Completion criteria: Keep the fake supervisor's connection open until the request has failed. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
+- Execution: complete; jj change `zzwuolzquxvqvqunzprzpzltunkzxrvz`, bookmark
+  `plan/e2e-helm-test-oracles/01-e2e-helm-test-oracles`; https://github.com/scode/farhelm/pull/1818/changes.
 
 ## shutdown-test-accepts-forced-cancellation-natural-completion.md
 

@@ -6459,11 +6459,18 @@ mod tests {
 
     /// Execution resolves each install action through its own payload kind,
     /// so the private-tmux branch cannot receive the Farhelm executable.
+    /// Assert installed bytes, not only operation labels: the label can be
+    /// correct even when the source selected for that action is wrong.
     #[farhelm_testtrace::test]
     async fn tmux_install_uses_the_distinct_tmux_fixture() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
         let backend = FakeBackend::absent(root.path().to_path_buf());
+        // Operation labels alone cannot detect substituting Farhelm's bytes
+        // for tmux. Materialize both destinations through the existing fake.
+        backend
+            .stateful
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         {
             let mut outcome = backend.reach.lock().unwrap();
             let ReachOutcome::Supported(reach) = &mut *outcome else {
@@ -6517,6 +6524,14 @@ mod tests {
             operations
                 .iter()
                 .any(|operation| operation == "install-tmux")
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("lib/farhelm")).unwrap(),
+            b"farhelm"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("lib/tmux")).unwrap(),
+            b"tmux"
         );
     }
 

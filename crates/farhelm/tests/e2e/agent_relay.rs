@@ -645,23 +645,22 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
     let mut peer_one = SessionPeer::connect(&h.sup, &first.id, &first_token).await;
     let mut peer_two = SessionPeer::connect(&h.sup, &second.id, &second_token).await;
     peer_one.send(&first.id, AgentVerb::Hosts {}).await;
+    // Observe the first upcall before sending the second. Handler scheduling
+    // must not reverse the request order we are about to reverse in replies.
+    let first_arrival = tokio::time::timeout(Duration::from_secs(20), calls.recv())
+        .await
+        .expect("the first upcall never reached the handler")
+        .expect("the handler's announcement channel is open");
+    assert_eq!(first_arrival, first.id);
     peer_two.send(&second.id, AgentVerb::Hosts {}).await;
 
     // Both upcalls are now parked inside the handler, so both are in the
     // link's pending table at once — the state a shared namespace breaks.
-    let mut seen = Vec::new();
-    for _ in 0..2 {
-        seen.push(
-            tokio::time::timeout(Duration::from_secs(20), calls.recv())
-                .await
-                .expect("an upcall never reached the handler")
-                .expect("the handler's announcement channel is open"),
-        );
-    }
-    seen.sort();
-    let mut expected = vec![first.id.clone(), second.id.clone()];
-    expected.sort();
-    assert_eq!(seen, expected, "both sessions must reach the handler");
+    let second_arrival = tokio::time::timeout(Duration::from_secs(20), calls.recv())
+        .await
+        .expect("the second upcall never reached the handler")
+        .expect("the handler's announcement channel is open");
+    assert_eq!(second_arrival, second.id);
 
     let ids = upstream_ids.lock().unwrap().clone();
     assert_eq!(ids.len(), 2, "two upcalls travelled up: {ids:?}");
@@ -670,12 +669,12 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
         "the supervisor must mint its own request ids: {ids:?}"
     );
 
-    // Reverse order on purpose: the second peer's answer is produced first.
+    // Observing the second arrival's correlated answer establishes reverse
+    // delivery, rather than merely scheduling two runnable handlers together.
     handler.release(&second.id);
-    handler.release(&first.id);
-
-    let one = outcome_of(peer_one.answer().await);
     let two = outcome_of(peer_two.answer().await);
+    handler.release(&first.id);
+    let one = outcome_of(peer_one.answer().await);
     for (expected_session, outcome) in [(&first.id, one), (&second.id, two)] {
         match outcome {
             AgentOutcome::Ok {
