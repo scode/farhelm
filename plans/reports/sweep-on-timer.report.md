@@ -119,3 +119,65 @@ The subsequent fixture corrections also passed a fresh gpt-6.1-sol high-effort r
 follow-up. Commit and PR wording passed fresh cold reads on gpt-6.1-sol at medium effort. Review agents ran no builds or
 VCS operations; recorded execution and lint results are the executor's evidence. Native usage counters and exact runtime
 model reporting were unavailable.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as three squash commits on main, in order: #1758 (supervisor observation separated from
+sampling), #1761 (session refreshes read the supervisor's state) and #1766 (settled launch evidence is no longer
+reread). They landed after this round's two UI plans, approval-card-layout and resizable-sidebar, on top of which the
+stack rebased without conflicts. Main had otherwise gained only plan bookkeeping and TODO entries.
+
+#### Review before merging
+
+A separate reviewer that had not worked on this round's plans read the stack against main and the two UI plans. It found
+no interaction with them, no protocol or database change, and no test seam reaching the shipped binary, and it confirmed
+the report's account of what lists, rename and stop still do immediately and what now waits for the next two-second
+tick.
+
+#### A fix made while landing
+
+The reviewer found one behavior change the plan had not asked for. When the supervisor could not tell whether a stopped
+session's launch file was still there (a failed file-system check, not a missing file), the stack made the whole
+observation of that session fail: the exit was never recorded and an error was logged every two seconds for as long as
+the check kept failing. Before the stack, that inconclusive check simply did not classify the launch as a failed start,
+and the exit was recorded from the pane as usual. The landing restored that, while still not letting an inconclusive
+check stop future reads (the plan's rule that a read failure never settles them), in #1766 before it merged. No test
+exercises an inconclusive check; the supervisor's unit tests passed with the change (below).
+
+The landing also corrected comments in #1761 that still described lists recording outcomes or computing a fresh restart
+offer, and one test's description: the pane-death test's check for a status-change hint cannot tell the hint the commit
+sends from the one every pane-death wake sends on entry, so its description now says the stored outcome is what proves
+the commit.
+
+#### Not changed while landing
+
+The reviewer found that some stopped sessions still have their launch evidence reread every tick, the cost the plan set
+out to remove. Reads stop only once the session's own pane was seen dead, or a host reboot interrupted it. An agent that
+exited on its own before a reboot keeps its exited row with no pane to see, so each tick still opens its launch status
+file and queries its checkout preparation, for as long as the row exists. The same holds within one boot for an exited
+session whose tmux session was closed or whose tmux server died. The plan's reason for treating an interrupted launch as
+settled (the old launch can no longer write anything) applies equally to an exit from a previous boot, but acting on it
+needs to know which boot each row's launch belongs to, which the supervisor does not track per row. That is a possible
+follow-up for the maintainer, not a regression: before the stack, these sessions were reread on every tick and every
+list.
+
+Smaller notes left as they are: the changelog fragment for the timer-owned sweeps is filed as `fixed`, though it mainly
+announces a change in timing (`changed` may read better at curation), and #1758 also carries the fix for the
+restart-confirmation flake, with its TODO entry and its exclusion from the flake sweep removed together, as the
+instructions require.
+
+#### Checks
+
+- Run now, on all three plans stacked together and including the landing's fix:
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` (the shipped binary, with
+  test seams off), and the supervisor's unit tests in full through the recorder with pinned tmux 3.7c, four slots and no
+  retries (run `75969832`, 1059 of 1059); `cargo fmt --all -- --check`.
+- The two UI plans' browser runs (see their notes) cover the session list and approvals the helm reads from this
+  supervisor, on the UI side; they ran without this stack, which the reviewer found does not change anything those plans
+  read.
+- Reused from the executor: the workspace test run and its corrected selections, the end-to-end cases it lists, and the
+  changelog and document checks. The landing's changes are one inconclusive-check branch in the supervisor's
+  observation, comments and one test's description; the end-to-end cases do not exercise an inconclusive check, so
+  nothing they cover changed.
+
+Nothing in the report above was made untrue by the landing.
