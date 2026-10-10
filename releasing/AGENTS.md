@@ -67,7 +67,7 @@ sections; the checker accepts the historical formats that are already present.
   | `### 🚀 Added`                    | `feat`                                                                      |
   | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                 |
   | `### 🔧 Fixes worth highlighting` | the fixes a reader should not miss (see below)                              |
-  | `### 🗑️ Removed`                   | removals that are not breaking in practice; breaking ones go under Breaking |
+  | `### 🗑️ Removed`                  | removals that are not breaking in practice; breaking ones go under Breaking |
   | `### 🩹 Misc fixes`               | every other fix                                                             |
 
   Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, 🔄 rather than ♻️ for

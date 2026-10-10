@@ -108,8 +108,7 @@ changing the renderer, or a macOS change beyond the buffer size and its comments
 Follow root `AGENTS.md` "Finishing work": `cargo fmt --all -- --check`, clippy on `farhelm-helm` and
 `farhelm-supervisor` with `--all-targets`, a focused nextest selection for the `units` tests through
 `scripts/record-test-run.py` (`--tmux none`), and the macOS compile above. Apply `.agents/test-authoring.md`.
-`dprint
-check` on the changed Markdown.
+`dprint check` on the changed Markdown.
 
 ## How to run
 

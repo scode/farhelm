@@ -203,8 +203,7 @@ loud premise instead of accepting a retained tail.
 ## 2026-09-03 — profiles popup, three cases (e2e/tests/profiles.spec.ts)
 
 `the profiles popup follows its focus and Escape dismissal contract`,
-`unknown then transit waits for the pending
-focus request`, and
+`unknown then transit waits for the pending focus request`, and
 `stale focus-out classifiers cannot clear newer obligations` fail only on a loaded 4-vCPU sandbox running the spec with
 the default worker count beside a live helm, supervisor, and both browsers, Chromium only; all three pass locally in
 both engines, repeatedly. The first is a product policy under load: when the page cannot learn where focus went within
@@ -326,10 +325,8 @@ mechanism, not on a reproduced cure.
 ## 2026-09-03 — two more profiles cases (e2e/tests/profiles.spec.ts)
 
 A full browser-suite run on a 4-vCPU sandbox (both engines, no load beside the suite):
-`only layout changes after a
-profiles opening invalidate its geometry` failed once on Chromium and
-`a saved profile is what the next editor sees,
-before the re-read lands` once on WebKit, beside the three known profiles
+`only layout changes after a profiles opening invalidate its geometry` failed once on Chromium and
+`a saved profile is what the next editor sees, before the re-read lands` once on WebKit, beside the three known profiles
 cases; the latter had also failed twice in ten loaded runs earlier that day. Disposition: open (TODO.md).
 
 ## 2026-09-03 — `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts), localized
@@ -340,8 +337,7 @@ sandbox for PR #363 (the sidebar locality-glyph change): `Error: route.fulfill: 
 `route.fulfill({ response, headers })`). Neither this test nor `fleet.ts` was touched by PR #363. `forceBuildSkew` has
 four callers in the target snapshot — three in `feed.spec.ts` and this sidebar test — not the broader set of every test
 that reads a build stamp. Reproduced alone:
-`--project=webkit-sidebar -g "the sidebar app
-bar shows the helm build and client tooltip" --repeat-each=20`, single
+`--project=webkit-sidebar -g "the sidebar app bar shows the helm build and client tooltip" --repeat-each=20`, single
 worker, no other test in play, failed 1 of 20 with the identical error. The shape reads as the route handler racing
 itself — WebKit re-issuing or re-dispatching the intercepted request so the handler runs twice concurrently for one
 navigation, and the second `fulfill` finds the route already answered. Not chased further: no hypothesis yet for why
@@ -352,13 +348,10 @@ both runs, so whatever triggers it is rare and not obviously tied to this one te
 ## 2026-09-03 — `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
 
 Seen during the host-alias feature's finishing-work run on a 4-vCPU sandbox:
-`cargo test -- --show-output
---test-threads=4` failed this one test (338 passed, 1 failed) with "a consumed sentinel is
+`cargo test -- --show-output --test-threads=4` failed this one test (338 passed, 1 failed) with "a consumed sentinel is
 deleted once its Error outcome commits durably". The launch-sentinel and supervisor code this test exercises was
 untouched by that work. Reproduced alone immediately after —
-`cargo test -p farhelm --test e2e
-launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail -- --exact
---show-output --test-threads=1`
+`cargo test -p farhelm --test e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail -- --exact --show-output --test-threads=1`
 — and it passed. One isolated pass does not distinguish a test race from a load-triggered product or harness defect, so
 no cause is claimed beyond the observed fingerprint: fails under a loaded `--test-threads=4` full-binary run, passes
 alone. Not chased further. Disposition: open (TODO.md).
@@ -376,8 +369,7 @@ Disposition: still open (TODO.md); the existing entry's diagnosis stands.
 ## 2026-09-03 — `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs)
 
 One `cargo test` run of the whole workspace at `--test-threads=4` on a 4-vCPU sandbox: `left: []`,
-`right:
-["/tmp/.tmpHAvtBc/fh-it.live01"]`. That is the test's SECOND assertion — after the test drops its own flock,
+`right: ["/tmp/.tmpHAvtBc/fh-it.live01"]`. That is the test's SECOND assertion — after the test drops its own flock,
 `sweep`'s second call is expected to reap the now-genuinely-dead directory (`assert_eq!(outcome.reaped, vec![live])`).
 An empty `reaped` list on the left means the sweep FAILED TO REAP a directory whose lock had actually been released, not
 that it wrongly reaped one still held — the opposite of what an earlier version of this entry claimed. Never reproduced:
@@ -524,8 +516,7 @@ entry and Tab exit covered; do not treat terminal readiness alone as proof that 
 
 ## 2026-09-05 — WebKit stalled-client case detaches before observing a pause
 
-`a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward
-replays`,
+`a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays`,
 in `e2e/tests/terminal-flood.spec.ts`, reproduced the historical zero-pause failure in the full WebKit run at `6903cf90`
 on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux 3.7c and no extra load. Pause count stayed zero for thirty
 seconds, but the trace already showed the stalled-detach banner about 404 ms after gate send, much earlier than the
@@ -933,8 +924,7 @@ Cause: hypothesis
 ## 2026-09-12 — popup disable-blur dismissal race fixed (e2e/tests/profiles.spec.ts, crates/farhelm-ui/src/app_bar.rs)
 
 Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` left the popup mounted after the toggle close in
-`a popup-created
-profile is offered on every host` with the profile registered server-side. Batch
+`a popup-created profile is offered on every host` with the profile registered server-side. Batch
 `acc5a4cf-2087-4f2a-a4f0-9c2d4450d927` ran the exact test twenty times per engine with the strengthened fixture premise
 but the product unmodified, reproducing the underlying event twice (attempts 1-2, Chromium): the popup dismissed between
 the save click and the close (form trivially gone, saved row never rendered, failure screenshot shows no popover). The
@@ -949,8 +939,7 @@ premise with lock-state receipts. Batch `39f81e52-2277-4e55-b584-9a15c0d48653` r
 engine with zero failures; run `4627195c-2fb2-472c-8e8c-557400527b2f` passed the whole profiles spec 120/120 on both
 engines with pinned tmux 3.7c executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`,
 `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. A deterministic pin test
-(`disabling the focused save control does not
-dismiss the popup`) now scripts the disable-blur directly: run
+(`disabling the focused save control does not dismiss the popup`) now scripts the disable-blur directly: run
 `d08fc2fa-9de0-4c9c-9474-fa8fb0c34cd6` fails it against the pre-fix bundle (the popup unmounts inside the observation
 window), and batch `23367a9f-dc59-4761-ac1d-3b4ab0c2bee1` passes it twice per engine against the fixed one. Disposition:
 fixed in this PR; the TODO.md entry is removed.
@@ -1009,8 +998,7 @@ test timeout fired in the `openProfileEditor` helper (profiles.spec.ts:214), who
 freshly created profile row never became actionable. All three classification reruns passed. Sweep failure retained run
 `fc4285c8-b667-4f2d-86c1-97dfe260aded` (failure screenshot and trace.zip retained under `playwright-artifacts`); reruns
 `b04195c1-6ad7-4c2d-a779-924ba0342b8a`, `cebdd484-c94a-4df4-8b0b-61175ba99b00`, `36a54b08-c525-4bdb-9570-d9517a0d8630`.
-Tested commit `b475c5c6` with a clean tree. Selection `browser suite, both
-engines`; concurrency
+Tested commit `b475c5c6` with a clean tree. Selection `browser suite, both engines`; concurrency
 `one browser worker; retries 0`. Pinned tmux 3.7c executable SHA256
 `c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, only
 `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` present in the test process. No attributed cause; the
@@ -1219,8 +1207,7 @@ The native desktop smoke failed with `FAIL: the webview JavaScript stack did not
 attempts of the v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, x86_64 Linux job, runner image
 `ubuntu-24.04` 20260920.314.1, WebKitGTK 2.52.6). The retained recorder run `bf8b80c8-54ee-41e3-b7f6-6d44c7207e2f`
 covers the first attempt: clean tag commit `af8f5ab65f15078a1295e724758fa0abc3837421`, selection
-`native desktop smoke
-legs`, sequential legs, pinned tmux 3.7c with executable SHA256
+`native desktop smoke legs`, sequential legs, pinned tmux 3.7c with executable SHA256
 `74c2614b1b48280e9d4c767a09fa5aee07fc66ae0d437dc3282b7bc56dc59884`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
 recorder-owned `FARHELM_TEST_TRACE_DIR`). In both failures the helm and managed supervisor came up and connected, WebKit
 printed its usual Xvfb EGL warnings, the window stayed black, and the desktop asset handler logged no request at all
@@ -1276,8 +1263,7 @@ Cause: established — the test's 10-second bound covered a real systemd user-ma
 ## 2026-09-29 — `restricted_inherited_create_waits_for_parent_delete_then_refuses` (crates/farhelm-supervisor/src/service/handlers.rs)
 
 The Delete sibling of the entry above failed the same way
-(`parent mutation and restricted create must both finish:
-Elapsed(())` after 10 seconds) in the fourth attempt of the
+(`parent mutation and restricted create must both finish: Elapsed(())` after 10 seconds) in the fourth attempt of the
 same v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, retained recorder run
 `b6db54a7-c603-47ad-94e8-7b57e22c609b`, clean commit `af8f5ab65f15078a1295e724758fa0abc3837421`, same selection, 4
 nextest slots with retries 0, pinned tmux 3.7c with executable SHA256

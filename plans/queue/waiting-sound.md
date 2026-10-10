@@ -174,11 +174,9 @@ oscillator at `f × ratio` whose peak is `a × relative`, on the same envelope. 
 `[[2.0, 0.25], [3.0, 0.08]]`. Start the sound 20 ms after the context's current time.
 
 - waiting, "Bell call": `{f: 784, t: 0, d: 0.7, a: 0.4, bell overtones}`,
-  `{f: 1047, t: 0.18, d: 0.9, a: 0.35, bell
-  overtones}`.
+  `{f: 1047, t: 0.18, d: 0.9, a: 0.35, bell overtones}`.
 - approval, "Ding-dong": `{f: 880, t: 0, d: 0.6, a: 0.4, bell overtones}`,
-  `{f: 698, t: 0.25, d: 0.9, a: 0.4, bell
-  overtones}`.
+  `{f: 698, t: 0.25, d: 0.9, a: 0.4, bell overtones}`.
 - turn finished, "Soft pluck": `{f: 523, t: 0, d: 0.35, wave: triangle, a: 0.45}`.
 
 ## How to run

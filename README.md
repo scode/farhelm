@@ -6,7 +6,11 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="website/src/assets/intro/header-dark.svg">
-    <img alt="farhelm: take the helm of your agents, far away and local" src="website/src/assets/intro/header-light.svg" width="760">
+    <img
+      alt="farhelm: take the helm of your agents, far away and local"
+      src="website/src/assets/intro/header-light.svg"
+      width="760"
+    >
   </picture>
 </p>
 
@@ -30,18 +34,23 @@
      this image the first time around. -->
 <!-- readme-hero-url -->
 
-![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal
-open](https://raw.githubusercontent.com/scode/farhelm/a26c3a498eb7d0510da8379b8226b02021a9bc77/readme-hero.png)
+![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal open](https://raw.githubusercontent.com/scode/farhelm/a26c3a498eb7d0510da8379b8226b02021a9bc77/readme-hero.png)
 
 <!-- /readme-hero-url -->
 
-<p align="center"><sub>Seven sessions across three hosts. The status dot on each row is the supervisor's own read of
-the live terminal.</sub></p>
+<p align="center">
+  <sub>Seven sessions across three hosts. The status dot on each row is the supervisor's own read of
+    the live terminal.</sub>
+</p>
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="website/src/assets/intro/pillars-dark.svg">
-    <img alt="What Farhelm gives you: durable sessions, every host on one screen, the real terminal, SSH as the only network, status at a glance, any agent" src="website/src/assets/intro/pillars-light.svg" width="960">
+    <img
+      alt="What Farhelm gives you: durable sessions, every host on one screen, the real terminal, SSH as the only network, status at a glance, any agent"
+      src="website/src/assets/intro/pillars-light.svg"
+      width="960"
+    >
   </picture>
 </p>
 
@@ -50,7 +59,11 @@ the live terminal.</sub></p>
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="website/src/assets/intro/how-it-works-dark.svg">
-    <img alt="How Farhelm works: the helm on your laptop lists every session from every host and reaches a supervisor on each remote box over ssh; the selected session's real terminal fills the pane" src="website/src/assets/intro/how-it-works-light.svg" width="960">
+    <img
+      alt="How Farhelm works: the helm on your laptop lists every session from every host and reaches a supervisor on each remote box over ssh; the selected session's real terminal fills the pane"
+      src="website/src/assets/intro/how-it-works-light.svg"
+      width="960"
+    >
   </picture>
 </p>
 
