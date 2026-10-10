@@ -462,6 +462,8 @@ pub(super) fn new_name_refusal(name: &str, templates: Option<&[LaunchTemplate]>)
 /// A one-line description of what a template sets, for its row in the
 /// list: every field it sets, a reset shown as such. The command and resume
 /// text are left out (they can be long, and the edit form shows them).
+/// Model ids can originate on a host, so escape them before composing the
+/// approval and trust wording shared by the list and quick switcher.
 pub(super) fn template_summary(fields: &TemplateFields) -> String {
     let choice = |name: &str, value: Option<String>| match value {
         Some(value) => format!("{name} {value}"),
@@ -476,7 +478,7 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
     }
     if let Some(model) = &fields.model {
         parts.push(match model {
-            Some(model) => model.clone(),
+            Some(model) => crate::peer::display_peer(model),
             None => "model default".to_string(),
         });
     }
@@ -1227,6 +1229,32 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both template selection surfaces share this summary. A host's model
+    /// text must not hide or reverse the approval wording beside it; ordinary
+    /// model ids and explicit defaults keep their established spelling.
+    #[test]
+    fn template_summaries_escape_model_text_before_permission_wording() {
+        let fields = TemplateFields {
+            model: Some(Some("model\u{200B}\u{202E}".into())),
+            permissions: Some(Some(LaunchPermission::Yolo)),
+            ..Default::default()
+        };
+        assert_eq!(
+            template_summary(&fields),
+            "model<U+200B><U+202E> · approvals yolo"
+        );
+        let ordinary = TemplateFields {
+            model: Some(Some("ordinary-model".into())),
+            ..Default::default()
+        };
+        assert_eq!(template_summary(&ordinary), "ordinary-model");
+        let reset = TemplateFields {
+            model: Some(None),
+            ..Default::default()
+        };
+        assert_eq!(template_summary(&reset), "model default");
+    }
 
     /// Opening a kindless record changes only the draft. It must be visibly
     /// unsaved so simply inspecting a template cannot migrate its behavior.

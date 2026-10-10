@@ -7722,7 +7722,8 @@
   broadly is an implementation DECISION within the gate. A test covers a paste containing the marker. If it needs
   significantly more than a small change in that path, stop and bring it back to the user. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`.
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes).
 
 ## stop-approval-retain-targets-owner.md
 
@@ -8433,7 +8434,8 @@
   control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
   templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
   validation, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md
@@ -8448,7 +8450,8 @@
   control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
   templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
   validation, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## displayed-recovery-paths-shell-quoting.md
@@ -8489,7 +8492,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-summaries-interpolate-model-text-into-approval-templates-list-summary-rendering.md
@@ -8503,7 +8507,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-summaries-interpolate-model-text-into-approval-quick-switcher-summary-rendering.md
@@ -8518,7 +8523,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## ascii-spaces-remain-invisible-host-identity-approval-labels.md
@@ -8534,7 +8540,8 @@
   direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
   through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
   than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-text-safety.md`. The spec text landed ahead of the code in
+- Execution: complete: change `wurqqtrk`, bookmark `plan/gui-text-safety/01-gui-text-safety`.
+  [PR #1811](https://github.com/scode/farhelm/pull/1811/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## restart-execute-cancel.md

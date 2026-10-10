@@ -1,4 +1,4 @@
-// The byte-domain conversion `terminal.js` needs for `term.onBinary`,
+// Input conversions `terminal.js` needs for binary reports and safe pastes,
 // pulled out on its own so `node --test` can load the EXACT file the page
 // loads (PLAN_M6_5.md item 1) — no bundler, no copy that could drift from
 // what ships.
@@ -13,8 +13,8 @@
 // `module.exports` when that exists, which is true under `node --test` and
 // false in the browser — the same file, unmodified, serves both callers.
 //
-// The whole body is an IIFE so `binaryStringToBytes` itself never becomes a
-// bare global: without it, the top-level `function` declaration below would
+// The whole body is an IIFE so the helpers themselves never become a
+// bare global: without it, a top-level `function` declaration would
 // leak `window.binaryStringToBytes` in addition to the intentionally
 // namespaced `window.farhelmTermBytes.binaryStringToBytes`, growing the
 // global surface by one unremovable name for no reason anyone would choose
@@ -45,6 +45,17 @@
     return bytes;
   }
 
+  /**
+   * Keep pasted text inside the terminal's own bracketed-paste frame.
+   * An embedded end marker would turn the remaining text into typed input.
+   * Remove that marker and all remaining ESC bytes: preserving ESC fragments
+   * could assemble another end marker when the embedded one is removed.
+   * Ordinary text, Unicode and line breaks still reach `term.paste()` intact.
+   */
+  function sanitizePastedText(text) {
+    return text.replace(/\x1b\[201~|\x1b/g, "");
+  }
+
   // Browser global (matches terminal.js's `window.farhelmTerm`-style
   // naming for page-visible helpers) when a `window` exists, and a
   // CommonJS export when `module` exists instead — `node --test` has the
@@ -52,9 +63,9 @@
   // guarded rather than assumed. That is what lets the page and the unit
   // tests load this exact file rather than a hand-maintained copy of it.
   if (typeof window !== "undefined") {
-    window.farhelmTermBytes = { binaryStringToBytes };
+    window.farhelmTermBytes = { binaryStringToBytes, sanitizePastedText };
   }
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { binaryStringToBytes };
+    module.exports = { binaryStringToBytes, sanitizePastedText };
   }
 })();

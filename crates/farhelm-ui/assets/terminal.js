@@ -1870,12 +1870,10 @@
    *   as terminal input, which is SPEC.md's own reading ("plain text
    *   passes through as ordinary terminal input") and, unlike a paste, has
    *   no existing handler to fall through to.
-   * - A PASTE is intercepted only when a file or an image wins. Plain text
-   *   is left entirely alone — no `preventDefault`, no `stopPropagation`
-   *   — so xterm's own paste handler runs exactly as it did before this
-   *   existed. That is what makes "pasted text that looks like a path is
-   *   still text" true by construction rather than by a heuristic that
-   *   could misfire.
+   * - A PASTE with text is intercepted too, so an embedded end-of-paste
+   *   marker cannot escape xterm's bracketed-paste framing. Classification
+   *   still depends only on the payload's kinds: text that looks like a
+   *   path stays text, and files or images retain their precedence.
    * - The listeners are CAPTURE-phase, for the reason the selection
    *   listener above already documents: xterm registers its paste handler
    *   on its hidden helper textarea and calls `stopPropagation()`, so a
@@ -2005,7 +2003,8 @@
     /**
      * Insert text into this terminal through the same call xterm's own
      * paste handler makes, so bracketed paste and the pane's other modes
-     * are handled by the code that already handles them.
+     * are handled by the code that already handles them. Sanitizing here
+     * also covers dropped text and paths inserted after an upload.
      *
      * The selection sweep rides along because an intercepted paste never
      * reaches the listener that normally does it (this island's own
@@ -2014,7 +2013,7 @@
      */
     function insert(text) {
       if (disposed || !text) return;
-      term.paste(text);
+      term.paste(window.farhelmTermBytes.sanitizePastedText(text));
       dismissSelectionSoon();
     }
 
@@ -2429,7 +2428,7 @@
       const flavor = interpret(payload);
       // Publish the event-time evidence before any classification return. A
       // plain-text paste or failed File projection can be the observation
-      // needed to explain why this handler correctly declined the event, and
+      // needed to explain the handler's interpretation of the event, and
       // an unsupported engine shape is precisely what this diagnostic exists
       // to capture. It is a hook, never drawn: the last paste's facts, page
       // wide, for the browser specs and for a manual check to read from the
@@ -2438,14 +2437,15 @@
       // Written on every paste, `null` included (no capture helper loaded),
       // so it never shows an earlier paste's facts as the latest one's.
       window.farhelmLastClipboardFacts = facts;
-      // Text and empty payloads are none of this handler's business:
-      // returning without touching the event leaves xterm's own paste
-      // path exactly as it was.
-      if (flavor !== "file" && flavor !== "image") {
-        return;
-      }
+      // Empty or unsupported payloads still belong to the engine. Text
+      // goes through our insertion path before xterm adds its paste frame.
+      if (flavor === "none") return;
       ev.preventDefault();
       ev.stopPropagation();
+      if (flavor === "text") {
+        insert(payload.text);
+        return;
+      }
       accept(payload, flavor);
       render();
     };

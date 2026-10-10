@@ -19,20 +19,6 @@ triage.
   selection.
 - `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
   misleading unchecked checkbox.
-- `embedded-paste-terminators-allow-command-execution-definite.md` — An embedded paste terminator could make pasted text
-  submit commands.
-- `ascii-spaces-remain-invisible-host-identity-approval-labels.md` — ASCII spaces could make distinct installation
-  identities hard to distinguish during approval.
-- `template-command-editors-hide-meaningful-characters-silently-saved-command-editor.md` — Editing a saved launch
-  command silently removes stored newlines.
-- `template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md` — Editing a saved resume
-  command silently removes stored newlines.
-- `template-summaries-interpolate-model-text-into-approval-summary-model-interpolation.md` — Template summary
-  construction could let model text distort permission wording.
-- `template-summaries-interpolate-model-text-into-approval-templates-list-summary-rendering.md` — The templates list
-  could display misleading permission wording in summaries.
-- `template-summaries-interpolate-model-text-into-approval-quick-switcher-summary-rendering.md` — The quick switcher
-  could show model text as misleading permission wording.
 - `replace-omits-conversation-loss-warning-failed-resume.md` — Replace omits a conversation-loss warning after a failed
   resume launch.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
