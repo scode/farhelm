@@ -9,6 +9,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `os-readback-fixes.md` — the service-file reader refuses escapes and section spellings systemd reads differently, and macOS reads large hook argument blocks whole
 - [pending] `ui-interaction-fixes.md` — menu arrow keys follow the selected item when items change, plain clicks stop re-copying old selections, and Replace on a failed session warns about the conversation
 - [complete] `harness-tooling-fixes.md` — quoted fixture paths, a per-run spawn-test workspace, deflake stop checks process start time, full hostname scrubbing, and release advice that never reuses a tag
-- [pending] `gui-text-safety.md` — pastes lose hidden end-of-paste markers, template summaries and identity labels show hidden characters, and templates refuse commands with control or invisible characters
+- [in-flight 8501a7] `gui-text-safety.md` — pastes lose hidden end-of-paste markers, template summaries and identity labels show hidden characters, and templates refuse commands with control or invisible characters
 - [pending] `setup-refusals.md` — setup refuses install paths containing `$`, service files of a type other than simple read as unrecognised, and uninstall's lock advice is shell-quoted (after `os-readback-fixes.md`)
 - [pending] `ssh-config-atomic.md` — the CentOS test edits the user's ssh config by atomic rename, and a failed step never overwrites it
