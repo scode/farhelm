@@ -133,12 +133,8 @@ triage.
 - `browse-routing-test-discards-wrong-host-assertion.md` — The browse test ignores an observed wrong-host request.
 - `malformed-message-test-pass-through-ordinary-eof.md` — The malformed-message test can pass because the peer closes
   normally.
-- `shutdown-test-accepts-forced-cancellation-natural-completion.md` — The shutdown test accepts cancellation of a writer
-  that never finishes.
 - `idle-flush-test-permits-deadline-extension-it-claims.md` — The idle-flush test allows the renewed deadline it is
   meant to reject.
-- `replay-test-consumes-outstanding-reply-testing-recovery.md` — The replay test settles its pending reply before replay
-  begins.
 - `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
   cannot measure RSS on native macOS.
 - `directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md` — Directory browsing tests fail on
@@ -148,19 +144,9 @@ triage.
   branch.
 - `stop-intent-test-exercises-different-failure-path.md` — The stop-intent test misses the live-agent transaction
   ordering.
-- `omp-transition-assertions-cannot-detect-stale-conversation.md` — Conversation-switch tests cannot distinguish the
-  final target from a stale one.
 - `omp-child-report-fixtures-bypass-nested-runtime-check.md` — The child-report test rejects its fixture before checking
   nested-runtime ownership.
-- `lock-test-establish-contender-reached-lock.md` — The lock test can pass without any contender waiting behind the
-  lock.
-- `ended-session-replay-test-accepts-relaunch-under-same.md` — Ended-session replay can relaunch work without failing
-  its test.
 - `skip-tmux-test-passes-tmux-queried.md` — The skip-tmux test also passes when tmux is unnecessarily queried.
-- `invalid-key-test-overlooks-permanently-settled-reservations.md` — Invalid-key tests miss permanently stored failed
-  reservations.
-- `oversized-resume-test-overlooks-settled-storage.md` — The oversized-resume test can accept prohibited settled
-  storage.
 - `dead-tab-regression-cannot-pass-ordinary-macos.md` — The dead-tab test fails on ordinary macOS before checking
   cleanup.
 - `shutdown-race-test-releases-sink-shutdown-starts.md` — The shutdown race test starts after the critical transition is
@@ -169,8 +155,6 @@ triage.
   correct status.
 - `host-identity-race-test-pass-exercising-competing-writes.md` — The identity-race test can pass after the write guard
   is removed.
-- `resume-preservation-test-never-verifies-relaunch-was-accepted.md` — The resume-preservation test can pass when
-  relaunch is refused.
 - `prompt-classification-test-finish-waiting-prompt-appears.md` — A delayed prompt could make its classification test
   fail on correct behavior.
 - `foreign-destination-fixture-reuse-identity-it-expects-reject.md` — The foreign-directory test could accidentally

@@ -2525,7 +2525,16 @@ mod tests {
             .expect("read queued frame")
             .expect("queued frame must reach the peer");
         assert_eq!(frame, Frame::data(1, b"queued before close".to_vec()));
-        drain_writer(&mut writer_task, &frames_written, Duration::from_millis(1)).await;
+        // The production drain helper may abort a stuck writer. That is
+        // cleanup, not evidence that this close signal finished the task.
+        let completed = tokio::time::timeout(Duration::from_millis(1), &mut writer_task).await;
+        if completed.is_err() {
+            writer_task.abort();
+            let _ = writer_task.await;
+        }
+        completed
+            .expect("signaled writer must finish before the drain window")
+            .expect("signaled writer must finish without panic or cancellation");
         assert_eq!(frames_written.load(Ordering::Relaxed), 1);
     }
 

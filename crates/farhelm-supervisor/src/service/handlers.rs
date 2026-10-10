@@ -7710,6 +7710,8 @@ mod tests {
     /// collapse every create from a client that forgot to fill the field
     /// into a single intent — the second such create would replay the
     /// first's session instead of making its own.
+    /// Checking each key directly includes settled failures, which the
+    /// pending-reservation list omits despite their permanent storage.
     #[farhelm_testtrace::test]
     async fn a_degenerate_intent_key_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
@@ -7748,7 +7750,7 @@ mod tests {
                     title: None,
                     cols: 80,
                     rows: 24,
-                    intent_key: Some(key),
+                    intent_key: Some(key.clone()),
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
@@ -7772,6 +7774,14 @@ mod tests {
             assert!(
                 message.contains("intent key"),
                 "the refusal must name what was wrong: {message}"
+            );
+            assert!(
+                sup.store
+                    .reservation(&key)
+                    .await
+                    .expect("read refused key")
+                    .is_none(),
+                "a refused key must leave no reservation, including a settled failure"
             );
         }
         assert!(
@@ -7839,6 +7849,8 @@ mod tests {
     /// while one of very many tiny arguments costs almost no bytes and is
     /// caught by the element cap. Either shape unbounded is a permanent
     /// write sized by the request.
+    /// Each refusal has its own key and must leave no reservation in any
+    /// state; a settled failure is absent from the pending-only query.
     #[farhelm_testtrace::test]
     async fn an_oversized_resume_command_is_refused_before_anything_is_stored() {
         let state = StateDir::new();
@@ -7854,6 +7866,7 @@ mod tests {
             (2, "x ".repeat(RESUME_TEMPLATE_ELEMENT_CAP), "element limit"),
         ] {
             let resume = format!("claude {filler} {{conversation}} {{farhelm_args}}");
+            let key = format!("oversized-resume-{req_id}");
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
@@ -7870,7 +7883,7 @@ mod tests {
                     title: None,
                     cols: 80,
                     rows: 24,
-                    intent_key: Some("key".to_string()),
+                    intent_key: Some(key.clone()),
                     confirm_yolo: false,
                     github_checkout: None,
                     key_lives_with_session: false,
@@ -7894,6 +7907,14 @@ mod tests {
             assert!(
                 message.contains(expected),
                 "the refusal must name the limit that was exceeded: {message}"
+            );
+            assert!(
+                sup.store
+                    .reservation(&key)
+                    .await
+                    .expect("read refused key")
+                    .is_none(),
+                "an oversized resume must leave no reservation, including a settled failure"
             );
         }
         assert!(

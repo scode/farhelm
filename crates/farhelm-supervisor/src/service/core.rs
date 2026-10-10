@@ -21643,6 +21643,8 @@ exit 0
     /// end — and the binding always names the latest one at version 1.
     /// The `session_switch` reason stays passthrough: the proof never
     /// depends on it, so a version-varying reason cannot break admission.
+    /// Distinct conversations make a binding stuck on an earlier report
+    /// observable at each transition, rather than only at the end.
     #[farhelm_testtrace::test]
     async fn omp_proven_transitions_report_in_order() {
         let mut fixture = OmpAdmission::launch().await;
@@ -21660,25 +21662,32 @@ exit 0
                 ],
             )
             .await;
-        let file = fixture.session_file("transitions.jsonl", "omp-parent");
         let Some(peer) = fixture.spawn_runtime(&id).await else {
             return;
         };
-        let mut last = String::new();
-        for source in [
+        for (index, source) in [
             "session_start",
             "session_switch:resume",
             "session_branch",
             "session_switch:fork",
             "agent_end",
-        ] {
-            last = fixture.locator_token("omp-parent", Some(&file));
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let conversation = format!("omp-transition-{index}");
+            let file = fixture.session_file(&format!("transition-{index}.jsonl"), &conversation);
+            let token = fixture.locator_token(&conversation, Some(&file));
             fixture
-                .report(&id, last.clone(), source, Some(peer))
+                .report(&id, token.clone(), source, Some(peer))
                 .await
                 .unwrap_or_else(|error| panic!("transition {source} admits: {error:#}"));
+            assert_eq!(
+                fixture.binding(&id).await,
+                (Some(token), 1),
+                "transition {source} must replace the preceding conversation binding"
+            );
         }
-        assert_eq!(fixture.binding(&id).await, (Some(last), 1));
         assert_eq!(
             fixture.offer(&id).await,
             farhelm_proto::RestartOffer::Resume
@@ -25151,14 +25160,25 @@ exit 0
         };
         let other = locks.claim("other-key").await;
         assert_eq!(locks.locks.lock().unwrap().len(), 2);
-        tokio::task::yield_now().await;
+        // An unpolled contender also looks unfinished. The arrival
+        // observer proves it reached this held key before exclusion is
+        // checked, so releasing the holder really exercises handoff.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            locks.claims_reached_for_test("key", 2),
+        )
+        .await
+        .expect("the second claim must reach the held key");
         assert!(!waiter.is_finished(), "the same key must still be blocked");
 
         // Releasing hands the key over rather than dropping its entry: the
         // waiter is holding the SAME mutex it queued on, which is only
         // true if pruning skipped an entry with a live waiter.
         drop(first);
-        let handed_over = waiter.await.expect("the waiter must acquire");
+        let handed_over = tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .expect("releasing the holder must hand the key to its waiter")
+            .expect("the waiter must acquire");
         assert!(
             locks.locks.lock().unwrap().contains_key("key"),
             "an entry with a live holder must not be pruned"
@@ -25575,6 +25595,19 @@ exit 0
             .await
             .expect("an ended session is still this intent's session");
         assert_eq!(replayed.id, "ended");
+        assert_eq!(
+            sup.store
+                .session("ended")
+                .await
+                .expect("read replayed session")
+                .expect("ended session remains stored")
+                .outcome,
+            LastOutcome::Exited {
+                exit_code: Some(1),
+                annotation: None,
+            },
+            "replay must preserve the finished run, not relaunch under the same id"
+        );
         assert_eq!(
             sup.store.load_all().await.expect("load").len(),
             1,

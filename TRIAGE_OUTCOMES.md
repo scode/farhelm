@@ -9809,7 +9809,9 @@
 - Completion criteria: Await the writer task directly under a short timeout and require success. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## replay-test-consumes-outstanding-reply-testing-recovery.md
 
@@ -9826,7 +9828,9 @@
 - Completion criteria: Reorder the commands so exactly one filter reply is outstanding when replay starts, and assert
   that. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## omp-transition-assertions-cannot-detect-stale-conversation.md
 
@@ -9842,7 +9846,9 @@
 - Completion criteria: Give the transitions distinct ids and files and check the binding after each. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## lock-test-establish-contender-reached-lock.md
 
@@ -9858,7 +9864,9 @@
 - Completion criteria: Wait on the existing arrival observer instead of yielding. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## ended-session-replay-test-accepts-relaunch-under-same.md
 
@@ -9875,7 +9883,9 @@
 - Completion criteria: Also assert the stored row is still exited with its original exit code. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## invalid-key-test-overlooks-permanently-settled-reservations.md
 
@@ -9892,7 +9902,9 @@
 - Completion criteria: Assert no reservation of any state exists for each refused key. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## oversized-resume-test-overlooks-settled-storage.md
 
@@ -9907,7 +9919,9 @@
 - Completion criteria: Assert no reservation of any state exists for the key. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## resume-preservation-test-never-verifies-relaunch-was-accepted.md
 
@@ -9923,7 +9937,9 @@
 - Completion criteria: Require the restart to be claimed, with a generation bump, before the preservation assertions. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
+- Execution: complete in change `xrzlpostszpmsklpznnuyvkknyomtxlo`, bookmark
+  `plan/supervisor-test-oracles/01-supervisor-test-oracles`,
+  [PR #1816](https://github.com/scode/farhelm/pull/1816/changes).
 
 ## intentional-child-passes-because-it-failed-wrong.md
 
