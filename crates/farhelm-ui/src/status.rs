@@ -526,6 +526,11 @@ fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
 /// anyway:" — replace has no analogous "there is nothing to reconsider"
 /// shortcut to fall back on, so its own consequence is spelled out in full
 /// even for a session that was already at rest.
+///
+/// An exec failure describes this run only. A failed Resume can retain the
+/// previous run's conversation, so `Error` must still warn about discarding
+/// any conversation the session could resume; this function has no capture
+/// evidence with which to promise that none exists.
 fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
@@ -540,7 +545,10 @@ fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
             "interrupted by a host reboot, which ended the agent, but replacing still discards \
              the conversation"
         }
-        SessionStatus::Error { .. } => "the agent never started",
+        SessionStatus::Error { .. } => {
+            "the agent never started, but replacing still discards any conversation the session \
+             could resume"
+        }
     }
 }
 
@@ -1169,16 +1177,12 @@ mod tests {
         );
     }
 
-    /// Every status EXCEPT `Error` must warn that the conversation is
-    /// discarded — the plan requirement no earlier test actually pins: the
-    /// wording tests above check kill certainty, reboot framing, and the
-    /// fresh-session suffix, but none of them would fail if an
-    /// implementation quietly dropped the irreversible conversation-loss
-    /// warning from every applicable arm. `Error` is the one deliberate
-    /// exception: no agent conversation ever started, so there is nothing
-    /// for that arm to say was discarded.
+    /// Every Replace confirmation warns about losing a conversation.
+    /// A failed Resume can leave `Error` with the earlier conversation still
+    /// available; treating an exec failure as proof of no capture would omit
+    /// the warning at the exact point the user chooses a fresh replacement.
     #[farhelm_testtrace::test]
-    fn every_status_but_error_warns_the_conversation_is_discarded() {
+    fn every_status_warns_the_conversation_is_discarded() {
         let discards = [
             SessionStatus::Running,
             SessionStatus::Waiting,
@@ -1198,8 +1202,9 @@ mod tests {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
         });
         assert!(
-            !error_wording.contains("discard"),
-            "an agent that never started never held a conversation to discard: {error_wording}"
+            error_wording.contains("discards any conversation")
+                && error_wording.contains("could resume"),
+            "a failed resume can retain its conversation: {error_wording}"
         );
     }
 

@@ -50,14 +50,11 @@
 // is not observable as a problem, but a copy that silently did not happen
 // is.
 //
-// The property that guard was actually protecting — "a plain click without
-// a drag must not clobber the clipboard" — never depended on the cache in
-// the first place. It falls out of xterm's OWN selection model: a click
-// with no movement never gets a selection END (`SelectionService`'s
-// `_handleSingleClick` sets `selectionStart` but leaves `selectionEnd`
-// undefined), so `hasSelection()` is false and this function already
-// declines on that alone. The decision is therefore just: did this gesture
-// end with a non-empty local selection.
+// A plain click must not clobber the clipboard. Without mouse tracking,
+// xterm clears the old selection on the press, so no selection remains to
+// copy. With tracking, an unforced press belongs to the program and can
+// leave an earlier forced selection intact. Its non-empty text is not a
+// new copy request: the press must also have allowed local selection.
 (function () {
   /**
    * Whether a completed mouse gesture on the terminal should push the
@@ -70,11 +67,17 @@
    * thin decision over both rather than a second guess about their
    * relationship.
    *
-   * @param {{hasSelection: boolean, selectionText: string}} state
+   * `trackingAtPress` and `forced` describe the press, not the release:
+   * a program can change mouse tracking during the gesture. An unforced
+   * press under tracking cannot select locally, even if old text remains.
+   *
+   * @param {{hasSelection: boolean, selectionText: string, trackingAtPress: boolean, forced: boolean}} state
    * @returns {boolean} true to write `selectionText` to the clipboard now
    */
   function copySelectionOnMouseUp(state) {
-    return !!(state && state.hasSelection && state.selectionText);
+    return !!(
+      state && (!state.trackingAtPress || state.forced) && state.hasSelection && state.selectionText
+    );
   }
 
   // ## The drag that copies nothing
@@ -140,14 +143,14 @@
    * no mouse tracking at the press makes Farhelm's own selection; a press
    * with the forcing modifier held is Farhelm's selection too, even when it
    * stayed inside one cell and so selected nothing (telling that user to
-   * hold the key they are holding would be wrong); a local selection is
-   * already copied by `copySelectionOnMouseUp`; and an OSC 52 write since
+   * hold the key they are holding would be wrong); and an OSC 52 write since
    * the press means the program copied by itself.
    *
    * `forced` is read from the press event with xterm's own rule (see
    * `pressForcesSelection`), not inferred from the missing selection: under
    * mouse tracking a plain press does not clear an earlier forced
-   * selection, so "no selection" and "no modifier" are different facts.
+   * selection. That retained text is neither copied nor evidence that this
+   * program-owned drag copied anything, so it must not suppress the notice.
    *
    * @param {{button: number, moved: number, onScreen: boolean,
    *          trackingAtPress: boolean, forced: boolean,
@@ -163,7 +166,6 @@
       g.moved >= DRAG_THRESHOLD_PX &&
       g.trackingAtPress &&
       !g.forced &&
-      !g.hasSelection &&
       !g.osc52SincePress
     );
   }

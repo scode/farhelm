@@ -436,10 +436,12 @@ pub(crate) struct MenuWiring<A: 'static, Id: 'static, const N: usize> {
     /// `focus_menu_item` for somewhere else, resetting `focused` back to an
     /// intermediate position the user has already stepped past
     /// (`menu_step_origin`'s own doc has the full race). `requested` has no
-    /// such second writer — only [`focus_menu_item`] ever SETS it, and only
-    /// the open/close/toggle-focus paths clear it — so it always names the
-    /// last position keyboard navigation actually asked for, no matter how
-    /// late a stray `onfocusin` arrives.
+    /// such DOM writer — [`focus_menu_item`] establishes the keyboard
+    /// target, and the open/close/toggle-focus paths clear it. The session row remaps
+    /// it by action when its item order changes, clearing it only if that
+    /// action disappears. It therefore keeps the latest keyboard target
+    /// ahead of a stray `onfocusin`, including across item withdrawal; a
+    /// withdrawn request falls back to the reconciled `focused` position.
     pub(crate) requested: Signal<Option<usize>>,
     /// Where focus should land as the panel mounts, honoured once and
     /// then cleared (see [`MenuOpenIntent`]).
@@ -1220,6 +1222,28 @@ pub(crate) enum MenuFocusReconciliation {
 ///
 /// `menu_open` is this row's OWN belief, as of the render that scheduled
 /// this effect, about whether its menu is the currently open one.
+/// Carry a pending keyboard request across a menu item-set change.
+///
+/// Returns the old-order position reconciliation should start from, and the
+/// request remapped into the new order. The request is remapped by ACTION,
+/// not position: withdrawing a middle item can leave the old position in
+/// bounds but naming a different action. The keyboard's latest target also
+/// outranks a focus position that may come from an older, delayed focus
+/// event, so it is the reconciliation origin whenever there is one. A
+/// request for an action that disappeared remaps to `None`, while still
+/// serving as the origin so the existing withdrawal path returns focus.
+pub(crate) fn carry_menu_request<A: Copy + Eq, const N: usize>(
+    previous_order: MenuOrder<A, N>,
+    current_order: MenuOrder<A, N>,
+    requested: Option<usize>,
+    focused: Option<usize>,
+) -> (Option<usize>, Option<usize>) {
+    let remapped = requested
+        .and_then(|position| previous_order.get(position))
+        .and_then(|action| current_order.position(action));
+    (requested.or(focused), remapped)
+}
+
 /// `Withdrawn` is short-circuited to `Unchanged` whenever it is false
 /// (F3/COR-HOST-WITHDRAWAL-REOPEN, F4/COR-SESSION-WITHDRAWAL-REOPEN): both
 /// callers (`hosts::HostRow`, `list::row::SessionRow`) act on `Withdrawn` by
@@ -1495,6 +1519,71 @@ mod tests {
         assert_eq!(menu_step_origin(None, Some(2), Some(0)), Some(2));
         assert_eq!(menu_step_origin(None, None, Some(0)), Some(0));
         assert_eq!(menu_step_origin(None, None, None), None);
+    }
+
+    /// Item withdrawal must preserve the latest arrow target despite late focus events.
+    /// The old Replace slot names Stop after Mark seen disappears. Remapping
+    /// the request keeps Down aimed at Stop even if an earlier focus event
+    /// lands before or after withdrawal. It drives `carry_menu_request`, the
+    /// function the row's item-set effect calls, so reverting the remap or
+    /// its precedence fails here; it does not drive real DOM focus.
+    #[farhelm_testtrace::test]
+    fn menu_step_after_middle_item_withdrawal_preserves_the_burst_target() {
+        let actions = [
+            "rename",
+            "mark seen",
+            "clone",
+            "replace with",
+            "replace",
+            "stop",
+            "delete",
+        ];
+        let before = MenuOrder::pack(actions, |_| true);
+        let after = MenuOrder::pack(actions, |action| action != "mark seen");
+        let old_request = before.position("replace").expect("replace is offered");
+        let old_focus = before
+            .position("replace with")
+            .expect("earlier target is offered");
+        assert_eq!(after.get(old_request), Some("stop"));
+        let (_, requested) = carry_menu_request(before, after, Some(old_request), Some(old_focus));
+        assert_eq!(
+            requested.and_then(|position| after.get(position)),
+            Some("replace")
+        );
+        let withdrawn_focus = before
+            .position("mark seen")
+            .expect("mark seen starts offered");
+        for old_focus in [old_focus, withdrawn_focus] {
+            // A surviving keyboard request also takes precedence for
+            // withdrawal reconciliation, so an older Mark seen focus event
+            // cannot close the menu before the requested Replace focus lands.
+            let (origin, _) = carry_menu_request(before, after, Some(old_request), Some(old_focus));
+            let MenuFocusReconciliation::Moved(focused) =
+                reconcile_menu_focus(before, after, origin, true)
+            else {
+                panic!("the latest requested action survives at an earlier position");
+            };
+            assert_eq!(after.get(focused), Some("replace"));
+
+            // The focus value can be stale on effect entry or overwritten by
+            // an older callback afterward. Neither may outrank the latest request.
+            for stale_focus in [focused, old_focus] {
+                let next = next_menu_focus(
+                    after.len(),
+                    menu_step_origin(requested, Some(stale_focus), Some(old_request)),
+                    MenuFocusMove::Next,
+                );
+                assert_eq!(next.and_then(|position| after.get(position)), Some("stop"));
+            }
+        }
+        let withdrawn_request = before.position("mark seen");
+        let (origin, withdrawn) =
+            carry_menu_request(before, after, withdrawn_request, Some(old_focus));
+        assert_eq!(withdrawn, None, "a withdrawn request has no new position");
+        assert_eq!(
+            origin, withdrawn_request,
+            "a withdrawn request still names the origin the withdrawal path closes from"
+        );
     }
 
     /// F5/COR-FOCUS-BURST: a burst of arrow presses arriving faster than a
