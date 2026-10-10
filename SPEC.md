@@ -1668,15 +1668,21 @@ starts, or ignore the YOLO rule below. That is accepted, because spawn acts only
 already trusts. Waiting for the user holds nothing other operations wait on, apart from the asking session's own next
 change, which is refused while an earlier one is still waiting.
 
-While a request waits, the GUI shows a card for it in a fixed corner of the window. The card stays until it is answered
-or expires, several stack, and the rest of the app stays usable. It names the requesting session and its host, the
-action, and its target. For a launch it shows the target host, the folder, the agent type and its choices or the full
-command and resume command text, and whether the launch is YOLO. For a template write it shows the whole resulting
-template, including the command and resume command text that the templates listing withholds from agents, and for a
-template delete the template being deleted. Text an agent controls (session titles, folders, command lines) is shown as
-labelled data, never in a way that could pass for Farhelm's own wording. The card offers Allow, Always allow from the
-requesting host, and Deny. Always allow turns that host's setting on and then approves the request; if turning the
-setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
+While requests wait, the GUI shows one expanded card centered at the top of the main area, below the session's tabs when
+a session is open and clear of the sidebar and the terminal's prompt. The oldest request opens first. Other requests
+appear as labelled headers below it; selecting a header expands that request instead, and it stays selected until
+answered or expired, after which the oldest remaining request opens. The card shows the total waiting count. Its compact
+fact grid reflows in a narrow main area, and the whole request region scrolls once it reaches its height cap, well short
+of the full main area; command text stays full and wrapped. The rest of the app stays usable, and cards remain
+answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting list or the expanded request changes,
+so a click already aimed at the previous request cannot answer the next one. It names the requesting session and its
+host, the action, and its target. For a launch it shows the target host, the folder, the agent type and its choices or
+the full command and resume command text, and whether the launch is YOLO. For a template write it shows the whole
+resulting template, including the command and resume command text that the templates listing withholds from agents, and
+for a template delete the template being deleted. Text an agent controls (session titles, folders, command lines) is
+shown as labelled data, never in a way that could pass for Farhelm's own wording. The card offers Allow, Always allow
+from the requesting host, and Deny. Always allow turns that host's setting on and then approves the request; if turning
+the setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
 answered on: other cards already waiting from that host stay until they are answered.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is

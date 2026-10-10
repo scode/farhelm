@@ -3978,6 +3978,20 @@ connection going away (checked on every feed change and at least every 5 seconds
 (`farhelm_proto::approvals::APPROVAL_WAIT`). Every ending passes through one drop guard that removes the entry if it is
 still there and bumps the feed, so no card outlives the request it describes. Card ids are random, not sequential.
 
+The GUI keeps one expanded request id locally, preserves it across listing refreshes, and falls back to the oldest
+remaining request when it leaves. The other requests are header buttons below it, including requests from other hosts.
+The listing's id sequence and the expanded id together trigger the 700ms arm delay; a generation check prevents an older
+delay from arming buttons after a more recent switch. Existing decision rows are regrouped into requester, short facts,
+and full-width text, preserving the peer-text distinction and showing real commands in full.
+
+The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
+follows the actual main-pane rectangle and the current tab strip's bottom (the titlebar or pane top when there are no
+tabs). This accounts for sidebar width, narrow-window shell scrolling, native top chrome, and conditional header notices
+without fixed offsets. Width is capped at 660px with 12px margins; the whole region's height is capped at 55% of the
+pane and at the space remaining below its top. Pane, sidebar and chrome sizes and direct chrome structure are observed,
+not terminal output mutations; listeners and observers are released when the region leaves the DOM. Sidebar size is an
+input even at the pane's minimum width, where a resize moves the pane without changing its size.
+
 "A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
 whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes
 (dioxus-desktop's default, which Farhelm keeps), so a closed app holds no subscription. A browser whose feed socket

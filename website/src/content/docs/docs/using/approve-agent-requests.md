@@ -17,8 +17,9 @@ to open it.
 
 ## The card
 
-When an agent asks to change something, a card appears in the bottom-right corner of the Farhelm window. It says what
-the agent wants to do and shows the details that matter:
+When an agent asks to change something, a compact card appears near the top of the main area, below an open session's
+tabs. It leaves the sidebar and the terminal's prompt clear. It says what the agent wants to do and shows the details
+that matter:
 
 - which session asked, and from which host;
 - the session it would act on, for a rename, stop, or restart, and the command a restart would run;
@@ -38,10 +39,15 @@ The card has three buttons:
   waiting stay up until you answer them.
 - **deny** refuses it, and the agent is told you declined.
 
-The rest of Farhelm stays usable while cards wait, and several can wait at once, up to four from one host. While four
+The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
+request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
+or expires. Then the oldest remaining request opens. A long request scrolls as a whole; its command text is shown in
+full.
+
+The rest of Farhelm stays usable while requests wait, and several can wait at once, up to four from one host. While four
 are waiting, that host's agents are turned away until you answer one. Cards stay clickable even over an open dialog.
-When the cards move, because one was answered or a new one arrived, their buttons pause for a moment, so a double-click
-cannot answer a card you have not read.
+When the waiting requests change or you switch to another request, the answer buttons pause for a moment, so a
+double-click cannot answer a request you have not read.
 
 ## When nobody answers
 
