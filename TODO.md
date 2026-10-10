@@ -735,6 +735,11 @@ are large mostly because of their tests.
   process; or have the hook check its own process chain before writing. The accepted gap is recorded in SPEC_impl.md's
   "Report files". Found 2026-10-05 reviewing the `hook-report-files` plan's report.
 
+- **Check upstream xterm.js for two link bugs at the next upgrade.** After part of a wrapped URL is repainted, clicking
+  it can still open the old target, and on very long wrapped lines a URL's click area shifts onto the row above. Farhelm
+  does not work around non-security bugs in the vendored bundle (SPEC_impl.md, decided 2026-10-10), so when the bundle
+  is next upgraded, check whether upstream fixed these and remove this entry.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the

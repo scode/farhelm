@@ -11,25 +11,6 @@ triage.
 
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 
-- `stop-approval-retain-targets-owner.md` — A stop approval could apply to a replacement host instead of the host shown.
-- `restarts-launch-comparison-bind-approval-target-host.md` — A restart approval could interrupt matching work on a
-  replacement host.
-- `rename-approval-transfer-another-installation.md` — A rename approval could change a replacement host's session
-  title.
-- `launch-approval-loses-destination-binding-dispatch-create-create-destination-client-acquisition.md` — An approved new
-  session could launch on a replacement destination.
-- `launch-approval-loses-destination-binding-dispatch-clone-clone-destination-client-acquisition.md` — An approved clone
-  could launch on a replacement destination.
-- `always-allow-grant-permission-host-connection-has.md` — An old “Always allow” answer could grant a replacement host
-  lasting authority.
-- `stale-host-settings-request-grant-fleet-authority-replacement.md` — A stale settings request can grant a replacement
-  host permission to act across the fleet.
-- `distinct-proxy-routes-reuse-wrong-hosts-ssh.md` — SSH connection sharing can send provisioning commands to the wrong
-  machine.
-- `delayed-settings-toggle-grant-replacement-installation-command.md` — A delayed checkbox action can enable fleet
-  commands on a replacement installation.
-- `retargeting-never-contacted-host-preserves-exemptions-intended-previous.md` — Retargeting a never-contacted host
-  carries its command exemption to the new destination.
 - `executable-read-back-collapses-dollars-select-another-installations.md` — Uninstall can mistake a service with
   literal dollars for another installation's service.
 - `unsupported-c-escapes-become-different-executable-instead.md` — Escaped service paths could make uninstall choose the
@@ -40,50 +21,16 @@ triage.
   installations could be assigned to only one.
 - `malformed-supervisor-messages-inject-terminal-controls-into.md` — A malformed supervisor message can alter the helm's
   terminal log display.
-- `unexpected-messages-give-supervisor-unrestricted-bulk-log.md` — A supervisor can repeatedly send oversized
-  unsolicited log messages.
 - `git-fixture-setup-modify-delete-callers-repository.md` — Git test fixtures can modify a repository outside their
   temporary directory.
-- `negative-manager-probe-permit-relaunch-over-surviving.md` — A retry could launch duplicate work after losing evidence
-  of a surviving scope.
-- `failed-registry-reload-reconnect-previous-destination-under.md` — A failed host reload could reconnect the old
-  destination under the edited registration.
 - `remote-attach-errors-inject-terminal-controls-into.md` — A remote attach refusal can manipulate the helm's log
   display.
-- `update-temporaries-briefly-permit-cross-account-writes.md` — Update files briefly allow another account to retain
-  write access.
 - `plain-clicks-overwrite-clipboard-old-selection.md` — An ordinary terminal click can replace the clipboard with an old
   selection.
-- `failed-relaunch-rollback-forget-surviving-process-scope.md` — Failed restart recovery could forget a surviving
-  replacement scope.
-- `replacement-window-cleanup-has-same-scope-loss-path.md` — Replacement confirmation recovery could lose evidence of
-  surviving scoped work.
 - `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
   misleading unchecked checkbox.
 - `embedded-paste-terminators-allow-command-execution-definite.md` — An embedded paste terminator could make pasted text
   submit commands.
-- `character-width-cache-retains-attacker-controlled-strings-indefinitely-possible.md` — Rendered combining-character
-  strings could grow memory beyond scrollback limits.
-- `forward-tab-counts-freeze-gui.md` — A tiny forward-tab command can occupy the GUI with billions of redundant steps.
-- `backward-tab-counts-freeze-gui.md` — A backward-tab command can keep the GUI busy after the cursor reaches zero.
-- `insert-line-counts-cause-excessive-allocation-cpu-work.md` — An insert-line command can request billions of redundant
-  allocations.
-- `delete-line-counts-cause-excessive-allocation-cpu-work.md` — A delete-line command can keep allocating after all
-  affected rows are blank.
-- `scroll-up-counts-cause-billions-redundant-operations.md` — A scroll-up command can block the window with redundant
-  row operations.
-- `scroll-down-counts-cause-billions-redundant-operations.md` — A scroll-down command has its own excessive-work path.
-- `repeat-character-commands-expand-tiny-input-into-enormous.md` — A short repeat-character command requests an enormous
-  allocation.
-- `color-list-parsing-performs-quadratic-work.md` — A long color list could block the GUI with costly array operations.
-- `unused-hyperlinks-accumulate-retained-record-bound.md` — Empty terminal hyperlinks accumulate metadata without adding
-  visible content.
-- `combining-characters-bypass-scrollback-memory-bound.md` — Combining characters can grow a single terminal cell beyond
-  line-retention bounds.
-- `unbounded-hyperlink-records-exhaust-viewers-memory.md` — Empty hyperlinks retain records beyond the terminal's
-  visible-content limits.
-- `overlapping-uninstall-dialogs-confirm-wrong-host.md` — Overlapping uninstall dialogs could route keyboard
-  confirmation to a hidden host plan.
 - `ascii-spaces-remain-invisible-host-identity-approval-labels.md` — ASCII spaces could make distinct installation
   identities hard to distinguish during approval.
 - `sidebar-directories-visually-disguise-sessions-actual-folder.md` — Invisible characters can disguise a session's
@@ -100,61 +47,21 @@ triage.
   could show model text as misleading permission wording.
 - `status-badges-render-unescaped-host-supplied-text.md` — Remote diagnostic text can visually distort session status
   badges.
-- `repainting-part-wrapped-url-leaves-previous-target-outer-repaint-invalidation-predicate.md` — The outer repaint check
-  lets a changed wrapped URL keep its old target.
-- `repainting-part-wrapped-url-leaves-previous-target-inner-cached-link-clearing-predicate.md` — The inner clearing
-  check can preserve a stale target after partial URL repaint.
-- `long-wrapped-lines-shift-url-hitboxes-onto.md` — Long wrapped URLs can make text on the preceding row clickable.
-- `restart-execute-cancel.md` — A stale Restart with submission could execute after Cancel.
-- `replacement-symlink-redirect-stale-state-cleanup-live-tmux.md` — A replaced test-state path could redirect cleanup to
-  another live tmux server.
 - `replace-omits-conversation-loss-warning-failed-resume.md` — Replace omits a conversation-loss warning after a failed
   resume launch.
 - `stale-deflake-pid-terminate-unrelated-work.md` — Stopping an old test sweep can signal an unrelated process.
 - `real-agent-cleanup-forget-somebody-elses-workspace.md` — A failed real-agent test can unregister another workspace.
-- `filename-matching-authorize-deletion-unrelated-pictures.md` — Recording can delete unrelated pictures in a matching
-  stills directory.
-- `stopping-original-supervisor-leaves-saved-pid-armed.md` — Final browser-stack cleanup could signal a replacement for
-  an exited supervisor.
-- `uninstall-confirmation-remove-replacement-installation.md` — An old uninstall approval could remove an adopted
-  replacement installation.
-- `concurrent-lockless-sweeps-redirect-kill-server-outside-test.md` — Concurrent cleanup could redirect tmux shutdown
-  beyond owned test state.
 - `release-failure-advice-tells-operator-reuse-tag.md` — Release recovery advice could lead an operator to reuse an
   immutable tag.
-- `capture-stack-cleanup-retains-exited-childrens-pids.md` — Capture teardown could signal an unrelated process after a
-  child exits.
-- `final-stills-check-becomes-stale-during-encoding.md` — Files added during video encoding could be erased afterward.
-- `notification-topic-leaks-through-curls-process-arguments.md` — Sending a notification exposes its private topic in
-  curl's arguments.
-- `cleanup-signal-recycled-desktop-pid.md` — Desktop smoke cleanup could signal a recycled process number.
-- `cross-boundary-handoff-desktop-smoke-exposes-unauthenticated-x.md` — The desktop smoke display could allow another
-  account to observe or inject input.
 - `ssh-stanza-removal-destroy-existing-configuration.md` — Removing a temporary SSH stanza can destroy unrelated
   configuration.
 - `legacy-ssh-stanza-cleanup-has-own-destructive.md` — Legacy SSH cleanup has a separate configuration-loss window.
 - `installing-temporary-ssh-stanza-destroy-original-configuration.md` — Installing a test SSH stanza can leave the
   user's configuration incomplete.
-- `browser-test-exit-cleanup-signals-process-numbers-retained.md` — Long-running browser-test cleanup could signal an
-  expired fixture's replacement.
-- `emergency-browser-cleanup-kills-already-reaped-spawner-old.md` — Emergency cleanup could kill a replacement for an
-  already-reaped spawner.
-- `emergency-browser-cleanup-treats-command-line-text-process.md` — Emergency cleanup can kill processes merely
-  mentioning a test path.
-- `deleted-checkout-cleanup-kill-foreground-development-server.md` — Preview cleanup could terminate a foreground
-  development server.
 - `large-macos-environments-corrupt-otherwise-valid-hook-argument.md` — A large macOS environment could make valid hooks
   lose argument evidence.
-- `pid-only-anchoring-admit-earlier-launchs-durable-report.md` — A retained report could be mistaken for a later launch
-  after process-number reuse.
-- `restart-resume-older-conversation-report-drain-fails.md` — Restart could choose an older conversation while a
-  replacement report remains unsettled.
-- `legal-codex-overrides-bypass-legacy-hook-collision-guard.md` — Legal Codex overrides can bypass the legacy
-  hook-conflict refusal.
 - `checkout-cache-refresh-overwrite-another-repositorys-branches.md` — Checkout preparation can force-update branches in
   another repository.
-- `interrupted-tab-creation-leaves-live-work-outside.md` — Interrupted tab creation could leave live work outside
-  Delete's warning check.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
 - `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md` — A space in the temporary
   root could redirect this fixture's write outside its directory.
@@ -162,8 +69,6 @@ triage.
   truncate a file outside its temporary directory.
 - `arrow-navigation-retains-obsolete-position-item-disappears.md` — An outdated menu position could move keyboard focus
   onto Delete.
-- `published-uploads-lack-directory-fsync.md` — A crash could lose an attachment that was already acknowledged.
-- `short-git-author-names-bypass-screen-scrubbing.md` — Screen capture could retain a short configured Git author name.
 - `qualified-hostname-scrubbing-leaves-private-domain.md` — Screen capture could leave the private domain of a qualified
   hostname.
 

@@ -729,7 +729,9 @@ correct behavior (the viewport's lines do not change under either), so they rule
 rather than explain the stale DOM; the exact xterm-internal step that leaves stale content is not established from
 source. `terminal.js` compensates with a throttled, unconditional `term.refresh()` while the viewport sits away from the
 tail, rather than patching the vendored bundle. The bundle is deliberately never patched: keeping the vendored file
-byte-identical to upstream is what makes its provenance checkable and a future version bump a plain swap.
+byte-identical to upstream is what makes its provenance checkable and a future version bump a plain swap. Decided
+2026-10-10: non-security bugs inside the bundle are fixed by upgrading it, not worked around in Farhelm, unless a
+workaround is already recorded here (the refresh above is one).
 
 JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js sets it as
 xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-ui` token (see the design-tokens paragraph
@@ -2299,10 +2301,11 @@ asset file is introduced.
   basis is that reuse inside such a window is vanishingly unlikely (Linux hands numbers out in order up to `pid_max`,
   millions on current systems, and macOS's range is about 100k), and that modern Unix software ordinarily relies on
   exactly that; the start-time revalidation above narrows these windows without closing them. What is not accepted is
-  carrying a bare number across unbounded waits or asynchronous work, or storing it for later. The acceptance is
-  deliberately interim. It stops review findings about such windows until two questions in TODO.md are settled: whether
-  requiring a systemd user manager on Linux lets the number-based walk go there, and what process cleanup should promise
-  on macOS.
+  carrying a bare number across unbounded waits or asynchronous work, or storing it for later. Development tooling has a
+  looser rule within a single run; see "Development tooling assumes a single-user machine" under Testing. The acceptance
+  is deliberately interim. It stops review findings about such windows until two questions in TODO.md are settled:
+  whether requiring a systemd user manager on Linux lets the number-based walk go there, and what process cleanup should
+  promise on macOS.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
   in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
   large file costs time rather than memory. A reported write or fsync failure before publication leaves nothing
@@ -3704,6 +3707,16 @@ constraint (see the GUI section's motivation), not an afterthought:
   host is an Ubuntu runner where it is not enforcing, so RHEL-family hosts with SELinux enforcing remain untested.
 - The desktop shell's native glue is the acknowledged manual-test gap (see GUI risks); everything else must be coverable
   without a human.
+
+**Development tooling assumes a single-user machine.** Decided 2026-10-10. The test harnesses, the capture and recording
+scripts, deflake and the docs preview run on a development machine with no hostile other local accounts, and need not
+defend against one: a secret in a process's arguments, an X display without authentication, or a race with another
+account's symlink are accepted. Within one run, tooling may signal a process number it recorded earlier in that run
+without rechecking it; keeping a number across runs (a daemon's process-number file, for example) is still not accepted.
+Tooling may recognise its own files and processes by naming convention, such as a run's private path in a command line
+or the demo recorder's still-image names, and may act on whatever matches. The agent-screen capture tool keeps skipping
+author-name parts shorter than three characters to avoid false matches, with the documented manual read of the diff as
+backstop.
 
 ## Version and skew
 

@@ -7459,7 +7459,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## backward-tab-counts-freeze-gui.md
 
@@ -7474,7 +7475,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## insert-line-counts-cause-excessive-allocation-cpu-work.md
 
@@ -7490,7 +7492,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## delete-line-counts-cause-excessive-allocation-cpu-work.md
 
@@ -7505,7 +7508,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## scroll-up-counts-cause-billions-redundant-operations.md
 
@@ -7520,7 +7524,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## scroll-down-counts-cause-billions-redundant-operations.md
 
@@ -7535,7 +7540,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## repeat-character-commands-expand-tiny-input-into-enormous.md
 
@@ -7551,7 +7557,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## color-list-parsing-performs-quadratic-work.md
 
@@ -7567,7 +7574,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## unused-hyperlinks-accumulate-retained-record-bound.md
 
@@ -7583,7 +7591,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## combining-characters-bypass-scrollback-memory-bound.md
 
@@ -7599,7 +7608,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## unbounded-hyperlink-records-exhaust-viewers-memory.md
 
@@ -7615,7 +7625,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## character-width-cache-retains-attacker-controlled-strings-indefinitely-possible.md
 
@@ -7631,7 +7642,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## unexpected-messages-give-supervisor-unrestricted-bulk-log.md
 
@@ -7648,7 +7660,8 @@
   repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
   supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## repainting-part-wrapped-url-leaves-previous-target-outer-repaint-invalidation-predicate.md
 
@@ -7661,7 +7674,8 @@
   bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
   upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## repainting-part-wrapped-url-leaves-previous-target-inner-cached-link-clearing-predicate.md
 
@@ -7674,7 +7688,8 @@
   bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
   upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## long-wrapped-lines-shift-url-hitboxes-onto.md
 
@@ -7687,7 +7702,8 @@
   bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
   upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## embedded-paste-terminators-allow-command-execution-definite.md
 
@@ -7721,7 +7737,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## restarts-launch-comparison-bind-approval-target-host.md
 
@@ -7737,7 +7754,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## rename-approval-transfer-another-installation.md
 
@@ -7752,7 +7770,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## launch-approval-loses-destination-binding-dispatch-create-create-destination-client-acquisition.md
 
@@ -7768,7 +7787,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## launch-approval-loses-destination-binding-dispatch-clone-clone-destination-client-acquisition.md
 
@@ -7783,7 +7803,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## always-allow-grant-permission-host-connection-has.md
 
@@ -7799,7 +7820,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## stale-host-settings-request-grant-fleet-authority-replacement.md
 
@@ -7815,7 +7837,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## delayed-settings-toggle-grant-replacement-installation-command.md
 
@@ -7831,7 +7854,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## retargeting-never-contacted-host-preserves-exemptions-intended-previous.md
 
@@ -7847,7 +7871,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## uninstall-confirmation-remove-replacement-installation.md
 
@@ -7864,7 +7889,8 @@
   settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
   is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
   user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## negative-manager-probe-permit-relaunch-over-surviving.md
 
@@ -7882,7 +7908,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## failed-relaunch-rollback-forget-surviving-process-scope.md
 
@@ -7900,7 +7927,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## replacement-window-cleanup-has-same-scope-loss-path.md
 
@@ -7917,7 +7945,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## interrupted-tab-creation-leaves-live-work-outside.md
 
@@ -7934,7 +7963,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## failed-registry-reload-reconnect-previous-destination-under.md
 
@@ -7952,7 +7982,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## pid-only-anchoring-admit-earlier-launchs-durable-report.md
 
@@ -7970,7 +8001,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## restart-resume-older-conversation-report-drain-fails.md
 
@@ -7988,7 +8020,8 @@
   pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
   accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## notification-topic-leaks-through-curls-process-arguments.md
 
@@ -8005,7 +8038,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## cross-boundary-handoff-desktop-smoke-exposes-unauthenticated-x.md
 
@@ -8022,7 +8056,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## concurrent-lockless-sweeps-redirect-kill-server-outside-test.md
 
@@ -8039,7 +8074,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## replacement-symlink-redirect-stale-state-cleanup-live-tmux.md
 
@@ -8056,7 +8092,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## stopping-original-supervisor-leaves-saved-pid-armed.md
 
@@ -8073,7 +8110,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## capture-stack-cleanup-retains-exited-childrens-pids.md
 
@@ -8090,7 +8128,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## cleanup-signal-recycled-desktop-pid.md
 
@@ -8107,7 +8146,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## browser-test-exit-cleanup-signals-process-numbers-retained.md
 
@@ -8124,7 +8164,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## emergency-browser-cleanup-kills-already-reaped-spawner-old.md
 
@@ -8141,7 +8182,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## filename-matching-authorize-deletion-unrelated-pictures.md
 
@@ -8158,7 +8200,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## final-stills-check-becomes-stale-during-encoding.md
 
@@ -8175,7 +8218,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## emergency-browser-cleanup-treats-command-line-text-process.md
 
@@ -8192,7 +8236,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## deleted-checkout-cleanup-kill-foreground-development-server.md
 
@@ -8209,7 +8254,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## short-git-author-names-bypass-screen-scrubbing.md
 
@@ -8227,7 +8273,8 @@
   against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
   by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
   diff read as backstop. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## ssh-stanza-removal-destroy-existing-configuration.md
 
@@ -8300,7 +8347,8 @@
 - Completion criteria: SPEC.md states that Farhelm follows good permission practice by default (for example restricting
   a file right after creating it) but spends no significant complexity on defence in depth against a user's broad umask.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## executable-read-back-collapses-dollars-select-another-installations.md
 
@@ -8349,7 +8397,8 @@
 - Completion criteria: SPEC.md states that host aliases reaching the same host, user and port through different
   `ProxyCommand` routes are unsupported, because the helm shares one SSH connection per OpenSSH connection hash; Farhelm
   does not detect the case. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## legal-codex-overrides-bypass-legacy-hook-collision-guard.md
 
@@ -8360,7 +8409,8 @@
 - Decision: discard. Asked (2026-10-10, question 7d), the user said: "whatever adds the least amount of complexity. we
   have 0 users that i am aware of this affects." No change is the least complexity.
 - Completion criteria: Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-command-editors-hide-meaningful-characters-silently-saved-command-editor.md
 
@@ -8414,7 +8464,8 @@
   answer.
 - Completion criteria: SPEC.md states that uploads are durable against Farhelm crashes but best effort across power
   loss, matching the supervisor's documented choice. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## template-summaries-interpolate-model-text-into-approval-summary-model-interpolation.md
 
@@ -8483,7 +8534,8 @@
 - Completion criteria: SPEC.md states that actions a user takes inside a sub-second window before the screen updates, or
   in a dialog hidden behind another, may apply as delivered: the last gesture wins. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## overlapping-uninstall-dialogs-confirm-wrong-host.md
 
@@ -8495,7 +8547,8 @@
 - Completion criteria: SPEC.md states that actions a user takes inside a sub-second window before the screen updates, or
   in a dialog hidden behind another, may apply as delivered: the last gesture wins. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: complete: change `xkplwqsowuto`, bookmark `triage/highest-spec-text`;
+  [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## canonical-path-replacement-race.md
 
