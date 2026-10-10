@@ -980,13 +980,22 @@ mod tests {
     }
 
     /// Run fixture Git synchronously and fail at setup time when its required
-    /// repository state was not actually established.
+    /// repository state was not actually established. Match discovery's child
+    /// isolation: inherited Git context must not redirect fixture writes into
+    /// the caller's repository or inject configuration into a setup command.
     fn run_git<const N: usize>(directory: &Path, args: [&str; N]) {
-        let status = Command::new("git")
-            .current_dir(directory)
-            .args(args)
-            .status()
-            .unwrap();
+        let mut command = Command::new("git");
+        command.current_dir(directory).args(args);
+        command
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR");
+        for (name, _) in std::env::vars_os()
+            .filter(|(name, _)| name.to_string_lossy().starts_with("GIT_CONFIG_"))
+        {
+            command.env_remove(name);
+        }
+        let status = command.status().unwrap();
         assert!(status.success(), "fixture Git command must succeed");
     }
 

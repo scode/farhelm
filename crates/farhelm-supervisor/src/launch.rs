@@ -1492,10 +1492,31 @@ fn run_checkout_preparation(
 /// environment. The working-copy lock is already held; the repository lock is
 /// taken second and held through dissociation, including foreground Git gc.
 /// Every failure names the cache and aborts the clone stage without fallback.
+/// Git's repository-local overrides cannot redirect these commands, while Git
+/// configuration and credentials still come from the user's environment. The
+/// agent and preparation hook keep their ordinary launch environment.
 fn clone_with_repo_cache(
     spec: &LaunchSpec,
     preparation: &CheckoutPreparation,
 ) -> Result<(), String> {
+    // `git rev-parse --local-env-vars`, excluding its configuration variables:
+    // -C and explicit paths cannot protect the cache when GIT_DIR or another
+    // repository-local override takes precedence. Keep configuration so URL
+    // rewrites and ordinary credential settings continue to work.
+    const REPOSITORY_ENV_VARS: [&str; 12] = [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+    ];
     let cache = &preparation.repo_cache_path;
     let result = (|| {
         if !cache.is_absolute() {
@@ -1510,6 +1531,9 @@ fn clone_with_repo_cache(
         init.args(["init", "--bare", "-q"])
             .arg(cache)
             .env("GIT_TERMINAL_PROMPT", "1");
+        for name in REPOSITORY_ENV_VARS {
+            init.env_remove(name);
+        }
         run_preparation_child_process(&mut init, "cache init")?;
 
         let mut fetch = launch_child_command(std::ffi::OsStr::new("git"), spec);
@@ -1530,6 +1554,9 @@ fn clone_with_repo_cache(
                 "+refs/tags/*:refs/tags/*",
             ])
             .env("GIT_TERMINAL_PROMPT", "1");
+        for name in REPOSITORY_ENV_VARS {
+            fetch.env_remove(name);
+        }
         run_preparation_child_process(&mut fetch, "cache fetch")?;
 
         let mut clone = launch_child_command(std::ffi::OsStr::new("git"), spec);
@@ -1543,6 +1570,9 @@ fn clone_with_repo_cache(
                 &preparation.cwd,
             ])
             .env("GIT_TERMINAL_PROMPT", "1");
+        for name in REPOSITORY_ENV_VARS {
+            clone.env_remove(name);
+        }
         run_preparation_child_process(&mut clone, "clone")?;
         lock.mark_used()
             .map_err(|e| format!("could not record cache use: {e}"))?;
@@ -3939,6 +3969,119 @@ printf 'AGENT-RAN\n'
     // configured with GIT_CONFIG_* variables ON THE CHILD COMMAND (never
     // the test process). No network, no credentials.
     // ---------------------------------------------------------------------
+
+    /// An inherited repository override must not redirect checkout preparation's
+    /// forced fetch into an unrelated repository. The foreign branch and tag are
+    /// absent upstream, so pruning them would expose the original data-loss bug;
+    /// reaching Ready also proves that ordinary Git configuration still works.
+    #[farhelm_testtrace::test]
+    fn d2_real_git_preparation_preserves_inherited_git_dir_repository() {
+        let setup = tempfile::tempdir().unwrap();
+        let upstream = setup.path().join("upstream");
+        let foreign = setup.path().join("foreign");
+        // Every setup and observation command owns its environment. The dangerous
+        // variable belongs only to the shim child, never to this test process.
+        let git = |directory: &Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .current_dir(directory)
+                .args(args)
+                .output()
+                .expect("run isolated fixture Git");
+            assert!(output.status.success(), "fixture Git {args:?}: {output:?}");
+            output.stdout
+        };
+        for directory in [&upstream, &foreign] {
+            std::fs::create_dir(directory).unwrap();
+            git(directory, &["init", "-q"]);
+            std::fs::write(directory.join("tracked.txt"), "fixture content\n").unwrap();
+            git(directory, &["add", "."]);
+            git(
+                directory,
+                &[
+                    "-c",
+                    "user.name=fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+            );
+        }
+        git(&foreign, &["branch", "foreign-branch"]);
+        git(&foreign, &["tag", "foreign-tag"]);
+        // A checked-out branch makes Git refuse the fetch before pruning. Keep
+        // HEAD detached so that protection cannot hide the destructive case.
+        git(&foreign, &["checkout", "--detach", "-q"]);
+        assert_eq!(
+            git(&foreign, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            b"HEAD\n"
+        );
+        let refs_before = git(&foreign, &["show-ref"]);
+        let refs_text = String::from_utf8(refs_before.clone()).unwrap();
+        assert!(refs_text.contains(" refs/heads/foreign-branch\n"));
+        assert!(refs_text.contains(" refs/tags/foreign-tag\n"));
+        let upstream_refs = String::from_utf8(git(&upstream, &["show-ref"])).unwrap();
+        assert!(!upstream_refs.contains("foreign-branch"));
+        assert!(!upstream_refs.contains("foreign-tag"));
+        let foreign_git = foreign.join(".git");
+        let metadata_before = std::fs::metadata(&foreign_git).unwrap();
+        assert!(metadata_before.is_dir());
+        let config_before = std::fs::read(foreign_git.join("config")).unwrap();
+
+        let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        fixture.install_script("fake-agent", "#!/bin/sh\nexit 0\n");
+        let child_path = format!(
+            "{}:{}",
+            fixture.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let rewrite_key = format!("url.{}.insteadOf", upstream.display());
+        let (report, terminal, status) = fixture.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&child_path)),
+            &[
+                ("GIT_DIR", foreign_git.as_os_str()),
+                ("GIT_CONFIG_COUNT", std::ffi::OsStr::new("1")),
+                ("GIT_CONFIG_KEY_0", std::ffi::OsStr::new(&rewrite_key)),
+                (
+                    "GIT_CONFIG_VALUE_0",
+                    std::ffi::OsStr::new("https://github.com/example/repo.git"),
+                ),
+                ("GIT_CONFIG_GLOBAL", std::ffi::OsStr::new("/dev/null")),
+                ("GIT_CONFIG_SYSTEM", std::ffi::OsStr::new("/dev/null")),
+            ],
+            // Preserve the deliberately injected GIT_DIR while removing other
+            // ambient repository overrides from the shim's test environment.
+            &["GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"],
+        );
+        assert_eq!(
+            git(&foreign, &["show-ref"]),
+            refs_before,
+            "foreign refs changed: {report} {terminal}"
+        );
+        let metadata_after = std::fs::metadata(&foreign_git).unwrap();
+        assert!(metadata_after.is_dir());
+        assert_eq!(metadata_after.dev(), metadata_before.dev());
+        assert_eq!(metadata_after.ino(), metadata_before.ino());
+        assert_eq!(
+            std::fs::read(foreign_git.join("config")).unwrap(),
+            config_before
+        );
+        assert!(
+            status.success() && report.is_empty(),
+            "preparation failed: {report} {terminal}"
+        );
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked.txt"))
+                .unwrap(),
+            "fixture content\n"
+        );
+    }
 
     /// D2: the shim, running the REAL git through the insteadOf mapping,
     /// must produce a checkout holding the tracked file's content, with

@@ -19,8 +19,6 @@ triage.
   about service ownership.
 - `multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md` — A service running commands from multiple
   installations could be assigned to only one.
-- `git-fixture-setup-modify-delete-callers-repository.md` — Git test fixtures can modify a repository outside their
-  temporary directory.
 - `plain-clicks-overwrite-clipboard-old-selection.md` — An ordinary terminal click can replace the clipboard with an old
   selection.
 - `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
@@ -52,8 +50,6 @@ triage.
   user's configuration incomplete.
 - `large-macos-environments-corrupt-otherwise-valid-hook-argument.md` — A large macOS environment could make valid hooks
   lose argument evidence.
-- `checkout-cache-refresh-overwrite-another-repositorys-branches.md` — Checkout preparation can force-update branches in
-  another repository.
 - `displayed-recovery-paths-shell-quoting.md` — Following a recovery command could act on a different path.
 - `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md` — A space in the temporary
   root could redirect this fixture's write outside its directory.
