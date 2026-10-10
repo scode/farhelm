@@ -191,11 +191,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   maximum widths. Decide whether the width is remembered per device, like the terminal text size, or shared by every
   client. Plan: `plans/queue/resizable-sidebar.md`.
 
-- **Improve the agent action approval card.** When an agent asks to do something that needs the user's approval, the
-  card that asks (SPEC.md: shown in a fixed corner of the window, offering Allow, Always allow and Deny) came up as a
-  giant vertical box along the very right edge of the screen the first time it was seen. Improve how it looks and where
-  it sits; details to be decided with the maintainer. Plan: `plans/queue/approval-card-layout.md`.
-
 - **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
   conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
   session as active. Make status detection recognize compaction as work, and add a captured compaction screen to the

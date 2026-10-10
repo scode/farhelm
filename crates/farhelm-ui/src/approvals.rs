@@ -9,8 +9,10 @@
 //!
 //! ## Shape
 //!
-//! Non-modal cards stacked in a fixed corner of the window, one per waiting
-//! request, oldest first. The rest of the app stays usable, and a card stays
+//! Non-modal requests centered above the main pane, with one expanded card
+//! and the other waiting requests below it as selectable headers. The oldest
+//! request opens first; a user's selection survives listing refreshes until
+//! that request leaves. The rest of the app stays usable, and a card stays
 //! until it is answered (here or in another window) or the helm expires it;
 //! either way the next listing drops it. The listing is re-read on every fleet
 //! invalidation notice, the same way every other surface learns of changes:
@@ -41,7 +43,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep};
 use crate::peer::{PeerBlock, display_identity, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
-/// Every waiting request's card, in a fixed corner of the window.
+/// Keep every waiting request reachable while showing one decision in full.
 ///
 /// Mounted once, beside the fleet feed, so the cards survive selection
 /// changes the way the feed does. Renders nothing while nothing waits.
@@ -70,10 +72,12 @@ pub(crate) fn ApprovalCards() -> Element {
     // `Some(true)` when that answer was "always allow", whose setting the helm
     // stores before it looks for the request.
     let mut late = use_signal(|| None::<bool>);
-    // Answer buttons stay disabled for a moment whenever the set of visible
-    // cards changes (see `ARM_DELAY_MS`).
+    // Listing changes and switches both move a different decision under the
+    // pointer. A generation keeps an older pause from arming a newer card.
     let mut armed = use_signal(|| true);
-    let mut shown = use_signal(Vec::<String>::new);
+    let mut shown = use_signal(|| (Vec::<String>::new(), None::<String>));
+    let mut expanded = use_signal(|| None::<String>);
+    let mut arm_generation = use_signal(|| 0_u64);
 
     let read_base = base.clone();
     let read = move || {
@@ -117,19 +121,23 @@ pub(crate) fn ApprovalCards() -> Element {
         .filter(|card| !answered.read().contains(&card.id))
         .cloned()
         .collect();
-    // A card set that changed under the pointer is when a click lands on a
-    // card the user never read: an answered card hides and the ones above it
-    // drop into its place, or a new card arrives and pushes the others up, so
-    // the second click of a double-click, or a click aimed at the card just
-    // read, would answer a different request. Disarming the buttons briefly on
-    // every change is how browsers protect their own permission prompts.
+    // The helm lists oldest first. Resolve selection against this listing,
+    // rather than its previous index: expiry or an answer can remove any
+    // request, and refreshing must not replace one the user chose to read.
+    let selected = selected_request(&cards, expanded.read().as_deref());
+    let selected_id = selected.map(|card| card.id.clone());
     let ids: Vec<String> = cards.iter().map(|card| card.id.clone()).collect();
-    if *shown.peek() != ids {
-        shown.set(ids);
+    let presentation = (ids, selected_id.clone());
+    if *shown.peek() != presentation {
+        shown.set(presentation);
+        let generation = arm_generation.peek().wrapping_add(1);
+        arm_generation.set(generation);
         armed.set(false);
         spawn(async move {
             crate::reader::sleep_ms(ARM_DELAY_MS).await;
-            armed.set(true);
+            if *arm_generation.peek() == generation {
+                armed.set(true);
+            }
         });
     }
     if cards.is_empty() && late().is_none() {
@@ -143,6 +151,12 @@ pub(crate) fn ApprovalCards() -> Element {
             // Left live by `modal_isolation` while a dialog is open: an agent
             // waiting on a card must not wait on the dialog too.
             "data-modal-exempt": "true",
+            onmounted: move |_| {
+                // The region stays outside the shell for modal exemption;
+                // its geometry follows the actual pane instead of assuming
+                // a sidebar width or a fixed-height session header.
+                document::eval(include_str!("../assets/approval-layout.js"));
+            },
             if let Some(always) = late() {
                 div { class: "approval-late", role: "status",
                     p {
@@ -160,10 +174,11 @@ pub(crate) fn ApprovalCards() -> Element {
                     }
                 }
             }
-            for card in cards {
+            if let Some(card) = selected {
                 ApprovalCard {
                     key: "{card.id}",
                     card: card.clone(),
+                    waiting: cards.len(),
                     busy: answering.read().contains(&card.id) || !armed(),
                     error: errors.read().get(&card.id).cloned(),
                     on_answer: {
@@ -197,26 +212,71 @@ pub(crate) fn ApprovalCards() -> Element {
                     },
                 }
             }
+            for card in cards.iter().filter(|card| Some(&card.id) != selected_id.as_ref()) {
+                button {
+                    key: "{card.id}",
+                    r#type: "button",
+                    class: "approval-waiting",
+                    "data-approval-id": "{card.id}",
+                    aria_expanded: "false",
+                    onclick: {
+                        let id = card.id.clone();
+                        move |_| {
+                            armed.set(false);
+                            expanded.set(Some(id.clone()));
+                        }
+                    },
+                    span { class: "approval-waiting-action", "{action_summary(&card.action)}" }
+                    span { class: "approval-waiting-host",
+                        span { class: "approval-waiting-label", "from host" }
+                        span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                    }
+                }
+            }
         }
     }
 }
 
-/// How long the answer buttons stay disabled after the visible cards change.
+/// Preserve a chosen request by identity, falling back to the oldest waiting.
+///
+/// The list is already ordered by the helm. A vanished selection must not
+/// retain its old position: answering or expiring it opens the oldest left.
+fn selected_request<'a>(
+    cards: &'a [PendingApproval],
+    selected: Option<&str>,
+) -> Option<&'a PendingApproval> {
+    cards
+        .iter()
+        .find(|card| Some(card.id.as_str()) == selected)
+        .or_else(|| cards.first())
+}
+
+/// How long the answer buttons stay disabled after the listing or selection changes.
 /// Long enough to absorb the second click of a double-click and a click
 /// already on its way, short enough not to be noticed when nothing moved.
 const ARM_DELAY_MS: u64 = 700;
 
-/// One waiting request.
+/// Show the selected request's entire decision and its own answer controls.
+///
+/// Collapsed headers carry no answer action. Every value needed to approve
+/// this request therefore remains in this expanded card, including full
+/// command text and any refusal that left the request waiting.
 #[component]
 fn ApprovalCard(
     card: PendingApproval,
-    /// An answer to this card is in flight.
+    /// The whole fleet's waiting count, including collapsed requests.
+    waiting: usize,
+    /// An answer is in flight, or the presentation-change pause is active.
     busy: bool,
     /// The last answer's refusal, if any.
     error: Option<String>,
     on_answer: EventHandler<(String, ApprovalAnswer)>,
 ) -> Element {
-    let rows = action_rows(&card.action);
+    // Long rows follow the short facts, so a full-width folder or command
+    // cannot split the compact grid into several mostly empty rows.
+    let (full, facts): (Vec<_>, Vec<_>) = action_rows(&card.action)
+        .into_iter()
+        .partition(full_width_row);
     let id = card.id.clone();
     let heading = format!("approval-{}-heading", card.id);
     let answer = move |answer: ApprovalAnswer| {
@@ -238,36 +298,20 @@ fn ApprovalCard(
             aria_labelledby: "{heading}",
             "data-approval-id": "{card.id}",
             "data-approval-kind": "{action_kind(&card.action)}",
-            h2 { id: "{heading}", class: "approval-card-heading", "an agent is asking to act" }
-            p { class: "approval-card-what", "{action_summary(&card.action)}" }
+            div { class: "approval-card-header",
+                span { class: "approval-card-badge", "agent request" }
+                h2 { id: "{heading}", class: "approval-card-heading", "{action_summary(&card.action)}" }
+                span { class: "approval-card-count", "1 of {waiting} waiting" }
+            }
+            dl { class: "approval-card-requester",
+                Row { label: "from host", value: card.host_name.clone() }
+                for (index, row) in asking.into_iter().enumerate() {
+                    CardDetail { key: "{index}", row }
+                }
+            }
             dl { class: "approval-card-rows",
-                Row { label: "requested from host", value: card.host_name.clone() }
-                for (index , row) in asking.into_iter().chain(rows).enumerate() {
-                    match row {
-                        CardRow::Value(label, value) => rsx! {
-                            Row { key: "{index}", label, value }
-                        },
-                        CardRow::Block(label, text) => rsx! {
-                            div { key: "{index}", class: "approval-card-row",
-                                dt { "{label}" }
-                                dd { PeerBlock { class: "approval-card-block", text } }
-                            }
-                        },
-                        CardRow::Note(label, words) => rsx! {
-                            div { key: "{index}", class: "approval-card-row",
-                                dt { "{label}" }
-                                dd { class: "approval-card-note", "{words}" }
-                            }
-                        },
-                        CardRow::Identity(label, identity) => rsx! {
-                            div { key: "{index}", class: "approval-card-row",
-                                dt { "{label}" }
-                                dd {
-                                    span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" }
-                                }
-                            }
-                        },
-                    }
+                for (index, row) in facts.into_iter().chain(full).enumerate() {
+                    CardDetail { key: "{index}", row }
                 }
             }
             if let Some(error) = error {
@@ -304,7 +348,11 @@ fn ApprovalCard(
     }
 }
 
-/// One labelled value on a card: this UI's label, the peer's value.
+/// Keep a requester value separate from the UI's own label.
+///
+/// The requesting host is peer text just like session details. Escape its
+/// controls and isolate its direction so it cannot rewrite the surrounding
+/// label; CSS lets the complete value wrap within the requester grid.
 #[component]
 fn Row(label: &'static str, value: String) -> Element {
     rsx! {
@@ -317,10 +365,81 @@ fn Row(label: &'static str, value: String) -> Element {
     }
 }
 
-/// What a card shows below its fixed rows.
+/// Regroup an existing decision row without changing which values are shown.
+///
+/// Commands and identities need the whole card width; short facts share the
+/// grid. The row model still owns content and trust distinctions, so visual
+/// compactness cannot turn peer text into Farhelm's own verdict.
+#[component]
+fn CardDetail(row: CardRow) -> Element {
+    let full = full_width_row(&row);
+    let class = if full {
+        "approval-card-row approval-card-full"
+    } else {
+        "approval-card-row"
+    };
+    match row {
+        CardRow::Value(label, value) => rsx! {
+            div { class,
+                dt { "{compact_label(label)}" }
+                dd { span { class: "peer-value", dir: "ltr", "{display_peer(&value)}" } }
+            }
+        },
+        CardRow::Block(label, text) => rsx! {
+            div { class: "approval-card-row approval-card-full approval-card-command",
+                dt { "{label}" }
+                dd { PeerBlock { class: "approval-card-block", text } }
+            }
+        },
+        CardRow::Note(label, words) => rsx! {
+            div { class,
+                dt { "{compact_label(label)}" }
+                dd { class: "approval-card-note", "{words}" }
+            }
+        },
+        CardRow::Identity(label, identity) => rsx! {
+            div { class,
+                dt { "{label}" }
+                dd { span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" } }
+            }
+        },
+    }
+}
+
+/// Reserve a whole line for text whose shape or identity needs room to read.
+/// Missing-command notes remain ordinary facts; real command text never does.
+fn full_width_row(row: &CardRow) -> bool {
+    matches!(
+        row,
+        CardRow::Block(..) | CardRow::Identity(..) | CardRow::Value("folder", _)
+    )
+}
+
+/// Shorten only labels whose context is already supplied by the card section.
+///
+/// Peer values remain untouched. Session target/source labels keep their
+/// distinctions; only the requester and new-session facts have shorter names.
+/// The requester's labels keep a "from" prefix, matching its "from host" row:
+/// rename, stop and restart cards label the session they act on as plain
+/// "session" and "session id", and two identically labelled sessions on one
+/// card would leave the user guessing which one is about to be stopped.
+fn compact_label(label: &'static str) -> &'static str {
+    match label {
+        "asked by session" => "from session",
+        "asking session id" => "from session id",
+        "new session on host" => "on host",
+        "resume command" => "resume",
+        _ => label,
+    }
+}
+
+/// Decision content before presentation separates facts from full-width text.
+///
+/// These variants preserve the distinction between peer text, fixed UI words,
+/// and install identities regardless of which grid position they occupy.
 #[derive(Debug, Clone, PartialEq)]
 enum CardRow {
-    /// A peer value on one line.
+    /// A labelled peer fact, allowed to wrap to fit the available width.
     Value(&'static str, String),
     /// A peer value that may span lines (command text), kept in its shape.
     Block(&'static str, String),
