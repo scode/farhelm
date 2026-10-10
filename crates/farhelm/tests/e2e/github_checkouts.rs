@@ -887,6 +887,70 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
     );
 }
 
+/// The shipped stack must discover and preview a future root without creating
+/// it, then complete a real clone, hook and agent launch there on first use.
+/// Missing parents exercise more than an empty pre-existing directory, and the
+/// accepted canonical binding must still be the session's final destination.
+#[farhelm_testtrace::test]
+async fn a_fresh_checkout_creates_the_missing_root_and_parents_on_first_use() {
+    let stack = CheckoutStack::start().await;
+    let root = stack.root_a.path().join("missing/parents/checkouts");
+    assert!(!root.exists());
+    checkout_config(
+        stack.supervisor.state.path(),
+        [OsString::from("set-root"), root.as_os_str().to_os_string()],
+    )
+    .await;
+    let shown = checkout_config(stack.supervisor.state.path(), [OsString::from("show")]).await;
+    assert!(
+        shown.contains(&format!("root: {}", root.display())),
+        "saved future root: {shown}"
+    );
+    assert!(!root.exists(), "configuration must not create directories");
+    let discovery = stack.client.post(format!("{}/api/github-repositories", stack.helm().base))
+        .json(&json!({"host": stack.claim.id, "expected_incarnation": stack.claim.incarnation, "query": ""}))
+        .send().await.expect("discovery reaches the helm");
+    let status = discovery.status();
+    let discovered: Value = discovery.json().await.expect("discovery JSON");
+    assert!(
+        status.is_success(),
+        "future-root discovery failed: {discovered}"
+    );
+    assert_eq!(discovered["truncated"], false);
+    assert_eq!(discovered["scan_error"], Value::Null);
+    assert_eq!(discovered["repos"], json!([]));
+    let title = "first-use";
+    let selector = Selector::Raw;
+    let accepted = preview(&stack, title).await;
+    let expected = stack
+        .root_a
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("missing/parents/checkouts");
+    assert_eq!(accepted.binding.canonical_root, path_text(&expected));
+    assert!(
+        !root.exists(),
+        "discovery and preview must remain read-only"
+    );
+    let body = create_body(&stack.claim, &accepted, title, "first-use-key", &selector);
+    let response = post_exact_body(&stack.client, &stack.helm().base, body).await;
+    let status = response.status();
+    let body = response.text().await.expect("first-use create reply");
+    assert!(status.is_success(), "first-use create failed: {body}");
+    let session: SessionInfo = serde_json::from_str(&body).expect("first-use session JSON");
+    let case = AcceptedCase::new(title, selector, 1, Vec::new(), accepted, session.clone());
+    assert_case_metadata(&session, &case);
+    let argv = await_prepared(&stack, &session, &stack.hook_a(), 1).await;
+    assert_process_argv(&case, &argv);
+    assert_eq!(root.canonicalize().unwrap(), expected);
+    assert_eq!(session.cwd, case.preview.binding.cwd);
+    assert_eq!(
+        directory_names(&root),
+        vec![case.preview.binding.basename.clone()]
+    );
+}
+
 /// R1.3 acceptance: each supported selector replays under its accepted snapshot.
 ///
 /// The first replies are never read. After server-side readiness, root and hook

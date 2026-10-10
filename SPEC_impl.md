@@ -2437,13 +2437,19 @@ stays with the installation identity.
 
 `POST /api/github-checkout-preview` asks the target supervisor to expand/canonicalize the configured root and propose
 the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
-claim, never the hook. Naming scans refuse incomplete results after 100,000 entries. Create verifies this binding and
-uses atomic mkdir as the collision authority. Known intent keys reconcile their original snapshot before current
-configuration or launch compilation; replacement identities additionally bind the source session and preserve its veto.
-The composer reads its checkout folder field from that accepted preview, or from the original binding while reconciling
-an ambiguous create. It leaves the field read-only until an explicit existing-folder action changes the destination
-draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty
-with an error state rather than displaying the old seed.
+claim, never the hook. A missing root resolves by canonicalizing its deepest existing directory ancestor and appending
+only normal missing components; unresolved parent components, dangling links and non-directory ancestors refuse. This
+preserves preview/create agreement through symlinked ancestors such as macOS's temporary directory. Discovery returns
+complete-empty for a missing root, and preview has no filesystem occupancy but still reserves the archive name. Naming
+scans refuse incomplete results after 100,000 entries. Create verifies this binding, creates the canonical root and its
+parents using the ordinary umask, then re-resolves the configured spelling and requires the same canonical path before
+capturing the root identity. It may leave an empty root after a later refusal. Atomic mkdir remains the checkout
+collision authority. Known intent keys reconcile their original snapshot before current configuration or launch
+compilation; replacement identities additionally bind the source session and preserve its veto. The composer reads its
+checkout folder field from that accepted preview, or from the original binding while reconciling an ambiguous create. It
+leaves the field read-only until an explicit existing-folder action changes the destination draft; the old editable
+`cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty with an error state rather
+than displaying the old seed.
 
 The serving future owns one serial three-second revision observer, initialized before readiness and HTTP serving.
 Changed revisions publish existing fleet invalidations; failed reads preserve the last observation. Launch history

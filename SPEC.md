@@ -679,9 +679,12 @@ The helm owns a working-copy root and optional post-clone command, globally with
 root. The all-hosts checkout folder can be set or cleared in Settings or with the command line; per-host overrides and
 the post-clone command remain command-line only. Settings explicitly saves the field, shows a refused value's reason,
 and clears it when an empty field is saved. Browser-readable configuration replies contain only the all-hosts folder,
-never hook text or host overrides. The root must already exist on the target host; `~` expands there, using the
-supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
-hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
+never hook text or host overrides. A missing root and its parents are created on the target host at the first checkout,
+using the ordinary umask; configuration, discovery and preview create nothing. Existing symlink ancestors resolve to
+their canonical directory, while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose
+resolution changed since preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an
+override restores inheritance; an empty hook override disables the inherited hook. Configuration changes affect new
+attempts, not an already accepted attempt or its retries.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
