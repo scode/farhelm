@@ -4722,16 +4722,11 @@ mod tests {
         );
     }
 
-    /// Write one executable shell script fixture and hand back its path.
+    /// Validate a fixture path for insertion into an outer shell's single quotes.
     ///
-    /// `farhelm helm setup` points [`probe_tmux`] at whatever the operator
-    /// named or `PATH` produced, so the probe's behaviour against programs
-    /// that are NOT tmux is production behaviour and needs real child
-    /// processes to exercise.
-    #[cfg(unix)]
-    /// A fixture path spelled for use inside a single-quoted `bash -c`
-    /// script: tempdir paths contain no quotes, so plain text is enough, and
-    /// this refuses the one character that would break the quoting.
+    /// The returned text is not shell-escaped: callers must supply the quotes.
+    /// Spaces and shell syntax are safe only inside those quotes; nested scripts
+    /// receive the path as a positional argument rather than as executable text.
     fn pidfile_arg(path: &Path) -> String {
         let text = path.display().to_string();
         assert!(
@@ -4741,6 +4736,13 @@ mod tests {
         text
     }
 
+    /// Write one executable shell script fixture and hand back its path.
+    ///
+    /// `farhelm helm setup` points [`probe_tmux`] at whatever the operator
+    /// named or `PATH` produced, so the probe's behaviour against programs
+    /// that are NOT tmux is production behaviour and needs real child
+    /// processes to exercise.
+    #[cfg(unix)]
     fn probe_fixture(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::io::Write as _;
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -4837,7 +4839,7 @@ mod tests {
             dir.path(),
             "escapes",
             &format!(
-                "exec bash -c 'printf \"%s\\n\" \"$$\" > {leader}; set -m; sleep 120 & printf \"%s\\n\" \"$!\" > {pid}; printf \"tmux {TMUX_FLOOR}\\n\"'",
+                "exec bash -c 'printf \"%s\\n\" \"$$\" > \"$1\"; set -m; sleep 120 & printf \"%s\\n\" \"$!\" > \"$2\"; printf \"tmux {TMUX_FLOOR}\\n\"' bash '{leader}' '{pid}'",
                 leader = pidfile_arg(&leader_file),
                 pid = pidfile_arg(&pidfile),
             ),
@@ -4897,8 +4899,8 @@ mod tests {
             dir.path(),
             "forks",
             &format!(
-                "sleep 120 & printf '%s\\n' \"$!\" > {}; printf 'tmux {TMUX_FLOOR}\\n'",
-                pidfile.display()
+                "sleep 120 & printf '%s\\n' \"$!\" > '{}'; printf 'tmux {TMUX_FLOOR}\\n'",
+                pidfile_arg(&pidfile)
             ),
         );
 

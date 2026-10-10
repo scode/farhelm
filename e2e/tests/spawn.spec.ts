@@ -247,7 +247,10 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
     await setLocalYoloWithoutAsking(request, true);
     await setLocalCommandsWithoutAsking(request, false);
     scratch = stackScratchDir(`farhelm-real-spawn-${stamp}-`);
-    workspace = path.join(scratch, "spawned-workspace");
+    // jj registers the basename in the real repository, beyond the scratch
+    // tree. A run-specific name keeps even failed-setup cleanup from forgetting
+    // a workspace another run registered.
+    workspace = path.join(scratch, `spawned-workspace-${stamp}`);
     parent = await createSession(request, {
       title: `real-spawn-parent-${stamp}`,
       cwd: repository,

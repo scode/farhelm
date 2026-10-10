@@ -115,7 +115,16 @@ class Scrubber:
         home = str(pathlib.Path.home())
         scrubber.literal.append((home, "~"))
         scrubber.forbidden.append(home)
-        for value, placeholder in ((getpass.getuser(), "user"), (socket.gethostname().split(".")[0], "host")):
+        hostname = socket.gethostname()
+        if "." in hostname:
+            # Replacing the first label alone leaves the private domain behind.
+            # Literals run before word replacements, so the full name wins.
+            scrubber.literal.append((hostname, "host"))
+            # Match case variants before the short label erases the evidence
+            # that the remaining domain belonged to the full host name.
+            scrubber.words.append((hostname, "host"))
+            scrubber.forbidden.append(hostname)
+        for value, placeholder in ((getpass.getuser(), "user"), (hostname.split(".")[0], "host")):
             if value:
                 scrubber.words.append((value, placeholder))
                 scrubber.forbidden.append(value)

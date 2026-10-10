@@ -93,7 +93,7 @@
     if [ "$GITHUB_REF_NAME" != "v$version" ]; then
       echo "tag $GITHUB_REF_NAME does not name this workspace's version" >&2
       echo "  expected exactly: v$version" >&2
-      echo "  bump [workspace.package].version, or delete and re-push the tag" >&2
+      echo "  this tag is spent; fix on main and cut the next version per releasing/AGENTS.md" >&2
       exit 1
     fi
     echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
