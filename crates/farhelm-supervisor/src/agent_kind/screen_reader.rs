@@ -264,7 +264,7 @@ struct GenericReader;
 impl ScreenReader for GenericReader {}
 
 // ---------------------------------------------------------------------
-// Claude Code (observed on 2.1.285)
+// Claude Code (observed on 2.1.285 and 2.1.296)
 // ---------------------------------------------------------------------
 
 /// Claude Code's reader.
@@ -274,7 +274,8 @@ impl ScreenReader for GenericReader {}
 /// below it. While a turn runs,
 /// a spinner line (`✶ Imagining… (2s · thinking)`, the glyph and verb
 /// rotating) sits just above that box for the whole turn, tool runs
-/// included. When the turn has handed work to background agents, Claude
+/// included. Multi-word spinners such as `✻ Compacting conversation… (1m 3s)`
+/// are work too. When the turn has handed work to background agents, Claude
 /// replaces that spinner with a line such as `✻ Waiting for 5 background
 /// agents to finish`; that line is still work in progress. Every dialog
 /// that needs the user — permission prompts,
@@ -296,8 +297,8 @@ const CLAUDE_FOOTER_LINES: usize = 2;
 /// How far above the input box's top rule Claude's working line (spinner or
 /// background-wait announcement) may sit.
 /// Claude puts notices (a connector warning, a tmux hint, a tip) between
-/// the two; six covers every observed arrangement without reaching into
-/// transcript text.
+/// the two; six covers every observed arrangement. Blank lines are omitted,
+/// so an idle screen can also put the end of its transcript in this window.
 const CLAUDE_SPINNER_LINES_ABOVE_BOX: usize = 6;
 
 impl ScreenReader for ClaudeReader {
@@ -367,6 +368,10 @@ fn claude_input_box_rule(lines: &[&str]) -> Option<usize> {
 /// changed between versions. The finished-turn line (`✻ Cogitated for 26s`)
 /// carries no ellipsis, and the background announcement must end exactly at
 /// `to finish`, so neither idle screen is mistaken for active work.
+/// Spinner verbs may contain several words. The ellipsis and digit-led
+/// parenthesis exclude ordinary finished-turn prose, but reply text with that
+/// same shape can still read as working when it falls in the input-box window.
+/// That cosmetic false-positive risk is accepted to cover multi-word spinners.
 fn is_claude_working_line(line: &str) -> bool {
     let mut chars = line.trim().chars();
     let Some(glyph) = chars.next() else {
@@ -392,9 +397,7 @@ fn is_claude_working_line(line: &str) -> bool {
     let Some((verb, after)) = rest.split_once("… (") else {
         return false;
     };
-    !verb.is_empty()
-        && !verb.contains(char::is_whitespace)
-        && after.starts_with(|c: char| c.is_ascii_digit())
+    !verb.trim().is_empty() && after.starts_with(|c: char| c.is_ascii_digit())
 }
 
 // ---------------------------------------------------------------------
@@ -644,7 +647,8 @@ mod tests {
     /// Why it matters: the glyphs rotate every frame and have changed
     /// between versions, and Claude's background count can differ from its
     /// visible task list. The finished-turn line sits in the same place and
-    /// must read idle.
+    /// must read idle. Compaction uses a multi-word verb and can run past a
+    /// minute, so neither a one-word verb nor a seconds-only timer is required.
     #[test]
     fn claude_working_line_is_recognized_by_shape() {
         for line in [
@@ -652,9 +656,15 @@ mod tests {
             "· Imagining… (3s · ↓ 262 tokens)",
             "* Tempering… (48s · ↓ 2.9k tokens · thinking with high effort)",
             "  ✢ Slithering… (1m 4s · ↓ 224 tokens)",
+            "✶ Two words… (2s)",
+            "* Compacting conversation… (1s · ↓ 2 tokens)",
+            "✻ Compacting conversation… (1m 3s · ↓ 224 tokens)",
             "✻ Waiting for 5 background agents to finish",
             "✻ Waiting for 1 background agent to finish",
             "✻ Waiting for 2 background shells to finish",
+            // The broad multi-word rule deliberately accepts this reply shape
+            // too; proximity to the input box does not prove a line's author.
+            "- Ran the suite… (2 failures)",
         ] {
             assert!(is_claude_working_line(line), "{line:?}");
         }
@@ -662,7 +672,10 @@ mod tests {
             "✻ Cogitated for 26s · done 3:41 PM",
             "● Skillette is loaded… (not a spinner)",
             "Imagining… (2s)",
-            "✶ Two words… (2s)",
+            "✻ Compacting conversation for 1m 3s",
+            "● Compacting conversation… (soon)",
+            "● Compacting conversation… without a timer",
+            "✶   … (2s)",
             "✶ Imagining… (soon)",
             "Waiting for 5 background agents to finish",
             "✻ Waiting for background agents to finish",

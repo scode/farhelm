@@ -1675,16 +1675,19 @@ evidence, but cannot authorize another directory move.
   rate-limit footer) and change counting reads every such redraw as work. The anchors are the vendors' own wording and
   layout, preferring text shown to the user as an instruction over decoration: every dialog that asks the user something
   ends in a key-hint footer ("Esc to cancel", "enter to submit answer", "enter continue"), Claude shows a spinner line
-  directly above its ruled `❯` input box for the whole of a turn; Claude's explicit
-  `Waiting for N background … to finish` announcement in that same position also means the turn is still working, while
-  footer hints and a listed task without that announcement remain idle. Codex animates a Braille spinner in its pane
-  title for the whole of a turn (its on-screen `Working (…)` widget appears only during tool runs, never while prose
-  streams, so the title is fetched with a separate `display-message` for Codex sessions only — the title is written by
-  the pane, so it never rides the authoritative pane-fact query). A waiting prompt wins over a busy indicator. A
-  recognized screen that carries no state (a model picker, a transcript view) reads "can't tell" and the previous
-  reading stands. A screen with none of the anchors falls back to the generic reader for that sample, and after a few
-  such samples in a row (so a half-drawn startup frame does not count) the supervisor logs that once per run, without
-  screen content, as likely rule drift. The rules are tested against real captures under
+  directly above its ruled `❯` input box for the whole of a turn. Its verb can have one or several words, followed by an
+  ellipsis and a parenthesized timer beginning with a digit; compaction (`Compacting conversation… (1m 3s)`) counts as
+  working too. Finished-turn prose without that ellipsis remains idle. Reply text of the same shape just above the input
+  box (`- Ran the suite… (2 failures)`) also reads as working; that cosmetic false positive is accepted. Claude's
+  explicit `Waiting for N background … to finish` announcement in that same position also means the turn is still
+  working, while footer hints and a listed task without that announcement remain idle. Codex animates a Braille spinner
+  in its pane title for the whole of a turn (its on-screen `Working (…)` widget appears only during tool runs, never
+  while prose streams, so the title is fetched with a separate `display-message` for Codex sessions only — the title is
+  written by the pane, so it never rides the authoritative pane-fact query). A waiting prompt wins over a busy
+  indicator. A recognized screen that carries no state (a model picker, a transcript view) reads "can't tell" and the
+  previous reading stands. A screen with none of the anchors falls back to the generic reader for that sample, and after
+  a few such samples in a row (so a half-drawn startup frame does not count) the supervisor logs that once per run,
+  without screen content, as likely rule drift. The rules are tested against real captures under
   `crates/farhelm-supervisor/tests/fixtures/screens/`, which `scripts/capture-agent-screens.py` re-captures from the
   installed agents (`docs/agent-screen-fixtures.md`). The earlier Codex-only masking of its composer out of change
   comparison is gone: whenever it applied, the Codex reader now recognizes the composer and answers from content, so the

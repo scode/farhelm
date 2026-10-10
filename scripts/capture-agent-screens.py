@@ -211,11 +211,14 @@ class Pane:
 
         self.tmux("send-keys", "-t", self.target, "-l", text)
 
-    def wait_for(self, what: str, predicate: Callable[[str, str], bool], timeout: float) -> tuple[str, str]:
+    def wait_for(
+        self, what: str, predicate: Callable[[str, str], bool], timeout: float, poll_seconds: float = POLL_SECONDS
+    ) -> tuple[str, str]:
         """Poll until `predicate(screen, title)` holds; return that screen and title.
 
         Raises `ScenarioTimeout` with the last screen attached when the deadline passes, and fails fast when the agent
-        process has died, since no later screen can satisfy anything.
+        process has died, since no later screen can satisfy anything. Short-lived states such as compaction can request
+        a faster poll without making every ordinary readiness wait sample that often.
         """
 
         deadline = time.monotonic() + timeout
@@ -228,7 +231,7 @@ class Pane:
                 raise ScenarioTimeout(f"the agent exited while waiting for {what}:\n{screen}")
             if time.monotonic() >= deadline:
                 raise ScenarioTimeout(f"timed out waiting for {what}; last screen:\n{screen}")
-            time.sleep(POLL_SECONDS)
+            time.sleep(poll_seconds)
 
     def submit(self, prompt: str, typed: Callable[[str], bool], timeout: float = 30) -> None:
         """Type `prompt`, confirm it is visible, then press Enter until it leaves the input line.
@@ -325,8 +328,29 @@ def claude_spinner(screen: str) -> bool:
     return CLAUDE_SPINNER.search(screen) is not None
 
 
+def claude_compaction_spinner(screen: str) -> bool:
+    """Recognize multi-word work with the reader's glyph, ellipsis and digit-led parenthesis guards.
+
+    The ordinary turn pattern requires seconds and one word, so it misses minute-long compaction. This capture
+    predicate searches the whole screen; the fixture tests independently require the saved indicator to be near the
+    input box, where the supervisor actually reads it.
+    """
+
+    for line in screen.splitlines():
+        line = line.strip()
+        if len(line) < 2 or line[0].isalnum() or line[1] != " ":
+            continue
+        verb, separator, after = line[2:].partition("… (")
+        if separator and verb.strip() and after and "0" <= after[0] <= "9":
+            return True
+    return False
+
+
 def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
-    """Drive Claude Code through trust, stateless menus, idle, working, both kinds of waiting, and its `/clear` hint."""
+    """Capture trust, menus, idle, work, permission and question dialogs, the `/clear` hint, then compaction.
+
+    Compaction comes last because the earlier turns supply the context it compacts.
+    """
 
     # The idle hint normally needs 75 idle minutes and 100k tokens of context; both thresholds are Claude's own
     # environment variables, so the tool lowers them rather than waiting.
@@ -433,6 +457,34 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
         pane.keys("Escape")
 
     rec.attempt("question form", question)
+
+    def compaction() -> None:
+        """Capture the first observed compaction spinner; minute timers are accepted too.
+
+        The question step dismisses its dialog without waiting for the input box to return. Compaction must start from
+        that box, and its multi-word spinner must not use the ordinary turn predicate, which only accepts seconds.
+        Submission still has its usual 1.5-second polling interval; the faster observation afterward cannot catch a
+        compaction that has already finished during submission.
+        """
+
+        # A returned input box can coexist with the question turn still finishing. Wait for that work to end so its
+        # spinner cannot be saved as the compaction fixture before /compact starts.
+        pane.wait_for(
+            "the idle prompt box before compaction",
+            lambda s, _t: claude_prompt_box(s) and not claude_compaction_spinner(s),
+            60,
+        )
+        pane.keys("C-u")
+        pane.submit("/compact", lambda s: (claude_input(s) or "").startswith("/compact"))
+        screen, title = pane.wait_for(
+            "the compaction spinner",
+            lambda s, _t: claude_compaction_spinner(s),
+            120,
+            poll_seconds=0.1,
+        )
+        rec.save("working", "compacting", screen, title)
+
+    rec.attempt("compaction", compaction)
 
 
 def reach_prompt(

@@ -17,9 +17,11 @@ Run this on a development host after `claude` or `codex` was upgraded:
 
 The tool launches each installed agent in a private tmux server the size of a production pane, drives it through its
 trust dialog, an idle prompt, a turn that thinks and then runs a slow shell command behind a real permission prompt, the
-finished turn, the agent's own idle-time decorations (Claude's `/clear` hint, a Codex recap), and a question form. It
-writes every screen to `<harness>/<version>/<expected>-<scenario>.txt`, with the pane title beside it in a `.title`
-file, and then runs the fixture tests through `scripts/record-test-run.py`.
+finished turn, the agent's own idle-time decorations (Claude's `/clear` hint, a Codex recap), and a question form.
+Claude then runs `/compact`; its in-progress spinner is saved as `working-compacting.{txt,title}`. The wait accepts
+timers past one minute, though the saved frame may be earlier. It writes every screen to
+`<harness>/<version>/<expected>-<scenario>.txt`, with the pane title beside it in a `.title` file, and then runs the
+fixture tests through `scripts/record-test-run.py`.
 
 A new version directory whose tests pass means nothing needs shipping. A failing test names the harness, version, and
 scenario of the screen that broke it, which is the screen whose rules need updating. Commit the new version directory
