@@ -7032,7 +7032,7 @@
   SPEC.md's uninstall paragraph says the private tmux server is ended too, and that a session started on the host while
   the removal runs may be ended with it (the confirmation-time check being sufficient, stricter checks allowed). Focused
   tests cover the plan and the step. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-ends-tmux.md`.
 
 ## shutdown-expiry.md
 
@@ -7061,7 +7061,7 @@
   part. Add the principle above to SPEC_impl.md where the acknowledged no-output teardown is described (and adjust that
   section's "part of the handoff contract" framing so it no longer invites unbounded defense), naming the evidence that
   would reopen it: an observed abort on 3.7c or later. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/shutdown-expiry-quiesce.md`.
 
 ## installer-startup-prune.md
 
@@ -7088,7 +7088,16 @@
   A case in `scripts/test-install-sh.sh` covers an interrupted update followed by an update to a third version keeping
   the intermediate folder. SPEC_impl.md's prune description names the pending version among those kept. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: `pending`, waiting on the user. Planning (2026-10-09) found the marker cannot be as small as described at
+  triage: `farhelm uninstall` refuses unknown entries inside the app bundle (`crates/farhelm/src/uninstall/app.rs`, with
+  a test pinning stray files in `Versions/` as refusals), so a marker left there by an interrupted update would block
+  uninstall; a marker beside the app or in the state directory would be left behind by uninstall and break the
+  installer's "only the app and the bin directory change" contract; and the installer's work directory is removed by its
+  exit trap, which is the failure case the marker is for. Options put to the user: (1) marker inside the bundle and
+  uninstall learns its name (roughly 5–10 more lines of Rust plus a test), recommended; (2) no new file: touch the new
+  version's folder before replacing the app and have pruning also keep the most recently modified other version, using
+  mtime as state; (3) leave it. Whichever is chosen, a run must read an existing marker before writing its own, and the
+  existing interrupted-after-each-step installer test gains a step. Not yet scheduled.
 
 ## template-empty-name.md
 
@@ -7127,4 +7136,4 @@
   positive control for a readable npm launcher pane (the existing `bun x` positive control stays). SPEC_impl.md's OMP
   corridor text drops the installed-`omp`-only scope of that rule (and its stale "attribution repeats around the
   evidence" wording if still present). Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/omp-pane-guard-all-launches.md`.
