@@ -7139,4 +7139,11 @@
   positive control for a readable npm launcher pane (the existing `bun x` positive control stays). SPEC_impl.md's OMP
   corridor text drops the installed-`omp`-only scope of that rule (and its stale "attribution repeats around the
   evidence" wording if still present). Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/omp-pane-guard-all-launches.md`.
+- Later decision: the 2026-10-10 answer in `plans/queue/omp-pane-guard-all-launches.md` replaces the top-process
+  launcher match with unreadable-arguments refusal for `bun x` and npm launches: a readable top process is accepted
+  there without a launcher match, including npm's rewritten process title. Installed-`omp` launches keep refusing any
+  Bun or Node top process that is not the reporting runtime, readable or not, as before; the executor's first reading
+  also accepted readable ones there, and the maintainer confirmed at landing that the refusal stays. The npm
+  documentation claim is a separate TODO; middle-link rules stay as they are.
+- Execution: complete: change `uouxtvtp`, bookmark `plan/omp-pane-guard-all-launches/01-omp-pane-guard`;
+  [PR #1779](https://github.com/scode/farhelm/pull/1779/changes).

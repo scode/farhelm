@@ -10,7 +10,6 @@ triage.
 ## Highest priority: security or data loss
 
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
-- `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
 
 - `stop-approval-retain-targets-owner.md` — A stop approval could apply to a replacement host instead of the host shown.
 - `restarts-launch-comparison-bind-approval-target-host.md` — A restart approval could interrupt matching work on a
