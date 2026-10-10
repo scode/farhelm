@@ -1,7 +1,7 @@
 # Plans queue
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
-- [pending] `ui-interaction-fixes.md` — menu arrow keys follow the selected item when items change, plain clicks stop re-copying old selections, and Replace on a failed session warns about the conversation
+- [in-flight 68a677] `ui-interaction-fixes.md` — menu arrow keys follow the selected item when items change, plain clicks stop re-copying old selections, and Replace on a failed session warns about the conversation
 - [in-flight 8501a7] `gui-text-safety.md` — pastes lose hidden end-of-paste markers, template summaries and identity labels show hidden characters, and templates refuse commands with control or invisible characters
 - [pending] `setup-refusals.md` — setup refuses install paths containing `$`, service files of a type other than simple read as unrecognised, and uninstall's lock advice is shell-quoted (after `os-readback-fixes.md`)
 - [pending] `ui-correctness-fixes.md` — launcher, terminal, sidebar and dialog fixes: Grok trust, dot template names, Unicode template match, IME save, A+/A- focus, OSC 8 drag, listing fence, read-mark retry, update-popup scroll, stale setup errors, escaped refusals and titles (after `gui-text-safety.md`)
