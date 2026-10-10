@@ -5428,10 +5428,20 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Discovery status is helper text beside the repository choice, including
+   when there is no checkout folder yet. Match the explanation underneath it. */
+.launch-composer-repository-note,
 .launch-composer-checkout-explanation {
   margin: 0;
   color: var(--fg-1);
   font-size: 12px;
+  line-height: 1.5;
+}
+
+/* The preview already supplies its surrounding spacing. Form-level error
+   padding would push a refusal away from the checkout details it explains. */
+.launch-composer-checkout-preview .create-session-error {
+  padding: 0;
   line-height: 1.5;
 }
 
