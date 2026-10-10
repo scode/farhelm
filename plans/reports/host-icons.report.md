@@ -129,3 +129,67 @@ the executor, as required by no-workhorse mode. Reviewer claims were checked aga
 validation. Exact native runtime model attribution and usage counters were unavailable; requested model names are not
 proof of actual attribution. Private orchestration evidence remains under session UUID
 `a63f6b2c-45f7-4830-bf84-ea76de63472d`.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as three squash commits on main, in order: #1765 (host settings organized into sections),
+#1770 (remote host icons and colors) and #1775 (host icons in the launcher and quick switcher). Since the stack was
+based, main gained the shutdown quiet-down fix (#1780, supervisor only) and plan and triage bookkeeping; the rebase was
+clean. claude-compaction-status landed directly after it. Other plans reviewed in the same round
+(terminal-file-download, waiting-sound, hook-report-watch, omp-pane-guard-all-launches) did not land with it; the
+reviewer found no overlap with them beyond separate hunks of shared files, and none touches the host rows or the
+launcher's host control.
+
+#### Review before merging
+
+A separate reviewer that had not worked on this round's plans read the stack against main and the plans landing near it.
+It found no path from a host's stored icon or color into markup or styles other than the fixed word lists, the helm
+route refusing unknown or extra fields and the local host, the database migration and its downgrade fixtures consistent,
+the new layout free of any assumption about the sidebar's old fixed width, and the many edits to other browser specs
+straight swaps to the new host picker rather than weakened assertions.
+
+#### Fixes made while landing
+
+- The launcher's new host menu relied on its button having keyboard focus: it closes when focus leaves and takes its
+  arrow keys, letter search and Escape on the button. Safari and the macOS desktop app do not focus a button when it is
+  clicked, so a menu opened with the mouse there would not close on a click elsewhere and would ignore the keyboard.
+  Opening the menu now focuses the button itself. A browser test opens the menu without giving it focus (as those
+  engines do) and checks that it takes focus, answers the arrow keys, and closes on an outside click. This was in #1775
+  before it merged.
+- Every icon and color word is written three times in the code (for the web API, for saving and for loading), and one
+  stored word the helm cannot read would make the whole host list fail. Tests now check that every word round-trips
+  through all three, and the code says that adding a word needs a database version bump. In #1770.
+- Two existing helm tests failed with the stack: a fixture that rebuilds an older database to compare with a frozen copy
+  needed the two new host columns removed (as the executor had already done for the store's own fixtures), and the
+  shared file that pins the helm's host-list response needed the new icon and color fields. Both fixed in #1770; the
+  executor's runs had covered only five targeted helm tests.
+- A stylesheet comment still said the local laptop's red was limited to session rows. It now says what the code does,
+  below. In #1770.
+
+#### Not changed while landing
+
+The local laptop mark is now red everywhere it is drawn, the hosts panel included; before this plan its red was limited
+to session rows on purpose. Your decision said the local host "keeps its red laptop", and the launcher and switcher
+showing it red follows from that, but the hosts panel change was not mentioned anywhere. Whether the hosts panel should
+show it red is yours to confirm; changing it back is a small style change.
+
+Smaller notes left as they are: a color click resends the client's current icon with the new color, so a near
+simultaneous icon change from another client can be overwritten (last write wins for the pair); the letter-search test
+cannot tell multi-letter from single-letter matching; and a few stale names of the old remote mark remain in comments.
+
+#### Checks
+
+- Run now, on host-icons and claude-compaction-status stacked together: `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, and `cargo fmt`.
+- The protocol, helm and UI unit tests in full, with the supervisor's screen tests: the first run (`aca47509`) found the
+  three helm test failures above; after the fixes, the protocol, helm and UI tests passed 1592 of 1592 (run `9e9c2d1e`).
+- Through the recorder on Chromium and WebKit with pinned tmux 3.7c, one worker and no retries: the host picker, quick
+  switcher, sidebar, multi-host terminal, settings and tooltip specs (run `865e8fca`, 344 of 346; the two failures were
+  the first version of the landing's own new host-picker test, which clicked a field the open menu covers), then the
+  host-picker spec again with that test corrected (run `9592311e`, 12 of 12).
+- Reused from the executor: the destination-authority, clone, launcher and checkout specs it ran on the combined stack,
+  the UI JavaScript tests, the website build and the changelog lint. The landing changed none of what those cover beyond
+  the host picker, which was re-run.
+
+Nothing in the report above was made untrue by the landing, except that the hosts panel's red laptop, which the report
+does not mention, is a change.
