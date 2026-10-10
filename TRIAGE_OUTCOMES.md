@@ -7004,3 +7004,127 @@
 - Execution: complete — change `nulwwqxysyqquxytrvxtssznwzutyqzv`, bookmark
   `plan/triage-install-uninstall-gaps/02-uninstall-missing-id`, PR
   [#1655](https://github.com/scode/farhelm/pull/1655/changes).
+
+## uninstall-reload.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, verified by inspection at `72420bf1` (no runtime reproduction). Remote uninstall disables
+  the unit with `--no-reload`, removes the unit file, then stops the unit, and only then reloads
+  (`crates/farhelm-helm/src/provisioning/plan.rs:688–699`). The stop step reads the loaded `KillMode` and refuses unless
+  it is `process`, then runs `systemctl --user stop` in the same shell
+  (`crates/farhelm-helm/src/provisioning/backend.rs` `stop`). A reload of the user manager by something else in the
+  milliseconds between that read and the stop would make the stop end the whole control group, including the private
+  tmux server. Because uninstall already refuses while any session has not ended or any tab is open, that server
+  normally holds only ended sessions' panes; a session started on the host during the uninstall would also be killed.
+  Conversations and Resume do not depend on tmux.
+- Decision: the user turned the finding around: uninstall should stop the host's private tmux server rather than protect
+  it. SPEC.md already says the private tmux server is an implementation detail, not an interface, so keeping it alive
+  after uninstall (from a deleted binary, if it was the private one) protects nothing the product promises. With the
+  server ended deliberately, the reload race no longer matters. A session started on the host while the uninstall runs
+  being ended with it is acceptable: the case is rare, a session that new is unlikely to matter, and the simpler design
+  wins. The spec states that the confirmation-time session check is sufficient, not that it is the only correct
+  behavior: an implementation may be stricter (for example re-checking sessions right before ending tmux) if that turns
+  out simpler, but nothing requires it. Local `farhelm uninstall` is out of scope and unchanged.
+- Completion criteria: the hosts-panel uninstall ends the host's private tmux server as part of its plan (stopping the
+  supervisor first, so its orderly terminal shutdown still runs, is the natural order but is left to the
+  implementation). SPEC_impl.md's uninstall section drops "the tmux server is not stopped by uninstall at all" and the
+  ordering and `KillMode` refusal reasoning that existed only to keep tmux alive, and describes the new behavior;
+  SPEC.md's uninstall paragraph says the private tmux server is ended too, and that a session started on the host while
+  the removal runs may be ended with it (the confirmation-time check being sufficient, stricter checks allowed). Focused
+  tests cover the plan and the step. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## shutdown-expiry.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by inspection at `72420bf1` (no runtime reproduction). Planned shutdown wraps all of
+  output-client teardown, including the first wait for the attachments lock, in one 10-second budget
+  (`crates/farhelm-supervisor/src/service/teardown.rs`, `shutdown_output_clients`); `stopping` is only set once that
+  lock is held, so a budget spent waiting for it has quieted no client. On expiry the entry point logs "exiting anyway"
+  and returns (`crates/farhelm-supervisor/src/service/core.rs`, `SHUTDOWN_OUTPUT_BUDGET` and its caller), and process
+  exit closes every output client abruptly. On a healthy host the lock is held for milliseconds; an attach against a
+  slow tmux can hold it about 10 s, and delete runs tmux commands under it with no deadline. The consequence, a private
+  tmux server abort ending every session on the host, is unverified on the pinned 3.7c: the repo's evidence is 3.7b (and
+  observed distro 3.6), and upstream's 3.7b→3.7c changes do not touch control-client exit. The earlier
+  `supervisor-stop-closes-clients-output-on.md` outcome accepted a bounded budget then exit but did not decide behavior
+  on expiry; BUGS.md excludes planned stops from its accepted residual.
+- Decision: fix it, under a hard complexity bound: this must stay small. At the same time, record the principle that
+  stops this class of feedback: defending against the tmux abort on abrupt close of an output-bearing control client
+  (observed on distro 3.6 and 3.7b) is not worth significant complexity unless there is evidence that tmux 3.7c or later
+  still has it. Without such evidence, findings that the existing safe-teardown discipline can be bypassed in some rare
+  path are not reasons for further design or code. The user noted this is the Nth triage of feedback tied to this one
+  tmux bug.
+- Completion criteria: on budget expiry, the supervisor makes one bounded, best-effort attempt to switch output off on
+  its remaining output clients before exiting (or an equally small change that keeps a contended lock from spending the
+  budget before any client is quieted), with one focused test. Keep the code change to roughly 150 lines including the
+  test; if it cannot be done within that, stop and return to the user rather than growing it, and land only the spec
+  part. Add the principle above to SPEC_impl.md where the acknowledged no-output teardown is described (and adjust that
+  section's "part of the handoff contract" framing so it no longer invites unbounded defense), naming the evidence that
+  would reopen it: an observed abort on 3.7c or later. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## installer-startup-prune.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `72420bf1` (no macOS reproduction); the finding's line numbers are stale. The
+  installer takes its app-bundle lock, replaces the desktop app's main program before advancing the Installed record
+  (`scripts/install.sh`, update sequence around 1259–1264), and prunes every version folder except the new one, the one
+  it replaced, and the one the Running record names, reading that record once with no process check
+  (`scripts/install.sh:1358–1393`). The desktop app starts its supervisor from its own version's folder
+  (`crates/farhelm-ui/src/desktop/bundle.rs`), and the supervisor publishes its Running record during startup without
+  the installer lock (`crates/farhelm-supervisor/src/service/core.rs`, `serve`; `app_bundle.rs`). So after an update
+  interrupted between replacing the app and advancing Installed, a separate installer run for a third version that
+  prunes during that supervisor's startup window can delete the running version's folder. Consequence: running agents
+  keep running, but until Farhelm is quit and reopened new sessions fail, Restart stops the agent then fails to
+  relaunch, and agents' `farhelm` commands fail; no conversation is lost. Nothing in SPEC.md, SPEC_impl.md, BUGS.md,
+  TODO.md or the filters accepts it. Likelihood is very low; filed bucket highest, assessed as lower since nothing is
+  lost.
+- Decision: fix it, because the installer is especially critical: it is what can brick an installation. Complexity gate:
+  the fix should be about as small as described at triage (a pending-update marker, roughly 10–20 lines of shell plus an
+  installer test case and a SPEC_impl.md sentence). If it turns out to need significantly more than that, stop and bring
+  it back to the user instead of growing it.
+- Completion criteria: an update records the version it is moving to before it replaces the app, and clears that once
+  the Installed record names it; a later installer run that finds such a pending version keeps its folder when pruning.
+  A case in `scripts/test-install-sh.sh` covers an interrupted update followed by an update to a third version keeping
+  the intermediate folder. SPEC_impl.md's prune description names the pending version among those kept. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## template-empty-name.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by #1687 (`01fa57ee`, "show launch templates beside their field editor"), which
+  landed after the finding's rebase base. The template editor now keeps a stored empty session name as a visible
+  session-name row (`crates/farhelm-ui/src/list/templates.rs`, `Field::Name` presence and `Draft::from_template`), and
+  saving refuses it with "type the session name, or remove its field" (`Draft::refusal`), so an unrelated edit can no
+  longer silently turn "clear the name" into "leave it as is". A narrower inconsistency remains and is not this finding:
+  the agent CLI and API still store an explicitly empty session name, while SPEC_impl.md ("Launch templates") says the
+  session name has no reset, and the GUI asks the user to replace or remove it before saving other edits.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## omp-bun-pane-proof.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, verified by inspection at `72420bf1` (no live OMP reproduction). The corridor's refusal of
+  a Bun or Node pane process that is not the reporting runtime applies only to launches of the installed `omp` command
+  (`crates/farhelm-supervisor/src/procs/omp.rs`, `omp_corridor`, the `OmpLaunchProgram::Omp` guard). A pane whose
+  arguments are unreadable or over the 64 KiB budget is not counted as a runtime and, being the pane, is skipped by the
+  intermediary checks, so a nested reporting OMP below it would be admitted as the session's own. Only a direct
+  `bun <entry> …` command launch is exposed: `bun x`/`bunx` and npm launches put the main runtime in a middle link,
+  where a second emitter or an unclassified intermediary already refuses. The trigger needs over 64 KiB of pane
+  arguments plus a nested interactive OMP that loads Farhelm's reporter, which Farhelm only injects into the launch it
+  builds; likelihood negligible. Consequence: Resume opens the wrong conversation (the right one stays in OMP's store),
+  which SPEC.md counts as lost user work even for partially supported harnesses; the non-first-class-harness filter
+  excludes it. Precedent: `omp-corridor-uncounted-pane-runtime.md` fixed the same gap for installed `omp` launches only.
+- Decision: fix it, with a complexity gate: the fix should stay about as small as described at triage (roughly ten lines
+  in the corridor plus two or three unit tests and a SPEC_impl.md sentence). If it needs significantly more, stop and
+  bring it back to the user.
+- Completion criteria: for every OMP launch program, a Bun or Node pane process that is not the reporting runtime
+  refuses attribution unless its arguments are readable and match that launch program's expected launcher, so behavior
+  for installed `omp` launches is unchanged. Unit tests cover refusal of an unreadable Bun pane under a Bun launch and a
+  positive control for a readable npm launcher pane (the existing `bun x` positive control stays). SPEC_impl.md's OMP
+  corridor text drops the installed-`omp`-only scope of that rule (and its stale "attribution repeats around the
+  evidence" wording if still present). Remove this feedback file and its index entry.
+- Execution: `pending`.
