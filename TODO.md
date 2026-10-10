@@ -271,6 +271,13 @@ Deferred work, with its original triggers:
   eat the margin above the 1.5-second rung; no reset was shown. First step: read the failed trace for when the page
   scheduled and started its reconnect attempt relative to the socket close.
 
+- **Installer test counts an extra request under BusyBox.** In CI's Alpine/BusyBox leg of `scripts/test-install-sh.sh`,
+  the check "G2-G4 (pre /latest): nothing but /latest was requested" saw two GET lines where one was expected, in the
+  first attempt of CI run 38061432384 (job 114240425122) (FLAKES.md, 2026-10-10). The rerun passed, as did the GNU leg
+  of the same run and two local Alpine runs. The check only prints a count, so which second request was logged is
+  unknown. First step: make the check print the counted request lines on failure, so the next occurrence says what the
+  extra request was.
+
 ## Broken tests
 
 ## Code review
