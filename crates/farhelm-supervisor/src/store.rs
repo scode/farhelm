@@ -2522,6 +2522,31 @@ fn insert_session_row(
     })
 }
 
+/// Collect every retained session's directory spellings for destructive cleanup.
+/// Stopped rows matter because Restart reuses their cwd. Keep raw, admission-time
+/// canonical paths so a recovery session reached through a symlink is visible.
+/// Do not resolve unrelated session folders here: a hung remote mount must not
+/// retain the host-wide admission lock during trash deletion.
+/// The caller holds directory admission through this read and the later mutation.
+pub(crate) fn session_directory_paths(
+    conn: &Connection,
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let mut statement = conn.prepare("SELECT cwd, canonical_cwd FROM sessions")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut paths = Vec::new();
+    for row in rows {
+        let (cwd, canonical) = row?;
+        let raw = std::path::PathBuf::from(cwd);
+        paths.push(raw);
+        if let Some(canonical) = canonical {
+            paths.push(std::path::PathBuf::from(canonical));
+        }
+    }
+    Ok(paths)
+}
+
 /// The column list every session read shares, in the order
 /// [`decode_session_row`] expects. Named so the two readers cannot drift
 /// apart by one column and start decoding each other's fields.

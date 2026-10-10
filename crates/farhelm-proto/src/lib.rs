@@ -199,7 +199,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_43` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_44` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -210,7 +210,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 43;
+pub const PROTOCOL_VERSION: u32 = 44;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2336,6 +2336,61 @@ impl DeleteGuard {
     }
 }
 
+/// One recorded, identity-verified archive on the answering supervisor's host.
+/// Paths are recovery information, never client-supplied deletion authority.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchivedCheckout {
+    pub id: String,
+    pub name: String,
+    pub repository: String,
+    pub path: String,
+    /// UTC seconds from the recorded archive name; malformed historical names
+    /// have no time rather than a guessed filesystem timestamp.
+    pub archived_at: Option<i64>,
+    /// Allocated disk bytes, including directory and symlink blocks. Unknown
+    /// means not requested, inaccessible, or the measurement budget expired.
+    pub bytes: Option<u64>,
+}
+
+/// A checkout's preservation or incomplete cleanup, with its recovery path.
+/// Deletion may have removed some contents before failing; the message states
+/// that partial outcome instead of implying the whole folder was untouched.
+/// An ID may carry more than one diagnostic, such as an identity refusal and
+/// a failure to forget that unusable record; clients display all of them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckoutTrashIssue {
+    pub id: String,
+    pub path: String,
+    pub message: String,
+}
+
+/// A host's current trash. Missing and mismatched records are omitted, with
+/// uncertainty named in `issues`; no unrecorded directory enters this list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckoutTrashListing {
+    pub checkouts: Vec<ArchivedCheckout>,
+    pub issues: Vec<CheckoutTrashIssue>,
+}
+
+/// The disposition of each selected archive. Removed records include absent
+/// or mismatched folders; only verified folders are recursively deleted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CheckoutTrashDeleted {
+    pub removed: Vec<String>,
+    pub issues: Vec<CheckoutTrashIssue>,
+}
+
+/// Facts established by a completed session Delete. The archive flag is
+/// absent in JSON unless a checkout really moved, so bare successes retain
+/// their existing shape and never imply that a cue should play.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionDeleteOutcome {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+}
+
 /// Control-channel messages. `req_id` correlates a response to its request
 /// so one connection can carry concurrent requests; unsolicited events —
 /// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
@@ -2595,6 +2650,25 @@ pub enum ControlMsg {
         children: Vec<String>,
         truncated: bool,
     },
+    /// Read only recorded retired archives on this host. Size measurement is
+    /// optional because the sidebar count must not traverse checkout trees.
+    ListCheckoutTrash { req_id: u64, measure_sizes: bool },
+    /// Complete host answer. Missing archives beneath a verified root are
+    /// pruned silently; every other unlistable record recurs in `issues`.
+    CheckoutTrashListed {
+        req_id: u64,
+        listing: CheckoutTrashListing,
+    },
+    /// Permanently remove the selected recorded archives after confirmation.
+    /// IDs select rows; the supervisor derives and re-verifies every path.
+    DeleteCheckoutTrash { req_id: u64, ids: Vec<String> },
+    /// Per-checkout disposition; individual refusals do not hide successful
+    /// removal of the other explicitly selected archives.
+    CheckoutTrashDeleted {
+        req_id: u64,
+        deleted: CheckoutTrashDeleted,
+    },
+
     /// Ask the supervisor to preview where a fresh GitHub checkout of one
     /// repository would land on a host: the checkout root, the proposed
     /// basename, the resulting working directory, and the claim context the
@@ -2763,6 +2837,10 @@ pub enum ControlMsg {
         req_id: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
+        /// True only after this Delete archived a managed checkout. Clients
+        /// use it for a local cue; session disappearance alone is not proof.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        archived: bool,
     },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
@@ -3442,6 +3520,8 @@ impl ControlMsg {
             | ControlMsg::GithubCheckoutReconciled { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
             | ControlMsg::DirectoryListing { req_id, .. }
+            | ControlMsg::CheckoutTrashListed { req_id, .. }
+            | ControlMsg::CheckoutTrashDeleted { req_id, .. }
             | ControlMsg::GithubCheckoutPreviewed { req_id, .. }
             | ControlMsg::GithubRepoResults { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
@@ -3468,6 +3548,8 @@ impl ControlMsg {
             | ControlMsg::ReconcileGithubCheckout { .. }
             | ControlMsg::ListSessions { .. }
             | ControlMsg::BrowseDirectory { .. }
+            | ControlMsg::ListCheckoutTrash { .. }
+            | ControlMsg::DeleteCheckoutTrash { .. }
             | ControlMsg::GithubCheckoutPreview { .. }
             | ControlMsg::GithubRepoSearch { .. }
             | ControlMsg::StopSession { .. }
@@ -3511,6 +3593,8 @@ impl ControlMsg {
             | ControlMsg::ReconcileGithubCheckout { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
             | ControlMsg::BrowseDirectory { req_id, .. }
+            | ControlMsg::ListCheckoutTrash { req_id, .. }
+            | ControlMsg::DeleteCheckoutTrash { req_id, .. }
             | ControlMsg::GithubCheckoutPreview { req_id, .. }
             | ControlMsg::GithubRepoSearch { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
@@ -3531,6 +3615,8 @@ impl ControlMsg {
             | ControlMsg::SessionCreated { .. }
             | ControlMsg::SessionList { .. }
             | ControlMsg::DirectoryListing { .. }
+            | ControlMsg::CheckoutTrashListed { .. }
+            | ControlMsg::CheckoutTrashDeleted { .. }
             | ControlMsg::GithubCheckoutPreviewed { .. }
             | ControlMsg::GithubRepoResults { .. }
             | ControlMsg::SessionStopped { .. }
@@ -3584,6 +3670,10 @@ impl ControlMsg {
             ControlMsg::ListSessions { .. } => "ListSessions",
             ControlMsg::SessionList { .. } => "SessionList",
             ControlMsg::BrowseDirectory { .. } => "BrowseDirectory",
+            ControlMsg::ListCheckoutTrash { .. } => "ListCheckoutTrash",
+            ControlMsg::CheckoutTrashListed { .. } => "CheckoutTrashListed",
+            ControlMsg::DeleteCheckoutTrash { .. } => "DeleteCheckoutTrash",
+            ControlMsg::CheckoutTrashDeleted { .. } => "CheckoutTrashDeleted",
             ControlMsg::DirectoryListing { .. } => "DirectoryListing",
             ControlMsg::GithubCheckoutPreview { .. } => "GithubCheckoutPreview",
             ControlMsg::ReconcileGithubCheckout { .. } => "ReconcileGithubCheckout",
@@ -4548,8 +4638,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_43() {
-        assert_eq!(PROTOCOL_VERSION, 43);
+    fn protocol_version_is_pinned_at_44() {
+        assert_eq!(PROTOCOL_VERSION, 44);
     }
 
     /// Why this matters: a create the user makes must keep its
@@ -4886,6 +4976,7 @@ mod tests {
 
         let deleted = ControlMsg::SessionDeleted {
             req_id: 12,
+            archived: false,
             notice: None,
         };
         assert_eq!(
@@ -4899,6 +4990,7 @@ mod tests {
         // sender's bare reply still decodes, as a delete with no notice.
         let noticed = ControlMsg::SessionDeleted {
             req_id: 12,
+            archived: false,
             notice: Some("left /work/bar-1 in place".to_string()),
         };
         assert_eq!(
@@ -4941,6 +5033,7 @@ mod tests {
             },
             ControlMsg::SessionDeleted {
                 req_id: 2,
+                archived: false,
                 notice: None,
             },
         ] {
@@ -4954,6 +5047,70 @@ mod tests {
             );
         }
     }
+    /// Trash vocabulary must participate in correlation and actual framed
+    /// decoding. A session Delete's archive fact remains optional on the wire.
+    #[farhelm_testtrace::test]
+    fn checkout_trash_roundtrips_and_correlates() {
+        let messages = [
+            ControlMsg::ListCheckoutTrash {
+                req_id: 7,
+                measure_sizes: true,
+            },
+            ControlMsg::CheckoutTrashListed {
+                req_id: 7,
+                listing: CheckoutTrashListing::default(),
+            },
+            ControlMsg::DeleteCheckoutTrash {
+                req_id: 8,
+                ids: vec!["recorded".into()],
+            },
+            ControlMsg::CheckoutTrashDeleted {
+                req_id: 8,
+                deleted: CheckoutTrashDeleted::default(),
+            },
+        ];
+        for (index, message) in messages.into_iter().enumerate() {
+            assert_eq!(
+                message.request_req_id(),
+                if index % 2 == 0 {
+                    Some(7 + (index / 2) as u64)
+                } else {
+                    None
+                }
+            );
+            assert_eq!(
+                message.reply_req_id(),
+                if index % 2 == 1 {
+                    Some(7 + (index / 2) as u64)
+                } else {
+                    None
+                }
+            );
+            let mut bytes = Vec::new();
+            Frame::control(&message).encode(&mut bytes).unwrap();
+            let (frame, consumed) = Frame::decode(&bytes).unwrap().unwrap();
+            assert_eq!(consumed, bytes.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                message
+            );
+        }
+        let message = ControlMsg::SessionDeleted {
+            req_id: 9,
+            notice: None,
+            archived: true,
+        };
+        let value = serde_json::to_value(&message).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"type":"session_deleted","req_id":9,"archived":true})
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(value).unwrap(),
+            message
+        );
+    }
+
     /// `PauseOutput`/`ResumeOutput` round-tripped through the real
     /// encode/decode path, matching how `stop_and_delete_roundtrip_through_frames`
     /// exercises the M2 additions above — this is what would catch a drift

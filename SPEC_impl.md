@@ -1643,6 +1643,47 @@ can release the source's last reference. After process teardown and committed fi
 private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
 evidence, but cannot authorize another directory move.
 
+### Archived-checkout trash
+
+Protocol 44 adds `ListCheckoutTrash`/`CheckoutTrashListed` and `DeleteCheckoutTrash`/`CheckoutTrashDeleted`. The helm
+routes each HTTP request to one connected supervisor and checks the observed host incarnation before dispatch; it keeps
+no archive listing cache. IDs select records, never paths supplied by the browser. The session Delete reply includes
+`archived: true` only when its completed last-reference teardown moved a checkout; bare successes and notice-only
+replies retain their existing JSON shapes.
+
+`checkout_trash` operates only on retired working-copy rows with a recorded archive destination. It derives that path
+under the recorded root, opens the root and archive without following their final symlinks, and applies the
+allocation-time inode/birth-time rules to those opened objects. Parent and leaf traversal stays relative to those
+handles. A passive read prunes only missing archives under a verified root; other failures remain recorded and return a
+path and diagnostic on every read. A confirmed Delete drops unusable identity records without touching the folder, while
+uncertain I/O failures keep the record for retry. Recursive deletion lives in this module, preserving `working_copies`'
+no-recursive-removal rule. Recursive cleanup removes objects reachable from the verified archive at the time each
+directory is read, without crossing symlinks or mounts. Linux uses `openat2` with `RESOLVE_NO_XDEV` (including
+same-filesystem bind mounts); macOS uses no-follow `openat` and device checks. Linux without `openat2` can still list
+identities, but sizes are unknown and permanent deletion refuses. An encountered mount remains untouched; removal may
+already have deleted other confirmed archive contents, so failures name that partial outcome. POSIX final `rmdir` is
+name-based and can remove only an empty directory; an opened subtree moved during cleanup remains the object being
+traversed. Directory admission stays held through the blocking operation and its live-session directory guard, including
+after caller cancellation; large deletes can therefore delay launches, restarts and session Deletes on that host.
+Stopped session rows also protect their folders because they can restart there. The guard compares raw and
+admission-time canonical session paths against the archive's recorded and current canonical path; it does not resolve
+unrelated session cwds under admission.
+
+Passive lists share the two-slot browse worker pool, including a syscall that outlives the caller's reply wait, and
+never hold directory admission. Permanent deletion runs on a separate blocking worker serialized by directory admission,
+so wedged browse slots cannot block session lifecycle through an empty request. Listing without sizes does not walk
+checkout trees. Requested disk usage sums allocated 512-byte blocks from no-follow descriptor-relative metadata,
+deduplicating hardlinks within each checkout. A mount boundary has unknown size rather than counting its external data.
+Traversal holds at most 32 directory levels per operation, leaving process-wide descriptor headroom for the two reads
+and one delete that can run together. Deeper trees have unknown sizes and report a retained partial-delete refusal.
+Removal retries a nonempty directory through its same opened handle at most three times, accommodating entries skipped
+by a directory iterator during unlinking without chasing a concurrent writer forever. Per-record bookkeeping failures
+stay in the batch's issues instead of hiding earlier results. One two-second deadline and 100,000-entry budget cover all
+sizes on a host; an incomplete measurement is unknown, never a partial checkout total. Archive time is parsed from the
+recorded destination after its separately recorded original basename, accepting the archive move's optional 32-hex
+collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the rename's
+timestamp.
+
 ### Runtime state
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's

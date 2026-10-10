@@ -462,6 +462,69 @@ pub(crate) async fn browse_directory(
     }
 }
 
+/// Host routing and optional incarnation checks reuse the existing mutation
+/// precondition. Archive UUIDs already select one supervisor's records; callers
+/// supplying the observed incarnation also reject a stale connection before
+/// dispatch. The trash dialog supplies that additional fence.
+#[derive(Deserialize)]
+pub(crate) struct CheckoutTrashReq {
+    host: store::HostId,
+    expected_incarnation: Option<u64>,
+    #[serde(default)]
+    measure_sizes: bool,
+}
+
+/// An explicit selection is required: a missing or misspelled `ids` field
+/// must not make a destructive request look like a successful empty operation.
+#[derive(Deserialize)]
+pub(crate) struct DeleteCheckoutTrashReq {
+    host: store::HostId,
+    expected_incarnation: Option<u64>,
+    ids: Vec<String>,
+}
+
+/// Read one host independently so a slow or unreachable host does not delay
+/// answers from the others. The helm keeps no archived-checkout cache.
+pub(crate) async fn list_checkout_trash(
+    State(state): State<Arc<AppState>>,
+    axum::Json(req): axum::Json<CheckoutTrashReq>,
+) -> impl IntoResponse {
+    let (claim, client) = match host_client(&state, req.host) {
+        Ok(target) => target,
+        Err(error) => return http_error(error),
+    };
+    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+        return http_error(error);
+    }
+    match client.list_checkout_trash(req.measure_sizes).await {
+        Ok(listing) => axum::Json(listing).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Empty an explicitly selected set on one observed host. The owned task
+/// remains responsible for the result if the browser disconnects mid-request.
+pub(crate) async fn delete_checkout_trash(
+    State(state): State<Arc<AppState>>,
+    axum::Json(req): axum::Json<DeleteCheckoutTrashReq>,
+) -> impl IntoResponse {
+    crate::run_owned(async move {
+        let (claim, client) = match host_client(&state, req.host) {
+            Ok(target) => target,
+            Err(error) => return http_error(error),
+        };
+        if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation)
+        {
+            return http_error(error);
+        }
+        match client.delete_checkout_trash(req.ids).await {
+            Ok(deleted) => axum::Json(deleted).into_response(),
+            Err(error) => http_error(error),
+        }
+    })
+    .await
+}
+
 /// GET /api/launch-catalog returns the release-owned choices the helm will
 /// validate and compile for structured creates.
 ///
@@ -2486,7 +2549,7 @@ pub(crate) async fn delete_session(
             )
             .await
         {
-            Ok(notice) => {
+            Ok(outcome) => {
                 if let Err(error) = state.store.clear_seen(&id).await {
                     warn!(
                         session_id = manager::peer_text(&id).as_str(),
@@ -2502,15 +2565,7 @@ pub(crate) async fn delete_session(
                     );
                 }
                 forget_session(&state, &claim, &id).await;
-                match notice {
-                    // Passed through as the supervisor wrote it: the UI renders it
-                    // as peer text (`peer::PeerLine`), which is where display
-                    // escaping belongs, as for every other host-written string.
-                    Some(notice) => {
-                        axum::Json(serde_json::json!({ "notice": notice })).into_response()
-                    }
-                    None => axum::Json(serde_json::json!({})).into_response(),
-                }
+                axum::Json(outcome).into_response()
             }
             Err(e) => http_error(e),
         }
@@ -3143,7 +3198,7 @@ async fn finish_replacement(
     // their request fence. Held until the delete answers.
     let _deleting = state.approvals.deny_session(id);
     let delete_notice = match client.delete_session_with(id, guard).await {
-        Ok(notice) => notice,
+        Ok(outcome) => outcome.notice,
         Err(delete_error) => {
             // Two shapes of failure here, and they earn different words because
             // they answer a different question: did the delete happen?

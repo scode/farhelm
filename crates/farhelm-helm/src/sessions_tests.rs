@@ -1060,57 +1060,68 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
 
 /// `DELETE /api/sessions/{id}` happy path, mirroring the stop test
 /// above: a scripted `SessionDeleted` reply must reach the caller as
-/// 200 with the same empty-object body shape.
+/// 200, preserving bare successes and carrying a true archive fact through
+/// to the client that will decide whether to animate its own Delete.
 #[farhelm_testtrace::test]
-async fn delete_session_happy_path_returns_200_with_empty_object_body() {
+async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
 
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
+    for archived in [false, true] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession {
+                req_id, session_id, ..
+            } = request
+            else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            assert_eq!(session_id, "sess-1");
+            writer
+                .write_control(&ControlMsg::SessionDeleted {
+                    req_id,
+                    archived,
+                    notice: None,
+                })
+                .await
+                .unwrap();
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
+
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri("/api/sessions/sess-1")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession {
-            req_id, session_id, ..
-        } = request
-        else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        assert_eq!(session_id, "sess-1");
-        writer
-            .write_control(&ControlMsg::SessionDeleted {
-                req_id,
-                notice: None,
-            })
-            .await
-            .unwrap();
-    });
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value,
+            if archived {
+                serde_json::json!({"archived":true})
+            } else {
+                serde_json::json!({})
+            }
+        );
 
-    let harness = rest_harness::spliced_helm(client_side).await;
-    let app = harness.router();
-
-    let request = axum::http::Request::builder()
-        .method("DELETE")
-        .uri("/api/sessions/sess-1")
-        .header("host", "127.0.0.1:7433")
-        .body(axum::body::Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(value, serde_json::json!({}));
-
-    peer.await.unwrap();
+        peer.await.unwrap();
+    }
 }
 
 /// A completed delete that left a checkout in place reaches the browser as
@@ -1142,6 +1153,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: Some("The managed checkout at /work/bar-1 was not archived".to_string()),
             })
             .await
@@ -1215,6 +1227,7 @@ async fn delete_session_forwards_its_precondition() {
             writer
                 .write_control(&ControlMsg::SessionDeleted {
                     req_id,
+                    archived: false,
                     notice: None,
                 })
                 .await
@@ -1276,7 +1289,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// notification storage note), not merely the session itself — a
 /// stray row would sit in the table forever with nothing to ever read it
 /// back out, since the id it names is gone. Mirrors
-/// `delete_session_happy_path_returns_200_with_empty_object_body`'s
+/// `delete_session_happy_path_returns_200_with_the_archive_fact`'s
 /// scripted-peer shape; the only addition is marking the session seen
 /// before the delete and checking the store directly afterward, since the
 /// REST reply carries no evidence either way (SPEC.md's "delete" leaves
@@ -1306,6 +1319,7 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -1922,6 +1936,7 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -2079,6 +2094,7 @@ async fn a_replace_dropped_after_its_create_still_deletes_the_source() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -2177,6 +2193,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -2269,6 +2286,7 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: Some("The managed checkout at /work/bar was not archived".to_string()),
             })
             .await
@@ -2360,6 +2378,7 @@ async fn a_replace_forwards_its_source_delete_precondition() {
             writer
                 .write_control(&ControlMsg::SessionDeleted {
                     req_id,
+                    archived: false,
                     notice: None,
                 })
                 .await
@@ -2476,6 +2495,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -2782,6 +2802,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -3265,6 +3286,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -3408,6 +3430,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
+                archived: false,
                 notice: None,
             })
             .await
@@ -9832,4 +9855,114 @@ fn a_command_launch_request_identity_is_pinned() {
         super::fresh_create_request_identity(&req),
         r#"["github_create_request_v2","/w",null,{"command":"agent","yolo":false,"agent":null,"resume":null},"t",null,null,null]"#
     );
+}
+
+/// Trash uses the observed host connection and never interprets its paths on
+/// the helm. A stale confirmation must be refused before a request reaches the
+/// supervisor; the next peer frame distinguishes that from a superficial HTTP
+/// error after dispatch.
+#[farhelm_testtrace::test]
+async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::ListCheckoutTrash {
+            req_id,
+            measure_sizes: true,
+        } = request
+        else {
+            panic!("expected size listing, got {request:?}");
+        };
+        writer.write_control(&ControlMsg::CheckoutTrashListed {
+            req_id,
+            listing: farhelm_proto::CheckoutTrashListing {
+                checkouts: vec![farhelm_proto::ArchivedCheckout {
+                    id: "recorded".into(),
+                    name: "project-1-20260101T000000Z".into(),
+                    repository: "acme/project".into(),
+                    path: "/remote/checkouts/farhelm-archived-working-copies/project-1-20260101T000000Z".into(),
+                    archived_at: Some(1767225600),
+                    bytes: Some(4096),
+                }],
+                issues: vec![],
+            },
+        }).await.unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteCheckoutTrash { req_id, ids } = request else {
+            panic!("expected deletion, got {request:?}");
+        };
+        assert_eq!(
+            ids,
+            vec!["recorded"],
+            "stale deletion must never reach the peer"
+        );
+        writer
+            .write_control(&ControlMsg::CheckoutTrashDeleted {
+                req_id,
+                deleted: farhelm_proto::CheckoutTrashDeleted {
+                    removed: ids,
+                    issues: vec![],
+                },
+            })
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    for (endpoint, body, status) in [
+        (
+            "list",
+            serde_json::json!({"host":local,"measure_sizes":true}),
+            axum::http::StatusCode::OK,
+        ),
+        (
+            "delete",
+            serde_json::json!({"host":local,"expected_incarnation":u64::MAX,"ids":["stale"]}),
+            axum::http::StatusCode::CONFLICT,
+        ),
+        // Missing selection is a malformed request, not an emptying success.
+        // The next accepted peer frame also proves it was never dispatched.
+        (
+            "delete",
+            serde_json::json!({"host":local,"id":["misspelled"]}),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "delete",
+            serde_json::json!({"host":local,"ids":["recorded"]}),
+            axum::http::StatusCode::OK,
+        ),
+    ] {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/checkout-trash/{endpoint}"))
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let response = harness.router().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), status);
+        let bytes = axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap();
+        if status == axum::http::StatusCode::OK {
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            if endpoint == "list" {
+                assert_eq!(value["checkouts"][0]["bytes"], 4096);
+                assert_eq!(value["checkouts"][0]["repository"], "acme/project");
+            } else {
+                assert_eq!(value["removed"], serde_json::json!(["recorded"]));
+            }
+        }
+    }
+    peer.await.unwrap();
 }

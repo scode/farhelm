@@ -241,6 +241,10 @@ impl Supervisor {
     /// caller: a caller can only ever start them after the guard is
     /// already gone.
     ///
+    /// The returned archive fact comes only from a confirmed move, not from
+    /// managed membership or the absence of an error. Preserved or missing
+    /// checkouts do not earn the initiating client's trash cue.
+    ///
     /// `session_id` is the id the request named; `entry` is the map value
     /// it resolved to. Both are passed rather than one derived from the
     /// other because the caller has already done that lookup and its
@@ -250,7 +254,7 @@ impl Supervisor {
         entry: &SessionEntry,
         session_id: &str,
         _directory_admission: tokio::sync::OwnedMutexGuard<()>,
-    ) -> Result<Option<String>, TeardownError> {
+    ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
         // holding `attachments` for that long would stall every OTHER
@@ -541,6 +545,7 @@ impl Supervisor {
         // the checkout rows Delete gave up archiving, which its final
         // transaction releases instead of retiring.
         let mut notices: Vec<String> = Vec::new();
+        let mut archived = false;
         let mut released: Vec<String> = Vec::new();
         let teardown: Result<crate::store::DeleteSettlement, String> = async {
             if output_reap_blocked {
@@ -726,41 +731,43 @@ impl Supervisor {
                         // naming it. Before this, each of these failures kept the session, and
                         // several could never clear (a removed or remounted root, a filesystem
                         // without no-replace rename, a path too long to archive).
-                        if let Err(skipped) = self
-                            .archive_last_reference(&row, &registry, session_id)
-                            .await
-                        {
-                            let path = row.canonical_path.clone().unwrap_or_else(|| {
-                                PathBuf::from(&row.canonical_root)
-                                    .join(&row.original_basename)
-                                    .display()
-                                    .to_string()
-                            });
-                            let ArchiveSkipped { reason, may_have_moved } = skipped;
-                            // Name every place the folder can be. After a
-                            // failed or unreconcilable move it may already be
-                            // at its archive destination, and telling the user
-                            // it stayed put would send them to an empty path.
-                            let whereabouts = match may_have_moved {
-                                None => "stays where it is".to_string(),
-                                Some(Some(destination)) => {
-                                    format!("may be there or at {destination}")
-                                }
-                                Some(None) => {
-                                    "may be there or in its root's archive folder".to_string()
-                                }
-                            };
-                            warn!(
-                                session = %session_id, path = %path, reason = %reason,
-                                whereabouts = %whereabouts,
-                                "the deleted session's checkout could not be archived and is no \
-                                 longer managed"
-                            );
-                            notices.push(format!(
-                                "The managed checkout at {path} was not archived and {whereabouts}; \
-                                 Farhelm no longer manages it. Reason: {reason}"
-                            ));
-                            released.push(row.id.clone());
+                        match self.archive_last_reference(&row, &registry, session_id).await {
+                            Ok(moved) => {
+                                archived |= moved;
+                            }
+                            Err(skipped) => {
+                                let path = row.canonical_path.clone().unwrap_or_else(|| {
+                                    PathBuf::from(&row.canonical_root)
+                                        .join(&row.original_basename)
+                                        .display()
+                                        .to_string()
+                                });
+                                let ArchiveSkipped { reason, may_have_moved } = skipped;
+                                // Name every place the folder can be. After a
+                                // failed or unreconcilable move it may already be
+                                // at its archive destination, and telling the user
+                                // it stayed put would send them to an empty path.
+                                let whereabouts = match may_have_moved {
+                                    None => "stays where it is".to_string(),
+                                    Some(Some(destination)) => {
+                                        format!("may be there or at {destination}")
+                                    }
+                                    Some(None) => {
+                                        "may be there or in its root's archive folder".to_string()
+                                    }
+                                };
+                                warn!(
+                                    session = %session_id, path = %path, reason = %reason,
+                                    whereabouts = %whereabouts,
+                                    "the deleted session's checkout could not be archived and is no \
+                                     longer managed"
+                                );
+                                notices.push(format!(
+                                    "The managed checkout at {path} was not archived and {whereabouts}; \
+                                     Farhelm no longer manages it. Reason: {reason}"
+                                ));
+                                released.push(row.id.clone());
+                            }
                         }
                     }
                     crate::working_copies::AllocationState::Retired => {}
@@ -907,7 +914,10 @@ impl Supervisor {
             );
         }
 
-        Ok((!notices.is_empty()).then(|| notices.join(" ")))
+        Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: (!notices.is_empty()).then(|| notices.join(" ")),
+            archived,
+        })
     }
 
     /// Archive the checkout whose last reference this Delete removes, or say
@@ -925,7 +935,7 @@ impl Supervisor {
         row: &crate::working_copies::WorkingCopyRow,
         registry: &[crate::working_copies::WorkingCopyRow],
         session_id: &str,
-    ) -> Result<(), ArchiveSkipped> {
+    ) -> Result<bool, ArchiveSkipped> {
         // The corrupt-evidence check (Design E): overlapping managed paths
         // can only exist against the admission rule, and moving either
         // would act on inconsistent ownership evidence.
@@ -975,6 +985,10 @@ impl Supervisor {
                     });
                 }
             };
+            let moved = !matches!(
+                reconciled,
+                crate::working_copies::ReconcileOutcome::SourceMissing
+            );
             match reconciled {
                 crate::working_copies::ReconcileOutcome::Moved { destination } => {
                     warn!(session = %session_id, destination = %destination,
@@ -986,7 +1000,7 @@ impl Supervisor {
                         "a pending archive's source was already gone; deleting the record only");
                 }
             }
-            return Ok(());
+            return Ok(moved);
         }
         // Missing-source cleanup needs the same root proof as a rename: a
         // replacement empty root can otherwise hide a still-owned checkout
@@ -1004,7 +1018,7 @@ impl Supervisor {
                     path = %row.canonical_path.as_deref().unwrap_or(""),
                     "the managed checkout's recorded directory is gone; deleting its ownership \
                      record without any move");
-                Ok(())
+                Ok(false)
             }
             Ok(crate::working_copies::IdentityStatus::Matches) => {
                 match self
@@ -1019,13 +1033,13 @@ impl Supervisor {
                         warn!(session = %session_id, destination = %destination,
                             "the last reference to this checkout is being deleted; the directory \
                              moved to the archive");
-                        Ok(())
+                        Ok(true)
                     }
                     Ok(crate::working_copies::ArchiveOutcome::SourceMissing) => {
                         warn!(session = %session_id,
                             "the checkout vanished between the identity check and the archive \
                              move; deleting only the record");
-                        Ok(())
+                        Ok(false)
                     }
                     // A refused rename moved nothing and rolled its journal
                     // back, so the folder is where it was.
@@ -2427,9 +2441,11 @@ mod tests {
 
         // Delete A: B still holds the checkout — no move, row gone, path
         // unchanged, membership down to one.
-        sup.teardown_session(&entry_a, "s-a", test_admission(&sup).await)
+        let first = sup
+            .teardown_session(&entry_a, "s-a", test_admission(&sup).await)
             .await
             .unwrap_or_else(|_| panic!("delete the first member"));
+        assert!(!first.archived, "another member keeps the checkout live");
         assert!(
             team_path.join("file.txt").exists(),
             "a delete that leaves another member must not move the checkout"
@@ -2457,9 +2473,14 @@ mod tests {
             .get("s-b")
             .cloned()
             .expect("the surviving member reloads");
-        sup.teardown_session(&entry_b, "s-b", test_admission(&sup).await)
+        let last = sup
+            .teardown_session(&entry_b, "s-b", test_admission(&sup).await)
             .await
             .unwrap_or_else(|_| panic!("delete the last member"));
+        assert!(
+            last.archived,
+            "only the last-reference Delete earns an archive cue"
+        );
         assert!(!preparation.exists());
         assert!(!preparation_lock.exists());
         assert!(
@@ -2611,7 +2632,11 @@ mod tests {
         // Archiving never blocks Delete (SPEC.md "Managed checkouts"):
         // the session goes, the checkout is released, and the reply names
         // the folder left in place. What must never happen is the move.
-        let Ok(Some(notice)) = result else {
+        let Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: Some(notice),
+            archived: false,
+        }) = result
+        else {
             panic!("a foreign object at the recorded source still deletes, with a notice");
         };
         assert!(
@@ -2691,7 +2716,10 @@ mod tests {
                 .unwrap(),
             1
         );
-        let Ok(Some(notice)) = sup
+        let Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: Some(notice),
+            archived: false,
+        }) = sup
             .teardown_session(&entry, "planned-origin", test_admission(&sup).await)
             .await
         else {
@@ -2954,7 +2982,10 @@ mod tests {
             // Archiving never blocks Delete (SPEC.md "Managed checkouts"): a replaced root
             // completes the delete with a notice and releases the checkout. What must never happen
             // is treating the checkout as gone and touching it, wherever it now lives.
-            let Ok(Some(notice)) = sup
+            let Ok(farhelm_proto::SessionDeleteOutcome {
+                notice: Some(notice),
+                archived: false,
+            }) = sup
                 .teardown_session(&entry, "missing-origin", test_admission(&sup).await)
                 .await
             else {
@@ -3066,7 +3097,10 @@ mod tests {
         std::fs::rename(&source, &destination).unwrap();
         let entry = seeded_session(&sup, "overlapped", source.to_str().unwrap()).await;
 
-        let Ok(Some(notice)) = sup
+        let Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: Some(notice),
+            archived: false,
+        }) = sup
             .teardown_session(&entry, "overlapped", test_admission(&sup).await)
             .await
         else {
@@ -3154,7 +3188,11 @@ mod tests {
             .teardown_session(&entry, "refused", test_admission(&sup).await)
             .await;
         std::fs::set_permissions(&archive_root, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let Ok(Some(notice)) = result else {
+        let Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: Some(notice),
+            archived: false,
+        }) = result
+        else {
             panic!("a refused archive rename still deletes the session, with a notice");
         };
         assert!(
@@ -3253,7 +3291,10 @@ mod tests {
         std::fs::write(foreign.join("theirs"), b"not ours").unwrap();
         let entry = seeded_session(&sup, "recovering", source.to_str().unwrap()).await;
 
-        let Ok(Some(notice)) = sup
+        let Ok(farhelm_proto::SessionDeleteOutcome {
+            notice: Some(notice),
+            archived: false,
+        }) = sup
             .teardown_session(&entry, "recovering", test_admission(&sup).await)
             .await
         else {
@@ -3390,7 +3431,11 @@ mod tests {
             // Archiving never blocks Delete (SPEC.md "Managed checkouts"). The rename has already
             // happened when the durability barrier fails, so the notice must not claim the folder
             // stayed put.
-            let Ok(Some(notice)) = result else {
+            let Ok(farhelm_proto::SessionDeleteOutcome {
+                notice: Some(notice),
+                archived: false,
+            }) = result
+            else {
                 panic!("a failed archive barrier still deletes the session, with a notice");
             };
             assert!(
@@ -3530,10 +3575,14 @@ mod tests {
             .get("archive-origin")
             .cloned()
             .unwrap();
-        reopened
+        let deletion = reopened
             .teardown_session(&entry, "archive-origin", test_admission(&reopened).await)
             .await
             .unwrap_or_else(|_| panic!("Delete must settle the matching archived identity"));
+        assert!(
+            deletion.archived,
+            "recovered committed move carries the archive fact"
+        );
         assert!(
             reopened
                 .store
