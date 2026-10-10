@@ -46,16 +46,12 @@ triage.
   temporary directory.
 - `negative-manager-probe-permit-relaunch-over-surviving.md` — A retry could launch duplicate work after losing evidence
   of a surviving scope.
-- `canonical-path-replacement-race.md` — Replacing a validated directory could redirect a later launch; supported
-  reachability is unresolved.
 - `failed-registry-reload-reconnect-previous-destination-under.md` — A failed host reload could reconnect the old
   destination under the edited registration.
 - `remote-attach-errors-inject-terminal-controls-into.md` — A remote attach refusal can manipulate the helm's log
   display.
 - `update-temporaries-briefly-permit-cross-account-writes.md` — Update files briefly allow another account to retain
   write access.
-- `old-receipt-cleanup-deletes-any-regular-file-receipt.md` — Old-receipt cleanup could delete unrelated content at the
-  reserved receipt path.
 - `plain-clicks-overwrite-clipboard-old-selection.md` — An ordinary terminal click can replace the clipboard with an old
   selection.
 - `failed-relaunch-rollback-forget-surviving-process-scope.md` — Failed restart recovery could forget a surviving

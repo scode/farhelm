@@ -7442,3 +7442,1082 @@
   `release.yml` is regenerated with the pinned cargo-dist and `dist generate --check` passes. Remove this feedback file
   and its index entry.
 - Execution: planned in `plans/queue/harness-tooling-fixes.md`.
+
+## forward-tab-counts-freeze-gui.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the bundled xterm.js `cursorForwardTab` loops once per
+  requested tab stop with no limit, so a tiny escape sequence with a huge count keeps the GUI thread busy. Needs a
+  hostile host or tmux passthrough. The library is never patched (SPEC_impl.md) and its parser hook cannot clamp the
+  count.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## backward-tab-counts-freeze-gui.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: same unbounded loop in `cursorBackwardTab`.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## insert-line-counts-cause-excessive-allocation-cpu-work.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: `insertLines` allocates and moves rows once per
+  requested line with no clamp.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## delete-line-counts-cause-excessive-allocation-cpu-work.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: same in `deleteLines`.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## scroll-up-counts-cause-billions-redundant-operations.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: `scrollUp` loops once per requested line.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## scroll-down-counts-cause-billions-redundant-operations.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: same in `scrollDown`.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## repeat-character-commands-expand-tiny-input-into-enormous.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: `repeatPrecedingCharacter` allocates a buffer
+  proportional to the requested count (about 8 GiB at the maximum).
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## color-list-parsing-performs-quadratic-work.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: palette-setting parsing uses repeated `shift()`, whose
+  cost depends on the engine; unmeasured.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## unused-hyperlinks-accumulate-retained-record-bound.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: opening and closing empty links registers a link record
+  each time that is never freed.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## combining-characters-bypass-scrollback-memory-bound.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: combining marks append to one cell's string without
+  limit, bypassing the scrollback memory cap; honest tmux limits cell size, so this needs passthrough or a hostile host.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## unbounded-hyperlink-records-exhaust-viewers-memory.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the same link-record growth as
+  `unused-hyperlinks-accumulate-retained-record-bound.md`, seen from the storage side.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## character-width-cache-retains-attacker-controlled-strings-indefinitely-possible.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the bundled library's character-width cache grows with
+  distinct combining strings; no memory impact measured.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## unexpected-messages-give-supervisor-unrestricted-bulk-log.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the helm logs each unexpected supervisor message in
+  full (`crates/farhelm-helm/src/client.rs`, the `other => warn!(?other, ...)` arm), up to the 8 MiB frame limit,
+  without disconnecting. Control characters are escaped there; the cost is log volume from a hostile supervisor.
+- Decision: accept. Asked (2026-10-10, question 1 of a spec batch that settles many findings at once) whether a hostile
+  or compromised host may exhaust the viewer's or the helm's resources through the terminal stream or the helm's log,
+  the user chose the recommended answer: accepted, with upgrading the bundled terminal library as the only remedy and no
+  workarounds in Farhelm.
+- Completion criteria: SPEC.md's denial-of-service paragraph ("Remote input, session defaults, and availability") states
+  that resource exhaustion a hostile or compromised host causes through the bundled terminal library (escape-sequence
+  repeat counts, link records, combining characters, its caches) or through the volume of what the helm logs about a
+  supervisor's messages is accepted, and that the remedy is upgrading the library, never a workaround in Farhelm. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## repainting-part-wrapped-url-leaves-previous-target-outer-repaint-invalidation-predicate.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the bundled library invalidates its cached link only
+  when a repaint covers the whole link, so after part of a wrapped URL is repainted a click can open the old target.
+- Decision: no workarounds; upgrade the library, and add a TODO to check upstream. Asked (2026-10-10, question 2)
+  whether Farhelm works around non-security bugs in the bundled terminal library, the user chose the recommended answer.
+- Completion criteria: SPEC_impl.md's paragraph on the vendored terminal library (the never-patched rule) states that
+  bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
+  upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## repainting-part-wrapped-url-leaves-previous-target-inner-cached-link-clearing-predicate.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the matching full-containment check inside the
+  library's link clearing.
+- Decision: no workarounds; upgrade the library, and add a TODO to check upstream. Asked (2026-10-10, question 2)
+  whether Farhelm works around non-security bugs in the bundled terminal library, the user chose the recommended answer.
+- Completion criteria: SPEC_impl.md's paragraph on the vendored terminal library (the never-patched rule) states that
+  bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
+  upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## long-wrapped-lines-shift-url-hitboxes-onto.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the bundled link add-on's windowed line collection
+  returns an off-by-one row count when its 2048-character limit stops the loop, shifting URL click areas up a row.
+- Decision: no workarounds; upgrade the library, and add a TODO to check upstream. Asked (2026-10-10, question 2)
+  whether Farhelm works around non-security bugs in the bundled terminal library, the user chose the recommended answer.
+- Completion criteria: SPEC_impl.md's paragraph on the vendored terminal library (the never-patched rule) states that
+  bugs inside it are fixed only by upgrading it, never worked around in Farhelm. One TODO.md entry records checking
+  upstream for the stale-link and shifted-hitbox bugs at the next library upgrade (the user asked for it). Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## embedded-paste-terminators-allow-command-execution-definite.md
+
+- Outcome: `fix code`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the bundled library wraps pasted text in bracketed-paste
+  markers without removing an embedded end marker, and `crates/farhelm-ui/assets/terminal.js` passes plain-text pastes
+  to the library's own handler, so the rest of a crafted clipboard reaches the program as typed input. Farhelm's
+  terminal code already intercepts pastes for files, so a fix there looks small; not verified end to end.
+- Decision: fix it, with a complexity gate. Asked (2026-10-10, question 2b) whether SPEC.md's "a user-initiated paste is
+  intentional delivery of the pasted content" covers hidden end-of-paste markers, the user chose the recommended answer:
+  fix it, bouncing back if it needs more than a small change in Farhelm's own paste path.
+- Completion criteria: Text pasted into a terminal has the bracketed-paste end marker (`ESC[201~`) removed before it
+  reaches the terminal, in Farhelm's own paste handling (the bundled library stays unpatched); whether to strip ESC more
+  broadly is an implementation DECISION within the gate. A test covers a paste containing the marker. If it needs
+  significantly more than a small change in that path, stop and bring it back to the user. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## stop-approval-retain-targets-owner.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: an agent's Stop request re-routes the session after the
+  approval wait (`crates/farhelm-helm/src/agent_requests.rs`), so a replacement host owning the same session id would
+  receive it.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restarts-launch-comparison-bind-approval-target-host.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: same for Restart; the post-approval comparison checks
+  the launch, not the owning host.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## rename-approval-transfer-another-installation.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: same for Rename.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## launch-approval-loses-destination-binding-dispatch-create-create-destination-client-acquisition.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: an approved create on a named host compares the
+  connection incarnation, then takes the client fresh at dispatch.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## launch-approval-loses-destination-binding-dispatch-clone-clone-destination-client-acquisition.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the same gap for clone.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## always-allow-grant-permission-host-connection-has.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: an "Always allow" answer checks the connection's
+  liveness before taking the host write lock and stores the permission after (`crates/farhelm-helm/src/approvals.rs`).
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## stale-host-settings-request-grant-fleet-authority-replacement.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the "run commands without asking" setter updates by row
+  id only, so a delayed toggle can re-enable it after adoption cleared it.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## delayed-settings-toggle-grant-replacement-installation-command.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: a duplicate of
+  `stale-host-settings-request-grant-fleet-authority-replacement.md` from another reviewer.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## retargeting-never-contacted-host-preserves-exemptions-intended-previous.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: retargeting a never-contacted host keeps its "run
+  commands without asking" setting.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## uninstall-confirmation-remove-replacement-installation.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: a confirmed uninstall plan records no approved
+  installation identity, and adoption takes no provisioning lock; no ordinary single-window path to the interleaving was
+  found.
+- Decision: accept. Asked (2026-10-10, question 3) whether approvals and host settings in flight may apply to the
+  replacement when a host is pointed at a different machine, the user said: "accept because the host the user maintains
+  is logically the same host. if the user says its at a diffent IP or wahtever it doesn't matter, it's the same logical
+  host from their perspective. otherwise the host would just be replaced instead." Consistent with the earlier YOLO
+  decision not to add an identity precondition to the setter.
+- Completion criteria: SPEC.md states that a host entry is one logical host from the user's perspective: approvals, host
+  settings and confirmed operations follow the host entry when its destination is retargeted or a different installation
+  is adopted, including actions already in flight, and Farhelm adds no installation-identity precondition to them. A
+  user who wants a different host replaces the entry instead. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## negative-manager-probe-permit-relaunch-over-surviving.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: after a crash in the launch window, recovery checks the
+  recorded process group only when the systemd manager probe succeeds (`crates/farhelm-supervisor/src/service/core.rs`),
+  so a failed probe can let it relaunch over a surviving group.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-relaunch-rollback-forget-surviving-process-scope.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: a failed scoped restart of an unscoped session with
+  unconfirmed cleanup restores "unscoped" and forgets the replacement's process group; needs a descendant invisible to
+  the sweep.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replacement-window-cleanup-has-same-scope-loss-path.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the same scope-loss path through the replacement-window
+  cleanup helper.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## interrupted-tab-creation-leaves-live-work-outside.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: a crash between creating a terminal tab's window and
+  labelling it leaves its shell invisible to Farhelm, so a later Delete kills it without warning.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-registry-reload-reconnect-previous-destination-under.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: after a destination edit, a registry read failure keeps
+  the connection worker's last-known settings (`crates/farhelm-helm/src/manager.rs`), reconnecting to the old machine;
+  also needs identity-less peers.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## pid-only-anchoring-admit-earlier-launchs-durable-report.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: when a pane has no start token, a stored report is matched
+  by process number alone (`crates/farhelm-supervisor/src/procs.rs`), so with process-number reuse an earlier launch's
+  report could be credited to a later one.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-resume-older-conversation-report-drain-fails.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed in part, screened at `e1ea1929` by code reading: a transiently failing report is put back and
+  the pass returns without telling Restart what is still pending
+  (`crates/farhelm-supervisor/src/service/report_files.rs`), so Restart can resume the previously stored conversation.
+- Decision: accept. Asked (2026-10-10, question 4) whether Farhelm must stay safe when a crash lands at an exact moment
+  or two independent rare faults coincide, the user said: "we accept these kinds of things if it's like \"the process on
+  the remote host got killed\" type of problems. not if it's \"we corrupt the supervisor database, helm database, or
+  totally brick something\" or similar." Asked about the three cases that are neither a lost process nor corruption (a
+  wrong conversation pointer, a reconnect to the previous destination), the user accepted all three.
+- Completion criteria: SPEC.md states that a supervisor crash at a specific narrow point, or two independent rare faults
+  coinciding, may leave a remote process untracked or later killed without warning, leave a session's conversation
+  pointer wrong until the next report, or reconnect a host to its previous destination until the next reload; these are
+  accepted. Corrupting the supervisor or helm database, bricking an installation, or similar lasting damage is not.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## notification-topic-leaks-through-curls-process-arguments.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the plans system's notification command puts the
+  private ntfy topic in curl's arguments (`plans/AGENTS.md`), visible to other local accounts.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## cross-boundary-handoff-desktop-smoke-exposes-unauthenticated-x.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the desktop smoke test starts Xvfb without
+  authentication (`scripts/desktop-smoke.sh`), and the script already says this is fine on a single-user machine.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## concurrent-lockless-sweeps-redirect-kill-server-outside-test.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: concurrent lockless test-state sweeps plus another local
+  account swapping a directory could aim a tmux kill at an unrelated server (`crates/farhelm-teststate/src/lib.rs`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replacement-symlink-redirect-stale-state-cleanup-live-tmux.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the stale test-state sweep walks paths, so a hostile
+  account's well-timed symlink could redirect it.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## stopping-original-supervisor-leaves-saved-pid-armed.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: browser-test teardown signals the original supervisor's
+  recorded process number after the test stopped it (`e2e/start-stack.sh`); needs process-number reuse within the run.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## capture-stack-cleanup-retains-exited-childrens-pids.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: capture teardown signals supervisor process numbers that
+  may have exited earlier (`e2e/readme-hero/start-stack.sh`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## cleanup-signal-recycled-desktop-pid.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: desktop smoke teardown signals a desktop app process it
+  already waited on (`scripts/desktop-smoke.sh`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## browser-test-exit-cleanup-signals-process-numbers-retained.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the cleanup test's exit handler signals a decoy process
+  that may have ended (`scripts/test-start-stack-cleanup.sh`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## emergency-browser-cleanup-kills-already-reaped-spawner-old.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: emergency cleanup SIGKILLs a spawner's number after
+  already waiting on it (`scripts/test-start-stack-cleanup.sh`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## filename-matching-authorize-deletion-unrelated-pictures.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the demo recorder deletes and replaces an output folder
+  whose files match its stills naming (`e2e/readme-video/recorder.ts`); name recognition is a documented choice.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## final-stills-check-becomes-stale-during-encoding.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: a file copied into the stills folder during encoding is
+  deleted afterwards (`e2e/readme-video/recorder.ts`).
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## emergency-browser-cleanup-treats-command-line-text-process.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: emergency cleanup kills every process whose command
+  line mentions the run's private path (`scripts/test-start-stack-cleanup.sh`), the harness's deliberate ownership rule.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## deleted-checkout-cleanup-kill-foreground-development-server.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the docs preview takes over any Astro dev server whose
+  checkout was deleted (`website/scripts/preview.sh`), a documented design.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## short-git-author-names-bypass-screen-scrubbing.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the capture tool skips author-name parts shorter than
+  three characters (`scripts/capture-agent-screens.py`) to avoid false matches; a manual diff read is the documented
+  backstop.
+- Decision: accept. Asked (2026-10-10, question 5) whether development tooling (test harnesses, capture and recording
+  scripts, deflake, the docs preview) need only run on a single-user development machine, may signal process numbers it
+  recorded within the same run, may recognise its own files and processes by naming convention, and keeps the capture
+  tool's author-name cutoff, the user chose the recommended answer: accept all. Deflake's process number persisted
+  across runs is fixed separately (`stale-deflake-pid-terminate-unrelated-work.md`).
+- Completion criteria: SPEC_impl.md states the development-tooling assumptions: a single-user machine with no hostile
+  other local accounts; a process number recorded within one run may be signalled later in that run (the existing rule
+  against keeping process numbers for later still applies across runs); tooling may identify its own files and processes
+  by naming convention; and the agent-screen capture tool's minimum name-part length stands, with the documented manual
+  diff read as backstop. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ssh-stanza-removal-destroy-existing-configuration.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: `scripts/test-provision-centos.sh` rewrites the config
+  in place on removal, deliberately to keep its inode, mode and symlinks; an interruption can leave it empty or partial,
+  and because cleanup calls the function with `|| true`, a failed `awk` still overwrites it.
+- Decision: fix it: make the rewrite atomic, with a complexity gate. Asked (2026-10-10, question 5b) whether the CentOS
+  test's in-place rewrite of the user's `~/.ssh/config` may be left truncated if killed mid-write, the user said: "make
+  it atomic assuming its just the usual complexity (minor) this causes, not some unique snowflake difficulty that will
+  explode complexity". The three ssh-config items are fixed together.
+- Completion criteria: Each of the CentOS test's three edits of `~/.ssh/config` (adding the temporary block, removing
+  it, removing an old-style block) writes a temporary file and renames it into place, keeping the file's permissions and
+  resolving a symlinked config to its target. A failed step never overwrites the config (this also fixes cleanup's
+  `remove_ssh_config_block || true`, which disables error checking so a failed `awk` still copies a truncated result
+  over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
+  the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## legacy-ssh-stanza-cleanup-has-own-destructive.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the same in-place rewrite when removing an old-style
+  block; errexit is active there, so only an interruption is at risk.
+- Decision: fix it: make the rewrite atomic, with a complexity gate. Asked (2026-10-10, question 5b) whether the CentOS
+  test's in-place rewrite of the user's `~/.ssh/config` may be left truncated if killed mid-write, the user said: "make
+  it atomic assuming its just the usual complexity (minor) this causes, not some unique snowflake difficulty that will
+  explode complexity". The three ssh-config items are fixed together.
+- Completion criteria: Each of the CentOS test's three edits of `~/.ssh/config` (adding the temporary block, removing
+  it, removing an old-style block) writes a temporary file and renames it into place, keeping the file's permissions and
+  resolving a symlinked config to its target. A failed step never overwrites the config (this also fixes cleanup's
+  `remove_ssh_config_block || true`, which disables error checking so a failed `awk` still copies a truncated result
+  over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
+  the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## installing-temporary-ssh-stanza-destroy-original-configuration.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the same in-place rewrite when adding the block.
+- Decision: fix it: make the rewrite atomic, with a complexity gate. Asked (2026-10-10, question 5b) whether the CentOS
+  test's in-place rewrite of the user's `~/.ssh/config` may be left truncated if killed mid-write, the user said: "make
+  it atomic assuming its just the usual complexity (minor) this causes, not some unique snowflake difficulty that will
+  explode complexity". The three ssh-config items are fixed together.
+- Completion criteria: Each of the CentOS test's three edits of `~/.ssh/config` (adding the temporary block, removing
+  it, removing an old-style block) writes a temporary file and renames it into place, keeping the file's permissions and
+  resolving a symlinked config to its target. A failed step never overwrites the config (this also fixes cleanup's
+  `remove_ssh_config_block || true`, which disables error checking so a failed `awk` still copies a truncated result
+  over the file). If atomic replacement turns out to need more than the usual minor handling, stop and bring it back to
+  the user. Validate with `shellcheck` and the script itself where practical. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## update-temporaries-briefly-permit-cross-account-writes.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the installer's `replace_file` copies, then chmods,
+  then moves (`scripts/install.sh`), so under a permissive umask another account could open a replacement file in the
+  gap.
+- Decision: accept. Asked (2026-10-10, question 6) about the installer's update copies being briefly readable under a
+  broad umask, the user said the first proposed rule was too broad: "I don't want it to be the case that we completely
+  ignore permissions of a file just because the spec doesn't say that that particular file needs to be locked down. The
+  default should still be good best practices. However, the general statement I would make is that we do not spend any
+  complexity doing defense-in-depth against the user accidentally having a broad umask. Minor reasonable things like
+  changing the permissions after the installation is totally fine because it adds very little complexity, but we do not
+  add significant complexity to work around a broad umask." On the restated rule, the user accepted the installer's
+  current copy-then-chmod behavior.
+- Completion criteria: SPEC.md states that Farhelm follows good permission practice by default (for example restricting
+  a file right after creating it) but spends no significant complexity on defence in depth against a user's broad umask.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## executable-read-back-collapses-dollars-select-another-installations.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading, worse than filed: Farhelm writes `$` in a service's
+  program path as `$$` (`crates/farhelm-helm/src/units.rs`, `systemd_arg`), but systemd does not expand the program
+  position, so such a service cannot start (`systemd-analyze verify` reports the doubled path as not executable); the
+  reader collapsing `$$` hides this. The filed wrong-installation scenario needs two paths differing only by `$$`, which
+  is implausible.
+- Decision: fix both: unsupported, and rejected. Asked (2026-10-10, question 7a) whether an install location whose path
+  contains `$` is supported, the user said: "unsupported but these kinds fo things need to be rejected, not just
+  \"undefined behavior\"." The related lower-priority `$` items
+  (`supervisor-cannot-start-farhelms-executable-path-contains.md`,
+  `helm-cannot-start-farhelms-executable-path-contains.md`, `dollar-escaping-changes-executable-path.md`) are outside
+  this bucket; this rule is expected to settle them when that bucket is triaged.
+- Completion criteria: SPEC.md states that install and binary paths containing `$` are unsupported, and setup and
+  provisioning refuse such a path up front with a clear error instead of writing a service that cannot start. A test
+  covers the refusal. If it needs significantly more than a check where Farhelm renders a service's paths, stop and
+  bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the reader assumes the last `ExecStart=` wins and reads
+  only the first command on a line, while systemd keeps a list; several commands are only allowed in a `Type=oneshot`
+  unit, and Farhelm's are `Type=simple`.
+- Decision: fix both: unsupported, and rejected. Asked (2026-10-10, question 7b, under the user's rule that unsupported
+  means rejected rather than undefined), the user chose the recommended answer.
+- Completion criteria: SPEC_impl.md (or SPEC.md, wherever the unit ownership rule lives) states Farhelm's units are
+  `Type=simple`; the service-file reader (`exec_start_program` in `crates/farhelm-helm/src/units.rs`) treats a unit
+  whose `Type=` is anything else as unrecognised, which setup and uninstall already refuse clearly. A test covers a
+  `Type=oneshot` unit with several commands. If it needs significantly more than that check, stop and bring it back to
+  the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## distinct-proxy-routes-reuse-wrong-hosts-ssh.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the shared-connection socket is named with OpenSSH's
+  `%C` (`crates/farhelm-helm/src/ssh.rs`), which covers host, user, port and jump host but not `ProxyCommand`, so two
+  such aliases share a connection. A route discriminator would cost socket-path length an earlier triage budgeted.
+- Decision: document as unsupported, without detection. Asked (2026-10-10, question 7c), the user chose the recommended
+  answer, an explicit exception to their rule that unsupported configurations are rejected, because rejecting would need
+  new machinery.
+- Completion criteria: SPEC.md states that host aliases reaching the same host, user and port through different
+  `ProxyCommand` routes are unsupported, because the helm shares one SSH connection per OpenSSH connection hash; Farhelm
+  does not detect the case. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## legal-codex-overrides-bypass-legacy-hook-collision-guard.md
+
+- Outcome: `discard`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: for Codex sessions created before launch kinds existed,
+  the hook collision guard (`crates/farhelm-supervisor/src/agent_kind/codex.rs`) recognises only `-c hooks.` and
+  `-c features.hooks` prefixes, so other spellings let Farhelm's hooks override the user's.
+- Decision: discard. Asked (2026-10-10, question 7d), the user said: "whatever adds the least amount of complexity. we
+  have 0 users that i am aware of this affects." No change is the least complexity.
+- Completion criteria: Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-command-editors-hide-meaningful-characters-silently-saved-command-editor.md
+
+- Outcome: `fix spec+code`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the Templates editor's launch-command field is a
+  single-line input that replaces the stored value on edit (`crates/farhelm-ui/src/list/templates.rs`), so a stored
+  newline is dropped silently and invisible characters are shown raw.
+- Decision: fix both: reject at save. Asked (2026-10-10, question 7e), the user chose the recommended answer: template
+  commands may not contain control or invisible formatting characters, refused with a clear error when saved from the
+  GUI, the CLI or an agent; lossless escaped editing was not chosen. Existing stored templates keep working until
+  edited.
+- Completion criteria: SPEC.md's template rules state that a template's launch and resume commands cannot contain
+  control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
+  templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
+  validation, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md
+
+- Outcome: `fix spec+code`.
+- Assessment: likely, screened at `e1ea1929` by code reading: the same for the resume-command field.
+- Decision: fix both: reject at save. Asked (2026-10-10, question 7e), the user chose the recommended answer: template
+  commands may not contain control or invisible formatting characters, refused with a clear error when saved from the
+  GUI, the CLI or an agent; lossless escaped editing was not chosen. Existing stored templates keep working until
+  edited.
+- Completion criteria: SPEC.md's template rules state that a template's launch and resume commands cannot contain
+  control or invisible formatting characters, and saving one is refused with a clear message on every path that saves
+  templates. Tests cover the refusal. If enforcing it on every save path needs significantly more than one shared
+  validation, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## displayed-recovery-paths-shell-quoting.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the advice embeds a path formatted for display, not the
+  shell (`crates/farhelm/src/uninstall/locks.rs`); realistic install paths are plain, so this needs an exotic path.
+- Decision: fix it: quote the path. Asked (2026-10-10, question 7f), the user chose the recommended answer.
+- Completion criteria: The uninstaller's stale-lock recovery advice single-quotes the paths in the printed command, and
+  prints only the path, without a command, when it cannot be quoted safely. A test covers a path with a space. If it
+  needs significantly more than a small quoting helper, stop and bring it back to the user. Remove this feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## published-uploads-lack-directory-fsync.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: publishing an upload renames it into place without
+  syncing the folder (`crates/farhelm-supervisor/src/files.rs`), a deliberate best-effort tier documented in that
+  module.
+- Decision: accept best effort and say so in the spec. Asked (2026-10-10, question 7g), the user chose the recommended
+  answer.
+- Completion criteria: SPEC.md states that uploads are durable against Farhelm crashes but best effort across power
+  loss, matching the supervisor's documented choice. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-summaries-interpolate-model-text-into-approval-summary-model-interpolation.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the template summary interpolates the model name raw
+  (`crates/farhelm-ui/src/list/templates.rs`) while the template name beside it is escaped; a model name can come from a
+  remote session cloned and saved as a template.
+- Decision: fix both. Asked (2026-10-10, question 8) whether every piece of host-originated text the GUI shows goes
+  through Farhelm's escaping, including model names in template summaries and spaces in installation-identity labels,
+  the user chose the recommended answer. This supersedes the earlier non-ASCII-only scope for identity labels.
+- Completion criteria: SPEC.md states that all host-originated text the GUI shows is escaped so invisible and
+  direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
+  through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
+  than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-summaries-interpolate-model-text-into-approval-templates-list-summary-rendering.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the Templates list renders that summary raw.
+- Decision: fix both. Asked (2026-10-10, question 8) whether every piece of host-originated text the GUI shows goes
+  through Farhelm's escaping, including model names in template summaries and spaces in installation-identity labels,
+  the user chose the recommended answer. This supersedes the earlier non-ASCII-only scope for identity labels.
+- Completion criteria: SPEC.md states that all host-originated text the GUI shows is escaped so invisible and
+  direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
+  through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
+  than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-summaries-interpolate-model-text-into-approval-quick-switcher-summary-rendering.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the quick switcher renders that summary raw
+  (`crates/farhelm-ui/src/list/quick_switcher.rs`).
+- Decision: fix both. Asked (2026-10-10, question 8) whether every piece of host-originated text the GUI shows goes
+  through Farhelm's escaping, including model names in template summaries and spaces in installation-identity labels,
+  the user chose the recommended answer. This supersedes the earlier non-ASCII-only scope for identity labels.
+- Completion criteria: SPEC.md states that all host-originated text the GUI shows is escaped so invisible and
+  direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
+  through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
+  than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ascii-spaces-remain-invisible-host-identity-approval-labels.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: `display_identity` (`crates/farhelm-ui/src/peer.rs`)
+  keeps ASCII spaces as they are and the label has no `white-space` rule, so identities differing only by spaces look
+  alike, contrary to that function's own doc.
+- Decision: fix both. Asked (2026-10-10, question 8) whether every piece of host-originated text the GUI shows goes
+  through Farhelm's escaping, including model names in template summaries and spaces in installation-identity labels,
+  the user chose the recommended answer. This supersedes the earlier non-ASCII-only scope for identity labels.
+- Completion criteria: SPEC.md states that all host-originated text the GUI shows is escaped so invisible and
+  direction-changing characters, and spaces in identity labels, are visible. The template summary's model name goes
+  through `display_peer`; identity labels make ASCII spaces visible. Tests cover each. If any needs significantly more
+  than the escaping call, stop and bring it back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-execute-cancel.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed premise, screened at `e1ea1929` by code reading: the Restart-with submit handler
+  (`crates/farhelm-ui/src/session_view.rs`) does not check whether the dialog was cancelled, so a Cancel and a submit in
+  the same event burst can still restart.
+- Decision: accept both. Asked (2026-10-10, question 9), the user chose the recommended answer.
+- Completion criteria: SPEC.md states that actions a user takes inside a sub-second window before the screen updates, or
+  in a dialog hidden behind another, may apply as delivered: the last gesture wins. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## overlapping-uninstall-dialogs-confirm-wrong-host.md
+
+- Outcome: `fix spec`.
+- Assessment: likely, screened at `e1ea1929` by code reading: each host's settings panel mounts its own uninstall
+  dialog, and focus handling finds the dialog with a page-wide query, so two plans finishing together can stack dialogs
+  with focus in the hidden one; focus starts on Cancel, so Tab and Enter are needed.
+- Decision: accept both. Asked (2026-10-10, question 9), the user chose the recommended answer.
+- Completion criteria: SPEC.md states that actions a user takes inside a sub-second window before the screen updates, or
+  in a dialog hidden behind another, may apply as delivered: the last gesture wins. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## canonical-path-replacement-race.md
+
+- Outcome: `other`.
+- Assessment: likely as a mechanism, screened at `e1ea1929` by code reading: the working directory is validated once and
+  kept as a path, so a deliberate swap during a restart could launch elsewhere; the finding itself found no accidental
+  trigger.
+- Decision: remove as already covered. Asked (2026-10-10, question 10), the user agreed it is covered by SPEC.md "Local
+  authority and trust between hosts", which excludes deliberate same-account interference and files planted at
+  Farhelm-reserved paths.
+- Completion criteria: Remove this feedback file and its index entry.
+- Execution: `complete`; covered by SPEC.md "Local authority and trust between hosts"; feedback file and index entry
+  removed during triage.
+
+## old-receipt-cleanup-deletes-any-regular-file-receipt.md
+
+- Outcome: `other`.
+- Assessment: confirmed, screened at `e1ea1929` by code reading: the installer deletes any regular file at the name it
+  reserves for an old installation record (`scripts/install.sh`) without checking it is one.
+- Decision: remove as already covered. Asked (2026-10-10, question 10), the user agreed it is covered by SPEC.md "Local
+  authority and trust between hosts", which excludes deliberate same-account interference and files planted at
+  Farhelm-reserved paths.
+- Completion criteria: Remove this feedback file and its index entry.
+- Execution: `complete`; covered by SPEC.md "Local authority and trust between hosts"; feedback file and index entry
+  removed during triage.
