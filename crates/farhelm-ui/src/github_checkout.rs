@@ -16,6 +16,11 @@ pub(crate) enum DestinationDraft {
     Existing {
         cwd: String,
     },
+    /// Managed intent without an accepted repository. Even a parseable query
+    /// needs a deliberate selection; the dormant folder is never a fallback.
+    GithubInput {
+        query: String,
+    },
     Github {
         repo: GithubRepo,
         // Ready carries the complete authority and reply. Keep that larger
@@ -53,8 +58,23 @@ impl DestinationDraft {
     /// Return the repo intent without exposing an old checkout path.
     pub(crate) fn repo(&self) -> Option<&GithubRepo> {
         match self {
-            Self::Existing { .. } => None,
+            Self::Existing { .. } | Self::GithubInput { .. } => None,
             Self::Github { repo, .. } => Some(repo),
+        }
+    }
+
+    /// The type choice survives an empty or invalid repository field.
+    pub(crate) fn is_managed(&self) -> bool {
+        !matches!(self, Self::Existing { .. })
+    }
+
+    /// Show the accepted identity or the exact unselected repository query.
+    /// Query text cannot carry preview authority or become a launch path.
+    pub(crate) fn repository_text(&self) -> String {
+        match self {
+            Self::Existing { .. } => String::new(),
+            Self::GithubInput { query } => query.clone(),
+            Self::Github { repo, .. } => repo.identifier(),
         }
     }
 }

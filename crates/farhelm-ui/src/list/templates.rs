@@ -684,12 +684,14 @@ fn FieldEditor(
             rsx! {
                 div { class: "templates-field",
                     span { "destination" }
-                    div { class: "templates-segments", role: "group", aria_label: "destination",
-                        for (is_github,text) in [(false,"folder"),(true,"managed checkout")] {
-                            button { r#type: "button", disabled, aria_pressed: is_github == github, "data-tooltip": "destination: {text}",
-                                onclick: move |_| draft.with_mut(|d| { let value=match d.fields.destination.take() { Some(TemplateDestination::Folder(v) | TemplateDestination::Github(v)) => v, None => String::new() }; d.fields.destination=Some(if is_github { TemplateDestination::Github(value) } else { TemplateDestination::Folder(value) }); }), "{text}"
-                            }
-                        }
+                    crate::launch_controls::DestinationTypeControl { managed: github, disabled,
+                        on_change: move |is_github| draft.with_mut(|d| {
+                            let value = match d.fields.destination.take() {
+                                Some(TemplateDestination::Folder(v) | TemplateDestination::Github(v)) => v,
+                                None => String::new(),
+                            };
+                            d.fields.destination = Some(if is_github { TemplateDestination::Github(value) } else { TemplateDestination::Folder(value) });
+                        }),
                     }
                     label {
                         span { if github { "repository" } else { "folder path" } }
@@ -699,7 +701,7 @@ fn FieldEditor(
                         }
                     }
                 }
-                if github { span { class: "templates-hint", "Each session gets a managed checkout of this repository." } }
+                if github { span { class: "templates-hint", "Each session from this template gets its own managed checkout. Farhelm clones the repository into a new folder named after the session, under the host's checkout folder. When the last session using it is deleted, the folder moves to the trash." } }
             }
         }
     };
@@ -1117,7 +1119,7 @@ pub(super) fn TemplatesDialog(
                     button { r#type: "button", class: "btn btn-neutral templates-close", disabled, "data-tooltip": "close templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Close), "close" }
                 }
                 p { class: "host-settings-help templates-help",
-                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a fresh acme/web checkout on build-box."
+                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box."
                 }
                 div { class: "templates-panes",
                     aside { class: "templates-sidebar", aria_label: "template list", aria_busy: templates.pending(),

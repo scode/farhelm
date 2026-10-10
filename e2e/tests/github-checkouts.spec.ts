@@ -413,7 +413,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     await sourceRow.locator(".session-row-menu").click();
     await sourceRow.locator(".session-row-clone").click();
     const cloneForm = page.locator('.create-session-form[role="dialog"]');
-    await cloneForm.getByRole("button", { name: "use existing folder", exact: true }).click();
+    await cloneForm.getByRole("button", { name: "folder", exact: true }).click();
     await expect(cloneForm.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
     await expect(cloneForm.locator(".launch-composer-checkout-preview")).toHaveCount(0);
     await cloneForm.getByLabel("name (optional)").fill("same-cwd-borrower");
@@ -610,7 +610,7 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     const again = await clone(origin.id);
     await expect(again.locator(".launch-composer-checkout-preview")).toContainText(second);
     await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(`${sourceTitle}-clone-2`);
-    await again.getByRole("button", { name: "use existing folder", exact: true }).click();
+    await again.getByRole("button", { name: "folder", exact: true }).click();
     await expect(again.getByLabel("folder", { exact: true })).toHaveValue(origin.cwd);
     await expect(again.getByLabel("name (optional)", { exact: true })).toHaveValue(sourceTitle);
     await selectRepo(again, "fixture/other-repository");
@@ -638,7 +638,7 @@ test("clone defaults to managed checkouts and searches only untouched names", as
     const nested = await clone(borrower.id);
     await expect(nested.locator(".launch-composer-checkout-preview"))
       .toContainText(path.join(fixture.root, `${fixture.repoName}-borrower-clone`));
-    await nested.getByRole("button", { name: "use existing folder", exact: true }).click();
+    await nested.getByRole("button", { name: "folder", exact: true }).click();
     await expect(nested.getByLabel("folder", { exact: true })).toHaveValue(subdir);
     await expect(nested.getByLabel("name (optional)", { exact: true })).toHaveValue("borrower");
     await page.keyboard.press("Escape");

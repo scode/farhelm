@@ -1234,6 +1234,7 @@ pub(crate) fn destination_recents<'a>(
                         == RecentDestination::Existing(canonical_destination(history, cwd))
             }
             DestinationDraft::Github { repo, .. } => entry.github_repo.as_ref() == Some(repo),
+            DestinationDraft::GithubInput { .. } => false,
         })
         .take(3)
         .collect()

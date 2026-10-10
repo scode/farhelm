@@ -50,7 +50,19 @@
 
 use dioxus::prelude::*;
 
-// ===== Managed-checkout marks =========================================
+// ===== Destination glyphs and managed-checkout marks ===================
+
+/// Pair the ordinary-directory choice with the branch mark's visual grammar.
+/// The visible control label supplies meaning; this SVG is decorative.
+#[component]
+pub(crate) fn FolderIcon() -> Element {
+    rsx! {
+        svg { class: "destination-folder-glyph", "data-glyph": "folder", view_box: "0 0 12 12", "aria-hidden": "true",
+            fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round",
+            path { d: "M1.5 3.2v5.6a.8.8 0 0 0 .8.8h7.4a.8.8 0 0 0 .8-.8V4.6a.8.8 0 0 0-.8-.8H6L5 2.4H2.3a.8.8 0 0 0-.8.8z" }
+        }
+    }
+}
 
 /// Draw the repository-neutral mark for a checkout Farhelm manages.
 ///

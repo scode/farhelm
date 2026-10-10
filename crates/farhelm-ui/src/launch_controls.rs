@@ -1,4 +1,4 @@
-//! Shared structured launch controls for the session launcher and restart-with dialog.
+//! Shared launch choices for the session launcher, restart-with and template editor.
 //!
 //! Values enter as props and user changes leave through callbacks. The caller owns
 //! the selected harness, model draft, and every consequential state transition;
@@ -12,6 +12,31 @@ use crate::api::LaunchCatalogModel;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption, harness_label};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+
+/// Present the same destination vocabulary in the launcher and templates.
+///
+/// This control only reports an explicit choice. The caller owns restoring
+/// folder drafts, invalidating previews and deciding whether a repository is
+/// launchable. Enter selects the type without invoking either dialog's primary.
+#[component]
+pub(crate) fn DestinationTypeControl(
+    managed: bool,
+    disabled: bool,
+    on_change: EventHandler<bool>,
+) -> Element {
+    rsx! {
+        div { class: "launch-composer-segmented destination-type-control", role: "group", aria_label: "destination type",
+            for (choice, label) in [(false, "folder"), (true, "managed checkout")] {
+                button { r#type: "button", disabled, class: if choice == managed { "selected" } else { "" },
+                    aria_pressed: choice == managed, onclick: move |_| on_change.call(choice),
+                    "data-tooltip": if choice { "managed checkout: Farhelm clones a repository into a new folder for this session" } else { "folder: start in an existing folder on this host" },
+                    if choice { crate::icons::BranchIcon {} } else { crate::icons::FolderIcon {} }
+                    "{label}"
+                }
+            }
+        }
+    }
+}
 
 /// Apply a focused choice before invoking its dialog's ordinary primary action.
 ///

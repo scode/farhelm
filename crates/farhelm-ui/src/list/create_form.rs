@@ -11,7 +11,7 @@ use crate::github_checkout::{
     DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
     PreviewState, RepositoryAuthority, repository_choices,
 };
-use crate::launch_controls::{LaunchControls, enter_choice};
+use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -66,7 +66,7 @@ impl LaunchPrerequisites {
         } else if !self.host_available {
             Some("choose a connected host before launching")
         } else if self.github_search {
-            Some("select a GitHub repository from search before launching")
+            Some("select a GitHub repository before launching")
         } else if !self.destination_ready {
             Some("wait for a current checkout preview before launching")
         } else if !self.remembered_destination_valid {
@@ -279,6 +279,7 @@ struct TemplateTargets {
 /// Capture the same raw launcher values for template application and saving.
 /// Relayed editor text retains its original bytes until deliberately edited;
 /// destination and name are included so saving does not grow a second reader.
+/// Unselected repository text is omitted: it has not become a destination yet.
 fn launcher_snapshot(
     t: TemplateTargets,
     hosts: &[HostOption],
@@ -323,16 +324,22 @@ fn launcher_snapshot(
                 .find(|host| host.id == chosen && !host.identity_mismatch)
                 .and_then(|host| host.identity.clone())
         }),
-        destination: Some(match &*t.destination.peek() {
-            DestinationDraft::Existing { .. } => TemplateDestination::Folder(submitted_field(
-                &t.cwd.peek(),
-                *t.cwd_edited.peek(),
-                t.cwd_raw_seed.peek().as_deref(),
-            )),
-            DestinationDraft::Github { repo, .. } => {
-                TemplateDestination::Github(format!("{}/{}", repo.owner, repo.name))
+        // An unselected query is an editor draft, not a reusable destination.
+        // Saving it would make the whole template fail when applied later.
+        destination: match &*t.destination.peek() {
+            DestinationDraft::Existing { .. } => {
+                Some(TemplateDestination::Folder(submitted_field(
+                    &t.cwd.peek(),
+                    *t.cwd_edited.peek(),
+                    t.cwd_raw_seed.peek().as_deref(),
+                )))
             }
-        }),
+            DestinationDraft::GithubInput { .. } => None,
+            DestinationDraft::Github { repo, .. } => Some(TemplateDestination::Github(format!(
+                "{}/{}",
+                repo.owner, repo.name
+            ))),
+        },
         name: Some(effective_title(
             &t.title.peek(),
             *t.title_edited.peek(),
@@ -2132,6 +2139,8 @@ pub(super) fn CreateSessionForm(
     let mut destination_draft = use_signal(move || DestinationDraft::Existing {
         cwd: destination_seed,
     });
+    let mut repository_open = use_signal(|| false);
+    let mut repository_index = use_signal(|| 0_usize);
     let mut clone_checkout_naming = use_signal(CloneCheckoutNaming::default);
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
     // A Replace-with deletes its source, whose notice the session list shows.
@@ -3079,8 +3088,9 @@ pub(super) fn CreateSessionForm(
         saving_template: template_panel().is_some() || template_saving(),
         host_available: selected_host_available,
         destination_ready: fresh_destination_ready,
-        github_search: crate::launch_composer::scoped_query(&composer_search()).0
-            == crate::launch_composer::SearchScope::Github,
+        github_search: matches!(destination_draft(), DestinationDraft::GithubInput { .. })
+            || crate::launch_composer::scoped_query(&composer_search()).0
+                == crate::launch_composer::SearchScope::Github,
         remembered_destination_valid,
         needs_harness: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
@@ -3101,6 +3111,13 @@ pub(super) fn CreateSessionForm(
         .or(current_preview);
     let summary_folder = match destination_draft() {
         DestinationDraft::Existing { cwd } => display_peer(&cwd),
+        DestinationDraft::GithubInput { query } if query.trim().is_empty() => {
+            "managed checkout (select a repository)".to_string()
+        }
+        DestinationDraft::GithubInput { query } => format!(
+            "managed checkout: {} (select a repository)",
+            display_peer(&query)
+        ),
         DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
             || format!("gh:{} (preview pending)", repo.identifier()),
             |preview| display_peer(&preview.cwd),
@@ -3111,6 +3128,7 @@ pub(super) fn CreateSessionForm(
     // retry binding), so the destination field must not echo that old seed.
     let (folder_field_value, folder_placeholder, checkout_mode) = match destination_draft() {
         DestinationDraft::Existing { .. } => (cwd(), "", false),
+        DestinationDraft::GithubInput { .. } => (String::new(), "select a repository", true),
         DestinationDraft::Github { preview_state, .. } => (
             displayed_preview
                 .as_ref()
@@ -3362,11 +3380,24 @@ pub(super) fn CreateSessionForm(
         .then(&*structured_model)
         .flatten();
     let search_text = composer_search();
-    let (search_scope, repo_query) = crate::launch_composer::scoped_query(&search_text);
+    let (search_scope, search_repo_query) = crate::launch_composer::scoped_query(&search_text);
+    let search_owns_repositories = search_scope == crate::launch_composer::SearchScope::Github;
+    // One identity-bound discovery worker serves both repository entry points.
+    // The dedicated field owns its query; global search takes priority only
+    // while the user explicitly searches with gh:.
+    let repository_text = destination_draft().repository_text();
+    let repo_query = if search_owns_repositories {
+        search_repo_query
+    } else {
+        &repository_text
+    };
     let mut live_repository_authority = use_signal(|| None::<RepositoryAuthority>);
     let mut repository_generation = use_signal(|| 0_u64);
-    let mut proposed_repository_authority = (search_scope
-        == crate::launch_composer::SearchScope::Github)
+    // A selected repository needs previews, not discovery. Keep scans confined
+    // to choosing so editing the session name cannot rescan the host's disk.
+    let choosing_repository =
+        matches!(destination_draft(), DestinationDraft::GithubInput { .. }) || repository_open();
+    let mut proposed_repository_authority = (choosing_repository || search_owns_repositories)
         .then(|| {
             let host = hosts.iter().find(|host| Some(host.id) == selected)?;
             Some(RepositoryAuthority {
@@ -3481,6 +3512,15 @@ pub(super) fn CreateSessionForm(
                 .map(crate::launch_composer::ComposerSearchResult::Github),
         );
     }
+    let repository_suggestions = repository_choices(
+        &repository_text,
+        repository_result
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map_or(&[][..], |r| r.repos.as_slice()),
+    );
+    let repository_active = repository_index().min(repository_suggestions.len().saturating_sub(1));
+    let repository_suggestions_for_keys = repository_suggestions.clone();
     let search_result_groups = crate::launch_composer::grouped_search_results(search_rows);
     let catalog_models_for_search_input = catalog_models.clone();
     let composer_hosts_for_search_input = composer_hosts.clone();
@@ -3639,6 +3679,26 @@ pub(super) fn CreateSessionForm(
             true
         },
     );
+    // Selection is the same explicit intent transition as a gh: result,
+    // including same-repository reselection after a refused preview.
+    let select_repository = use_callback(move |repo: GithubRepo| {
+        if !draft_transition_allowed(ops) {
+            return;
+        }
+        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+        invalidate_directory_browse(
+            browse_generation,
+            browse_request,
+            browse_result,
+            browse_error,
+        );
+        remembered_destination.set(None);
+        destination_draft.set(DestinationDraft::github(repo));
+        preview_revision
+            .with_mut(|value| *value = value.checked_add(1).expect("preview revision exhausted"));
+        repository_open.set(false);
+        intent_key.set(None);
+    });
     // Names need only mount seeding. Templates also need completed reads:
     // validating against temporary empty inputs would reject a valid choice.
     // While a template waits, the form presents a cancellable loading state
@@ -4117,6 +4177,10 @@ pub(super) fn CreateSessionForm(
                 let mut replaying_fresh = false;
                 match destination_draft.peek().clone() {
                     DestinationDraft::Existing { cwd } => { binding.cwd = cwd; }
+                    DestinationDraft::GithubInput { .. } => {
+                        error.set(Some("select a GitHub repository before launching".into()));
+                        return;
+                    }
                     DestinationDraft::Github { repo, preview_state } => {
                         let installation = hosts.iter().find(|host| host.id == binding.host).and_then(|host| host.identity.as_deref());
                         let Some(installation) = installation else {
@@ -5161,76 +5225,157 @@ pub(super) fn CreateSessionForm(
             // The two columns preserve the form's destination-first tab
             // order in every mode. Only the launch-specific controls in the
             // choices column change with the launch-kind tab.
-            if search_scope == crate::launch_composer::SearchScope::Github {
-                if let Some(note) = repository_note {
+            if search_owns_repositories {
+                if let Some(note) = &repository_note {
                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
-                }
-            }
-            if let DestinationDraft::Github { repo, preview_state } = destination_draft() {
-                div { class: "launch-composer-checkout-preview", aria_live: "polite",
-                    // Completion must be observable even while reconciliation
-                    // hides a preview error behind the original accepted path.
-                    "data-preview-state": match preview_state.as_ref() {
-                        PreviewState::Pending => "pending",
-                        PreviewState::Ready { .. } => "ready",
-                        PreviewState::Failed { .. } => "failed",
-                    },
-                    "managed checkout of {repo.identifier()} on {selected_host_label}"
-                    if let Some(preview) = &displayed_preview {
-                        div { dir: "ltr", "{display_peer(&preview.cwd)}" }
-                    }
-                    if retry_binding.is_some() {
-                        div { "retry reconciles the original request at this path" }
-                    } else {
-                        match preview_state.as_ref() {
-                            PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
-                            PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
-                            PreviewState::Ready { .. } => rsx! {},
-                        }
-                    }
                 }
             }
             div { class: "launch-composer-columns",
                     div { class: "launch-composer-column-destination",
-                        // A destination is a host and its folder, so the structured
-                        // composer keeps the controls that change either fact in one
-                        // compact block, in reading order: host and browse, the host
-                        // reconciliation notes, the folder, the recent-folder links
-                        // with the two resets, and the optional name. This makes a
+                        // A destination is a host and its folder or managed checkout.
+                        // Keep that type choice, host reconciliation and the active
+                        // type's editor together. Folder recents belong only to the
+                        // folder editor; a repository owns its verified preview and
+                        // explanation instead. The optional name follows both. This makes a
                         // launch's location reviewable without restoring a second
                         // summary of its choices.
                         div { class: "launch-composer-destination",
                             span { class: "launch-composer-section-label", "destination" }
+                            DestinationTypeControl { managed: checkout_mode, disabled: busy,
+                                on_change: move |managed| {
+                                    if !draft_transition_allowed(ops) || managed == destination_draft.peek().is_managed() { return; }
+                                    remembered_destination.set(None);
+                                    promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+                                    invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
+                                    repository_open.set(false);
+                                    if managed {
+                                        destination_draft.set(DestinationDraft::GithubInput { query: String::new() });
+                                    } else {
+                                        // A proposal is not an existing path. Return to the
+                                        // last editable seed, including Clone's source cwd.
+                                        let previous = submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref());
+                                        select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &previous);
+                                    }
+                                    intent_key.set(None);
+                                },
+                            }
                             div { class: "launch-composer-destination-row",
                                 {host_select.clone()}
-                                button {
-                                    r#type: "button",
-                                    disabled: busy || selected.is_none(),
-                                    // A proposed checkout path may not exist
-                                    // yet, so Browse starts from the retained
-                                    // existing folder rather than "this path"
-                                    // while checkout mode is active.
-                                    aria_label: if checkout_mode { "browse existing folders" } else { "browse this path" },
-                                    "data-tooltip": if checkout_mode { "browse the existing folders on this host instead of a managed checkout" } else { "browse: list the folders under this path on the host" },
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) { return; }
-                                        request_directory_browse(
-                                            browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
-                                            submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
-                                            browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
-                                            live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
-                                        );
-                                    },
-                                    // Center the whole label as one inline
-                                    // unit when Browse moves below the host
-                                    // selector at narrow widths.
-                                    span {
-                                        "browse folders on "
-                                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                                if !checkout_mode {
+                                    button {
+                                        r#type: "button",
+                                        disabled: busy || selected.is_none(),
+                                        aria_label: "browse this path",
+                                        "data-tooltip": "browse: list the folders under this path on the host",
+                                        onclick: move |_| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            request_directory_browse(
+                                                browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
+                                                submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                                                browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
+                                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                            );
+                                        },
+                                        // Center the whole label as one inline
+                                        // unit when Browse moves below the host
+                                        // selector at narrow widths.
+                                        span {
+                                            "browse folders on "
+                                            span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                                        }
                                     }
                                 }
                             }
                             {host_notes.clone()}
+                            if checkout_mode {
+                                label { class: "launch-composer-repository-field",
+                                    span { class: "launch-composer-section-label", "repository" }
+                                    input { r#type: "text", role: "combobox", aria_label: "repository", aria_autocomplete: "list",
+                                        aria_expanded: repository_open() && !repository_suggestions.is_empty(),
+                                        aria_controls: (repository_open() && !repository_suggestions.is_empty()).then_some("checkout-repository-options"),
+                                        aria_activedescendant: (repository_open() && !repository_suggestions.is_empty()).then(|| format!("checkout-repository-{repository_active}")),
+                                        value: "{repository_text}", placeholder: "owner/repo", disabled: busy,
+                                        autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false", dir: "ltr",
+                                        onfocus: move |_| repository_open.set(true),
+                                        onblur: move |_| repository_open.set(false),
+                                        oninput: move |evt| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            remembered_destination.set(None);
+                                            invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
+                                            destination_draft.set(DestinationDraft::GithubInput { query: evt.value() });
+                                            repository_index.set(0);
+                                            repository_open.set(true);
+                                            intent_key.set(None);
+                                        },
+                                        onkeydown: move |evt: KeyboardEvent| {
+                                            match evt.key() {
+                                                Key::Escape if repository_open() => {
+                                                    evt.prevent_default(); evt.stop_propagation(); repository_open.set(false);
+                                                }
+                                                Key::ArrowDown | Key::ArrowUp if repository_open() && !repository_suggestions_for_keys.is_empty() => {
+                                                    evt.prevent_default();
+                                                    let count = repository_suggestions_for_keys.len();
+                                                    repository_index.set(if evt.key() == Key::ArrowDown { (repository_active + 1) % count } else { (repository_active + count - 1) % count });
+                                                }
+                                                Key::Enter => {
+                                                    evt.prevent_default(); evt.stop_propagation();
+                                                    if evt.is_auto_repeating() || evt.is_composing() || !draft_transition_allowed(ops) { return; }
+                                                    if repository_open() && let Some(repo) = repository_suggestions_for_keys.get(repository_active) {
+                                                        select_repository.call(repo.clone());
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        },
+                                    }
+                                }
+                                if repository_open() && !repository_suggestions.is_empty() {
+                                    div { class: "launch-composer-repository-options", id: "checkout-repository-options", role: "listbox", aria_label: "repositories",
+                                        for (index, repo) in repository_suggestions.iter().enumerate() {
+                                            button { r#type: "button", role: "option", id: "checkout-repository-{index}",
+                                                aria_selected: index == repository_active, disabled: busy, tabindex: "-1",
+                                                "data-tooltip": "managed checkout of {display_peer(&repo.identifier())}",
+                                                onmousedown: move |evt| evt.prevent_default(),
+                                                onclick: { let repo = repo.clone(); move |_| {
+                                                    select_repository.call(repo.clone());
+                                                } },
+                                                crate::icons::BranchIcon {}
+                                                "{display_peer(&repo.identifier())}"
+                                            }
+                                        }
+                                    }
+                                }
+                                if choosing_repository && !search_owns_repositories && let Some(note) = &repository_note {
+                                    div { class: "launch-composer-repository-note", role: "status", "{display_peer(note)}" }
+                                }
+                                if let DestinationDraft::Github { repo, preview_state } = destination_draft() {
+                                    div { class: "launch-composer-checkout-preview", aria_live: "polite",
+                                        // Completion must be observable even while reconciliation
+                                        // hides a preview error behind the original accepted path.
+                                        "data-preview-state": match preview_state.as_ref() {
+                                            PreviewState::Pending => "pending",
+                                            PreviewState::Ready { .. } => "ready",
+                                            PreviewState::Failed { .. } => "failed",
+                                        },
+                                        "managed checkout of {repo.identifier()} on {selected_host_label}"
+                                        if let Some(preview) = &displayed_preview {
+                                            div { dir: "ltr", "{display_peer(&preview.cwd)}" }
+                                        }
+                                        if retry_binding.is_some() {
+                                            div { "retry reconciles the original request at this path" }
+                                        } else {
+                                            match preview_state.as_ref() {
+                                                PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
+                                                PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
+                                                PreviewState::Ready { .. } => rsx! {},
+                                            }
+                                        }
+                                    }
+                                }
+                                p { class: "launch-composer-checkout-explanation",
+                                    "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash."
+                                }
+                            }
                             input {
                                 r#type: "text",
                                 required: !checkout_mode,
@@ -5247,9 +5392,9 @@ pub(super) fn CreateSessionForm(
                                 oninput: move |evt| {
                                     if !draft_transition_allowed(ops) { return; }
                                     // A checkout path is evidence from the helm,
-                                    // never an editable suggestion. The explicit
-                                    // action below is the only way back to typing.
-                                    if matches!(destination_draft(), DestinationDraft::Github { .. }) { return; }
+                                    // never an editable suggestion. The folder
+                                    // segment is the only way back to typing.
+                                    if destination_draft().is_managed() { return; }
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
@@ -5264,36 +5409,6 @@ pub(super) fn CreateSessionForm(
                                     intent_key.set(None);
                                 },
                             }
-                            if checkout_mode {
-                                // The preview path may not exist yet. An
-                                // existing-folder edit resumes from the prior
-                                // editable seed, never from that proposal.
-                                button {
-                                    r#type: "button",
-                                    class: "launch-composer-existing-folder",
-                                    "data-tooltip": "use an existing folder instead of a managed checkout",
-                                    disabled: busy,
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) { return; }
-                                        remembered_destination.set(None);
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        invalidate_directory_browse(
-                                            browse_generation, browse_request, browse_result, browse_error,
-                                        );
-                                        let previous = submitted_field(
-                                            &cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref(),
-                                        );
-                                        select_existing_directory(
-                                            &mut destination_draft, &mut cwd, &mut cwd_raw_seed,
-                                            &mut cwd_edited, &mut folder_is_explicit, &previous,
-                                        );
-                                        intent_key.set(None);
-                                    },
-                                    "use existing folder"
-                                }
-                            }
                             // Recent folders are destination shortcuts, rendered as
                             // text links rather than chips so they read as history
                             // beneath the field they fill, not as a second picker.
@@ -5303,42 +5418,44 @@ pub(super) fn CreateSessionForm(
                             // and paths of different lengths wrapped raggedly
                             // and left separators stranded at line ends. The
                             // group's accessible name still says what it holds.
-                            div { class: "launch-composer-folder-links", aria_label: "recent folders",
-                                for folder in recent_history.folders.iter().take(3) {
-                                    button {
-                                        r#type: "button",
-                                        class: if submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd { "selected" } else { "" },
-                                        aria_pressed: submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd,
-                                        // A grid cell ellipsizes a long path at
-                                        // its END, which is the part that tells
-                                        // sibling checkouts apart, so the whole
-                                        // path has to be reachable without
-                                        // picking the link to find out.
-                                        "data-tooltip": "{display_peer(&folder.display_cwd)}",
-                                        disabled: busy,
-                                        onclick: {
-                                            let folder = folder.display_cwd.clone();
-                                            let history_target = current_history_target.clone();
-                                            move |_| {
-                                                if !draft_transition_allowed(ops) { return; }
-                                                if !admit_history_destination(
-                                                    history_target.clone(), live_destination,
-                                                    remembered_destination, history_activation_attempts,
-                                                ) { return; }
-                                                promote_fetched_history_snapshot(
-                                                    offered_history, create_target, fetched_history,
-                                                );
-                                                invalidate_directory_browse(
-                                                    browse_generation, browse_request, browse_result, browse_error,
-                                                );
-                                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &folder);
-                                                intent_key.set(None);
-                                            }
-                                        },
-                                        "{display_peer(&folder.display_cwd)}"
+                            if !checkout_mode {
+                                div { class: "launch-composer-folder-links", aria_label: "recent folders",
+                                    for folder in recent_history.folders.iter().take(3) {
+                                        button {
+                                            r#type: "button",
+                                            class: if submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd { "selected" } else { "" },
+                                            aria_pressed: submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd,
+                                            // A grid cell ellipsizes a long path at
+                                            // its END, which is the part that tells
+                                            // sibling checkouts apart, so the whole
+                                            // path has to be reachable without
+                                            // picking the link to find out.
+                                            "data-tooltip": "{display_peer(&folder.display_cwd)}",
+                                            disabled: busy,
+                                            onclick: {
+                                                let folder = folder.display_cwd.clone();
+                                                let history_target = current_history_target.clone();
+                                                move |_| {
+                                                    if !draft_transition_allowed(ops) { return; }
+                                                    if !admit_history_destination(
+                                                        history_target.clone(), live_destination,
+                                                        remembered_destination, history_activation_attempts,
+                                                    ) { return; }
+                                                    promote_fetched_history_snapshot(
+                                                        offered_history, create_target, fetched_history,
+                                                    );
+                                                    invalidate_directory_browse(
+                                                        browse_generation, browse_request, browse_result, browse_error,
+                                                    );
+                                                    select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &folder);
+                                                    intent_key.set(None);
+                                                }
+                                            },
+                                            "{display_peer(&folder.display_cwd)}"
+                                        }
                                     }
+                                    {destination_resets.clone()}
                                 }
-                                {destination_resets.clone()}
                             }
                             // The optional name belongs to the shared destination
                             // block. Keeping one mounted input gives assistive

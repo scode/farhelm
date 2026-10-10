@@ -110,6 +110,12 @@ Dioxus, version pinned at the workspace level, rendering the same component tree
 served by the helm) and desktop (wry webview wrapping the identical DOM). No dioxus-fullstack / server functions — the
 UI is a pure client of the helm's HTTP/WS API.
 
+The launcher's managed type also has an unselected repository draft, which cannot carry preview authority or fall back
+to the ordinary folder seed. Its field reuses the existing installation-bound repository discovery worker; explicit
+`gh:` search owns that worker's query while scoped search is active, otherwise the repository field owns it. Selecting a
+repository invalidates the preview generation even on same-repository reselection. The launcher and template editor
+share one destination type control; template JSON retains its existing folder/github variants.
+
 The composer keeps destination choice separate from agent mode. `github_checkout` owns the preview authority and
 retained-attempt state; `launch_composer` owns pure scope parsing and history grouping. An async preview is usable only
 for the same destination generation, host/incarnation/install claim, repository, title, agent choice and observed

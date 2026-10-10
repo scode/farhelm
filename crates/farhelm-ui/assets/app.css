@@ -3456,7 +3456,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-width: 0;
 }
 
-.managed-checkout-glyph {
+.managed-checkout-glyph,
+.destination-folder-glyph {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
@@ -4969,20 +4970,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 0 12px;
 }
 
-/* A checkout preview is read-only until this explicit escape returns to an
-   existing folder. Place the escape by the path it changes, outside the
-   recent-folders group so it does not read as another history entry. */
-.launch-composer-existing-folder {
-  justify-self: start;
-  padding: 2px 4px;
-  border: 0;
-  background: transparent;
-  color: var(--fg-1);
-  cursor: pointer;
-  font: inherit;
-  text-decoration: underline dotted;
-}
-
 /* One path per cell, two cells across. Paths of different lengths line up
    in two columns where an inline run wrapped raggedly. Two explicit columns
    and not `auto-fill` over a `ch` minimum: the destination column is about
@@ -5302,6 +5289,49 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--border);
+}
+
+/* Destination type uses one control in both editors. Keep its glyph with
+   its label when the control wraps; repository suggestions remain keyboard
+   choices on the focused input, just like the model picker. */
+.destination-type-control > button,
+.launch-composer-repository-options > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.launch-composer-repository-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.launch-composer-repository-options {
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.launch-composer-repository-options > button {
+  border: 0;
+  border-radius: 0;
+  padding: 6px 8px;
+  text-align: left;
+  background: var(--well);
+}
+
+.launch-composer-repository-options > button[aria-selected="true"] {
+  background: var(--accent-fill);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.launch-composer-checkout-explanation {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .launch-composer-segmented > button {
