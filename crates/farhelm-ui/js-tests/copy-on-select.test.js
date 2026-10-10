@@ -5,8 +5,8 @@
 //
 // The decision is now trivial by design (see copy-on-select.js's header for
 // why an earlier "does this differ from the last copy" cache was removed as
-// a real bug, not simplified away for its own sake): copy whenever the
-// gesture ended with a non-empty local selection, full stop. What these
+// a real bug, not simplified away for its own sake): copy when a gesture
+// allowed local selection and ended with non-empty text. What these
 // cases pin is that BOTH of xterm's own signals are consulted rather than
 // either one alone — `hasSelection()` and `getSelection()` are read
 // separately in terminal.js, and a caller that got them out of sync (never
@@ -47,6 +47,17 @@ test("a plain click without a drag skips (no selection, no text)", () => {
     copySelectionOnMouseUp({ hasSelection: false, selectionText: "" }),
     false,
   );
+});
+
+test("an unforced press under mouse tracking does not re-copy a retained selection", () => {
+  // Legacy mouse reporting can leave a previous forced selection visible.
+  // The program owns this press, so that old text must not replace whatever
+  // the user has since copied elsewhere. Forcing the press still selects
+  // locally; turning tracking off still permits deliberate reselection.
+  const retained = { hasSelection: true, selectionText: "old selection" };
+  assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: true, forced: false }), false);
+  assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: true, forced: true }), true);
+  assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: false, forced: false }), true);
 });
 
 test("browser-global branch: window.farhelmCopyOnSelect exists with no module present", () => {
@@ -107,6 +118,14 @@ test("a plain drag the program took without copying raises the notice", () => {
   assert.equal(dragMayHaveCopiedNothing(plainUncopiedDrag()), true);
 });
 
+/** Retained text is not copied by a program-owned gesture and cannot suppress its guidance. */
+test("a tracked plain drag with an old selection raises guidance while a click stays silent", () => {
+  const drag = { ...plainUncopiedDrag(), hasSelection: true, selectionText: "old selection" };
+  assert.equal(copySelectionOnMouseUp(drag), false);
+  assert.equal(dragMayHaveCopiedNothing(drag), true);
+  assert.equal(dragMayHaveCopiedNothing({ ...drag, moved: 0 }), false);
+});
+
 test("no notice for a gesture that copied or never tried to", () => {
   const cases = {
     "a click (pointer barely moved)": { moved: DRAG_THRESHOLD_PX - 1 },
@@ -115,9 +134,6 @@ test("no notice for a gesture that copied or never tried to", () => {
     // Option/Shift held but the drag stayed inside one cell, so xterm made
     // no selection: the user is already holding the key the notice names.
     "a forced drag that selected nothing": { forced: true, hasSelection: false },
-    // An earlier forced selection survives a plain press under mouse
-    // tracking; the existing copy path re-copies it, so no notice either.
-    "a plain drag over a surviving local selection": { hasSelection: true },
     "a pane with no mouse tracking at the press": { trackingAtPress: false },
     "a press outside the terminal screen (the scrollbar)": { onScreen: false },
     "a right or middle button drag": { button: 2 },

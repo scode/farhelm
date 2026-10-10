@@ -7318,7 +7318,8 @@
 - Completion criteria: after an item set change, the next arrow step moves from the item the user had selected; the
   comment's reasoning is corrected; a test covers a middle item disappearing. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
+- Execution: complete: change `uxnnwkkzrlplnwuwoplvoyyyqoxsqtsm`, bookmark
+  `plan/ui-interaction-fixes/01-ui-interactions`; [draft PR #1812](https://github.com/scode/farhelm/pull/1812/changes).
 
 ## plain-clicks-overwrite-clipboard-old-selection.md
 
@@ -7336,7 +7337,8 @@
 - Completion criteria: a plain click under mouse tracking does not copy a retained selection; forced selections still
   copy; reselection without tracking is unchanged; a JS unit test covers it. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
+- Execution: complete: change `uxnnwkkzrlplnwuwoplvoyyyqoxsqtsm`, bookmark
+  `plan/ui-interaction-fixes/01-ui-interactions`; [draft PR #1812](https://github.com/scode/farhelm/pull/1812/changes).
 
 ## replace-omits-conversation-loss-warning-failed-resume.md
 
@@ -7353,7 +7355,8 @@
   user.
 - Completion criteria: Replace's confirmation on an errored session warns that a resumable conversation is discarded
   whenever one exists; tests covering the wording are updated. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
+- Execution: complete: change `uxnnwkkzrlplnwuwoplvoyyyqoxsqtsm`, bookmark
+  `plan/ui-interaction-fixes/01-ui-interactions`; [draft PR #1812](https://github.com/scode/farhelm/pull/1812/changes).
 
 ## unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md
 

@@ -1125,12 +1125,11 @@ pub(super) fn SessionRow(
     // already moved `menu_focus` on, and only a signal DOM events never
     // touch survives that). Cleared alongside `menu_focus` wherever the
     // menu opens or closes, below, and wherever the toggle takes focus
-    // (`forget_menu_focus`), and NOT reconciled against a mid-open
-    // item-set change the way `menu_focus` is: `next_menu_focus`'s existing
-    // out-of-range handling already treats a stale index as "not on an
-    // item" and re-enters at an end, the same tolerance a stale
-    // `event_origin` already relies on, so a request left pointing at a
-    // withdrawn action's old slot degrades no worse than that.
+    // (`forget_menu_focus`). An item-set change remaps a surviving request
+    // by action: withdrawing a middle item can leave its old position in
+    // bounds but naming a different action. Keep the remapped request so a
+    // late focus event still cannot roll a keyboard burst back; clear only
+    // a request for an action that has disappeared.
     let mut menu_requested = use_signal(|| None::<usize>);
     // The order `menu_focus`'s stored position was last recorded against —
     // seeded from this render's own list, so the first run of the
@@ -1288,10 +1287,27 @@ pub(super) fn SessionRow(
     let withdrawal_close_id = session.id.clone();
     use_effect(use_reactive(&offers_mark_seen, move |offers_mark_seen| {
         let order = session_menu_order(row_control_visibility(offers_mark_seen));
+        let mut focused_position = *menu_focus.peek();
+        if order != *previous_menu_order.peek() {
+            // Preserve the latest keyboard target across a withdrawal and
+            // any older focus event still in flight. A withdrawn target
+            // has no new slot, so the reconciled focus becomes the fallback.
+            // Publish the origin even if its slot stays unchanged; a
+            // withdrawn target still supplies focus-return bookkeeping to
+            // the existing dismissal path (see `carry_menu_request`).
+            let (origin, requested) = menu_panel::carry_menu_request(
+                *previous_menu_order.peek(),
+                order,
+                *menu_requested.peek(),
+                focused_position,
+            );
+            focused_position = origin;
+            menu_focus.set(focused_position);
+            menu_requested.set(requested);
+        }
         item_handles
             .write()
             .retain(|action, _| order.position(*action).is_some());
-        let focused_position = *menu_focus.peek();
         // `menu_open` is this render's own belief about whether THIS row's
         // menu is the open one — passed through so `reconcile_menu_focus`
         // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):

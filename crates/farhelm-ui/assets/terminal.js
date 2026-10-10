@@ -5113,7 +5113,10 @@
         // No "did this change since last copied" cache any more (see
         // copy-on-select.js's header for why an earlier version of that was
         // a real bug, not a simplification worth keeping): every gesture
-        // that ends with a non-empty local selection copies, full stop.
+        // that can select locally and ends with a non-empty selection
+        // copies, even when it reselects the same text. An unforced press
+        // under mouse tracking belongs to the program and may leave an old
+        // selection visible; that retained text is not a copy request.
         //
         // ## Why the real work is DEFERRED past the mouseup dispatch itself
         //
@@ -5178,8 +5181,9 @@
         // — the addon's own parser-driven path, never routed through this
         // listener at all — are untouched by this change.
         let gestureStartedHere = false;
-        // The drag-copy notice's view of the gesture (copy-on-select.js's
-        // "The drag that copies nothing"): where the press was, whether the
+        // The copy decision and drag-copy notice's view of the gesture
+        // (copy-on-select.js's "The drag that copies nothing"): where the
+        // press was, whether the
         // program had mouse tracking on at that moment, and how many OSC 52
         // writes this pane had seen by then. Recorded at the press because
         // the release is too late: a program can turn tracking off, or copy,
@@ -5273,7 +5277,12 @@
               );
             }
             if (
-              !window.farhelmCopyOnSelect.copySelectionOnMouseUp({ hasSelection, selectionText })
+              !window.farhelmCopyOnSelect.copySelectionOnMouseUp({
+                hasSelection,
+                selectionText,
+                trackingAtPress: press && press.trackingAtPress,
+                forced: press && press.forced,
+              })
             ) {
               return;
             }

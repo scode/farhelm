@@ -912,17 +912,18 @@ The "this drag did not copy" notice is decided in `assets/copy-on-select.js` (`d
 `dragCopyNoticeText`) and driven from terminal.js's existing copy-on-select mousedown/mouseup pair: the press records
 the pointer position, whether the pane's program had mouse tracking on (`term.modes.mouseTrackingMode`), and the pane's
 OSC 52 count, kept by a fall-through `registerOscHandler(52, …)` registered after the clipboard addon so the addon still
-performs the write; the release checks for a drag with no local selection, and 1.5 seconds later whether any OSC 52
-arrived since the press. The forcing modifier it names copies the vendored xterm's own `isMac` platform list.
-Agent-specific wording comes from the session's agent kind (`SessionAgentKind::drag_copy_hint` in the UI crate, an
-exhaustive per-kind function per the harness map), passed on the agent terminal's spec only; tabs always get the generic
-text. The persistent Rust-rendered live region holds an initially empty text span and a dismiss button.
-`createDragCopyNotice` owns its placement and thirty-second timer per mount; every qualifying drag replaces its position
-and deadline. Horizontal placement reuses `placeTooltip`; vertical placement clamps six pixels above the release pointer
-rather than flipping below it. CSS caps the box to the viewport and hides its entire subtree when dismissed. Only ×
-takes pointer events; its mousedown prevents the native focus change, and its click hides locally outside xterm's
-element. A terminal press cancels both the visible notice and any pending OSC 52 grace check. Resize repositions it;
-mount teardown removes listeners and cancels timers.
+performs the write; the release checks for a plain drag under press-time mouse tracking without the forcing modifier,
+and 1.5 seconds later whether any OSC 52 arrived since the press. A retained local selection does not suppress this
+notice: that program-owned gesture does not copy it. The forcing modifier it names copies the vendored xterm's own
+`isMac` platform list. Agent-specific wording comes from the session's agent kind (`SessionAgentKind::drag_copy_hint` in
+the UI crate, an exhaustive per-kind function per the harness map), passed on the agent terminal's spec only; tabs
+always get the generic text. The persistent Rust-rendered live region holds an initially empty text span and a dismiss
+button. `createDragCopyNotice` owns its placement and thirty-second timer per mount; every qualifying drag replaces its
+position and deadline. Horizontal placement reuses `placeTooltip`; vertical placement clamps six pixels above the
+release pointer rather than flipping below it. CSS caps the box to the viewport and hides its entire subtree when
+dismissed. Only × takes pointer events; its mousedown prevents the native focus change, and its click hides locally
+outside xterm's element. A terminal press cancels both the visible notice and any pending OSC 52 grace check. Resize
+repositions it; mount teardown removes listeners and cancels timers.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is
