@@ -658,9 +658,13 @@ test("Replace with refuses a template that sets a host", async ({ page, request 
  * the editor. Enter belongs to the inline name field, never to session launch.
  * Count create requests so an otherwise successful template save cannot hide a
  * second operation; read stored fields rather than trusting checkbox visuals.
+ * Each checkbox also belongs beside its text, including the text's first line
+ * at phone width: the launcher's generic stacked labels must not split these
+ * checklist rows into a control line and a separate caption.
  */
 for (const kind of ["agent", "command"] as const) {
-  test(`save as template captures the ${kind} setup without launching`, async ({ page, request }) => {
+  test(`save as template captures the ${kind} setup without launching`, async ({ page, request }, info) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     const name = `e2e-launcher-save-${kind}-${Date.now()}`;
     const creates: string[] = [];
     page.on("request", (r) => {
@@ -680,9 +684,27 @@ for (const kind of ["agent", "command"] as const) {
       const panel = form.locator(".save-template-panel");
       await expect(panel).toBeVisible();
       await expect(panel.locator('[data-field="destination"]')).toBeChecked();
-      await panel.locator('[data-field="destination"]').uncheck();
       if (kind === "agent") await expect(panel.locator('[data-field="agent"]')).toBeChecked();
       else await expect(panel.locator('[data-field="command"]')).toBeChecked();
+      const choices = panel.locator(".save-template-choice");
+      expect(await choices.count(), "the staged setup offers a checklist to measure").toBeGreaterThan(0);
+      await page.evaluate(() => document.fonts.ready);
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        // Keep the before image even when the geometry assertion rejects the
+        // current CSS; a text label may wrap, but its box stays on the row.
+        await page.screenshot({ path: info.outputPath(`save-template-${kind}-${width}.png`) });
+        await expect.poll(() => choices.evaluateAll((labels) => labels.every((label) => {
+          const input = label.querySelector("input")!.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(label.querySelector("span")!);
+          const firstLine = Array.from(range.getClientRects()).find((rect) => rect.width > 0)!;
+          const center = input.top + input.height / 2;
+          return center >= firstLine.top && center <= firstLine.bottom && input.right <= firstLine.left;
+        })), { message: "every template checkbox shares its label's first text line" }).toBe(true);
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await panel.locator('[data-field="destination"]').uncheck();
       await panel.locator(".save-template-name").fill(name);
       await expect(panel.locator(".save-template-name")).toBeFocused();
       await panel.locator(".save-template-name").press("Enter");

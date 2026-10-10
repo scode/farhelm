@@ -5697,8 +5697,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-sizing: border-box;
 }
 
-.save-template-choice {
+/* The launcher's general labels stack a caption over an input. This checklist
+   is the exception: keep the native checkbox beside its text, even when a
+   saved value wraps. Match the form rule's specificity so direction and gap
+   belong to the checklist rather than its enclosing form. */
+.create-session-form .save-template-choice {
   display: flex;
+  flex-direction: row;
   align-items: start;
   gap: 8px;
   overflow-wrap: anywhere;
