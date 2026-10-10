@@ -41,8 +41,10 @@ produce an asset.
 Run from the repository root:
 
 ```
+(
 TARGET="${CARGO_TARGET_DIR:-target}"
 mkdir -p "$TARGET" && TARGET=$(cd "$TARGET" && pwd)
+export CARGO_TARGET_DIR="$TARGET"
 rm -rf "$TARGET/dx"
 (cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release)
 FARHELM_UI_DIST="$TARGET/dx/farhelm-ui/release/web/public" \
@@ -51,7 +53,11 @@ cargo build --release -p farhelm
 APP="$TARGET/dx/farhelm-desktop/release/linux/app"
 cp "$TARGET/release/farhelm" "$APP/farhelm"
 "$APP/farhelm-desktop"
+)
 ```
+
+The outer parentheses run the recipe in a subshell, so the exported target directory does not stay set in your shell
+for later builds of other projects.
 
 Three things there are not decoration. `CARGO_TARGET_DIR` is resolved to an absolute path ONCE and every path derived
 from it, because both `dx` commands honour that variable and they run from different directories — left relative, one

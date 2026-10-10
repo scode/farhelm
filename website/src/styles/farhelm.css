@@ -106,6 +106,8 @@
 }
 
 :root[data-theme="light"] {
+  /* The smaller monospace headings need a dark foreground on the light page. */
+  --farhelm-cyan: #174b83;
   --sl-color-accent-low: #dbeafd;
   --sl-color-accent: #286db8;
   --sl-color-accent-high: #174b83;

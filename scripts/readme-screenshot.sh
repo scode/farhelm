@@ -43,6 +43,27 @@ case "$output" in
   *) output="$PWD/$output" ;;
 esac
 
+# The fleet launches checkout-local outputs even with --no-build. An outside
+# build directory would therefore photograph older binaries after a good build.
+# Resolve an accepted override once so cargo and dx see the same absolute path.
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  target="$(python3 - "$CARGO_TARGET_DIR" "$repo/target" <<'PYTARGET'
+import os
+import sys
+# An explicit target/ is valid before the first build creates it. realpath
+# follows existing symlinks without requiring the final directory to exist.
+target = os.path.realpath(sys.argv[1])
+if target != os.path.realpath(sys.argv[2]):
+    raise SystemExit(1)
+print(target)
+PYTARGET
+  )" || {
+    echo "CARGO_TARGET_DIR must name this checkout's target/; capture refused" >&2
+    exit 1
+  }
+  export CARGO_TARGET_DIR="$target"
+fi
+
 if [ "$build" = true ]; then
   # Both builds are incremental and cheap when nothing changed; running them
   # unconditionally is what makes "at the current version" true rather than

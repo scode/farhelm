@@ -147,10 +147,12 @@ invoke the CLI resolves to its installation.
 ## What protects against inappropriate deletion
 
 The ownership checks happen before any files or services are removed. A familiar filename is not enough to authorize
-deletion: changed contents, invalid ownership records, or unexpected entries inside the app bundle cause a refusal.
-Uninstall also checks file types and ownership; a symlink in place of a claimed file cannot redirect deletion to its
-target. It removes only recognized files and the app's empty directories, rather than recursively deleting whatever
-happens to be inside an installation directory or the app.
+deletion: invalid ownership records or unexpected entries inside the app bundle cause a refusal. Linux installation
+files are also checked for changed contents. On macOS, the app's record, layout, file types and ownership are checked,
+but file contents are not: modifications to recognized app files do not prevent their removal. Uninstall also checks
+file types and ownership; a symlink in place of a claimed file cannot redirect deletion to its target. It removes only
+recognized files and the app's empty directories, rather than recursively deleting whatever happens to be inside an
+installation directory or the app.
 
 On Linux, a service is selected only when its systemd unit file identifies it as managed by Farhelm setup and names an
 executable belonging to this installation. These are `farhelm-helm.service` and `farhelm-supervisor.service` in the user

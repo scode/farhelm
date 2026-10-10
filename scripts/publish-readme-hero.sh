@@ -200,11 +200,10 @@ publish() {
 # fails on one file leaves the others untouched, and a dry run touches
 # nothing. The checkout's origin is a github-shaped URL so that the URL
 # derivation is the real one; a git `insteadOf` rewrite, installed through
-# GIT_CONFIG_GLOBAL for the duration of the test only, sends that URL's
-# pushes to the bare repository instead. The variable is exported inside
-# this function and dies with the process, so nothing outside the self-test
-# ever sees it.
-self_test() {
+# GIT_CONFIG_GLOBAL in each git child's environment, sends that URL's pushes
+# to the bare repository instead. The subshell keeps the git wrapper local
+# without changing the environment of the process running the test.
+self_test() (
   local work bare checkout png expected first second dry fail=0
   local origin="git@github.com:example/repo.git"
   command -v convert >/dev/null || die "self-test needs ImageMagick's convert"
@@ -213,7 +212,9 @@ self_test() {
   checkout="$work/checkout"
   git init -q --bare "$bare" || die "bare init failed"
   printf '[url "%s"]\n\tinsteadOf = %s\n' "$bare" "$origin" >"$work/gitconfig" || die "cannot write the test gitconfig"
-  export GIT_CONFIG_GLOBAL="$work/gitconfig"
+  # publish() and the assertions all use this wrapper, so no child can push
+  # to the GitHub-shaped origin without the fixture's local redirect.
+  git() { command env GIT_CONFIG_GLOBAL="$work/gitconfig" git "$@"; }
   # A checkout that looks enough like this repo for publish(): the scenario,
   # the json5 package, a README and a website page with markers, and an
   # origin.
@@ -267,7 +268,10 @@ self_test() {
   test "$(git -C "$bare" ls-tree --name-only "$BRANCH")" = "$ASSET" || { echo "FAIL branch holds more than the asset"; fail=1; }
   first="$(git -C "$bare" rev-parse "$BRANCH")"
 
-  (publish "$checkout" "$png" false >/dev/null) || { echo "FAIL second publish"; fail=1; }
+  # A changed pixel makes the next tree different even when both commits
+  # have the same timestamp. Inverting the image guarantees different bytes.
+  convert "$png" -negate "$work/second.png" || die "cannot make the second test image"
+  (publish "$checkout" "$work/second.png" false >/dev/null) || { echo "FAIL second publish"; fail=1; }
   test "$(git -C "$bare" rev-list --count "$BRANCH")" -eq 1 || { echo "FAIL second publish extended the branch"; fail=1; }
   second="$(git -C "$bare" rev-parse "$BRANCH")"
   test "$first" != "$second" || { echo "FAIL second publish did not replace the commit"; fail=1; }
@@ -288,14 +292,13 @@ self_test() {
     { echo "FAIL a partial rewrite reported success"; fail=1; }
   grep -q "OLD" "$checkout/good.md" || { echo "FAIL a failed rewrite still edited an earlier file"; fail=1; }
 
-  unset GIT_CONFIG_GLOBAL
   rm -rf "$work"
   if [ "$fail" -ne 0 ]; then
     echo "publish-readme-hero self-test: FAILED" >&2
     return 1
   fi
   echo "publish-readme-hero self-test: ok"
-}
+)
 
 dry=false
 png=""
