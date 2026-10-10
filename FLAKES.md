@@ -1853,3 +1853,28 @@ Received:   4185
 Class: budget
 
 Cause: hypothesis
+
+## 2026-10-10 — `G2-G4 (pre /latest): nothing but /latest was requested` (scripts/test-install-sh.sh)
+
+The first attempt of an on-demand CI run on GitHub (run 38061432384, job `install-script`, job id 114240425122) failed
+this check in the Alpine/BusyBox portability step (`alpine:3` container on the hosted runner): after the installer
+refused a prerelease `/latest`, the fixture server's log held two `"GET ` lines for the case where exactly one was
+expected. It was the only failure of 509 checks and failed fast, not on a timeout. The tested commit was a release-gate
+rehearsal commit on top of a dependency-update stack whose changes do not touch `install.sh` or the harness. The same
+check passed in the GNU leg of the same job, in a rerun of the failed job on the same commit (attempt 2), in the first
+CI run of that stack the previous night, and in two local `alpine:3` runs. The Alpine image's exact version, tmux
+identity (not used by this suite) and runner load are unavailable. The check prints only the count, not the counted
+lines, so which extra request was logged is unknown. The fixture server writes each request's log line before it sends
+the response, which argues against a late line from the preceding case being counted in this one; nothing else was
+established. No earlier entry exists for this check. The hosted job log expires with GitHub's retention. Disposition:
+open (TODO.md).
+
+```
+NOT OK - G2-G4 (pre /latest): nothing but /latest was requested
+    condition failed: [ 2 -eq 1 ]
+509 checks, 1 failed
+```
+
+Class: unknown
+
+Cause: unknown
