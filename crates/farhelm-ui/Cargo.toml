@@ -72,6 +72,9 @@ arboard = { workspace = true, optional = true }
 # Tao exposes the display backend through the window's raw handle. This is
 # needed before its first frame: Wayland has no meaningful global position.
 raw-window-handle = { version = "0.6", optional = true }
+# Native file downloads use the platform's account-specific Downloads folder.
+# Folder discovery stays outside the webview; the helm receives the capability.
+dirs = { version = "6", optional = true }
 farhelm-helm.workspace = true
 farhelm-supervisor.workspace = true
 # Content types for the desktop asset handler (`desktop::serve_asset`, D6).
@@ -119,7 +122,7 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle"]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle", "dep:dirs"]
 
 [dev-dependencies]
 farhelm-teststate.workspace = true

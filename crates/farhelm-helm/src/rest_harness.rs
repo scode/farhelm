@@ -765,6 +765,7 @@ impl Harness {
         );
         state.event_subscriber_cap = old_state.event_subscriber_cap;
         state.clipboard_sink = old_state.clipboard_sink.clone();
+        state.downloads_dir = old_state.downloads_dir.clone();
         state.feedback = old_state.feedback.clone();
         let state = Arc::new(state);
         let device_secret = state
@@ -1411,6 +1412,15 @@ pub(crate) struct FakeSupervisor {
 }
 
 impl FakeSupervisor {
+    /// Send a real data frame for receive-direction streaming tests. Tests
+    /// share the production framing rather than inventing byte demux doubles.
+    pub(crate) async fn send_frame(&mut self, frame: &farhelm_proto::Frame) {
+        self.writer
+            .write_frame(frame)
+            .await
+            .expect("writing to the helm");
+    }
+
     /// Answer the helm's handshake on `peer_side` as a supervisor.
     pub(crate) async fn accept(peer_side: DuplexStream) -> FakeSupervisor {
         let (read, write) = tokio::io::split(peer_side);

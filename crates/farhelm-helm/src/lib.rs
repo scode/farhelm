@@ -90,6 +90,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 mod client;
+mod downloads;
 pub use client::{
     CreateExtras, Detach, DownloadGuard, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
     SupervisorError, SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
@@ -511,6 +512,10 @@ struct AppState {
     /// `clipboard.rs` for why this channel exists at all (the webview's own
     /// clipboard API does not).
     clipboard_sink: Option<ClipboardSink>,
+    /// Native saves are an embedded-app capability, never a server-helm flag.
+    /// The desktop resolves its account's Downloads folder at startup; tests
+    /// inject a private directory without changing the process environment.
+    downloads_dir: Option<PathBuf>,
     /// The cap on native clipboard writes in flight at once, so a hung OS
     /// clipboard cannot pile blocking threads up behind it (see
     /// `clipboard::ClipboardAdmission`). Per helm rather than process-wide,
@@ -593,6 +598,7 @@ impl AppState {
                 std::time::Instant::now(),
             )),
             clipboard_sink: None,
+            downloads_dir: None,
             clipboard_admission: clipboard::ClipboardAdmission::new(),
             // Test-built helms never reach the production endpoint; a
             // feedback test injects its own stand-in instead.
@@ -891,11 +897,37 @@ fn api_router(state: Arc<AppState>) -> Router {
             clipboard::MAX_BODY_BYTES,
         ));
 
+    // File operations use the same auth-inside-CORS boundary as attachments.
+    // Only preflight is public; a webview must read actual auth refusals too.
+    let desktop_files = Router::new()
+        .route(
+            "/api/sessions/{id}/files/stat",
+            axum::routing::post(downloads::stat_file),
+        )
+        .route(
+            "/api/sessions/{id}/files/download",
+            axum::routing::post(downloads::download_file),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::require_device_session,
+        ))
+        .route(
+            "/api/sessions/{id}/files/stat",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .route(
+            "/api/sessions/{id}/files/download",
+            axum::routing::options(middleware::desktop_webview_preflight),
+        )
+        .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
+
     let app = protected
         .merge(desktop_device)
         .merge(desktop_attachment)
         .merge(desktop_client_log)
-        .merge(desktop_clipboard);
+        .merge(desktop_clipboard)
+        .merge(desktop_files);
     let app = match mode {
         ServingMode::Standalone => {
             // Leave the token route's preflight and CORS layer untouched. The
@@ -1821,7 +1853,7 @@ mod embedded_ui_tests {
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
 pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None, ServingMode::Standalone).await
+    run_with_ready(args, None, None, None, None, ServingMode::Standalone).await
 }
 
 /// What an embedded helm hands the desktop process that owns it once every
@@ -1854,15 +1886,21 @@ pub struct EmbeddedReady {
 /// line for readiness. The explicit shutdown receiver gives `DesktopBootstrap`
 /// a teardown path it can join; dropping its sender carries the same owner-
 /// disappeared meaning as sending the signal.
+///
+/// The native shell supplies clipboard and Downloads capabilities for this
+/// window's account. An absent Downloads directory leaves native-save requests
+/// refused; it never asks the webview to save in its place.
 pub async fn run_embedded(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
+    downloads_dir: Option<PathBuf>,
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     run_with_ready(
         args,
         clipboard_sink,
+        downloads_dir,
         Some(ready),
         Some(shutdown),
         ServingMode::Embedded,
@@ -1874,14 +1912,13 @@ pub async fn run_embedded(
 /// startup sequence so the desktop cannot acquire a weaker auth or transport
 /// boundary than `farhelm helm run`.
 ///
-/// `clipboard_sink` is the one capability that differs BY DESIGN between the
-/// two callers rather than by configuration: only the embedded caller has a
-/// desktop window whose user's clipboard a webview write could legitimately
-/// mean, so only [`run_embedded`] can pass `Some` and the CLI path hardcodes
-/// `None` — there is deliberately no flag to enable it on a server helm.
+/// Native clipboard and Downloads saves belong to the embedded window's user.
+/// A server helm's browser may run on another machine, so its startup always
+/// supplies `None` for both capabilities; no CLI flag enables either one.
 async fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
+    downloads_dir: Option<PathBuf>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
     mode: ServingMode,
@@ -1937,6 +1974,7 @@ async fn run_with_ready(
         mode,
     )?;
     app.clipboard_sink = clipboard_sink;
+    app.downloads_dir = downloads_dir;
     let state = Arc::new(app);
     // The manager was started before this state existed — it is one of the
     // state's own fields — so the handler that answers an agent's questions

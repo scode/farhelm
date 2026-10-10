@@ -1921,6 +1921,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "dioxus",
+ "dirs",
  "farhelm-helm",
  "farhelm-proto",
  "farhelm-supervisor",

@@ -460,6 +460,9 @@ impl DesktopBootstrap {
                             backstop_refresh_secs: None,
                         },
                         Some(native_clipboard_sink()),
+                        // Resolve on the native side. An unavailable Downloads
+                        // folder refuses a save rather than using the webview.
+                        dirs::download_dir(),
                         ready_tx,
                         shutdown_rx,
                     ))
