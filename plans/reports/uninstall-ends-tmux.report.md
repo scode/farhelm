@@ -79,3 +79,55 @@ The wording cold reader recovered the motivation, retry behavior and session cav
 Implementation and investigation were local; only the required reviews and cold reads used agents. Requested native
 model selections are recorded, but actual runtime model identity and usage counters were unavailable. Private review and
 delegation evidence remains in the session records.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1781 (remote uninstall ends the host's private tmux server), one squash commit on main.
+Since the plan was based, main gained host-icons, claude-compaction-status and the supervisor's stop-expiry quiet-down
+(#1780); the rebase was clean. host-icons adds an icon and a color to each host row, which forgetting a host now deletes
+with the row; nothing else in them touches the uninstall flow.
+
+#### Review before merging
+
+The first reviewer got stuck in a hung command for hours and was stopped; a fresh reviewer that had not worked on this
+round's plans then read the change against main by reading the code only. It found the remote commands safe: the tmux
+server ended is only the one whose socket is this installation's own `tmux.sock` in the state directory the plan already
+shows as kept, the tmux program and socket are frozen in the confirmed plan (a change between plan and confirmation
+refuses), every value reaches the remote command through the existing shell quoting, and the user's own tmux server or
+another installation's cannot be reached. Any failed step keeps the host listed, a retry repeats the steps safely, and
+live sessions or tabs still refuse at planning and again at confirmation. Remote setup and uninstall only target Linux
+hosts with a systemd user manager, so there is no macOS path.
+
+#### Fixes made while landing
+
+- A browser test of remote uninstall still expected the old step order (the supervisor stopped before systemd reloads),
+  so it would have failed the next time anyone ran the browser suite; the executor ran no browser specs, and CI does not
+  run them. The landing updated the expected order and its explanation.
+- A new code comment said the supervisor is stopped first "so its orderly terminal shutdown runs". With the reload now
+  before the stop, systemd stops the supervisor and its tmux server together, so that shutdown no longer runs ahead of
+  tmux during uninstall; the comment now says so. The supervisor's stop documentation and SPEC_impl.md's account of the
+  process-only stop policy now name remote uninstall as the one stop that ends the private tmux server on purpose.
+
+#### Not changed while landing
+
+- On a host whose `stat` is BusyBox's rather than GNU's or uutils', the stop step cannot recognize a socket that is
+  already gone, so every uninstall attempt fails at that step and the host stays listed. Nothing is lost, and removing
+  the host from the list still works, but such a host cannot be uninstalled through the menu. SPEC.md says nothing
+  provisioning does is distribution-specific, so this is a gap worth a follow-up if such hosts matter.
+- SPEC.md says each removed item is named by its path on the host, but the confirmation names the private tmux server
+  without its socket path. Either the confirmation or the spec sentence should change.
+- The hosts docs page still says uninstall never stops a session. That stays true for live sessions, which still refuse,
+  but it does not mention that a session started while the removal runs may be ended, as you agreed.
+
+#### Checks
+
+- Run now, on the plan rebased onto main with the landing's fixes: `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the helm's unit tests in full including provisioning (run `b70a0c4d`,
+  1018 of 1018), and through the recorder on Chromium and WebKit with pinned tmux 3.7c, one worker and no retries, the
+  multi-host terminal spec's uninstall cases (run `f172f6b1`, 4 of 4).
+- Reused from the executor: its real-SSH removal run against a fixture host with a systemd user manager, which ran
+  before main gained the stop-expiry quiet-down. That change adds at most twelve seconds before a supervisor exits and
+  then exits regardless, so it cannot hold up this stop; that was judged by reading, not re-run.
+- Skipped: the CentOS provisioning container and macOS, which this flow does not target.
+
+Nothing in the report above was made untrue by the landing.
