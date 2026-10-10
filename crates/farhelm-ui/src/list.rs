@@ -40,6 +40,7 @@
 
 mod bell;
 mod create_form;
+mod host_picker;
 mod quick_switcher;
 mod row;
 /// Save a snapshot of the launcher without changing the draft being launched.

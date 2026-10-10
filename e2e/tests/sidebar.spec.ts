@@ -1,3 +1,4 @@
+import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 /**
  * The two-pane shell itself (BUGS_BURNDOWN.md issue 5): the properties the
  * sidebar redesign claims but no interaction test proves on its own —
@@ -5089,9 +5090,9 @@ test("composer path actions keep typing inert and browse the selected remote hos
   await page.goto("/");
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
-  const host = form.locator("select.create-session-host");
-  await host.selectOption(String(remoteFixture.id));
-  const remote = await host.inputValue();
+  const host = form.locator(".create-session-host");
+  await chooseLauncherHost(host, String(remoteFixture.id));
+  const remote = await host.getAttribute("data-host-id");
   expect(remote, "the selected option must be the asserted remote fixture, not a positional row").toBe(String(remoteFixture.id));
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   const remotePath = remoteFixture.remote_state_dir;
@@ -5273,9 +5274,9 @@ test("composer rejects held and queued stale browse activation after destination
   await feed.waitForConnection(1);
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
-  const host = form.locator("select.create-session-host");
-  await host.selectOption({ index: 1 });
-  const remote = await host.inputValue();
+  const host = form.locator(".create-session-host");
+  await chooseLauncherHost(host, { index: 1 });
+  const remote = await host.getAttribute("data-host-id");
   expect(Number(remote), "the authority fixture needs a selected remote host").not.toBe(1);
   const folder = form.getByLabel("folder", { exact: true });
   const saved = form.locator(".launch-composer-folder-links");
@@ -5485,10 +5486,10 @@ test("composer local-home reset takes over a remote open destination", async ({ 
     await page.goto("/"); await expect(row(page, session.id), "the remote open-session premise must render").toBeVisible();
     await row(page, session.id).locator(".session-row-open").click();
     await page.locator(".new-session-button").click(); const form = page.locator(".create-session-form");
-    const hostSelect = form.locator("select.create-session-host");
-    await expect(hostSelect).toHaveValue(String(remote.id));
+    const hostSelect = form.locator(".create-session-host");
+    await expect(hostSelect).toHaveAttribute("data-host-id", String(remote.id));
     await form.getByRole("button", { name: "reset destination to local home" }).click();
-    await expect(hostSelect).toHaveValue(String(local));
+    await expect(hostSelect).toHaveAttribute("data-host-id", String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
     const localName = hosts.hosts.find((host: { id: number }) => host.id === local).name;
     const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
@@ -5555,8 +5556,8 @@ test("composer local-home reset takes over a remote clone destination", async ({
     const formHandle = await form.elementHandle();
     expect(formHandle, "the clone modal must have one concrete DOM node").not.toBeNull();
     await formHandle!.evaluate((node) => node.setAttribute("data-clone-form-identity", "owned"));
-    const hostSelect = form.locator("select.create-session-host");
-    await expect(hostSelect, "the clone's remote host must be selected before reset").toHaveValue(String(remote.id));
+    const hostSelect = form.locator(".create-session-host");
+    await expect(hostSelect, "the clone's remote host must be selected before reset").toHaveAttribute("data-host-id", String(remote.id));
     const folder = form.locator('input[aria-label="folder"]');
     await expect(folder, "the clone must carry its source folder").toHaveValue(cwd);
     const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
@@ -5566,7 +5567,7 @@ test("composer local-home reset takes over a remote clone destination", async ({
     const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
     await expect(codex, "the structured clone retains its inherited harness before reset").toHaveAttribute("aria-pressed", "true");
     await form.getByRole("button", { name: "reset destination to local home" }).click();
-    await expect(hostSelect).toHaveValue(String(local));
+    await expect(hostSelect).toHaveAttribute("data-host-id", String(local));
     await expect(folder).toHaveValue("~");
     await expect(destinationPeers.nth(0)).toHaveText(`local (${hosts.hosts.find((host: { id: number }) => host.id === local).name})`);
     await expect(destinationPeers.nth(1)).toHaveText("~");
@@ -5710,7 +5711,7 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     }).toBeGreaterThan(completions);
     await expect(form.getByRole("button", { name: "/tmp/STALE-CHILD", exact: true }), "the original A reply must remain refused after A is restored by a newer clone generation").toHaveCount(0);
 
-    await expect(form.locator("select.create-session-host")).toHaveValue(String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
     await expect(form.getByLabel("name (optional)")).toHaveValue(first.title);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -5753,7 +5754,7 @@ test("composer destination block keeps host, browse, folder, and recent links to
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   const destination = form.locator(".launch-composer-destination");
-  const host = destination.locator("select.create-session-host");
+  const host = destination.locator(".create-session-host");
   const browse = destination.getByRole("button", { name: "browse this path", exact: true });
   const folder = destination.getByLabel("folder", { exact: true });
   const links = destination.locator(".launch-composer-folder-links");
@@ -5761,15 +5762,15 @@ test("composer destination block keeps host, browse, folder, and recent links to
   const name = destination.getByLabel("name (optional)", { exact: true });
   await expect(destination).toBeVisible();
   await expect(name).toBeVisible();
-  const hostLabel = await host.locator("option:checked").textContent();
-  expect(hostLabel, "the host select must show a selected option before its label is checked").toBeTruthy();
+  const hostLabel = await host.locator("bdi").textContent();
+  expect(hostLabel, "the host picker must show its committed label before it is checked").toBeTruthy();
   await expect(browse).toContainText(hostLabel!.trim());
   // The controls can separate at phone width, but each label must stay
   // centered in its own control rather than riding the text baseline.
   for (const width of [1024, 540]) {
     await page.setViewportSize({ width, height: 900 });
     const centers = await destination.evaluate((node) => {
-      const selector = node.querySelector("select.create-session-host")!;
+      const selector = node.querySelector(".create-session-host")!;
       const button = node.querySelector<HTMLButtonElement>('button[aria-label="browse this path"]')!;
       const label = button.firstElementChild!;
       const buttonBox = button.getBoundingClientRect();
@@ -5790,7 +5791,7 @@ test("composer destination block keeps host, browse, folder, and recent links to
   await expect(links.getByText("local home", { exact: true })).toBeVisible();
   expect(await destination.evaluate((node) => {
     const controls = [
-      node.querySelector("select.create-session-host"),
+      node.querySelector(".create-session-host"),
       node.querySelector('button[aria-label="browse this path"]'),
       node.querySelector('input[aria-label="folder"]'),
       node.querySelector(".launch-composer-folder-links button[aria-pressed]"),
@@ -5808,7 +5809,7 @@ test("composer destination block keeps host, browse, folder, and recent links to
   await links.getByText("local home", { exact: true }).click();
   await expect(folder).toHaveValue("~");
   await expect(recentLink).toHaveAttribute("aria-pressed", "false");
-  await expect(host).toHaveValue(String(local));
+  await expect(host).toHaveAttribute("data-host-id", String(local));
 });
 
 /**
@@ -6299,7 +6300,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status, "the old-draft notice must still exist immediately before ordinary restoration").toBeVisible();
   await ordinaryRecent.click();
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator("select.create-session-host")).toHaveValue("1");
+  await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", "1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("local (this machine)");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
@@ -6362,7 +6363,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await customSearchRecent.click();
   await expect(status, "a search recent also replaces the whole draft and its old notice").toHaveCount(0);
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator("select.create-session-host")).toHaveValue("1");
+  await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", "1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("local (this machine)");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
@@ -6809,7 +6810,7 @@ test("composer launch button names the chosen harness, host, and folder", async 
   const launch = form.getByRole("button", { name: /^launch\b/ });
   const context = form.locator(".launch-composer-launch-context");
   const peers = context.locator(".peer-value");
-  const host = await form.getByRole("combobox", { name: "host", exact: true }).locator("option:checked").textContent();
+  const host = await form.getByRole("combobox", { name: "host", exact: true }).locator("bdi").textContent();
   const folder = await form.getByLabel("folder", { exact: true }).inputValue();
   expect(host, "the host select must show a selected option before the label is checked").toBeTruthy();
   expect(folder, "the folder field must be seeded before the label is checked").not.toBe("");
@@ -7363,12 +7364,13 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   await expect(dialog).toHaveCount(0);
   await page.locator(".new-session-button").click();
   await expect(page.locator(".create-session-form")).toBeVisible();
+  await launcherHostOptions(page.locator(".create-session-host"));
   // Anchored, not a bare substring match: an option that showed "Build Box
   // (user@aliasable-mock)" — the alias with the raw destination still
   // exposed beside it — would satisfy `hasText: "Build Box"` but is exactly
   // the leak this assertion exists to catch.
   await expect(
-    page.locator(".create-session-host option", { hasText: /^Build Box$/ }),
+    page.locator(".launcher-host-option", { hasText: /^Build Box$/ }),
   ).toHaveCount(1);
 
   // The session row's host slot rides a SEPARATE signal (`/api/sessions`,
@@ -7409,8 +7411,9 @@ test("aliasing a remote host renames it everywhere but the details view", async 
 
   await page.locator(".new-session-button").click();
   await expect(page.locator(".create-session-form")).toBeVisible();
+  await launcherHostOptions(page.locator(".create-session-host"));
   await expect(
-    page.locator(".create-session-host option", { hasText: new RegExp(`^${destination}$`) }),
+    page.locator(".launcher-host-option", { hasText: new RegExp(`^${destination}$`) }),
   ).toHaveCount(1);
 
   await page.reload();

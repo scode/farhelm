@@ -167,10 +167,10 @@ test("launcher value-control Enter keeps the shown choices", async ({ page, requ
   const { form, bodies } = await observeChoiceCreates(page, request);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
   const host = form.getByLabel("host", { exact: true });
-  const hostId = await host.inputValue();
+  const hostId = await host.getAttribute("data-host-id");
   expect(hostId, "the connected host selection must have settled").not.toBe("");
   expect(await enterCreateChoice(form, host, bodies)).toMatchObject({ host: Number(hostId) });
-  await expect(host).toHaveValue(hostId);
+  await expect(host).toHaveAttribute("data-host-id", hostId);
   await form.getByRole("tab", { name: "command", exact: true }).click();
   await form.getByLabel("agent command", { exact: true }).fill("claude {farhelm_args}");
   await form.getByRole("radio", { name: "no", exact: true }).check();
@@ -228,7 +228,7 @@ test("launcher repeated Enter never launches", async ({ page, request }) => {
   });
   const { form, bodies } = await observeChoiceCreates(page, request);
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(form.getByLabel("host", { exact: true }), "the recent must belong to the selected connected destination").toHaveValue(String(host));
+  await expect(form.getByLabel("host", { exact: true }), "the recent must belong to the selected connected destination").toHaveAttribute("data-host-id", String(host));
   const recent = form.locator(".launch-composer-recents button");
   await expect(recent).toHaveCount(1);
   await expect(recent).toContainText("High");

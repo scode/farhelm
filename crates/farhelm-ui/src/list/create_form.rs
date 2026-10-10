@@ -3720,67 +3720,45 @@ pub(super) fn CreateSessionForm(
         focus_composer_surface();
     });
     let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
-    // The host selector and its reconciliation notes are built once for the
-    // shared destination block. Command mode changes only launch controls, so
-    // it has no second host path that could drift from this one.
-    //
-    // The select is disabled for the whole round trip, exactly like the text
-    // fields: the key is bound to the target, and a selection changing between
-    // minting and sending would publish a key that belongs to a different
-    // machine. Its value is empty only before the first hosts read lands (a
-    // live helm always has its local row); the submit handler refuses in that
-    // window rather than sending a hostless create.
+    // HostPicker owns only transient browsing. Keep the old select's complete
+    // destination transition here, including the synchronous history fence;
+    // queued callbacks must observe the new target before a render happens.
+    let choose_host = EventHandler::new(move |id: HostId| {
+        if !draft_transition_allowed(ops) {
+            return;
+        }
+        let next_host = Some(id);
+        chosen_host.set(next_host);
+        // A queued history callback can run before rerender.
+        // Revoke the old destination in this same event turn.
+        live_destination.set(history_target(&hosts_for_destination_choice, next_host));
+        remembered_destination.set(None);
+        invalidate_directory_browse(
+            browse_generation,
+            browse_request,
+            browse_result,
+            browse_error,
+        );
+        // The agent choice deliberately survives: every host
+        // consumes the same helm catalog.
+        // And it takes this generation's clone-derived
+        // binding off automatic handling for good
+        // (`CloneHostState::UserTookOver`): the user is now
+        // driving host selection by hand, so a later
+        // retarget of the CLONE's own row must not pull the
+        // rug out from under a choice the clone had nothing
+        // to do with anymore.
+        clone_host_state.set(CloneHostState::UserTookOver);
+        // A different host is a different intended create,
+        // exactly as a different directory is — so the key
+        // the last submit used stops applying (see this
+        // component's docs for both edges of that rule).
+        intent_key.set(None);
+    });
     let host_select = rsx! {
-        select {
-            class: "create-session-host",
-            aria_label: "host",
-            "data-tooltip": "host: the machine the session runs on",
-            disabled: busy,
-            onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
-            value: selected.map(|id| id.to_string()).unwrap_or_default(),
-            onchange: move |evt| {
-                if !draft_transition_allowed(ops) {
-                    return;
-                }
-                let next_host = evt.value().parse::<HostId>().ok();
-                chosen_host.set(next_host);
-                // A queued history callback can run before rerender.
-                // Revoke the old destination in this same event turn.
-                live_destination.set(history_target(&hosts_for_destination_choice, next_host));
-                remembered_destination.set(None);
-                invalidate_directory_browse(
-                    browse_generation, browse_request, browse_result, browse_error,
-                );
-                // The agent choice deliberately survives: every host
-                // consumes the same helm catalog.
-                // And it takes this generation's clone-derived
-                // binding off automatic handling for good
-                // (`CloneHostState::UserTookOver`): the user is now
-                // driving host selection by hand, so a later
-                // retarget of the CLONE's own row must not pull the
-                // rug out from under a choice the clone had nothing
-                // to do with anymore.
-                clone_host_state.set(CloneHostState::UserTookOver);
-                // A different host is a different intended create,
-                // exactly as a different directory is — so the key
-                // the last submit used stops applying (see this
-                // component's docs for both edges of that rule).
-                intent_key.set(None);
-            },
-            for host in hosts.iter() {
-                option {
-                    key: "{host.id}",
-                    value: "{host.id}",
-                    // Marked on the OPTION as well as through the
-                    // select's `value` above, and that redundancy is
-                    // load-bearing rather than belt-and-braces — see
-                    // the agent picker below, where the same
-                    // arrangement is what makes a preselection appear
-                    // at all.
-                    selected: selected == Some(host.id),
-                    "{host.label()}"
-                }
-            }
+        super::host_picker::HostPicker {
+            hosts: hosts.clone(), selected, busy,
+            on_pick: choose_host, on_enter: launch_from_choice,
         }
     };
     // The reconciliation, said out loud. A chosen host leaving the registry

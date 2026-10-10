@@ -127,7 +127,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
       await source.locator(".session-row-clone").click();
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
-      await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
       // The search field and recent-folder group also mention “folder”; the
       // composer input is the one control whose literal value becomes the
       // successor destination.
@@ -848,7 +848,7 @@ test("each clone restores every field after an intervening draft edit", async ({
     await rowA.locator(".session-row-clone").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdA);
     await expect(form.getByLabel("name (optional)")).toHaveValue(titleA);
     await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
@@ -868,7 +868,7 @@ test("each clone restores every field after an intervening draft edit", async ({
     await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
-    await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdB);
     await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
     await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
@@ -931,7 +931,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     const form = page.locator(".create-session-form");
     const assertFreshDefaults = async (expectedCwd: string) => {
       await expect(form).toBeVisible();
-      await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+      await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
       await expect(form.getByLabel("folder", { exact: true })).toHaveValue(expectedCwd);
       await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute(
         "aria-pressed",

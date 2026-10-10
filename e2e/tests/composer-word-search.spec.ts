@@ -1,3 +1,4 @@
+import { launcherHostOptions } from "./helpers/host-picker";
 /**
  * The launch search is a sequential keyboard surface: each accepted word
  * changes one structured field, clears the box, and returns focus to the
@@ -166,11 +167,12 @@ test("name and host labels apply one draft choice without launching", async ({ p
   const form = page.locator('.create-session-form[role="dialog"]');
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   const host = form.locator(".create-session-host");
-  const local = host.locator("option").filter({ hasText: "local (this machine)" });
-  const localId = await local.getAttribute("value");
+  const options = await launcherHostOptions(host);
+  const local = options.filter({ hasText: "local (this machine)" });
+  const localId = await local.getAttribute("data-host-id");
   expect(localId, "the local row must have a stable selector value").toBeTruthy();
-  const remote = host.locator("option").filter({ hasNotText: "local (this machine)" }).first();
-  const remoteId = await remote.getAttribute("value");
+  const remote = options.filter({ hasNotText: "local (this machine)" }).first();
+  const remoteId = await remote.getAttribute("data-host-id");
   const remoteLabel = (await remote.textContent())?.trim();
   expect(remoteId, "the fixture must offer another host to filter").toBeTruthy();
   expect(remoteLabel).toBeTruthy();
@@ -185,7 +187,7 @@ test("name and host labels apply one draft choice without launching", async ({ p
 
   await search.fill(`host:${remoteLabel}`);
   await form.getByRole("option", { name: `Host: ${remoteLabel}`, exact: true }).click();
-  await expect(host).toHaveValue(remoteId!);
+  await expect(host).toHaveAttribute("data-host-id", remoteId!);
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
@@ -193,7 +195,7 @@ test("name and host labels apply one draft choice without launching", async ({ p
   await expect(form.getByRole("option", { name: "Host: local (this machine)", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(host).toHaveValue(localId!);
+  await expect(host).toHaveAttribute("data-host-id", localId!);
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
   expect(creates, "search acceptance must not submit the form").toBe(0);

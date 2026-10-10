@@ -1,14 +1,17 @@
 //! One activity-ordered fleet snapshot for keyboard navigation.
 //!
 //! The sidebar may show only one host, so the switcher reads independently.
-//! Matching partitions that snapshot without changing the helm's order inside
+//! Host marks reuse ListView's existing registry read; sessions alone get an
+//! independent fleet listing. Matching partitions that snapshot without changing the helm's order inside
 //! each tier. Selection is a navigation intent; ListView keeps the ordinary
 //! busy guard, preference write and terminal focus handoff.
 
 use dioxus::prelude::*;
 
 use crate::api::{ListSort, SessionFilter, fetch_sessions, fetch_templates};
+use crate::hosts::HostsRead;
 use crate::hosts::settings_dialog::install_dialog_with_selector;
+use crate::icons::{HostMark, LocalHostIcon};
 use crate::launch_composer::{
     ComposerSearchResult, SearchScope, harness_label, scoped_query, template_search_results,
 };
@@ -193,6 +196,7 @@ fn MatchedText(text: String, positions: Vec<usize>) -> Element {
 /// and removes the modal before navigating or opening the launcher.
 #[component]
 pub(super) fn QuickSwitcher(
+    hosts: Signal<HostsRead>,
     on_close: EventHandler<()>,
     on_pick: EventHandler<SwitcherPick>,
 ) -> Element {
@@ -208,6 +212,8 @@ pub(super) fn QuickSwitcher(
     });
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0_usize);
+    let hosts_read = hosts.read();
+    let host_rows = hosts_read.hosts().unwrap_or_default();
     let text = query();
     let template_mode = scoped_query(&text).0 == SearchScope::Template;
     let read = listing.read();
@@ -332,6 +338,7 @@ pub(super) fn QuickSwitcher(
                         } else if let Some(listing) = sessions {
                             for (position, matched) in matches.iter().enumerate() {
                                 { let session = listing.sessions[matched.index].clone();
+                                  let host = session.host.and_then(|id| host_rows.iter().find(|host| host.id == id));
                                   let badge = status_badge(&session.status, session.annotation.as_deref(), session.has_unseen_output());
                                   let ended = badge.as_ref().is_some_and(|badge| badge.visible);
                                   rsx! {
@@ -347,7 +354,13 @@ pub(super) fn QuickSwitcher(
                                         }
                                         span { class: "quick-switcher-title", MatchedText { text: listing.sessions[matched.index].title.clone(), positions: matched.title.clone() } }
                                         span { class: "quick-switcher-agent", "{agent_label(&listing.sessions[matched.index])}" }
-                                        span { class: "quick-switcher-host", MatchedText { text: host_name(&listing.sessions[matched.index]).to_string(), positions: matched.host.clone() } }
+                                        span { class: "quick-switcher-host",
+                                            if let Some(host) = host {
+                                                if host.kind.is_this_machine() { LocalHostIcon {} }
+                                                else { HostMark { icon: host.icon, color: host.color } }
+                                            }
+                                            MatchedText { text: host_name(&listing.sessions[matched.index]).to_string(), positions: matched.host.clone() }
+                                        }
                                         span { class: "quick-switcher-cwd", MatchedText { text: listing.sessions[matched.index].cwd.clone(), positions: matched.cwd.clone() } }
                                     }
                                   }

@@ -1,3 +1,4 @@
+import { chooseLauncherHost } from "./helpers/host-picker";
 /**
  * Mounted composer authority tests. The real helm supplies the host identity
  * and catalog; intercepted checkout replies exercise UI races without network
@@ -94,7 +95,7 @@ async function openComposer(page: Page, host: LocalHost) {
   await page.locator(".new-session-button").click();
   const form = page.locator('.create-session-form[role="dialog"]');
   await expect(form).toBeVisible();
-  await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveValue(String(host.id));
+  await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", String(host.id));
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   return form;
 }
@@ -627,8 +628,8 @@ test("switching hosts rejects the old checkout preview while the new host is pen
     await expect.poll(() => localStarted).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     const hostPicker = form.getByRole("combobox", { name: "host", exact: true });
-    await hostPicker.selectOption(String(remote!.id));
-    await expect(hostPicker).toHaveValue(String(remote!.id));
+    await chooseLauncherHost(hostPicker, String(remote!.id));
+    await expect(hostPicker).toHaveAttribute("data-host-id", String(remote!.id));
     await expect.poll(() => remoteStarted).toBe(true);
     releaseLocal();
     await expect.poll(() => localFinished).toBe(true);

@@ -3169,6 +3169,7 @@ pub(crate) fn ListView(
         }
         if quick_switcher_open() {
             super::quick_switcher::QuickSwitcher {
+                hosts,
                 on_close: move |_| finish_switcher.call(None),
                 on_pick: move |pick| finish_switcher.call(Some(pick)),
             }

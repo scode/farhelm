@@ -255,6 +255,9 @@ pub(super) struct HostOption {
     /// Whether this is the helm's own machine — the reserved local row,
     /// which is SPEC.md's fallback default.
     pub(super) local: bool,
+    /// Helm-kept identity words are display facts, independent of availability.
+    pub(super) icon: farhelm_proto::host_appearance::HostIcon,
+    pub(super) color: farhelm_proto::host_appearance::HostColor,
     /// The phase to show beside the name, for a host that is NOT connected;
     /// `None` for one that is.
     ///
@@ -541,6 +544,8 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
             id: host.id,
             name: host.name.clone(),
             local: host.kind.is_this_machine(),
+            icon: host.icon,
+            color: host.color,
             // Non-connected hosts are labelled with their phase, so choosing
             // one is an informed choice rather than a surprise refusal.
             phase: (!is_connected(&host.state))
@@ -602,6 +607,8 @@ pub(super) mod tests {
             id,
             name: name.into(),
             local,
+            icon: Default::default(),
+            color: Default::default(),
             phase: None,
             incarnation: format!("incarnation-{id}"),
             connection: 1,

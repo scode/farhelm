@@ -4722,7 +4722,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* Sized to its content rather than stretched like the text fields beside
-   it: a host name is short and fixed, and a full-width select would read as
+   it: a host name is short and fixed, and a full-width control would read as
    a field the user is expected to type into. */
 .create-session-host {
   align-self: flex-start;
@@ -4896,8 +4896,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 .launch-composer-destination-row .create-session-host {
   min-width: 12em;
-  /* Native select text sits inside the control's own box. Give that box the
-     same fixed height as Browse so the two labels share a vertical center. */
+  /* The chosen mark and label share Browse's fixed height and center. */
   box-sizing: border-box;
   height: 36px;
   padding-block: 0;
@@ -6682,6 +6681,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .quick-switcher-agent,
 .quick-switcher-host,
 .quick-switcher-cwd { color: var(--fg-1); font-size: 12px; }
+.quick-switcher-host { display: flex; align-items: center; gap: 6px; }
+.quick-switcher-host bdi { overflow: hidden; text-overflow: ellipsis; }
+.quick-switcher-host .host-kind-icon { flex-shrink: 0; }
 .quick-switcher-row:hover { background: var(--control-hover-bg); }
 .quick-switcher-row[aria-selected="true"] {
   background: var(--accent-fill);
@@ -6746,3 +6748,17 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-appearance-preview { display: grid; gap: 10px; padding: 12px; background: var(--bg-1); border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
 .host-appearance-preview-row { display: flex; align-items: center; gap: 8px; }
 .host-appearance-preview-row .status-dot { background: var(--fg-1); }
+
+/* The launcher host menu shares the switcher's row spacing and active
+   treatment. Only the mark carries identity color; names remain ordinary text.
+   The transient list stays inside the modal's scrolling body. */
+.launcher-host-picker { position: relative; min-width: 12em; max-width: 100%; }
+.launcher-host-picker .create-session-host { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.launcher-host-picker .create-session-host bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-host-picker .host-kind-icon { flex-shrink: 0; pointer-events: none; }
+.launcher-host-chevron { margin-left: auto; color: var(--fg-1); }
+.launcher-host-options { position: absolute; z-index: 3; top: 100%; left: 0; min-width: 100%; max-width: min(30em, 80vw); max-height: 240px; overflow: auto; padding: 4px; background: var(--bg-2); border: 1px solid var(--border-dialog); border-radius: var(--radius-sm); box-shadow: var(--shadow-menu); }
+.launcher-host-option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg-0); text-align: left; font: inherit; cursor: pointer; }
+.launcher-host-option bdi { white-space: nowrap; }
+.launcher-host-option:hover { background: var(--control-hover-bg); }
+.launcher-host-option[aria-selected="true"] { background: var(--accent-fill); border-color: var(--accent-edge); box-shadow: inset 3px 0 var(--accent); }
