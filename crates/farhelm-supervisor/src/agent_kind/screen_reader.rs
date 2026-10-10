@@ -431,8 +431,8 @@ struct CodexReader;
 /// a draft cannot be mistaken for a dialog footer.
 const CODEX_FOOTER_LINES: usize = 2;
 
-/// How far from the bottom a queued question's two rows may sit: above the
-/// composer and its footer rows.
+/// How far above the input prompt a queued question's two rows may sit.
+/// Draft continuation rows below that prompt never spend this search budget.
 const CODEX_QUEUED_QUESTION_LINES: usize = 8;
 
 /// The title prefixes Codex alternates between while it needs the user.
@@ -474,7 +474,7 @@ impl ScreenReader for CodexReader {
             || any_contains(&footer, "enter to submit answer")
             || any_contains(&footer, "enter to submit all")
             || any_contains(&footer, "enter continue")
-            || codex_queued_question(last_lines(&lines, CODEX_QUEUED_QUESTION_LINES))
+            || codex_queued_question(&lines)
         {
             return Reading::anchored(ScreenState::Waiting);
         }
@@ -492,13 +492,22 @@ impl ScreenReader for CodexReader {
     }
 }
 
-/// Whether the bottom of a Codex screen shows a queued question waiting
-/// for the user: a `? N question(s)` row followed by its "to answer" hint.
-fn codex_queued_question(bottom: &[&str]) -> bool {
-    bottom.windows(2).any(|pair| {
-        let row = pair[0].trim_start();
-        row.starts_with("? ") && row.contains(" question") && pair[1].contains("to answer")
-    })
+/// Whether Codex output above its last input prompt has a queued question.
+/// A `? N question(s)` row followed by its "to answer" hint needs the user;
+/// the same text inside an unsent draft is only input and cannot prove waiting.
+fn codex_queued_question(lines: &[&str]) -> bool {
+    // Everything from the last input prompt onward belongs to the unsent
+    // draft or its footer. Question-shaped pasted text is not agent output.
+    let above_prompt = lines
+        .iter()
+        .rposition(|line| line.starts_with('›'))
+        .map_or(lines, |prompt| &lines[..prompt]);
+    last_lines(above_prompt, CODEX_QUEUED_QUESTION_LINES)
+        .windows(2)
+        .any(|pair| {
+            let row = pair[0].trim_start();
+            row.starts_with("? ") && row.contains(" question") && pair[1].contains("to answer")
+        })
 }
 
 /// Whether a Codex dialog may be on screen.
@@ -736,6 +745,27 @@ mod tests {
                 "[ ! ] Action Required | task | codex"
             )
             .state,
+            ScreenState::Waiting
+        );
+    }
+
+    /// Question-shaped text in an unsent draft must not request attention.
+    /// The same two rows above the editor are still a real queued question,
+    /// including when a long draft pushes them outside the screen's last rows.
+    #[test]
+    fn codex_queued_questions_exclude_unsent_drafts() {
+        let marker = "  ? 1 question\n    shift+← to answer";
+        let draft = format!("• Done\n› Please explain this UI\n{marker}\n  footer");
+        assert_eq!(
+            read(AgentKind::Codex, &draft, "codex").state,
+            ScreenState::Idle
+        );
+        let question = format!(
+            "• Working\n{marker}\n› my draft\n{}",
+            "  continuation\n".repeat(10)
+        );
+        assert_eq!(
+            read(AgentKind::Codex, &question, "codex").state,
             ScreenState::Waiting
         );
     }

@@ -808,10 +808,20 @@ fn install(
         report,
         "loginctl enable-linger \"$USER\"   # start at boot and survive logout"
     );
-    line!(
-        report,
-        "farhelm helm token show   # the browser sign-in token"
-    );
+    // A chosen directory must survive into the advice; a bare token show
+    // can read or create credentials for an unrelated default helm.
+    let show_command = if opts.state_dir.is_some() {
+        let state_dir_text = state_dir
+            .to_str()
+            .context("the setup state directory is not valid UTF-8")?;
+        format!(
+            "farhelm helm token show --state-dir={}",
+            shell_words::quote(state_dir_text)
+        )
+    } else {
+        "farhelm helm token show".to_string()
+    };
+    line!(report, "{show_command}   # the browser sign-in token");
     Ok(())
 }
 
@@ -1932,6 +1942,41 @@ mod tests {
                 .contains("loginctl enable-linger \"$USER\"   # start at boot and survive logout")
         );
         assert!(output.contains("farhelm helm token show   # the browser sign-in token"));
+    }
+
+    /// Custom-state setup must print advice for the helm it actually configured.
+    /// Spaces and apostrophes survive shell parsing; otherwise the copied command
+    /// can mint a token for a different helm instead of signing into this one.
+    #[farhelm_testtrace::test]
+    fn custom_state_sign_in_advice_keeps_the_pinned_directory() {
+        let fixture = Fixture::new();
+        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let opts = SetupOptions {
+            state_dir: Some(PathBuf::from("state with 'quote")),
+            ..SetupOptions::default()
+        };
+        let (output, error) = run(&ctx, &opts, &mut fixture.manager());
+        assert!(error.is_empty(), "{error}");
+        let advice = output
+            .lines()
+            .find(|line| line.starts_with("farhelm helm token show"))
+            .expect("sign-in advice");
+        let words = shell_words::split(advice.split("   #").next().unwrap()).unwrap();
+        let pinned = fixture.cwd().join("state with 'quote");
+        assert_eq!(
+            words,
+            [
+                "farhelm",
+                "helm",
+                "token",
+                "show",
+                &format!("--state-dir={}", pinned.display())
+            ]
+        );
+        let parsed = crate::Cli::try_parse_from(words).expect("the printed command must parse");
+        assert!(
+            matches!(parsed.command, crate::Cmd::Helm { command: crate::HelmCmd::Token { command: crate::TokenCmd::Show { state_dir } } } if state_dir.as_deref() == Some(pinned.as_path()))
+        );
     }
 
     /// Rerunning setup unchanged writes nothing and restarts nothing — a

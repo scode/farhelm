@@ -26,7 +26,6 @@ triage.
 - `upload-cancellation-drops-final-reply.md` — Delete can discard an upload result during temporary connection
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
-- `feedback-cancel.md` — Feedback forwarding can be cancelled with its HTTP request.
 - `snapshot-root.md` — Writable snapshot may pass replacement checkout ownership.
 - `grok-trust.md` — Choosing Grok preserves incompatible workspace trust.
 - `font-focus.md` — Text-size buttons leave focus outside the terminal at the limits.
@@ -99,12 +98,7 @@ triage.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
 
-- `codex-draft-mistaken-for-question.md` — Pasting question-shaped diagnostics into an unsent Codex draft can make the
-  sidebar say the agent needs an answer when it is idle.
-
-- `uninstall-cancel.md` — Cancelled uninstall and Update planning can leave SSH helpers running.
 - `birth-oracle.md` — Birth-time oracle treats execution errors as absent capability.
-- `token-recovery-path.md` — Token recovery command silently targets a different path.
 - `template-catalog-error.md` — Template discovery failure looks like an empty catalog.
 - `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
 - `plans-heading-splice.md` — Legal Markdown headings can strand part of a plan question.
@@ -131,9 +125,6 @@ triage.
   intended sequence.
 - `tampering-regression-fails-reaching-tampering-boundary-macos.md` — The tampering test never reaches byte tampering on
   native macOS.
-- `literal-helm-state-path-breaks-ssh-connections.md` — A literal environment-reference spelling in the state path
-  breaks SSH routing.
-- `setups-sign-in-command-ignores-selected-state-directory.md` — Setup's sign-in advice can target a different helm.
 - `empty-chunk-test-accepts-upload-stalls-only-traffic.md` — The empty-chunk upload test can pass the wrong timeout
   behavior.
 - `releasing-both-relay-gates-establish-reverse-reply.md` — The relay test can pass without replies arriving in reverse
@@ -207,8 +198,6 @@ triage.
   fail on correct behavior.
 - `foreign-destination-fixture-reuse-identity-it-expects-reject.md` — The foreign-directory test could accidentally
   recreate the original identity.
-- `cancellation-protection-starts-too-late.md` — Cancelling a connection supervisor before its first poll leaves its
-  worker unmanaged.
 - `shutdown-race-test-establish-intended-interleaving.md` — The shutdown-race test does not hold reconciliation at the
   database boundary.
 - `logging-test-establish-refresh-completed.md` — The quiet-logging test could inspect logs before any refresh

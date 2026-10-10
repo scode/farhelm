@@ -235,9 +235,21 @@ pub async fn show(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
 /// a shell whose `XDG_STATE_HOME` differs from the one `helm setup` pinned)
 /// with a fresh database would print a new token and exit successfully
 /// while the real helm kept the leaked one.
+///
+/// A non-UTF-8 state path is refused before any work: copyable recovery
+/// advice must identify the same directory without substituting path bytes.
 pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
-    let show_command = recovery_show_command(state_dir.as_deref());
+    let explicit_state_dir = state_dir.is_some();
     let state_dir = state_dir_or_default(state_dir)?;
+    // Refuse before any directory, lock or credential changes. Recovery advice
+    // must name this exact helm rather than a lossy spelling of its path.
+    state_dir.to_str().with_context(|| {
+        format!(
+            "state directory {} is not valid UTF-8; point --state-dir elsewhere",
+            state_dir.display()
+        )
+    })?;
+    let show_command = recovery_show_command(explicit_state_dir.then_some(state_dir.as_path()));
     let db_path = state_dir.join("helm.db");
     // Before `ensure_private_dir` and the ownership lock, both of which
     // would create files. A serving helm always has its database, so this
@@ -1102,6 +1114,30 @@ mod tests {
         );
         assert!(!detail.contains("may or may not"), "{detail}");
         peer.await.unwrap();
+    }
+
+    /// Unsupported paths must be refused before rotation revokes credentials.
+    /// The database exists and has a token, so a missing database cannot stand
+    /// in for the UTF-8 refusal; neither a lock nor a changed token is allowed.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn rotate_refuses_non_utf8_before_changing_state() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root
+            .path()
+            .join(std::ffi::OsString::from_vec(b"state-\xff".to_vec()));
+        std::fs::create_dir(&dir).unwrap();
+        let store = HelmStore::open(&dir.join("helm.db")).await.unwrap();
+        let before = auth::show_token(&store).await.unwrap();
+        assert!(!dir.join(LOCK_NAME).exists());
+        let error = rotate(Some(dir.clone())).await.unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"), "{error:#}");
+        assert!(
+            !dir.join(LOCK_NAME).exists(),
+            "refusal must precede lock creation"
+        );
+        assert_eq!(auth::show_token(&store).await.unwrap(), before);
     }
 
     /// The recovery command names the rotated helm's state directory as

@@ -1205,7 +1205,8 @@ ordinary host it costs one more login when provisioning starts with no provision
 carries its letter as a prefix because only a trailing `%C` stays an expansion token; the expanded names differ in
 length, so a provisioning socket can never share a name with a supervisor socket. The supervisor socket fits the Unix
 socket limit for the usernames SPEC.md supports on Linux and most of them on macOS; provisioning's is one character
-longer, and each connection decides its own fit. Where a socket cannot fit, that connection runs with connection sharing
+longer, and each connection decides its own fit. Where a socket cannot fit, or the state path contains a literal `${`
+(which OpenSSH would expand even inside the quoted `ControlPath`), that connection runs with connection sharing
 explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The supervisor is reached by executing
 `farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
 that unix socket only — no network port, exactly as SPEC.md requires.

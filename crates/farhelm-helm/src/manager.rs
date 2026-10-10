@@ -1764,8 +1764,11 @@ impl ConnectionManager {
         let supervised = Arc::clone(&status);
         let incarnations = Arc::clone(&self.incarnations);
         let events = Arc::clone(&self.events);
+        // Capture the guard before spawn: cancellation can drop this future
+        // before its first poll, and a bare JoinHandle would detach the actor.
+        let abort_actor = AbortOnDrop(actor_task.abort_handle());
         let task = tokio::spawn(async move {
-            let _abort_actor = AbortOnDrop(actor_task.abort_handle());
+            let _abort_actor = abort_actor;
             let reason = match actor_task.await {
                 // A replacement that lost slot arbitration never entered
                 // the actor. It published nothing, so it has no state to
@@ -10114,7 +10117,8 @@ mod tests {
         assert_eq!(fixture.transport.attempts(host).len(), dials);
     }
 
-    /// Discarding a gated replacement produces no actor lifecycle event.
+    /// Discarding a gated replacement produces no actor lifecycle event,
+    /// whether its start gate is dropped or its unpolled supervisor is aborted.
     ///
     /// Slot arbitration creates this shape before a replacement has entered
     /// `HostActor::run`. Its supervisor must distinguish that completion
@@ -10147,7 +10151,7 @@ mod tests {
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
         let revision = manager.events().revision();
-        let mut discarded = manager.spawn_actor(row);
+        let mut discarded = manager.spawn_actor(row.clone());
         drop(discarded.start.take());
 
         tokio::time::timeout(Duration::from_secs(10), &mut discarded.task)
@@ -10158,6 +10162,27 @@ mod tests {
             manager.events().revision(),
             revision,
             "a never-started replacement must not publish retirement or invalidate the fleet"
+        );
+
+        // The current-thread runtime cannot poll either new task until this
+        // test yields. Keep the actor gated until supervision has finished
+        // cancelling, so an actor publication cannot race guard cleanup.
+        // Only a captured guard can prevent it becoming unmanaged afterward.
+        let mut cancelled = manager.spawn_actor(row);
+        let mut status = cancelled.status.subscribe();
+        assert!(!cancelled.task.is_finished());
+        cancelled.task.abort();
+        assert!(cancelled.task.await.unwrap_err().is_cancelled());
+        // Guard cleanup may already have dropped the gate's receiver. With
+        // the old placement, releasing this gate exposes the orphaned actor.
+        let _ = cancelled.start.take().unwrap().send(());
+        drop(cancelled.status);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), status.changed())
+                .await
+                .expect("the unpolled actor must release its status sender")
+                .is_err(),
+            "an actor whose supervisor never ran must not publish any state"
         );
     }
 
