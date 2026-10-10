@@ -57,3 +57,43 @@ The required fresh-context gpt-6.1-sol high source review passed with no remaini
 test-quality findings. It inspected all three publication paths, the private failure proof, and the full test-authoring
 contract. It did not execute runtime checks; the executing session ran those separately. A second fresh gpt-6.1-sol
 medium wording reader understood the failure and inode tradeoff and found no unclear or contradicted claims.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1805, last of this round's five plans. This round landed five triage plans together, in
+order: untrusted-text-escaping, git-env-isolation, os-readback-fixes, harness-tooling-fixes and ssh-config-atomic. Each
+rebased onto main with only conflicts in the review queue's index, where each plan removes only its own entries. Since
+their stacks were based, main gained this day's earlier landings (sounds, file downloads, the reboot follow-up of the
+supervisor's timer sweep) and the 2026-10-10 spec triage; of the files these plans touch, only the helm's supervisor
+client changed upstream (download routing), away from the log line one of them changes. A separate reviewer read all
+five against each other and main by reading the code only, and checked each against its triage decisions and completion
+criteria.
+
+#### A fix made while landing
+
+The provisioning test now rewrites the user's ssh config by writing a new file and renaming it into place, which is what
+makes the edit atomic, but it did so on every teardown even when the run had added nothing, for example after a failed
+build. Replacing the file breaks a hard link a dotfile manager may have made, resets its owner and drops extended
+attributes. The landing made removal return early when this run's block is not in the file, so the config is only
+replaced when there is something to take out. In #1805 before it merged.
+
+Smaller notes left as they are: interrupted runs can leave a temporary copy of the config beside it, which nothing
+sweeps (it holds the user's own config at its own mode); a read-only config is now edited, where the old in-place write
+failed; and there is no fsync before the rename. The test's block still sits at the top of the user's config while a run
+is in progress, which is a separate queued finding.
+
+#### Checks
+
+- Run now, on the first four stacked in landing order: `dist generate --check` (the release workflow matches its
+  sources), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the
+  supervisor, helm, UI and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no
+  retries (run `1b086587`, 2699 of 2699), and on Chromium and WebKit with one worker and no retries the spawn, header,
+  readers and change-feed specs (run `50ffb9fe`, 44 passed; the two skipped are the real-Claude spawn cases).
+- Run now, after the landing's fixes, with ssh-config-atomic stacked on top:
+  `cargo clippy -p farhelm-helm --all-targets`, `shellcheck` on the provisioning script, and the helm's client tests
+  including the new log-escaping test (run `0067a921`, 68 of 68). The new test was also seen to fail with the escaping
+  removed, then restored.
+- Reused from the executors: their focused runs for each fix, the hosted macOS compile of the argument-reading change,
+  and the deflake end-to-end evaluation.
+
+Nothing in the report above was made untrue by the landing.
