@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`linux-test-false-failures`](reports/linux-test-false-failures.report.md) landed 2026-10-10 in #1814: Linux tests stop failing on correct code (partial witness reads, bash-as-sh, quoted paths, early notifications, a mis-timed silence window, an inherited state directory) and stop leaking tmux servers, units, files and stopped processes
 - [`setup-refusals`](reports/setup-refusals.report.md) landed 2026-10-10 in #1817: setup refuses install paths containing `$`, service files of a type other than simple read as unrecognised, and uninstall's lock advice is shell-quoted
 - [`supervisor-test-oracles`](reports/supervisor-test-oracles.report.md) landed 2026-10-10 in #1816: supervisor tests for writer shutdown, replay settlement, OMP conversation binding, per-key locks, create replay, reservation refusals and restart preservation assert what they claim
 - [`e2e-helm-test-oracles`](reports/e2e-helm-test-oracles.report.md) landed 2026-10-10 in #1818: Stop-sweep tests run without cgroup scopes, and installer, provisioning, upload, relay, list-race, stale-refresh and malformed-message tests assert what they claim
