@@ -60,10 +60,11 @@ use dioxus::prelude::*;
 use crate::api::{
     Commit, PreferenceValue, ProbeResponse, ProvisioningOperation, ProvisioningSubmission,
     adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
-    set_commands_without_asking, set_host_destination, set_yolo_without_asking, store_preference,
+    set_commands_without_asking, set_host_appearance, set_host_destination,
+    set_yolo_without_asking, store_preference,
 };
 use crate::app_updater::use_app_updater;
-use crate::icons::{LocalHostIcon, RemoteHostIcon};
+use crate::icons::{HostMark, LocalHostIcon};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -794,6 +795,25 @@ impl HostsRead {
         }
     }
 
+    /// Install only the identity that this client just durably saved.
+    /// The owner must first supersede reads begun before the write finished;
+    /// otherwise an older GET could undo this pair before the next choice.
+    pub(crate) fn record_appearance(
+        &mut self,
+        id: HostId,
+        icon: farhelm_proto::host_appearance::HostIcon,
+        color: farhelm_proto::host_appearance::HostColor,
+    ) {
+        if let Some(host) = self
+            .snapshot
+            .as_mut()
+            .and_then(|list| list.iter_mut().find(|host| host.id == id))
+        {
+            host.icon = icon;
+            host.color = color;
+        }
+    }
+
     /// The rows to draw, or `None` while no read has ever succeeded.
     pub(crate) fn hosts(&self) -> Option<&[Host]> {
         self.snapshot.as_deref()
@@ -1017,6 +1037,13 @@ pub(crate) fn HostsPanel(
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
     on_changed: EventHandler<()>,
+    /// Publish confirmed identity before releasing the write token. The
+    /// parent owns the read-ordering barrier against older host reads.
+    on_appearance_committed: EventHandler<(
+        HostId,
+        farhelm_proto::host_appearance::HostIcon,
+        farhelm_proto::host_appearance::HostColor,
+    )>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
@@ -1346,6 +1373,38 @@ pub(crate) fn HostsPanel(
                 .insert(host, SettingsField::CommandsWithoutAsking);
         } else {
             settings_dialog::reset_checkboxes();
+        }
+    };
+
+    // Save only the explicit choice from the event. The unchanged word is
+    // read at handler entry, and success publishes both before `run` releases
+    // the token. This closes the POST-to-refresh gap without a second cache.
+    let appearance_base = base.clone();
+    let on_appearance = move |(host, choice)| {
+        use settings_dialog::AppearanceChoice;
+        let current = hosts
+            .peek()
+            .hosts()
+            .and_then(|list| list.iter().find(|row| row.id == host).cloned());
+        let Some(current) = current else {
+            return;
+        };
+        let (icon, color) = match choice {
+            AppearanceChoice::Icon(icon) => (icon, current.color),
+            AppearanceChoice::Color(color) => (current.icon, color),
+        };
+        let base = appearance_base.clone();
+        if run(
+            host,
+            Box::pin(async move {
+                let commit = set_host_appearance(&base, host, icon, color).await?;
+                // A successful HTTP write committed the specified pair even
+                // if its body is unreadable; retain the existing warning.
+                on_appearance_committed.call((host, icon, color));
+                Ok(commit)
+            }),
+        ) {
+            dialog_write.write().insert(host, SettingsField::Appearance);
         }
     };
 
@@ -1807,6 +1866,7 @@ pub(crate) fn HostsPanel(
                     on_edit_cancel,
                     on_yolo_without_asking: on_yolo_without_asking.clone(),
                     on_commands_without_asking: on_commands_without_asking.clone(),
+                    on_appearance,
                     on_close: on_settings_close,
                     host,
                 }
@@ -2916,7 +2976,7 @@ fn HostRow(
                         span { class: "visually-hidden", "local" }
                     },
                     HostKind::Ssh => rsx! {
-                        RemoteHostIcon {}
+                        HostMark { icon: host.icon, color: host.color }
                         span { class: "visually-hidden", "remote" }
                     },
                     HostKind::Unrecognized => rsx! {},
@@ -4074,6 +4134,8 @@ mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         }
     }
 
@@ -5219,6 +5281,8 @@ mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         }
     }
 

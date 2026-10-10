@@ -2563,6 +2563,8 @@ mod tests {
             remote_state_dir: None,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
             state,
             incarnation: 1,
         }

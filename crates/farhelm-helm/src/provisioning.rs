@@ -838,6 +838,8 @@ mod tests {
                 cache_truncated: false,
                 yolo_without_asking: false,
                 commands_without_asking: false,
+                icon: Default::default(),
+                color: Default::default(),
             };
             let error = layout(root.path())
                 .plan_for_row(
@@ -894,6 +896,8 @@ mod tests {
             cache_truncated: false,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         };
         let plan = PlanLayout::production(root.path().join("state"))
             .plan_for_row(
@@ -999,6 +1003,8 @@ mod tests {
             cache_truncated: false,
             yolo_without_asking: false,
             commands_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
         };
         let reach = Reach {
             home: root.path().join("home"),

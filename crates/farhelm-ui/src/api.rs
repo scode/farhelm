@@ -3522,6 +3522,28 @@ pub(crate) async fn answer_approval(
     Ok(AnswerOutcome::Delivered)
 }
 
+/// Save both host identity words through the existing per-field write flow.
+/// A successful but undecodable reply is still a committed write; callers
+/// keep the usual warning and refresh the authoritative hosts read.
+pub(crate) async fn set_host_appearance(
+    base: &str,
+    host: HostId,
+    icon: farhelm_proto::host_appearance::HostIcon,
+    color: farhelm_proto::host_appearance::HostColor,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/appearance");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "icon": icon, "color": color })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+}
+
 /// Forget a registered host (`DELETE /api/hosts/{id}`).
 ///
 /// SPEC.md's remove-merely-forgets contract: the registry row and the

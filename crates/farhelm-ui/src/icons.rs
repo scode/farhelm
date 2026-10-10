@@ -14,10 +14,11 @@
 //! second asset-parity surface with nothing to show for it. Inline SVG pays
 //! neither cost: the shape is markup, `currentColor` lets the caller style
 //! its meaning, and there is no file for the two build targets to disagree
-//! about. Remote glyphs inherit the surrounding text color; session-local
-//! glyphs retain an explicit red caution color across row states.
+//! about. Remote marks use the chosen host identity color, defaulting to the
+//! ordinary foreground; local glyphs retain an explicit red caution color
+//! across callers and row states.
 //!
-//! Both components below deliberately carry no accessible name of their own
+//! Host-mark components deliberately carry no accessible name of their own
 //! (`aria-hidden="true"`, and neither takes a `title` prop) — see each
 //! caller's own doc for why: the word belongs to a sibling element the caller
 //! controls, using the same clip-not-remove `.visually-hidden` pattern
@@ -33,7 +34,8 @@
 //! reuses this same title-line slot) would extend what appears beside these
 //! icons, not this file's shape.
 //!
-//! Both roots also carry `data-glyph="local"`/`"remote"` — the shared
+//! Host roots carry `data-glyph="local"` or the chosen icon word (`"cloud"`
+//! by default). The shared
 //! `host-kind-icon` class sizes and positions either glyph identically, so
 //! nothing in the DOM otherwise distinguishes which SHAPE actually
 //! rendered. Without a per-glyph marker, a bug that swapped the two
@@ -344,6 +346,7 @@ pub(crate) fn LocalHostIcon() -> Element {
         svg {
             class: "host-kind-icon",
             "data-glyph": "local",
+            style: "color: var(--danger)",
             "data-tooltip": "local: on this machine, where the helm runs",
             view_box: "0 0 16 16",
             fill: "none",
@@ -358,32 +361,94 @@ pub(crate) fn LocalHostIcon() -> Element {
     }
 }
 
-/// The remote-session mark: a lobed cloud outline.
+/// Draw the helm's chosen remote identity in the shared host-mark box.
 ///
-/// Deliberately a different silhouette family from the laptop's straight
-/// lines — the two shapes differ in outline, not only in detail that gets
-/// lost first as glyphs shrink. The stroke stays at the shared 1.3 weight
-/// rather than a bolder one: a cloud is a secondary identity cue, and a
-/// heavier or filled mark would compete with the live status dot. A cloud
-/// can suggest internet hosting rather than an ordinary remote machine, so
-/// the caller's locality label stays authoritative and the glyph never
-/// stands alone. Its hover text says what it means for the same reason
-/// [`LocalHostIcon`]'s does.
+/// The tint identifies a host and never a status. Geometry is Farhelm's own
+/// fifteen-icon set, kept at the original 16-unit box and 1.3 stroke so small
+/// marks have the same visual weight. The caller retains the accessible
+/// locality word; the SVG is decorative and its tooltip still explains SSH.
 #[component]
-pub(crate) fn RemoteHostIcon() -> Element {
+pub(crate) fn HostMark(
+    #[props(default)] icon: farhelm_proto::host_appearance::HostIcon,
+    #[props(default)] color: farhelm_proto::host_appearance::HostColor,
+) -> Element {
+    use farhelm_proto::host_appearance::{HostColor, HostIcon};
+    let tint = if color == HostColor::Default {
+        "color: var(--fg-0)".to_string()
+    } else {
+        format!("color: var(--host-icon-{})", color.as_str())
+    };
     rsx! {
         svg {
-            class: "host-kind-icon",
-            "data-glyph": "remote",
+            class: "host-kind-icon", "data-glyph": icon.as_str(),
+            "data-host-color": color.as_str(), style: "{tint}",
             "data-tooltip": "remote: on another machine, reached over ssh",
-            view_box: "0 0 16 16",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "1.3",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
+            view_box: "0 0 16 16", fill: "none", stroke: "currentColor",
+            stroke_width: "1.3", stroke_linecap: "round", stroke_linejoin: "round",
             "aria-hidden": "true",
-            path { d: "M4 12.5a2.5 2.5 0 0 1-0.3-4.98A3.7 3.7 0 0 1 11 6.3a2.6 2.6 0 0 1 1.2 4.9V12.5Z" }
+            match icon {
+                HostIcon::Cloud => rsx! {
+                    path { d: "M4 12.5a2.5 2.5 0 0 1-0.3-4.98A3.7 3.7 0 0 1 11 6.3a2.6 2.6 0 0 1 1.2 4.9V12.5Z" }
+                },
+                HostIcon::House => rsx! {
+                    path { d: "M2 7.5 8 2.5l6 5" }
+                    path { d: "M3.5 6.3v7.2h9V6.3" }
+                    path { d: "M6.8 13.5V10h2.4v3.5" }
+                },
+                HostIcon::Flask => rsx! {
+                    path { d: "M6 1.8h4M6.8 1.8v4.4L2.9 12.7A1.2 1.2 0 0 0 4 14.5h8a1.2 1.2 0 0 0 1.1-1.8L9.2 6.2V1.8" }
+                    path { d: "M4.6 10h6.8" }
+                },
+                HostIcon::Database => rsx! {
+                    ellipse { cx: "8", cy: "3.8", rx: "5", ry: "2" }
+                    path { d: "M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8" }
+                    path { d: "M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" }
+                },
+                HostIcon::Chip => rsx! {
+                    rect { x: "4", y: "4", width: "8", height: "8", rx: "1" }
+                    rect { x: "6.3", y: "6.3", width: "3.4", height: "3.4" }
+                    path { d: "M6 1.8V4M10 1.8V4M6 12v2.2M10 12v2.2M1.8 6H4M1.8 10H4M12 6h2.2M12 10h2.2" }
+                },
+                HostIcon::Rocket => rsx! {
+                    path { d: "M8 1.8c2.3 1.6 3.2 4 3 6.8l-1.4 2.2H6.4L5 8.6C4.8 5.8 5.7 3.4 8 1.8Z" }
+                    path { d: "M5.2 8.4 3.2 10.5l.3 2.3 2.6-1.4M10.8 8.4l2 2.1-.3 2.3-2.6-1.4" }
+                    path { d: "M7.2 12.6 8 14.4l.8-1.8" }
+                    circle { cx: "8", cy: "6", r: "1.1" }
+                },
+                HostIcon::Gear => rsx! {
+                    circle { cx: "8", cy: "8", r: "2.2" }
+                    circle { cx: "8", cy: "8", r: "4.6" }
+                    path { d: "M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M3.5 12.5l1.3-1.3M11.2 4.8l1.3-1.3" }
+                },
+                HostIcon::Gem => rsx! {
+                    path { d: "M4.3 2.5h7.4L14 6 8 13.8 2 6Z" }
+                    path { d: "M2 6h12M6 2.5 5.2 6 8 13.8 10.8 6 10 2.5" }
+                },
+                HostIcon::Hexagon => rsx! {
+                    path { d: "M8 1.8 13.4 4.9v6.2L8 14.2 2.6 11.1V4.9Z" }
+                },
+                HostIcon::Triangle => rsx! {
+                    path { d: "M8 2.2 14 13.3H2Z" }
+                },
+                HostIcon::Ring => rsx! {
+                    circle { cx: "8", cy: "8", r: "5.5" }
+                    circle { cx: "8", cy: "8", r: "2" }
+                },
+                HostIcon::Square => rsx! {
+                    rect { x: "2.8", y: "2.8", width: "10.4", height: "10.4", rx: "1.5" }
+                },
+                HostIcon::Bug => rsx! {
+                    ellipse { cx: "8", cy: "9.3", rx: "3.4", ry: "4.4" }
+                    path { d: "M8 5v8.6M5.6 3.4 6.7 5M10.4 3.4 9.3 5M1.8 7.5h2.8M11.4 7.5h2.8M1.8 11h2.8M11.4 11h2.8" }
+                },
+                HostIcon::Factory => rsx! {
+                    path { d: "M1.8 13.8V7.4l3.8 2.4V7.4l3.8 2.4V2.2h3.6v11.6Z" }
+                },
+                HostIcon::Castle => rsx! {
+                    path { d: "M2.5 14V3.5h2v2h2v-2h3v2h2v-2h2V14Z" }
+                    path { d: "M6.6 14v-3a1.4 1.4 0 0 1 2.8 0v3" }
+                },
+            }
         }
     }
 }

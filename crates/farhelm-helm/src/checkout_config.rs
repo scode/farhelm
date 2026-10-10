@@ -1338,6 +1338,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 26;",

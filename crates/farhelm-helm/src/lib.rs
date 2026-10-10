@@ -737,6 +737,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_alias),
         )
         .route(
+            "/api/hosts/{id}/appearance",
+            axum::routing::post(hosts::set_appearance),
+        )
+        .route(
             "/api/hosts/{id}/yolo-without-asking",
             axum::routing::post(hosts::set_yolo_without_asking),
         )
@@ -2075,6 +2079,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             store::HostStoreError::DuplicateDestination(_)
             | store::HostStoreError::AliasTaken(_)
             | store::HostStoreError::LocalHostImmutable
+            | store::HostStoreError::LocalHostAppearanceFixed
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }
             | store::HostStoreError::IdentityClaimedBeforeRegistration { .. }

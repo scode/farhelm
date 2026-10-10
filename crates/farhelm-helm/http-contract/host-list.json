@@ -12,6 +12,8 @@
       "remote_state_dir": null,
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "build_version": "0.16.0",
         "identity": "identity1",
@@ -36,6 +38,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "attempt": 2,
         "last_error": "connection refused",
@@ -54,6 +58,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "cause": "transport-failure",
         "last_error": "timed out",
@@ -72,6 +78,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "our_build": "0.16.0",
         "our_protocol": 29,
@@ -93,6 +101,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "phase": "identity-mismatch",
         "recorded": "old",
@@ -111,6 +121,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "phase": "identity-unverified",
         "recorded": "old"
@@ -128,6 +140,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "identity": "identity2",
         "phase": "duplicate",
@@ -146,6 +160,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "phase": "retired",
         "reason": "removed"
@@ -163,6 +179,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "build_version": "0.15.0",
         "identity": null,
@@ -187,6 +205,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "icon": "cloud",
+      "color": "default",
       "state": {
         "build_version": "0.16.0",
         "identity": null,

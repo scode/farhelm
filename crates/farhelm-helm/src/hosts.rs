@@ -81,6 +81,10 @@ pub(crate) struct HostView {
     /// without asking the user; `false` (ask first) until the user changes it. A row missing
     /// from the registry read reports that asking is required, like the YOLO setting.
     pub(crate) commands_without_asking: bool,
+    /// Helm-owned identity choices, independent of the actor's connection.
+    pub(crate) icon: farhelm_proto::host_appearance::HostIcon,
+    /// Identity tint only; connection and permission colors stay separate.
+    pub(crate) color: farhelm_proto::host_appearance::HostColor,
     pub(crate) state: HostStateView,
     /// Which CONNECTION this host is on — an opaque, monotonic token that
     /// changes whenever the host's client does, including when it goes away
@@ -421,6 +425,8 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
                 yolo_without_asking: registry.is_some_and(|row| row.yolo_without_asking),
                 commands_without_asking: registry.is_some_and(|row| row.commands_without_asking),
+                icon: registry.map(|row| row.icon).unwrap_or_default(),
+                color: registry.map(|row| row.color).unwrap_or_default(),
                 state: (&snapshot.state).into(),
                 incarnation: snapshot.incarnation,
             }
@@ -539,6 +545,46 @@ async fn set_yolo_without_asking_owned(
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// Both identity words are required and validated by the shared vocabulary.
+/// Extra fields are refused so a misspelled setting cannot be silently ignored.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AppearanceSpec {
+    pub(crate) icon: farhelm_proto::host_appearance::HostIcon,
+    pub(crate) color: farhelm_proto::host_appearance::HostColor,
+}
+
+/// Save a remote host's chosen mark and announce it to every open client.
+///
+/// This is a helm-owned operation: a client leaving after the durable write
+/// must not cancel the feed bump and strand other clients on the old mark.
+/// Actors do not consume decorative identity, so no reconnect or reconcile
+/// is needed. The ordinary host write lock serializes it with removal.
+pub(crate) async fn set_appearance(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<AppearanceSpec>,
+) -> impl IntoResponse {
+    crate::run_owned(async move {
+        let serialized = state.manager.host_write_lock(host).await;
+        match state
+            .store
+            .set_appearance(host, spec.icon, spec.color)
+            .await
+        {
+            Ok(true) => state.manager.events().bump(),
+            Ok(false) => {}
+            Err(error) => return http_error(error),
+        }
+        drop(serialized);
+        match host_view(&state, host).await {
+            Ok(view) => axum::Json(view).into_response(),
+            Err(error) => http_error(error),
+        }
+    })
+    .await
 }
 
 /// The body of `POST /api/hosts/{id}/commands-without-asking`: the new setting, required.
@@ -2954,5 +3000,105 @@ mod tests {
             "the host's session is listed once, under the entry that owns it"
         );
         assert_eq!(sessions["sessions"][0]["host"], original);
+    }
+
+    /// A chosen identity must be durable and announced exactly once per
+    /// change, so another client can redraw without reconnecting the host.
+    /// Unknown words, missing/extra keys, local and absent hosts are refused
+    /// and never change the stored mark or the event revision.
+    #[farhelm_testtrace::test]
+    async fn appearance_route_validates_stores_and_announces_only_changes() {
+        let harness = lone_local_helm().await;
+        let (status, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({"ssh": "user@appearance-check"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        assert_eq!(added["icon"], "cloud");
+        assert_eq!(added["color"], "default");
+        let route = format!("/api/hosts/{host}/appearance");
+        let events = Arc::clone(harness.manager.events());
+        let before = events.revision();
+        let (status, view, text) = call(
+            &harness,
+            "POST",
+            &route,
+            Some(serde_json::json!({"icon": "rocket", "color": "teal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(view["icon"], "rocket");
+        assert_eq!(view["color"], "teal");
+        let saved = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(saved.icon.as_str(), "rocket");
+        assert_eq!(saved.color.as_str(), "teal");
+        let after = events.revision();
+        assert!(after > before, "a changed identity must wake other clients");
+        let (status, _, _) = call(
+            &harness,
+            "POST",
+            &route,
+            Some(serde_json::json!({"icon": "rocket", "color": "teal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(events.revision(), after, "a repeat must stay silent");
+        for invalid in [
+            serde_json::json!({"icon": "spaceship", "color": "teal"}),
+            serde_json::json!({"icon": "rocket", "color": "red"}),
+            serde_json::json!({"icon": "rocket"}),
+            serde_json::json!({"icon": "rocket", "color": "teal", "colour": "sand"}),
+        ] {
+            let (status, _, text) = call(&harness, "POST", &route, Some(invalid)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{text}");
+        }
+        let local = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.kind == crate::store::HostKind::Local)
+            .unwrap()
+            .id;
+        for (id, expected) in [
+            (local, StatusCode::CONFLICT),
+            (99_999, StatusCode::NOT_FOUND),
+        ] {
+            let (status, _, text) = call(
+                &harness,
+                "POST",
+                &format!("/api/hosts/{id}/appearance"),
+                Some(serde_json::json!({"icon": "cloud", "color": "default"})),
+            )
+            .await;
+            assert_eq!(status, expected, "{text}");
+        }
+        assert_eq!(
+            events.revision(),
+            after,
+            "refusals cannot announce a change"
+        );
+        let (_, listing, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let saved = listing["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == host)
+            .unwrap();
+        assert_eq!(saved["icon"], "rocket");
+        assert_eq!(saved["color"], "teal");
     }
 }

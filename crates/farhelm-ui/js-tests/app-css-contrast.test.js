@@ -126,6 +126,12 @@ function contrastRatio(hexA, hexB) {
 // added, so it is the pair a retune of either token is likeliest to break.
 const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
+  // Decorative host colors must stay legible on the sidebar, selections,
+  // settings/header and picker rows. Binding each tint to every actual
+  // surface catches a later palette retune that screenshots cannot reveal.
+  ...["lavender", "orchid", "teal", "steel", "sand", "copper"].flatMap((name) =>
+    [...ROW_SURFACES, "--control-hover-bg", "--well"].map((bg) => [`--host-icon-${name}`, bg, 4.5])
+  ),
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-0", bg, 4.5]),
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-1", bg, 4.5]),
   ["--fg-2", "--bg-0", 4.5],

@@ -260,6 +260,8 @@ mod tests {
                 cache_truncated: false,
                 yolo_without_asking: false,
                 commands_without_asking: false,
+                icon: Default::default(),
+                color: Default::default(),
             }
         };
         let rows = vec![
