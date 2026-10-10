@@ -125,3 +125,53 @@ mechanism. Every touched file received a separate documentation pass. The host-r
 refreshed to protocol 45 and passed a new wording cold read; the other wording retains its earlier cold-read results.
 Reviewers performed source inspection; runtime results and artifact inspection belong to the executor. Native exact
 model reporting and usage counters were unavailable.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as three squash commits on main, in order: #1769 (session-host file reads), #1771
+(authenticated file downloads) and #1773 (downloads from terminal paths), in the plan's second round, after
+sweep-on-timer's follow-up and waiting-sound. You decided the status message moves to the top of the terminal (success
+fades, a failure stays until the next click or download), that downloads deliberately carry no macOS quarantine flag and
+SPEC.md says so, and that the protocol moves to 45 because managed-checkout-trash took 44. The rebase met only the
+TODO.md entries removed by this plan and waiting-sound, and, at the last merge, the SPEC.md conflict described below.
+
+#### Review before merging
+
+A separate reviewer read the round by reading the code only and found the decision met: the strip sits at the top and
+the browser test checks its position, "saved to" fades after five seconds, a failure stays until a click on the terminal
+or another download, and SPEC.md's local-authority section records the host-to-machine transfer and the absent
+quarantine flag. Protocol 45 is consistent everywhere, and the trash plan's version-44 messages are all still present.
+
+#### Fixes made while landing
+
+- The status strip kept the stacking layer it had when it sat at the bottom, which now let it draw over the header's
+  Restart, Replace and Delete confirmations, over dialogs such as the quick switcher, and over the file-hover disclosure
+  that shows what a click would download. It now sits just above the terminal's own layers and below every other layer,
+  is listed in the stylesheet's layer list, and is capped in height so a long failure message cannot reach down over the
+  agent's input. In #1773.
+- One new end-to-end test used a nested condition that the toolchain's lint now asks to be collapsed; the landing
+  collapsed it. In #1769.
+
+Smaller notes left as they are: one browser assertion that no download request was sent runs immediately after the
+click, so it could pass before a request is reported; and the changelog fragment and user docs do not mention the absent
+quarantine flag (SPEC.md does, as you asked).
+
+#### Checks
+
+All three plans of this round (sweep-on-timer's follow-up, waiting-sound, terminal-file-download) were stacked in
+landing order and checked together.
+
+- Run now: `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and `cargo build` (clean after the landing's fixes below); the
+  supervisor, helm, UI and protocol unit tests in full with the file-download end-to-end tests, through the recorder
+  with pinned tmux 3.7c, four slots and no retries (run `6225cfec`, 2699 of 2700; the failure is sweep-on-timer's
+  database upgrade test, fixed as described in its notes, after which the upgrade, schema and store tests passed 113 of
+  113 in run `106eaf3c`); the UI JavaScript tests run directly (226 of 226); the desktop asset comparison (run
+  `d09df54a`, 24 assets on both sides); and, on Chromium and WebKit with one worker and no retries, the sounds,
+  settings, change-feed, sort, stale-read, filter, approval-layout and terminal-file specs (run `208a7db7`, 122 of 122),
+  which include the four specs the first waiting-sound round broke.
+- Between the checks and the merges, main gained the 2026-10-10 triage decisions written into SPEC.md (#1801) and its
+  plan (#1802). They touch none of these plans' subjects; the only effect was a textual SPEC.md conflict in the last
+  terminal-file-download PR, resolved by keeping both texts. No checks were re-run for that.
+
+Nothing in the report above was made untrue by the landing, beyond the strip's layering described above.
