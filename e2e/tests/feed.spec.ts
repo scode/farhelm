@@ -311,7 +311,8 @@ test.describe("the invalidation feed", () => {
       await held.waitForCaptures(1);
       feed.notify(3);
       await expect.poll(async () => {
-        const list = (await readFeedReaders(page)).find((snapshot) => snapshot.role === "list");
+        const snapshots = await readFeedReaders(page);
+        const list = snapshots.find((snapshot) => snapshot.role === "list");
         return list?.acted_on === list?.notices && list?.readers[0].running === true &&
           list.readers[0].demand === "Notice" && list.readers[0].task === true;
       }, { timeout: 30_000, message: "the snapshot must expose the follow-up owed behind the held read" }).toBe(true);
@@ -327,7 +328,7 @@ test.describe("the invalidation feed", () => {
     await openSession(page, second.id, second.title);
     await waitForFeedReadersSettled(page);
     const snapshots = await readFeedReaders(page);
-    expect(snapshots).toHaveLength(2);
+    expect(snapshots).toHaveLength(3);
     expect(snapshots.filter((snapshot) => snapshot.role === "session").map((snapshot) => snapshot.id))
       .toEqual([second.id]);
   });
@@ -707,8 +708,8 @@ test.describe("the invalidation feed", () => {
    * might be that retry rather than anything the feed asked for, and no
    * counter can tell the two apart. A satisfied reader has no standing
    * demand, so once the freeze lifts the ONLY thing that can produce a read
-   * is the notice — and `reachedHelm() === 1` says exactly one read was
-   * produced.
+   * is the notice — and `reachedHelm() === 1` says exactly one listing read
+   * was produced. Sounds observe that accepted reply without another read.
    *
    * The freeze lifts in the same synchronous breath as the notification, and
    * immediately after a stale answer has been served — so the next fallback
@@ -764,6 +765,7 @@ test.describe("the invalidation feed", () => {
     // is doing work rather than guarding an idle page) and leaves most of an
     // interval before the next tick.
     await gate.waitForStaleAnswer();
+    await waitForFeedReadersSettled(page, undefined, false);
     // The rename has not been painted, and the row is still there saying the
     // old name — which is the honest mid-outage picture: the page has been
     // reading all along and every answer described the world it started in.
@@ -779,11 +781,12 @@ test.describe("the invalidation feed", () => {
     await expect(row(page, session.id).locator(".session-title")).toHaveText(renamed, {
       timeout: 20_000,
     });
+    await waitForFeedReadersSettled(page);
     expect(
       gate.reachedHelm(),
-      "the handshake owes exactly one read: the reads taken during the outage were all " +
+      "the handshake owes exactly one listing read: outage reads were all " +
         "answered, so nothing was owed to a retry, and a greeted subscription is healthy so " +
-        "the fallback is off — a second read here would mean the repaint had another author",
+        "the fallback is off — an extra read would mean the repaint had another author",
     ).toBe(1);
   });
 

@@ -95,7 +95,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox")).toHaveCount(2);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(5);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(setup).toBeFocused();
     await expect(setup).not.toBeChecked();

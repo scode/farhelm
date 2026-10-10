@@ -9,6 +9,8 @@
 //! preference: whether to install updates automatically. It belongs to that
 //! app installation (SPEC.md "Session list"), so it is read from and written
 //! to the app's own state file through the updater, never the helm.
+//! Sound switches belong to this device's webview storage and remain live
+//! even if a storage write fails; the sound asset owns those controls.
 
 use dioxus::prelude::*;
 
@@ -42,8 +44,7 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose the two permanent host answers, and in a desktop app whose updater
-/// runs the automatic-updates choice, without introducing another save step.
+/// Expose helm preferences, device sounds and desktop updates without a save step.
 ///
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
@@ -84,7 +85,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 },
                 h2 { class: "host-settings-title", "settings" }
                 p { class: "host-settings-help",
-                    "These choices apply to every host on this helm. Other open clients pick them up when they reload."
+                    "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
                 }
                 div {
                     label { class: "app-settings-choice",
@@ -130,6 +131,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 }
+                crate::sounds::SoundSettings {}
                 if let Some(updater) = updater {
                     p { class: "host-settings-help",
                         "This one belongs to this Farhelm app on this Mac."

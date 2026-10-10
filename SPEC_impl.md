@@ -747,6 +747,26 @@ the fixed narrow-window and row-menu-pointer media cutoffs. The existing termina
 grid change without debounce. A focused separator prevents terminal reveal from taking keyboard focus. Desktop
 persistence has the same webview-localStorage assumptions as terminal text size below.
 
+Device sounds live in `sounds.js`, which generates the three approved note sequences with Web Audio at master gain 0.3.
+Its `farhelm.sound.waiting`, `farhelm.sound.approval` and `farhelm.sound.finished` localStorage keys accept only `true`
+or `false`; missing, malformed or inaccessible values use their event defaults. One context serves the page, resumed on
+trusted pointer-release, click or key gestures, with no replay queue. Touch release is required for mobile browser
+activation. Desktop persistence has the same webview-storage assumption as terminal text size below.
+
+The authenticated `SessionSounds` component lives under the persistent sidebar and observes its accepted listing and
+view scope signals, without another session-list request. The scope advances when an accepted reply changes the filter,
+including a return to a previously shown filter while an approval read is pending. That first reply records the view's
+silent status baseline, so a later status change is still detected when approval replies lag. Approval history starts
+with its own first successful reply. It keeps prior statuses for that view and all seen approval ids. Its
+serialized/retrying surface reader reads approval data on feed notices, accepted listing changes and the
+disconnected-feed fallback. A different accepted filter silently reseeds status history; sort and selection changes and
+reconnects preserve it. A new authenticated mount starts silently. Status coverage has the sidebar's listing cap.
+Successful approval reads pair with current sidebar evidence for pure JS transition and priority rules; device switches
+and `data-window-active` quiet the open session before priority is chosen. Priority is per observed snapshot, not a time
+window across independent replies. Failed reads leave history intact; a silent audio refusal still consumes the event.
+Approval-card markup is not an input to detection, and approval requests remain audible when their requesting session is
+outside the sidebar's view.
+
 Terminal text size lives entirely in `terminal.js`. It reads the remembered size once, at script load, from the page's
 localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or
 anything but plain digits, means the default, and an out-of-range number is clamped) and constructs every terminal at

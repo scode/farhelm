@@ -18,7 +18,7 @@ import { recordPage } from "./timeline";
 type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
 type ReaderState = { running: boolean; demand: string; task: boolean };
 type ReaderSnapshot = {
-  role: "list" | "session";
+  role: "list" | "session" | "sounds";
   readers: ReaderState[];
   acted_on: string;
   notices?: string;
@@ -31,6 +31,7 @@ type ReaderSnapshot = {
   id?: string;
   stale?: boolean;
   host_absent?: boolean;
+  baseline?: boolean;
 };
 
 /** Install before navigation; ordinary pages never register reader callbacks. */
@@ -62,10 +63,16 @@ export async function readFeedReaders(page: Page): Promise<ReaderSnapshot[]> {
  * count without adding an effect. Selection agreement excludes a pending mount. In the
  * deliberately stale fixture, pass its session ID: a confirmed-absent host proves its
  * initial host effect ran. Other selected sessions must be fresh, as these fixtures expect.
+ * Set feedHealthy to false only for an intentional outage boundary: successfully
+ * answered fallback reads can retire while the socket still owes its greeting.
  * This is a setup boundary; the caller's uninterrupted zero-read window proves silence.
  */
-export async function waitForFeedReadersSettled(page: Page, staleSession?: string): Promise<void> {
-  await waitForFeedReaderBoundary(page, false, staleSession);
+export async function waitForFeedReadersSettled(
+  page: Page,
+  staleSession?: string,
+  feedHealthy = true,
+): Promise<void> {
+  await waitForFeedReaderBoundary(page, false, staleSession, feedHealthy);
 }
 
 /**
@@ -81,7 +88,12 @@ export async function waitForFeedReadersWithdrawn(page: Page): Promise<void> {
 }
 
 /** Share selection and retirement checks while keeping the two public premises explicit. */
-async function waitForFeedReaderBoundary(page: Page, withdrawn: boolean, staleSession?: string): Promise<void> {
+async function waitForFeedReaderBoundary(
+  page: Page,
+  withdrawn: boolean,
+  staleSession?: string,
+  feedHealthy = !withdrawn,
+): Promise<void> {
   let last: ReaderSnapshot[] = [];
   await expect.poll(async () => {
     last = await readFeedReaders(page);
@@ -90,19 +102,22 @@ async function waitForFeedReaderBoundary(page: Page, withdrawn: boolean, staleSe
     )) return false;
     const lists = last.filter((snapshot) => snapshot.role === "list");
     const sessions = last.filter((snapshot) => snapshot.role === "session");
+    const sounds = last.filter((snapshot) => snapshot.role === "sounds");
     const list = lists[0];
-    if (lists.length !== 1 || last.length !== lists.length + sessions.length ||
-      list.healthy !== !withdrawn || list.skew !== withdrawn || list.listing_answered !== true ||
+    if (lists.length !== 1 || sounds.length !== 1 ||
+      last.length !== lists.length + sessions.length + sounds.length ||
+      list.healthy !== feedHealthy || list.skew !== withdrawn || list.listing_answered !== true ||
       list.resolving_remembered !== false || typeof list.notices !== "string" ||
       typeof list.has_rows !== "boolean" ||
       (list.selected !== null && typeof list.selected !== "string") ||
       (list.has_rows && !list.selected)) return false;
+    if (sounds[0].selected !== list.selected || (!withdrawn && sounds[0].baseline !== true)) return false;
     if (staleSession !== undefined && list.selected !== staleSession) return false;
     if (list.selected ? sessions.length !== 1 || sessions[0].id !== list.selected : sessions.length !== 0) {
       return false;
     }
     return last.every((snapshot) => snapshot.acted_on === list.notices &&
-      snapshot.readers.length === 2 && snapshot.readers.every((reader) =>
+      snapshot.readers.length === (snapshot.role === "sounds" ? 1 : 2) && snapshot.readers.every((reader) =>
         reader.running === false && reader.task === false &&
         (withdrawn ? ["None", "Scheduled", "Retry", "Notice"].includes(reader.demand) : reader.demand === "None")
       ) && (snapshot.role !== "session" ||

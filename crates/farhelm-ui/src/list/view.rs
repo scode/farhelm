@@ -1091,6 +1091,10 @@ pub(crate) fn ListView(
     // The query the committed `listing` answers, which is what a new reply
     // is compared against to decide whether the hold still applies.
     let mut listing_query = use_signal(|| None::<(SessionFilter, ListSort)>);
+    // A sounds read can outlive several accepted views. Keep their identity
+    // even across A -> B -> A, so the returning view gets a silent baseline
+    // rather than comparing against attention observed before B was shown.
+    let mut listing_scope = use_signal(crate::sounds::StatusScope::default);
     // A row's refusal line (`action-error`, drawn under the row while its
     // own menu is closed) makes the row taller, so one appearing, clearing
     // or changing its text on a row ABOVE the open session menu can move
@@ -1479,6 +1483,13 @@ pub(crate) fn ListView(
             };
             if reconciled.is_some() || order_hold.peek().is_some() {
                 order_hold.set(reconciled);
+            }
+            if listing_query
+                .peek()
+                .as_ref()
+                .is_none_or(|(filter, _)| *filter != requested)
+            {
+                listing_scope.write().advance(listing);
             }
             listing_query.set(Some((requested.clone(), ordered_by)));
         }
@@ -3184,6 +3195,9 @@ pub(crate) fn ListView(
     });
 
     rsx! {
+        // Status sounds follow the very replies these rows display. Keeping
+        // the observer here avoids another session read or a mirrored listing.
+        crate::sounds::SessionSounds { selected, listing, listing_scope }
         button {
             class: "quick-switcher-trigger", r#type: "button", hidden: true,
             tabindex: "-1", disabled: quick_switcher_closing(),
