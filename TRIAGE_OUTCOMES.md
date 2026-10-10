@@ -8377,7 +8377,8 @@
   provisioning refuse such a path up front with a clear error instead of writing a service that cannot start. A test
   covers the refusal. If it needs significantly more than a check where Farhelm renders a service's paths, stop and
   bring it back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/setup-refusals.md`. The spec text landed ahead of the code in
+- Execution: complete: change `kkwzzzwwvxnwkyztrtqptwpxyxmvwktk`, bookmark `plan/setup-refusals/01-setup-refusals`,
+  [PR #1817](https://github.com/scode/farhelm/pull/1817/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md
@@ -8393,7 +8394,8 @@
   whose `Type=` is anything else as unrecognised, which setup and uninstall already refuse clearly. A test covers a
   `Type=oneshot` unit with several commands. If it needs significantly more than that check, stop and bring it back to
   the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/setup-refusals.md`. The spec text landed ahead of the code in
+- Execution: complete: change `kkwzzzwwvxnwkyztrtqptwpxyxmvwktk`, bookmark `plan/setup-refusals/01-setup-refusals`,
+  [PR #1817](https://github.com/scode/farhelm/pull/1817/changes). The spec text landed ahead of the code in
   [PR #1801](https://github.com/scode/farhelm/pull/1801/changes).
 
 ## distinct-proxy-routes-reuse-wrong-hosts-ssh.md
@@ -8467,7 +8469,8 @@
   prints only the path, without a command, when it cannot be quoted safely. A test covers a path with a space. If it
   needs significantly more than a small quoting helper, stop and bring it back to the user. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/setup-refusals.md`.
+- Execution: complete: change `kkwzzzwwvxnwkyztrtqptwpxyxmvwktk`, bookmark `plan/setup-refusals/01-setup-refusals`,
+  [PR #1817](https://github.com/scode/farhelm/pull/1817/changes).
 
 ## published-uploads-lack-directory-fsync.md
 
