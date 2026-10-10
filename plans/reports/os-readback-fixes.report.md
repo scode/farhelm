@@ -72,3 +72,35 @@ conversation recording needed for Resume. A separate reader opened the diff befo
 contamination, and supplied no valid cold-read evidence; a fresh reader completed the required phases. A separate fresh
 native report cold read passed: the report supplies enough product context and evidence to approve or request follow-up,
 and contains no private repository-hygiene violations.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1796. This round landed five triage plans together, in order: untrusted-text-escaping,
+git-env-isolation, os-readback-fixes, harness-tooling-fixes and ssh-config-atomic. Each rebased onto main with only
+conflicts in the review queue's index, where each plan removes only its own entries. Since their stacks were based, main
+gained this day's earlier landings (sounds, file downloads, the reboot follow-up of the supervisor's timer sweep) and
+the 2026-10-10 spec triage; of the files these plans touch, only the helm's supervisor client changed upstream (download
+routing), away from the log line one of them changes. A separate reviewer read all five against each other and main by
+reading the code only, and checked each against its triage decisions and completion criteria.
+
+#### Review before merging
+
+No findings. Unit-file readback decodes only the two escapes Farhelm itself writes and refuses ownership for anything
+else, section names match exactly, and the macOS argument read is sized the same way the environment read already was,
+while keeping the 64 KiB argument budget. A live macOS reproduction remains unverified, as the report says.
+
+#### Checks
+
+- Run now, on the first four stacked in landing order: `dist generate --check` (the release workflow matches its
+  sources), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the
+  supervisor, helm, UI and protocol unit tests in full through the recorder with pinned tmux 3.7c, four slots and no
+  retries (run `1b086587`, 2699 of 2699), and on Chromium and WebKit with one worker and no retries the spawn, header,
+  readers and change-feed specs (run `50ffb9fe`, 44 passed; the two skipped are the real-Claude spawn cases).
+- Run now, after the landing's fixes, with ssh-config-atomic stacked on top:
+  `cargo clippy -p farhelm-helm --all-targets`, `shellcheck` on the provisioning script, and the helm's client tests
+  including the new log-escaping test (run `0067a921`, 68 of 68). The new test was also seen to fail with the escaping
+  removed, then restored.
+- Reused from the executors: their focused runs for each fix, the hosted macOS compile of the argument-reading change,
+  and the deflake end-to-end evaluation.
+
+Nothing in the report above was made untrue by the landing.
