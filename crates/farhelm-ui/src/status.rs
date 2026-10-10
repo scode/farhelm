@@ -107,6 +107,8 @@ pub(crate) struct StatusBadge {
 /// annotation alone, which read as a fourth status word and quietly
 /// dropped the code entirely. The annotation is ignored for every other
 /// status — it describes how a run ENDED, and a live session has not.
+/// Annotation and error detail are relayed host text: escape their hidden
+/// and directional characters before the same text reaches the badge and tooltip.
 ///
 /// `pub(crate)`, not private: the session view renders the same badge in its
 /// header — and, for a stale session, in the metadata band under the
@@ -157,7 +159,7 @@ pub(crate) fn status_badge(
             }
             if let Some(annotation) = annotation {
                 text.push_str(" — ");
-                text.push_str(annotation);
+                text.push_str(&crate::peer::display_peer(annotation));
             }
             ("exited", text)
         }
@@ -171,7 +173,10 @@ pub(crate) fn status_badge(
         // text rather than being tucked behind a tooltip or a separate
         // element: it is usually short, and it is the one piece of
         // information that actually explains why the row needs attention.
-        SessionStatus::Error { detail } => ("error", format!("error — {detail}")),
+        SessionStatus::Error { detail } => (
+            "error",
+            format!("error — {}", crate::peer::display_peer(detail)),
+        ),
         // Deliberately the one early return: see this function's own docs.
         SessionStatus::Unknown => return None,
     };
@@ -688,6 +693,51 @@ mod tests {
             badge("error", "error — exec_failed argv0=/nope errno=2", true),
             "the shim's own recorded detail must reach the badge text, not just its class"
         );
+    }
+
+    /// Host diagnostics must not hide or reorder their contents in a badge.
+    /// Both the visible badge and its tooltip consume this text, so escaping
+    /// here protects both while keeping the exit code ahead of the annotation.
+    #[farhelm_testtrace::test]
+    fn status_badge_escapes_host_diagnostics() {
+        assert_eq!(
+            status_badge(
+                &SessionStatus::Error {
+                    detail: "exec\u{200B} \u{202E}failed".to_string(),
+                },
+                None,
+                None,
+            ),
+            badge("error", "error — exec<U+200B> <U+202E>failed", true),
+        );
+        assert_eq!(
+            status_badge(
+                &SessionStatus::Exited { exit_code: Some(7) },
+                Some("stopped\u{200B} \u{202E}by user"),
+                None,
+            ),
+            badge(
+                "exited",
+                "exited (code 7) — stopped<U+200B> <U+202E>by user",
+                true
+            ),
+        );
+        for (detail, shown) in [
+            ("", "error — (empty)"),
+            ("  ", "error — (whitespace only: 2 characters)"),
+        ] {
+            assert_eq!(
+                status_badge(
+                    &SessionStatus::Error {
+                        detail: detail.to_string()
+                    },
+                    None,
+                    None
+                ),
+                badge("error", shown, true),
+                "an otherwise invisible diagnostic must have a visible spelling",
+            );
+        }
     }
 
     /// The unseen-idle split (SPEC.md, Status): `Idle` with
