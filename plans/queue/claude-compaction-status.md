@@ -10,8 +10,7 @@ This plan has no dependency on another plan.
 ## The goal
 
 While Claude Code compacts its conversation (its screen shows a spinner line such as
-`✻ Compacting conversation… (1m 3s
-· …)`, sometimes for a minute or more), Farhelm should show the session as Running,
+`✻ Compacting conversation… (1m 3s · …)`, sometimes for a minute or more), Farhelm should show the session as Running,
 not Idle. Ground the fix in a real captured compaction screen, kept as a fixture so a future Claude release that changes
 it is caught.
 

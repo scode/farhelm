@@ -29,8 +29,7 @@ All commit messages and PR titles must use Conventional Commit format: `<type>: 
 
 Allowed types: `feat`, `fix`, `docs`, `perf`, `refactor`, `style`, `test`, `chore`, `ci`, `revert`.
 
-Append `!` after the type for breaking changes (e.g. `feat!: remove legacy
-endpoint`). Scope is optional.
+Append `!` after the type for breaking changes (e.g. `feat!: remove legacy endpoint`). Scope is optional.
 
 Rules:
 

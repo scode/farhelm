@@ -1364,8 +1364,7 @@
   the TLDR. The helm answers `ResolveProfile` from any supervisor connection with the profile's full invocation, agent
   kind, resume template, and snapshot (`farhelm-helm/src/agent_requests.rs`), validates only the selector shape, and
   logs nothing; only the asking supervisor refuses the verb from sessions
-  (`farhelm-supervisor/src/service/
-  handlers.rs`). This contradicts SPEC.md's "Remote input" statement that profile
+  (`farhelm-supervisor/src/service/ handlers.rs`). This contradicts SPEC.md's "Remote input" statement that profile
   discovery does not extend to raw command lines, and its rule that a remote host must not gain access to secrets.
   However, the same compromised host can already obtain the same bundle through SPEC.md's accepted temporary exception
   for agent-requested cross-host creation: `farhelm agent create --profile X` aimed at its own host makes the helm send
@@ -1627,12 +1626,11 @@
   users that checkout roots must be private to their account and shared directories are unsupported. Tests cover a
   group-writable root, a foreign-owned archive directory, and the created directory's mode. Changelog fragment. Remove
   the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Decision note (supersedes the outcome above, from the goal-building session): the user changed this item to
-  `fix
-  spec` only: "lets' just not refuse at all, just have the spec update to clarify we aren't desining fro this.
-  the user is responsible for keeping their checkouts in self-writable locations." No refusal of roots or of the archive
-  directory, no owner or mode check, no change to how the archive directory is created. (The strict refusal would have
-  refused ordinary roots under a 0002 umask with user-private groups, and broken archiving for existing installs.)
+- Decision note (supersedes the outcome above, from the goal-building session): the user changed this item to `fix spec`
+  only: "lets' just not refuse at all, just have the spec update to clarify we aren't desining fro this. the user is
+  responsible for keeping their checkouts in self-writable locations." No refusal of roots or of the archive directory,
+  no owner or mode check, no change to how the archive directory is created. (The strict refusal would have refused
+  ordinary roots under a 0002 umask with user-private groups, and broken archiving for existing installs.)
 - Execution: `complete`; SPEC.md's fresh-checkout section states that Farhelm is not designed for working-copy roots
   other local accounts can write to, that keeping the root in a location only the user can write is the user's
   responsibility, that Farhelm does not check, and that the section's ownership and archive promises assume it.
@@ -2240,12 +2238,11 @@
   conditional on an Astra high reviewer agreeing; the review returned "agree with changes", and its changes are adopted
   as the scope. Introduce a shared confirmation primitive beside `OpLock` in `ops.rs`, following its rationale (enforce
   the handler-time invariant once): a payload-bearing slot such as `ConfirmSlot<K, P = ()>` whose
-  `take(&K) ->
-  Option<P>` is the only way a confirm handler proceeds, with ordinary prompts carrying `()` and
-  lifecycle prompts carrying an owned guard. Add `PaneGate::claim_guard()` (preserving its sidebar-operation check);
-  lifecycle prompts store that guard while open and transfer it into the task on confirm, never release-and-reacquire;
-  cancel drops only ownership still in the slot and is a no-op after `take`; remove the corresponding manual releases.
-  Specify failed or mismatched `take` leaves the prompt untouched, explicit `open` replacement/refusal semantics,
+  `take(&K) -> Option<P>` is the only way a confirm handler proceeds, with ordinary prompts carrying `()` and lifecycle
+  prompts carrying an owned guard. Add `PaneGate::claim_guard()` (preserving its sidebar-operation check); lifecycle
+  prompts store that guard while open and transfer it into the task on confirm, never release-and-reacquire; cancel
+  drops only ownership still in the slot and is a no-op after `take`; remove the corresponding manual releases. Specify
+  failed or mismatched `take` leaves the prompt untouched, explicit `open` replacement/refusal semantics,
   `cancel_for(&key)` for event handlers, and distinct slots or keys for header Replace and interrupted Replace
   (SPEC_impl.md's distinction). Use an opening generation if "that prompt" must reject clicks across cancel-and-reopen
   of the same target. Migrate header Replace, header restart (non-mechanical: its closure is shared with Restart With,
@@ -3848,8 +3845,7 @@
   browser primitives at first load): review showed a script injected after launch could still intercept the token
   through other page intrinsics, and moving the exchange out of the page removes the token from reach instead. JS tests
   `a page without a usable secret asks native to mint one` and
-  `a native mint failure is reported as the
-  authentication error`, with the rest updated to the protocol; the native
+  `a native mint failure is reported as the authentication error`, with the rest updated to the protocol; the native
   exchange keeps the page's former five-second bound over headers and body (`WEBVIEW_EXCHANGE_TIMEOUT`), with native
   tests `a_refused_token_is_none_and_a_granted_one_is_the_secret` and
   `a_stalled_exchange_body_is_cut_off_at_the_deadline`. jj change `tytynmmukovw`, bookmark `pr/desktop-token-on-demand`,
@@ -3969,8 +3965,7 @@
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
 - Execution: `complete`; `handle_create_session` reserves a spawn's intent key as
-  `spawn-<asking session>-<SHA-256 of
-  the key>` (`spawn_scoped_intent_key` in handlers.rs) before admission, so the
+  `spawn-<asking session>-<SHA-256 of the key>` (`spawn_scoped_intent_key` in handlers.rs) before admission, so the
   per-key lock and the reservation both use the scoped form and another session reusing the key spawns afresh. The
   earlier self-replay refusal stays as a backstop. SPEC_impl.md states the scoping for spawn beside the agent
   create/clone scoping. Regression tests `spawn_intent_keys_are_scoped_to_the_asking_session` and
@@ -4241,8 +4236,7 @@
   local `farhelm helm setup` refuses with a wrong message and `farhelm uninstall` can look in the wrong unit directory
   and leave units behind.
 - Decision: the user chose to replace parsing of human/shell-oriented output with a structured query at both sites:
-  `busctl --user get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager
-  Environment --json=short`
+  `busctl --user get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager Environment --json=short`
   (raw strings, systemd 240 and later), parsed in Rust.
 - Completion criteria: both sites read the manager's environment through the structured query, a config path containing
   a space resolves correctly for remote setup, local setup and uninstall, focused coverage, and this feedback file and
@@ -4767,13 +4761,11 @@
 
 - Outcome: `fix spec+code`.
 - Assessment: confirmed by current-code inspection at 961e0a0. `argv_is_yolo` (`crates/farhelm-proto/src/yolo.rs`) picks
-  the vendor's flag table from the first word's basename only, so
-  `env NAME=value claude
-  --dangerously-skip-permissions` (or `env A=1 codex --yolo`, or `env A=b pi`) classifies as
-  `env`, matches no vendor, and is not YOLO. The helm guard (`invocation_is_yolo` in
-  `crates/farhelm-helm/src/yolo_guard.rs`) therefore lets it start on a sensitive host without confirmation, and the
-  sidebar badge (`invocation_marker`, same first-word lookup) misses it too. Farhelm itself treats a leading
-  `env NAME=value` prefix as an ordinary launch shape: the supervisor's `effective_program_index`
+  the vendor's flag table from the first word's basename only, so `env NAME=value claude --dangerously-skip-permissions`
+  (or `env A=1 codex --yolo`, or `env A=b pi`) classifies as `env`, matches no vendor, and is not YOLO. The helm guard
+  (`invocation_is_yolo` in `crates/farhelm-helm/src/yolo_guard.rs`) therefore lets it start on a sensitive host without
+  confirmation, and the sidebar badge (`invocation_marker`, same first-word lookup) misses it too. Farhelm itself treats
+  a leading `env NAME=value` prefix as an ordinary launch shape: the supervisor's `effective_program_index`
   (`crates/farhelm-supervisor/src/agent_kind/mod.rs`) skips it to find the real program. No test pins either behavior,
   and no spec text, `Planned` item, `BUGS.md` entry or filter covers it. Affects raw command lines and profile
   invocations (and clone/replace of such sources, `farhelm agent create`/`spawn`); structured launches are unaffected.
@@ -4825,15 +4817,14 @@
   and nothing in the supervisor or the `farhelm` binary handles or ignores SIGHUP, so a hangup kills the supervisor with
   its default action and skips the orderly tmux output shutdown; per `BUGS.md` that can abort the private tmux server
   and every session on the host. Triggers: closing the terminal or losing the ssh connection of a hand-started
-  `farhelm
-  supervisor run` (a remedy the hosts page suggests), or closing the terminal a Linux desktop app was
-  launched from (the managed supervisor is spawned in the app's process group, `crates/farhelm-ui/src/desktop.rs`).
-  systemd-unit supervisors and desktop apps launched without a terminal are unaffected. `BUGS.md`'s "Abrupt supervisor
-  death" entry does not cover this and is inaccurate: it says every planned stop runs the orderly path and only deaths
-  that run no code remain, but SIGHUP is catchable and unhandled. Triage added a premise the finding understates: the
-  tmux output and sink clients (`crates/farhelm-supervisor/src/tmux/stream.rs`, `tmux/sink.rs`) share the supervisor's
-  process group, so a terminal hangup also reaches them and tmux tears them down outside the orderly order; a supervisor
-  SIGHUP handler alone may not restore safe ordering (inferred from tmux 3.7c source, not tested).
+  `farhelm supervisor run` (a remedy the hosts page suggests), or closing the terminal a Linux desktop app was launched
+  from (the managed supervisor is spawned in the app's process group, `crates/farhelm-ui/src/desktop.rs`). systemd-unit
+  supervisors and desktop apps launched without a terminal are unaffected. `BUGS.md`'s "Abrupt supervisor death" entry
+  does not cover this and is inaccurate: it says every planned stop runs the orderly path and only deaths that run no
+  code remain, but SIGHUP is catchable and unhandled. Triage added a premise the finding understates: the tmux output
+  and sink clients (`crates/farhelm-supervisor/src/tmux/stream.rs`, `tmux/sink.rs`) share the supervisor's process
+  group, so a terminal hangup also reaches them and tmux tears them down outside the orderly order; a supervisor SIGHUP
+  handler alone may not restore safe ordering (inferred from tmux 3.7c source, not tested).
 - Decision: the user chose the code fix as recommended.
 - Completion criteria: route SIGHUP into the same orderly shutdown as SIGTERM and SIGINT, updating `run`'s docs; start
   the tmux output and sink clients in their own process group so a terminal hangup or Ctrl-C reaches only the supervisor
@@ -4906,10 +4897,9 @@
   `codex-cli 0.159.3 --help`: `-a never` is "Never ask for user approval" and `-s danger-full-access` removes the
   sandbox, together the same as `--dangerously-bypass-approvals-and-sandbox`. Reach is that of
   `yolo-guard-misses-env-prefix.md` (raw command lines, profiles, clone/replace of such sources,
-  `farhelm agent
-  create`/`spawn`); structured launches are unaffected. Not covered by the spec, `Planned`, `BUGS.md`
-  or filters; the best-effort principle recorded for `yolo-guard-misses-env-prefix.md` frames this as a common
-  documented shape to cover.
+  `farhelm agent create`/`spawn`); structured launches are unaffected. Not covered by the spec, `Planned`, `BUGS.md` or
+  filters; the best-effort principle recorded for `yolo-guard-misses-env-prefix.md` frames this as a common documented
+  shape to cover.
 - Decision: the user chose the code fix as recommended. `-a never` alone keeps Codex's sandbox and does not count, like
   `--full-auto`; `-s danger-full-access` alone keeps approval prompts and does not count.
 - Completion criteria: classify a Codex command as YOLO when it carries both a never-ask approval policy and the
@@ -4950,16 +4940,14 @@
 - Assessment: both parts confirmed by current-code inspection at 961e0a0. (A) Cursor: the classifier's Cursor rows
   (`agent`, `cursor-agent` in `crates/farhelm-proto/src/yolo.rs`) list only `--force` and `--yolo`, so the documented
   short `-f` (verified in the installed `cursor-agent --help`:
-  `-f, --force  Force allow commands unless explicitly
-  denied`) is not YOLO in the guard or the badge. (B) Pi: a
-  launch declared as kind Pi (a profile's `agent_kind`, or a raw create's kind override) whose program is not named `pi`
-  is not YOLO; the declared kind is available to the guard (`create_is_yolo` in `crates/farhelm-helm/src/yolo_guard.rs`,
+  `-f, --force  Force allow commands unless explicitly denied`) is not YOLO in the guard or the badge. (B) Pi: a launch
+  declared as kind Pi (a profile's `agent_kind`, or a raw create's kind override) whose program is not named `pi` is not
+  YOLO; the declared kind is available to the guard (`create_is_yolo` in `crates/farhelm-helm/src/yolo_guard.rs`,
   `ResolveProfile` in `agent_requests.rs`) but ignored. Restart-with is already covered; raw clone/replace drop the kind
   entirely. Triage also found that the program name `agent` is ambiguous: on the development host `agent` is Grok's
   executable, not Cursor's, so the classifier's assumption that `agent` means Cursor is unsound (Grok's
   `--always-approve` under the name `agent` is missed). Also noticed in passing, outside this finding: OMP's documented
-  `--auto-approve` and Grok's `--permission-mode
-  bypassPermissions` are absent from the tables.
+  `--auto-approve` and Grok's `--permission-mode bypassPermissions` are absent from the tables.
 - Decision: fix Cursor's `-f`. Agents installed or launched under alternative program names are explicitly out of scope
   for YOLO detection, a declared Pi kind under another program name included; record that in the spec rather than
   checking the declared kind. Recognize `cursor-agent` as Cursor and `grok` as Grok, and assume nothing about the
@@ -5984,8 +5972,7 @@
   choice to treat the font as a best-effort enhancement rather than a required bundled asset.
 - Decision: discard, and remove the font fallback as its own task: the bundled font is to be treated like Farhelm's
   other bundled assets, with the fallback complexity and behavior removed. Recorded as a TODO.md
-  `Definite
-  simplification` entry during triage (user, 2026-10-01).
+  `Definite simplification` entry during triage (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
 - Execution: complete: change `lultloxq`, bookmark `triage-1001e/23-font-promise`, PR
   https://github.com/scode/farhelm/pull/1465.

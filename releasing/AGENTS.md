@@ -66,7 +66,7 @@ sections; the checker accepts the historical formats that are already present.
   | `### 🚀 Added`    | `feat`                                                                      |
   | `### 🔄 Changed`  | `style`, and `feat` or `perf` that alters existing behavior                 |
   | `### 🔧 Fixed`    | `fix`, `perf` that fixes a performance problem                              |
-  | `### 🗑️ Removed`   | removals that are not breaking in practice; breaking ones go under Breaking |
+  | `### 🗑️ Removed`  | removals that are not breaking in practice; breaking ones go under Breaking |
 
   Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, and 🔄 rather than ♻️
   for Changed because recycling reads as refactoring. Category headings sit below the release level, so the parser never

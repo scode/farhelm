@@ -106,13 +106,11 @@ details to be decided with the maintainer."
   beside `feed::FleetFeed`) renders `div.approval-cards` with `role="region"` and `data-modal-exempt`, the late-answer
   notice, and one `ApprovalCard` (`section.approval-card`, `data-approval-id`, `data-approval-kind`) per waiting
   request. Rows come from `action_rows`, `launch_rows`, `template_rows` and `session_rows` as
-  `CardRow::{Value, Block, Note,
-  Identity}`; `ARM_DELAY_MS` is the button pause. Rust unit tests at the bottom of the
+  `CardRow::{Value, Block, Note, Identity}`; `ARM_DELAY_MS` is the button pause. Rust unit tests at the bottom of the
   file cover row content only.
 - The CSS is in `crates/farhelm-ui/assets/app.css` (search `.approval-cards`); z-index 45 is recorded in the file's
   z-index registry. The column is
-  `position: fixed; right: 12px; bottom: 12px; width: min(420px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px); overflow-y: auto`.
+  `position: fixed; right: 12px; bottom: 12px; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto`.
   The rows are a `max-content 1fr` grid.
 - `crates/farhelm-ui/src/modal_isolation.rs`: the dialog inerts every sibling of its ancestor chain except a
   `data-modal-exempt` element that is itself such a sibling; "one nested deeper inside an element this inerts is inerted

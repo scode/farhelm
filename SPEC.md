@@ -1018,8 +1018,7 @@ row's actions menu that already shows a description line under its label.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. A compatible supervisor whose build is older than the helm's is still connected and usable, but its row says
-`old
-version` as an advisory; an incompatible protocol handshake remains `needs update`. On an SSH host with Update
+`old version` as an advisory; an incompatible protocol handshake remains `needs update`. On an SSH host with Update
 available, an outlined `↑ update` button replaces those words: amber for an optional compatible-build update, red for a
 required update when the host's protocol is lower. The dot keeps its color and the accessible status keeps its words.
 Hover names both builds (and both protocols for a skew), says whether updating is optional or required, and explains

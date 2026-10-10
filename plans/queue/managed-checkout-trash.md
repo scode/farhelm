@@ -85,8 +85,7 @@ Acceptance criteria:
 - Every delete asks once, in place, stating how many checkouts on which hosts and their size, and that work in them that
   was never committed or pushed is lost permanently. Then it deletes exactly the archived folders Farhelm recorded and
   nothing else (D6): for each recorded archive, the supervisor resolves
-  `<recorded root>/farhelm-archived-working-copies/
-  <recorded destination name>`, verifies the root and the directory
+  `<recorded root>/farhelm-archived-working-copies/ <recorded destination name>`, verifies the root and the directory
   against the recorded identity with the existing `same_directory`/`verified_root` rules, and only then removes it
   recursively without following symlinks. A directory that is missing or fails the identity check is not touched, and
   its record is dropped from the trash; a mismatch is reported in the dialog, naming the folder left in place, so the
@@ -276,8 +275,7 @@ crate's version pin test, the supervisor's working-copy, teardown and store test
 crate's tests), `cd crates/farhelm-ui/js-tests && node --test` if asset JS changes, the relevant Playwright specs (the
 GitHub-checkout specs, clone, delete, templates, and the new ones) on Chromium and WebKit through the recorder after
 `cargo build` and the `dx` web build, the test-sleep check,
-`cd website && bun install --frozen-lockfile && bun
-run build` when docs pages change, `dprint check`, and
+`cd website && bun install --frozen-lockfile && bun run build` when docs pages change, `dprint check`, and
 `python3 releasing/check-changelog.py format`. Look at the launcher, the template editor, the session list and the trash
 dialog yourself in a real browser at the sidebar's minimum and default widths, and compare them with the mockup.
 
@@ -287,19 +285,15 @@ Colors are the app's tokens (`crates/farhelm-ui/assets/app.css`). Glyphs use a 1
 at 1.2, round caps and joins.
 
 - Branch glyph:
-  `<circle cx="3.5" cy="2.8" r="1.2"/><circle cx="3.5" cy="9.2" r="1.2"/><circle cx="8.5" cy="4.2"
-  r="1.2"/><path d="M3.5 4v4M8.5 5.4c0 2-5 1.4-5 2.6"/>`.
+  `<circle cx="3.5" cy="2.8" r="1.2"/><circle cx="3.5" cy="9.2" r="1.2"/><circle cx="8.5" cy="4.2" r="1.2"/><path d="M3.5 4v4M8.5 5.4c0 2-5 1.4-5 2.6"/>`.
   Drawn at 12px on rows, in `--fg-1`, with the repository in `--fg-0`.
 - Folder glyph (launcher and template segment):
-  `<path d="M1.5 3.2v5.6a.8.8 0 0 0 .8.8h7.4a.8.8 0 0 0
-  .8-.8V4.6a.8.8 0 0 0-.8-.8H6L5 2.4H2.3a.8.8 0 0 0-.8.8z"/>`.
+  `<path d="M1.5 3.2v5.6a.8.8 0 0 0 .8.8h7.4a.8.8 0 0 0 .8-.8V4.6a.8.8 0 0 0-.8-.8H6L5 2.4H2.3a.8.8 0 0 0-.8.8z"/>`.
 - Trash, empty:
-  `<path d="M1.5 3h9M4.6 3V1.6h2.8V3"/><path d="M2.6 3l.6 7.3a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0
-  .9-.8L9.4 3"/><path d="M5 5.2v3.8M7 5.2v3.8"/>`,
+  `<path d="M1.5 3h9M4.6 3V1.6h2.8V3"/><path d="M2.6 3l.6 7.3a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0 .9-.8L9.4 3"/><path d="M5 5.2v3.8M7 5.2v3.8"/>`,
   at 16px, in `--fg-2`.
 - Trash, full ("lid pops open"):
-  `<path d="M2 2.6l7.6-1.9M5 1.9l-.3-1 2.4-.6.3 1"/><path d="M2.6 4.2l.6 6.1a.9.9 0 0 0
-  .9.8h3.8a.9.9 0 0 0 .9-.8l.6-6.1z" fill="currentColor"/><path d="M4 4.2l.8-1.2 1.4.6 1.6-.9.6 1.5"/>`,
+  `<path d="M2 2.6l7.6-1.9M5 1.9l-.3-1 2.4-.6.3 1"/><path d="M2.6 4.2l.6 6.1a.9.9 0 0 0 .9.8h3.8a.9.9 0 0 0 .9-.8l.6-6.1z" fill="currentColor"/><path d="M4 4.2l.8-1.2 1.4.6 1.6-.9.6 1.5"/>`,
   at 16px, in `--fg-0`, with the count beside it at 11px semibold. The button has New's border width and vertical
   padding, so the two are the same height.
 - Trash tooltip. Empty: "trash: empty. When you delete the last session using a managed checkout, its folder moves here

@@ -97,8 +97,7 @@ framework for every externally supplied value.
 - `crates/farhelm-desktop` — the macOS webview shell (D6): a `main` that calls farhelm-ui's desktop entry point and
   nothing else. It exists as its own package because only a package can enable farhelm-ui's `desktop` feature
   unconditionally, and it is excluded from the workspace's `default-members` so that no ordinary
-  `cargo
-  build`/`test`/`clippy` compiles WebKit. `-p farhelm-desktop` is consequently the only thing that compiles it.
+  `cargo build`/`test`/`clippy` compiles WebKit. `-p farhelm-desktop` is consequently the only thing that compiles it.
 
 Motivation: the proto crate is the seam that keeps helm and supervisor honestly decoupled (they meet only over the wire,
 even in-process). `farhelm` remains the single multi-call artifact provisioning ever has to move — farhelm-desktop is a
@@ -970,8 +969,7 @@ the pinned one earns a one-time warning that it is unaudited, never a refusal. A
 cannot name is one nobody audited it against.
 
 How the binary is chosen: the supervisor selects its tmux program once at startup — `--tmux <path>` on
-`farhelm
-supervisor run`, else `FARHELM_TMUX` from its environment, else the bare name `tmux` — and every invocation
+`farhelm supervisor run`, else `FARHELM_TMUX` from its environment, else the bare name `tmux` — and every invocation
 goes through that one value. A bare name is resolved against `PATH` by the operating system at each spawn, as it always
 was; only the spelling is fixed, and the refusal message reports the `PATH` entry it would resolve to. Whatever was
 chosen is version-checked and refused by name (binary path, version found, floor) when too old. The check is applied
@@ -1780,8 +1778,7 @@ evidence, but cannot authorize another directory move.
   chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter must
   spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
   still accepts older hooks), and every other non-Codex link except the pane anchor must be a narrow shell trampoline
-  directly invoking it (`sh -c '<farhelm> internal
-  hook …'` — the shape vendor hook runners produce) as exactly one
+  directly invoking it (`sh -c '<farhelm> internal hook …'` — the shape vendor hook runners produce) as exactly one
   simple command: any unquoted control operator, redirection, substitution, or other executable shell syntax refuses
   even when the hook comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime
   or any unclassified intermediary (interactive shell, script, chained command, unreadable argv) refuses. Argv
@@ -1877,8 +1874,7 @@ evidence, but cannot authorize another directory move.
   limit because every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
-  (`INTEGER NOT NULL
-  DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
+  (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
   under the ownership contract — every historical capture — and only the authoritative admission transaction ever writes
   1, for the kind whose proof ran. Exact Resume requires version 1 for such kinds on every surface (reload, list and
   replay views, direct restart requests, pre-spawn verification), with the stored row's version beside the identity at
@@ -3054,8 +3050,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
   warning before dispatch and treats a lost reply as unknown rather than success.
 - `farhelm agent create [--host <name>] [--cwd <dir>] <launch flags> [--title ...] [--idempotency-key ...]` and
-  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
-  [--idempotency-key ...]` — the
+  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...] [--idempotency-key ...]` — the
   in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
@@ -3462,8 +3457,7 @@ the session processes and terminals until the user deletes them or the host rebo
 The supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill sweep
 claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux server. A
 tab's startup file that runs a bare `systemctl --user import-environment`, or
-`dbus-update-activation-environment
---systemd --all`, copies that tab's markers into the user manager; a supervisor
+`dbus-update-activation-environment --systemd --all`, copies that tab's markers into the user manager; a supervisor
 started afterwards would inherit them, and deleting that session or closing that tab would make it signal itself, and a
 tmux server it started would take every session's panes with it. A systemd-managed supervisor never legitimately belongs
 to a session, so stripping the markers is free. This covers supervisors started through the generated unit (local setup

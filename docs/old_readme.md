@@ -271,8 +271,7 @@ position removes a feature must not be flipped by a typo.
 
 Development builds carry no provisioning payloads by default. Asking one to install a host with neither payload flag
 reports
-`this farhelm was built from source and carries no provisioning payloads; pass --payload-dir <dir> holding the
-release files, or install a release build (see README, "Install")`.
+`this farhelm was built from source and carries no provisioning payloads; pass --payload-dir <dir> holding the release files, or install a release build (see README, "Install")`.
 Either flag opts a source build back in: `--payload-dir <dir>` (or `FARHELM_HELM_PAYLOAD_DIR`) reads published release
 files from a directory unverified, and `--release-base-url <url>` (or `FARHELM_RELEASE_BASE_URL`) downloads them from
 any server with the full signature and checksum verification a release build performs. `--payload-dir` wins if both are

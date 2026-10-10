@@ -95,14 +95,12 @@ widths. Decide whether the width is remembered per device, like the terminal tex
   `.app-shell { display: flex; height: 100%; overflow-x: auto }`, `.app-sidebar { width: 340px; flex-shrink: 0; ... }`,
   `.app-main { flex: 1; min-width: 320px; height: 100% }` ("Below 340+320px the shell scrolls"), the macOS
   `@media (max-width: 661px)` block that pins the app bar in narrow windows,
-  `.macos-root:has(.build-skew) .app-bar {
-  width: 341px }`, a `@media (max-width: 601px)` rule for the row-menu
-  pointer, and comments assuming 340px elsewhere in the file and in `crates/farhelm-ui/src/hosts.rs`. Media queries
-  cannot read a CSS variable, so the 661px rule needs another mechanism (a class toggled from the same script, a
-  container query, or an equivalent); pick the simplest that keeps today's behavior at the default width.
+  `.macos-root:has(.build-skew) .app-bar { width: 341px }`, a `@media (max-width: 601px)` rule for the row-menu pointer,
+  and comments assuming 340px elsewhere in the file and in `crates/farhelm-ui/src/hosts.rs`. Media queries cannot read a
+  CSS variable, so the 661px rule needs another mechanism (a class toggled from the same script, a container query, or
+  an equivalent); pick the simplest that keeps today's behavior at the default width.
 - Text size, the per-device pattern to follow: `crates/farhelm-ui/assets/terminal.js`
-  (`FONT_SIZE_KEY =
-  "farhelm.terminal-font-size"`, `storedFontSize()` accepting only digits, clamping, falling back on
+  (`FONT_SIZE_KEY = "farhelm.terminal-font-size"`, `storedFontSize()` accepting only digits, clamping, falling back on
   any exception, `stepFontSize` writing inside a `try`). SPEC.md, Terminal experience: "The size is remembered per
   device, deliberately unlike the session list's preference". SPEC_impl.md's text-size paragraph notes desktop
   persistence relies on the webview keeping its local storage, verified on Linux, not on macOS; the same caveat applies
