@@ -134,7 +134,23 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // --- Composer exemption: Launch is deliberately brighter
     // than the generic sidebar primary, per the maintainer's composer mockup.
     await page.locator(".new-session-button").click();
-    await expect(page.locator(".create-session-form")).toBeVisible();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    // Launch only wears its primary fill while it can launch, and with no
+    // harness chosen it is refused ("choose a structured harness") and drawn
+    // disabled. Run alone, this test opens the composer in exactly that
+    // state; it used to pass in the full suite only when other specs had run
+    // first. Choosing a harness makes the resting state independent of what
+    // ran before. Codex is the structured harness the e2e stack fakes.
+    const codex = form
+      .locator(".launch-composer-harness-choice")
+      .getByRole("button", { name: "Codex", exact: true });
+    await codex.click();
+    await expect(codex).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      form.locator(".create-session-submit"),
+      "Launch must be accepting before its resting fill can be judged",
+    ).not.toHaveAttribute("aria-disabled", "true");
     await expectPrimary(".create-session-submit", composerLaunchFill, composerLaunchEdge);
     // Reset is the action row's secondary control. It was once bare grey
     // text with nothing to say it was clickable until hovered; the neutral
