@@ -190,6 +190,17 @@ remove that entry or change this one's destination and then press Retry. Farhelm
 machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
 removing the host from the registry.
 
+Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
+adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
+a user who wants a different host replaces the entry instead. Approvals, settings changes and confirmed operations
+therefore follow the entry. One still in flight when the destination changes or a new identity is adopted (an approved
+stop, restart, rename, create or clone, an "Always allow" answer, a change to the setting for running `farhelm` commands
+without asking, a confirmed uninstall) may be carried out against the entry's new machine, and Farhelm adds no check of
+the installation identity to prevent that. A destination change that does not adopt a new identity keeps the host's
+settings, including on a host that was never contacted. The identity rules above still hold: adopting a new identity
+resets both settings to asking, and the New dialog's default host and recent setups stay tied to the install the user
+saw.
+
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
 exactly like any other client taking control. "Exactly one" is an operating assumption, not something enforced; that
@@ -204,6 +215,11 @@ carries still has to exist on the host that runs it. Farhelm ships no built-in t
 what a release supplies. Integrations are not user-authored: an agent type selects Farhelm's own status reading and
 conversation-identity reporting for that harness, and a command launch with no declared agent type gets generic
 treatment.
+
+Confirmed 2026-10-10: a template's launch and resume commands cannot contain control characters or invisible formatting
+characters. Saving such a command is refused with a clear message, from the GUI, the CLI or an agent alike, because the
+template editor's single-line fields can neither show nor keep them. A template saved before this rule still launches,
+but saving any change to it is refused until its commands are fixed.
 
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
@@ -917,6 +933,18 @@ Farhelm tried to reap but could not examine counts as unconfirmed, never as gone
 usable user manager described above are not unconfirmed cleanup: processes Farhelm has no way to identify do not make an
 operation fail.
 
+Confirmed 2026-10-10: these cleanup and resume rules cover single ordinary failures. They do not extend to a supervisor
+crash that lands at one exact moment of an operation, or to two independent rare faults coinciding (a crash and a failed
+systemd probe, a transient database read failure and a host that reports no identity, a lost report and a reused process
+number, and the like). Under those conditions it is accepted that a process on a remote host is left untracked, is later
+killed without the usual warning, or keeps running beside a relaunch; that a session's recorded conversation is wrong
+until the agent next reports one, so Restart may resume a different conversation of that agent; or that the helm
+reconnects a host to its previous destination until the next reload. These are exceptions to "never alongside them", to
+failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent was actually in, and to a
+corrected destination taking effect, for those conditions only. In the maintainer's words, they are accepted when they
+are of the "the process on the remote host got killed" kind. Corrupting the supervisor's or the helm's database,
+bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger.
+
 ### Session view
 
 For opening a terminal tab, the session's working directory is a path, not a tracked inode or a preserved symlink
@@ -1355,7 +1383,9 @@ path; a browser never needs to reach any machine but the helm's.
 Transfer must not block the terminal: you can keep typing while it runs, and the path is inserted at whatever cursor
 position is current when the transfer completes. For a typical screenshot this is imperceptible.
 
-Upload failures must be visible; an attachment must never disappear silently.
+Upload failures must be visible; an attachment must never disappear silently. Confirmed 2026-10-10: that covers
+Farhelm's own failures and crashes. Whether an attachment survives a power loss or system crash right after its upload
+completed is best effort.
 
 ## Desktop window chrome
 
@@ -2211,6 +2241,12 @@ directional: the helm and GUI must treat remote supervisor messages and agent-co
 host must not gain unauthorized execution or access to secrets on the helm's machine or another host through Farhelm.
 Existing redaction promises remain requirements even where the sender already has local account authority.
 
+Confirmed 2026-10-10: text a host supplied that the GUI shows outside a terminal is escaped so invisible and
+direction-changing characters are visible, wherever it appears and however it reached the helm (a model name saved into
+a template from a cloned session, for example). Identity labels the user compares, such as installation ids in the adopt
+prompt, also show spaces visibly, so two different identities never look alike. Terminal output is not part of this
+rule; it is the remote program's own display.
+
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,
 including when a malicious program replaces the clipboard. Programs must not read that clipboard through Farhelm. A
@@ -2288,6 +2324,11 @@ surface alongside the GUI, including while a GUI is open (acting from inside a s
 it, unless the host's setting says not to ask; see Agent-spawned sessions): operations they perform concurrently with a
 GUI must behave correctly, and the best-effort qualifier above applies only to several GUIs at once.
 
+Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
+behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a
+redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
+explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry, still hold.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is
@@ -2337,6 +2378,13 @@ that host at once, and each such refresh makes every open client re-read, so the
 by the same minimum gap the supervisor promises to keep between its hints, with at most one more pending. A host that
 hints without pause then costs the helm no more than a busy honest one.
 
+Confirmed 2026-10-10: beyond that acceptance, two effects a hostile or compromised host can have are accepted even where
+Farhelm could avoid them. Through the bundled terminal library, for example, escape sequences with huge repeat counts,
+link records or combining characters that pile up, and the library's own caches can make a session's terminal slow or
+exhaust the viewer's memory; the remedy is upgrading the library when upstream fixes such a problem, never a workaround
+in Farhelm. And a supervisor can fill the helm's log by sending large unexpected messages, which Farhelm need not limit.
+Neither extends to a host gaining execution, reading secrets, or changing what Farhelm does on other hosts.
+
 ### Ownership during cleanup and provisioning
 
 Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product
@@ -2376,6 +2424,11 @@ state, or binary directory on a host, a shared directory it writes into, or the 
 update, recovery, and uninstall guarantees assume no other account can create or replace entries in them. A
 group-writable or sticky shared directory is outside what the installer's lock, journal, and backup safeguards defend
 against.
+
+Confirmed 2026-10-10: Farhelm follows good permission practice for the files and directories it creates, for example
+restricting a file right after creating it, whether or not this spec names that file. It does not spend significant
+complexity on defence in depth against a user's broad umask, such as closing the brief window between creating a file
+and restricting it.
 
 On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
 without `farhelm helm setup`'s managed-by marker belongs to provisioning: ADD and UPDATE may replace it, and uninstall
@@ -2424,6 +2477,16 @@ are theirs. Farhelm need not add complexity for such hosts. The separate provisi
 on an ordinary host it means one more SSH login when provisioning starts with no provisioning connection open, which a
 user whose key needs a hardware touch or an agent confirmation per login sees as one more prompt.
 
+Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
+undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
+aliasing, and the proxy case below). An install whose `farhelm` program path contains `$` is unsupported and refused,
+because systemd does not decode `$$` in a service's program position, so a service written for that path could not
+start.
+
+Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
+helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
+share one connection, and an operation meant for one can reach the other machine. Farhelm does not look for this case.
+
 Filesystem aliasing beyond symlinks is unsupported: bind mounts, and any similar mechanism that makes the same files or
 folders appear at more than one path even after symlinks are resolved, including hard links. Farhelm compares canonical
 paths (symlinks resolved, as the checkout rules above require) and treats each canonical path as the location it names.
@@ -2442,6 +2505,11 @@ provisioning does not target. Do not spend significant complexity making setup o
 or preserve such setups; refusing with a clear message is enough. Setup and Update may treat the layout they install as
 their own, including re-applying the settings they manage, such as start at boot and linger, on every run. The rules
 above about shared directories and unrelated host configuration still hold.
+
+Confirmed 2026-10-10: Farhelm's units use systemd's `simple` service type (the default, so a unit may also leave it
+unset) with one start command. Setup and uninstall treat a Farhelm unit changed to any other type as one they do not
+recognise, and refuse it, because Farhelm reads a unit's one start command to learn which program it runs, and only a
+`oneshot` unit can list several.
 
 A Linux machine running a helm remains supported, but the standalone installer temporarily does not cover that setup. On
 a Mac the installer supplies the desktop app, which manages its own helm and local supervisor.
