@@ -251,8 +251,10 @@ test("documentation opens the docs site through the shared link opener", async (
  * the attached values the dialog displayed, from the web UI. Send is
  * disabled until there is a message; on success the dialog thanks the user,
  * closes by itself, and focus returns to the help toggle.
+ * Contact reuse keeps its ordinary leading checkbox even though Feedback
+ * shares the Settings dialog's shell and label styles.
  */
-test("send feedback sends exactly what the dialog shows, then thanks and closes", async ({ page }) => {
+test("send feedback sends exactly what the dialog shows, then thanks and closes", async ({ page }, testInfo) => {
   const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
   await page.goto("/");
   const dialog = await openFeedbackDialog(page);
@@ -262,6 +264,23 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
 
   await dialog.locator(".feedback-message").fill("The sidebar is great.\nSecond line.");
   await dialog.locator(".feedback-contact").fill("someone@example.com");
+  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback", exact: true });
+  await expect(reuse).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-reuse-layout.png") });
+  const reuseLayout = await reuse.evaluate((input) => {
+    const caption = Array.from(input.parentElement!.childNodes).find((node) => node !== input && node.textContent?.trim())!;
+    const range = document.createRange();
+    range.selectNode(caption);
+    return {
+      controlRight: input.getBoundingClientRect().right,
+      textLeft: range.getBoundingClientRect().left,
+      appearance: getComputedStyle(input).appearance,
+    };
+  });
+  expect(reuseLayout.textLeft).toBeGreaterThan(reuseLayout.controlRight);
+  expect(reuseLayout.textLeft - reuseLayout.controlRight).toBeLessThanOrEqual(16);
+  expect(reuseLayout.appearance).not.toBe("none");
   await expect(dialog.locator(".feedback-surface")).toHaveText("web UI");
   // The operating system is read asynchronously; wait until it is no longer
   // the placeholder before reading the value the dialog will send.
