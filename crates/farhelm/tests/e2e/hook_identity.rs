@@ -1050,14 +1050,12 @@ async fn generic_sessions_get_no_hook_flags() {
         .expect("create a generic session");
     let (_chan, _rx, seen) = attach_ready(&h, &session).await;
 
-    // Both sides are the same argv joined the same way — the marker joins
-    // the process's REAL argv with single spaces — so this compares every
-    // element and the count. What it deliberately cannot see is a word
-    // boundary the shell moved without changing the characters, which is
-    // not a failure mode injection has.
+    // The fixture shell-quotes its real argv, preserving word boundaries.
+    // Use the same encoding so paths containing spaces or quotes cannot
+    // make an unchanged launch look like hook injection.
     assert_eq!(
         argv_marker(&seen),
-        requested.join(" "),
+        shell_words::join(&requested),
         "a generic session has no integration and must be launched exactly as asked"
     );
     assert_eq!(

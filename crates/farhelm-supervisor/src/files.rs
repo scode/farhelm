@@ -1567,6 +1567,10 @@ mod tests {
 
             let complete = std::fs::metadata(&published).unwrap().len() == (CHUNK * CHUNKS) as u64;
             let growth = peak.saturating_sub(baseline);
+            // Direct exit bypasses destructors. Remove the 64 MiB fixture
+            // explicitly, after measuring so cleanup cannot affect RSS.
+            tmp.close()
+                .expect("remove the measurement fixture before exit");
             std::process::exit(match (complete, growth < ALLOWED_GROWTH) {
                 (true, true) => 0,
                 (false, _) => 2,

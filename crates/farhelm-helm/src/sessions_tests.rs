@@ -4188,19 +4188,19 @@ async fn list_sessions_passes_interrupted_status_and_stop_annotation_through() {
 /// — same setup as `foreign_or_missing_authorities_are_refused`
 /// above, aimed at the stop route instead of the pure function.
 ///
-/// Proof that no frame reached the supervisor comes from EOF, not a
-/// timeout: `oneshot` consumes the router (and with it the only
-/// remaining `Arc<SupervisorClient>`) once the response is produced, so
-/// the transport closes right after — the scripted peer reading a clean
-/// `Ok(None)` at that point means nothing but the handshake was ever
-/// written to it. A frame arriving instead (a bypassed guard) would read
-/// as `Ok(Some(_))`, which is what this actually distinguishes.
+/// Observation lasts through the HTTP response, then the test explicitly ends
+/// and joins the peer. The harness retains the connection, so EOF cannot mark
+/// completion; an elapsed window could end during setup before the request.
+/// The original two-second silence window starts after that signal, keeping
+/// the peer alive for frames still queued in the harness's asynchronous relay.
+/// Neither setup time nor the HTTP request can consume that window.
 #[farhelm_testtrace::test]
 async fn foreign_origin_is_refused_on_the_stop_route() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (finish, finished) = tokio::sync::oneshot::channel();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
         let mut reader = FrameReader::new(r);
@@ -4208,17 +4208,20 @@ async fn foreign_origin_is_refused_on_the_stop_route() {
         handshake(&mut reader, &mut writer, "supervisor")
             .await
             .unwrap();
-        // A bounded silence, not an EOF: the harness keeps this
-        // connection open for the whole test (see `rest_harness`), so
-        // "nothing reached the supervisor" is only observable as
-        // nothing ARRIVING. The window is generous because a false
-        // pass needs the frame to be merely late, and a stop that the
-        // middleware failed to refuse would be sent immediately.
-        let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
+        let incoming = reader.read_frame();
+        tokio::pin!(incoming);
+        tokio::select! {
+            leaked = &mut incoming => {
+                panic!("foreign-origin stop must not reach the supervisor: {leaked:?}");
+            }
+            result = finished => result.expect("the response must finish observation"),
+        }
+        // Continue the same read so a partially relayed frame is not discarded
+        // at the response boundary. Only silence through this window passes.
+        let leaked = tokio::time::timeout(Duration::from_secs(2), &mut incoming).await;
         assert!(
             leaked.is_err(),
-            "stop request must never reach the supervisor for a foreign origin, but one \
-             arrived: {leaked:?}"
+            "foreign-origin stop reached the supervisor: {leaked:?}"
         );
     });
 
@@ -4234,9 +4237,9 @@ async fn foreign_origin_is_refused_on_the_stop_route() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
-
+    finish.send(()).expect("the peer must still be observing");
     peer.await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 }
 
 /// `http_error`'s status mapping, pinned through the real handler and

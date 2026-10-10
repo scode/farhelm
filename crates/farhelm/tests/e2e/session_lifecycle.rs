@@ -2073,19 +2073,22 @@ async fn resize_from_a_stale_channel_on_the_same_connection_is_ignored() {
 /// Read the launched shell's directory witness before checking cwd expansion.
 ///
 /// A correct stored directory does not prove the process used it. Preserve
-/// this fixture's file-read boundary and let the caller compare the witness
-/// with the expanded path independently.
+/// the shell's newline-terminated report boundary and let the caller compare
+/// the witness with the expanded path independently. Redirection creates the
+/// file before `pwd` writes, so readability alone is not evidence of launch.
 async fn wait_for_launch_directory_report(marker: &std::path::Path) -> String {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
-        if let Ok(contents) = std::fs::read_to_string(marker) {
+        if let Ok(contents) = std::fs::read_to_string(marker)
+            && contents.ends_with('\n')
+        {
             return contents;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the launch never ran in the expanded directory (no marker at {marker:?})"
+            "the launch never completed its directory report at {marker:?}"
         );
-        // sleep-ok: the launched shell publishes the directory witness asynchronously; retain the original readability polling boundary.
+        // sleep-ok: poll for the launched shell's complete newline-terminated directory witness.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }

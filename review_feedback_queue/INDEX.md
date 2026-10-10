@@ -102,7 +102,6 @@ triage.
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
 - `template-dot-name.md` — Dot-only template names pass validation but cannot be saved.
 
-- `fixed-process-marker-lets-concurrent-stop-tests.md` — Concurrent Stop tests can kill each other's fixture processes.
 - `failed-confirmation-discard-session-despite-failed-process.md` — Failed create recovery could discard the session
   needed to retry process cleanup.
 - `template-command-editor-displays-untrusted-command-bytes.md` — The template launch-command editor hides meaningful
@@ -111,9 +110,6 @@ triage.
   retained command.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `uninstall-test-inherits-unrelated-state-directory.md` — The uninstall test fails under a valid inherited
-  state-directory setting.
-- `fixture-startup-leave-real-systemd-service-behind.md` — Failed fixture startup can leave a real user service running.
 - `failed-upload-regression-fails-native-macos-tools.md` — The failed-upload test stops at incompatible macOS metadata
   tools.
 - `orphan-cleanup-regression-requires-gnu-tools-platform-guard.md` — The orphan-cleanup test fails on macOS before its
@@ -134,15 +130,9 @@ triage.
 - `tilde-replay-test-equates-display-canonical-paths.md` — The tilde-replay test rejects correct canonical paths.
 - `checkout-recovery-compares-canonical-roots-unresolved-fixture.md` — Checkout recovery tests reject correctly resolved
   directory roots.
-- `generic-launch-assertion-uses-different-argv-encoding-fixture.md` — The generic-launch test mistakes quoting
-  differences for changed arguments.
-- `raw-restart-helper-mistakes-notifications-replies.md` — A restart test could mistake a valid notification for the
-  refusal reply.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
 - `later-refresh-hide-stale-refresh-regression.md` — A later refresh can repair the regression before the stale-refresh
   test checks it.
-- `foreign-origin-test-finish-observing-sending-request.md` — The foreign-origin test can stop watching before its Stop
-  request occurs.
 - `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
   covering the operation.
 - `browse-routing-test-discards-wrong-host-assertion.md` — The browse test ignores an observed wrong-host request.
@@ -150,13 +140,10 @@ triage.
   normally.
 - `shutdown-test-accepts-forced-cancellation-natural-completion.md` — The shutdown test accepts cancellation of a writer
   that never finishes.
-- `failed-adoption-test-leaks-private-tmux-server.md` — A failed adoption test can leave an unreachable tmux daemon
-  running.
 - `idle-flush-test-permits-deadline-extension-it-claims.md` — The idle-flush test allows the renewed deadline it is
   meant to reject.
 - `replay-test-consumes-outstanding-reply-testing-recovery.md` — The replay test settles its pending reply before replay
   begins.
-- `upload-memory-test-leaks-mib-fixture-successful-runs.md` — Successful upload-memory tests leave 64 MiB files behind.
 - `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
   cannot measure RSS on native macOS.
 - `directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md` — Directory browsing tests fail on
@@ -215,14 +202,12 @@ triage.
   incomplete value.
 - `persistence-assertion-rejects-legitimately-newer-activity-timestamp.md` — A newer persisted timestamp could make the
   persistence test time out.
-- `directory-witness-read-pwd-writes-it.md` — The directory-witness test reads publication before it is complete.
 - `client-task-scheduling-mistaken-server-side-overlap.md` — Client scheduling could make a serialized server pass the
   overlap test.
 - `stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md` — The stubborn Stop fixture lacks cleanup ownership of
   its whole process tree.
 - `dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md` — The dispatch-overlap fixture arms incomplete cleanup
   after fallible setup.
-- `wrapper-stop-test-fails-sh-uses-bashs-final-command.md` — A valid shell optimization breaks the wrapper-stop fixture.
 - `orphan-client-test-accepts-failed-inspection-proof-no.md` — The orphan-client test accepts unknown inspection as
   proof of no writer leak.
 - `signal-cleanup-test-interrupts-cleanup-exists.md` — The signal-cleanup test interrupts before staging or traps exist.
@@ -242,7 +227,6 @@ triage.
   external window started.
 - `checkout-validation-test-cannot-construct-fixture-apfs.md` — APFS rejects the validation fixture before its intended
   checks run.
-- `directory-report-polling-accept-unfinished-write.md` — The launch-directory report can be read while still empty.
 - `stop-test-leave-fixture-permanently-stopped-failure.md` — Failure after stopping the Stop fixture could leave its
   child indefinitely suspended.
 - `restart-test-has-same-stopped-child-cleanup-gap.md` — The Restart fixture separately risks leaving a suspended child
@@ -385,8 +369,6 @@ triage.
   separate unobserved-Delete test boundary.
 - `ignored-transcript-feeder-write-errors-conceal-missing-input.md` — A failed transcript feeder could make
   query-stripping tests pass with no input.
-- `stopped-fixture-could-survive-assertion-failure.md` — The stopped-process fixture has failures outside any active
-  cleanup owner.
 - `recreation-test-assumes-distinct-birth-timestamps.md` — Immediate directory recreation could preserve the identity
   the test expects to differ.
 - `replacement-tests-overstate-immediate-list-no-delete-evidence.md` — Replacement tests refresh away the
