@@ -3303,7 +3303,7 @@ enum SpawnFailure {
 /// home to expand against (no seam, no usable `$HOME`) is refused with a
 /// message naming the real problem instead of falling through to a
 /// baffling "not absolute" error.
-fn expand_tilde_cwd<'a>(
+pub(super) fn expand_tilde_cwd<'a>(
     cwd: &'a str,
     home: Option<&Path>,
 ) -> anyhow::Result<std::borrow::Cow<'a, str>> {
@@ -4504,7 +4504,7 @@ pub struct Supervisor {
     /// or `$HOME` (see [`expand_tilde_cwd`] for the contract). Resolved
     /// once because what a `~` means must not
     /// shift mid-life with the daemon's environment.
-    user_home: Option<PathBuf>,
+    pub(super) user_home: Option<PathBuf>,
     /// Serializes each session's report/refresh capture transaction, across
     /// every kind and every capture mutation/readiness path.
     ///

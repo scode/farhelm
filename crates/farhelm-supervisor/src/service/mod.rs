@@ -88,6 +88,7 @@ mod agent_relay;
 mod capture;
 mod connection;
 mod core;
+mod downloads;
 mod handlers;
 mod hints;
 mod launch_artifacts;

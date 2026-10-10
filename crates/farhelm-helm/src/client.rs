@@ -7,6 +7,9 @@
 //! as a reader/writer pair so this code cannot tell the difference,
 //! which is the SPEC_impl.md transport-blindness made structural.
 
+mod downloads;
+pub use downloads::DownloadGuard;
+
 use anyhow::bail;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
@@ -844,6 +847,9 @@ pub struct SupervisorClient {
     /// there, including the terminal outcome, and the owner decides when
     /// the upload is finished with.
     uploads: Mutex<HashMap<u32, watch::Sender<UploadProgress>>>,
+    /// Receive-direction reads share the channel allocator, never terminal
+    /// routing or upload lifecycle. The consumer guard owns retirement.
+    downloads: Mutex<HashMap<u32, downloads::DownloadHandle>>,
     /// The connection-wide ration of upload frames allowed to occupy the
     /// shared writer queue at once — see [`UPLOAD_ENQUEUE_FRAMES`].
     upload_enqueue: Arc<Semaphore>,
@@ -1404,6 +1410,7 @@ impl SupervisorClient {
             pending: Mutex::new(Pending::default()),
             terminals: Mutex::new(HashMap::new()),
             uploads: Mutex::new(HashMap::new()),
+            downloads: Mutex::new(HashMap::new()),
             upload_enqueue: Arc::new(Semaphore::new(UPLOAD_ENQUEUE_FRAMES)),
             upload_stall,
             next_req: AtomicU64::new(1),
@@ -1582,6 +1589,11 @@ impl SupervisorClient {
             end_upload(progress, reason.to_string());
         }
         drop(uploads);
+        for route in self.downloads.lock().await.values() {
+            if route.end.borrow().is_none() {
+                route.end.send_replace(Some(Err(reason.to_string())));
+            }
+        }
         // Flag and drain in one lock hold; see `Pending` for why.
         let mut pending = self.pending.lock().await;
         pending.closed = true;
@@ -1729,11 +1741,15 @@ impl SupervisorClient {
     /// it is bounded, visible to the user as a detach banner, and
     /// recoverable by reattaching, whereas the alternative is an
     /// unbounded, invisible stall of everything else.
-    async fn dispatch(&self, frame: Frame) -> anyhow::Result<()> {
+    async fn dispatch(self: &Arc<Self>, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
             FrameKind::Data => {
-                self.route_terminal_event(frame.channel, TermEvent::Data(frame.body))
-                    .await;
+                if self.downloads.lock().await.contains_key(&frame.channel) {
+                    self.route_download_bytes(frame.channel, frame.body).await;
+                } else {
+                    self.route_terminal_event(frame.channel, TermEvent::Data(frame.body))
+                        .await;
+                }
             }
             FrameKind::Control => {
                 let msg = parse_control(&frame)?;
@@ -1792,6 +1808,17 @@ impl SupervisorClient {
                     return Ok(());
                 }
                 match &msg {
+                    ControlMsg::DownloadEnded { channel, reason } => {
+                        if let Some(route) = self.downloads.lock().await.get(channel) {
+                            // A prior overflow must not become a later EOF success.
+                            if route.end.borrow().is_none() {
+                                route.end.send_replace(Some(match reason {
+                                    Some(reason) => Err(reason.clone()),
+                                    None => Ok(()),
+                                }));
+                            }
+                        }
+                    }
                     ControlMsg::Detached {
                         channel,
                         reason,
