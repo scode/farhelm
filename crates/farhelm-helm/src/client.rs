@@ -1530,7 +1530,8 @@ impl SupervisorClient {
                     Ok(Some(frame)) => match demux.upgrade() {
                         Some(client) => {
                             if let Err(e) = client.dispatch(frame).await {
-                                warn!(error = %e, "invalid frame from supervisor");
+                                // Parse errors can quote the supervisor's malformed input.
+                                warn!(error = %crate::manager::peer_text(&format!("{e:#}")), "invalid frame from supervisor");
                                 break;
                             }
                         }
@@ -4314,6 +4315,72 @@ mod tests {
             "an error tied to no request must fall through to the unhandled arm and be logged, \
              not be swallowed by the reply lookup"
         );
+    }
+
+    /// A malformed frame from a supervisor is logged with its text escaped.
+    ///
+    /// Why: a parse error can quote the peer's own bytes, and the helm's log
+    /// is read in a terminal. A host that sends a message name carrying an
+    /// escape sequence must not be able to recolor, retitle or rewrite that
+    /// log; the logged error has to show the bytes, not act on them.
+    ///
+    /// Spec: after a control frame whose message name holds ESC and BEL, the
+    /// "invalid frame from supervisor" warning's `error` field contains
+    /// neither raw byte but still names the escaped sequence. The pending
+    /// request fails because the reader stops on that frame, which is also
+    /// what orders the assertion after the warning without any wait.
+    #[farhelm_testtrace::test]
+    async fn a_malformed_frame_is_logged_with_its_text_escaped() {
+        let events = crate::test_capture::current();
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let _request = reader.read_frame().await.unwrap().unwrap();
+            writer
+                .write_frame(&Frame {
+                    kind: FrameKind::Control,
+                    channel: 0,
+                    body: br#"{"type":"\u001b]0;owned\u0007"}"#.to_vec(),
+                })
+                .await
+                .unwrap();
+            // Keep the pipe open until the client has read the frame.
+            let _ = reader.read_frame().await;
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        client
+            .request(102, ControlMsg::ListSessions { req_id: 102 })
+            .await
+            .expect_err("the reader stops on a malformed frame, failing the request");
+
+        let logged: Vec<String> =
+            crate::test_capture::matching(&events, "invalid frame from supervisor")
+                .into_iter()
+                .filter_map(|event| event.field("error").map(str::to_owned))
+                .collect();
+        assert_eq!(
+            logged.len(),
+            1,
+            "exactly one malformed-frame warning: {logged:?}"
+        );
+        let error = &logged[0];
+        assert!(
+            !error.contains('\u{1b}') && !error.contains('\u{7}'),
+            "the logged error must not carry raw control bytes: {error:?}"
+        );
+        assert!(
+            error.contains("owned"),
+            "the warning must still show what the peer sent: {error:?}"
+        );
+        drop(client);
+        let _ = peer.await;
     }
 
     /// Request correlation is keyed by req_id, not arrival order. Two

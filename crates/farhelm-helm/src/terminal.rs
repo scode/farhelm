@@ -405,7 +405,8 @@ fn serve_term_upgrade(
                 if refused_as_taken_over(&e) {
                     info!(session = %id_for_log, "terminal reconnect refused: another client holds this session");
                 } else {
-                    error!(error = %e, "terminal websocket ended with error");
+                    // A refusal can carry host text into the operator's terminal.
+                    error!(error = %crate::manager::peer_text(&format!("{e:#}")), "terminal websocket ended with error");
                 }
             }
         })

@@ -7154,7 +7154,8 @@
 - Completion criteria: the badge's visible text and tooltip show the annotation and error detail escaped; the sidebar
   tooltip stays correct (escaping twice is harmless); a test covers a zero-width or direction-override character in the
   detail. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
+- Execution: complete: change `okturrqk`, bookmark `plan/untrusted-text-escaping/01-escape-peer-text`;
+  [PR #1797](https://github.com/scode/farhelm/pull/1797/changes).
 
 ## sidebar-directories-visually-disguise-sessions-actual-folder.md
 
@@ -7172,7 +7173,8 @@
   `(empty)` unless that is already how an empty folder appears; a test covers a zero-width or direction-override
   character. The host name rendered raw nearby (around 1664) is not part of this finding. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
+- Execution: complete: change `okturrqk`, bookmark `plan/untrusted-text-escaping/01-escape-peer-text`;
+  [PR #1797](https://github.com/scode/farhelm/pull/1797/changes).
 
 ## malformed-supervisor-messages-inject-terminal-controls-into.md
 
@@ -7190,7 +7192,8 @@
 - Completion criteria: the parse-failure log line carries the error normalized by the existing helper; a test, where a
   practical seam exists, shows a control character in an unknown message type does not reach the log raw. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
+- Execution: complete: change `okturrqk`, bookmark `plan/untrusted-text-escaping/01-escape-peer-text`;
+  [PR #1797](https://github.com/scode/farhelm/pull/1797/changes).
 
 ## remote-attach-errors-inject-terminal-controls-into.md
 
@@ -7205,7 +7208,8 @@
   significantly more, stop and bring it back to the user.
 - Completion criteria: the attach-failure log line carries the error normalized by the existing helper. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
+- Execution: complete: change `okturrqk`, bookmark `plan/untrusted-text-escaping/01-escape-peer-text`;
+  [PR #1797](https://github.com/scode/farhelm/pull/1797/changes).
 
 ## checkout-cache-refresh-overwrite-another-repositorys-branches.md
 

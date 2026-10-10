@@ -19,12 +19,8 @@ triage.
   about service ownership.
 - `multiple-execstart-commands-incorrectly-treated-last-assignment-wins.md` — A service running commands from multiple
   installations could be assigned to only one.
-- `malformed-supervisor-messages-inject-terminal-controls-into.md` — A malformed supervisor message can alter the helm's
-  terminal log display.
 - `git-fixture-setup-modify-delete-callers-repository.md` — Git test fixtures can modify a repository outside their
   temporary directory.
-- `remote-attach-errors-inject-terminal-controls-into.md` — A remote attach refusal can manipulate the helm's log
-  display.
 - `plain-clicks-overwrite-clipboard-old-selection.md` — An ordinary terminal click can replace the clipboard with an old
   selection.
 - `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
@@ -33,8 +29,6 @@ triage.
   submit commands.
 - `ascii-spaces-remain-invisible-host-identity-approval-labels.md` — ASCII spaces could make distinct installation
   identities hard to distinguish during approval.
-- `sidebar-directories-visually-disguise-sessions-actual-folder.md` — Invisible characters can disguise a session's
-  folder in the sidebar.
 - `template-command-editors-hide-meaningful-characters-silently-saved-command-editor.md` — Editing a saved launch
   command silently removes stored newlines.
 - `template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md` — Editing a saved resume
@@ -45,8 +39,6 @@ triage.
   could display misleading permission wording in summaries.
 - `template-summaries-interpolate-model-text-into-approval-quick-switcher-summary-rendering.md` — The quick switcher
   could show model text as misleading permission wording.
-- `status-badges-render-unescaped-host-supplied-text.md` — Remote diagnostic text can visually distort session status
-  badges.
 - `replace-omits-conversation-loss-warning-failed-resume.md` — Replace omits a conversation-loss warning after a failed
   resume launch.
 - `stale-deflake-pid-terminate-unrelated-work.md` — Stopping an old test sweep can signal an unrelated process.

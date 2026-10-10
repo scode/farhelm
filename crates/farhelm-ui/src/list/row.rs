@@ -892,6 +892,13 @@ pub(super) fn SessionRow(
     // attributes carry the original: an abbreviation the user cannot undo
     // would make the sidebar's own claim about a session unverifiable.
     let cwd_shown = abbreviate_home(&session.cwd);
+    // An absent folder has always left the line blank; only a supplied path
+    // needs a visible spelling for hidden or directional characters.
+    let cwd_shown = if cwd_shown.is_empty() {
+        cwd_shown
+    } else {
+        display_peer(&cwd_shown)
+    };
     // Glyph and permission mark from the session's launch, never from its
     // command text (see `agent_badge`).
     let agent = agent_badge(&session);
@@ -2558,14 +2565,19 @@ mod tests {
     /// quote a different title than the one they act on. Spec: the row's
     /// visible title, its hover tooltip, and both confirmation quotes show
     /// the escaped form (`display_peer`) and never the raw control
-    /// characters.
+    /// characters. The folder line follows the same rule after home
+    /// abbreviation; an absent folder stays blank rather than gaining a
+    /// placeholder that the row did not previously show.
     #[farhelm_testtrace::test]
-    fn titles_render_escaped_in_the_row_and_both_confirmations() {
+    fn titles_and_folders_render_escaped_without_filling_an_empty_folder() {
         std::thread_local! {
             static PROMPT: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
+            static CWD: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
         }
         const SPOOF: &str = "build\u{200B} \u{202E}lanif";
 
+        /// Render the real row for each supplied folder and confirmation state;
+        /// inspecting its text mutations keeps Rust debug escaping out of the proof.
         fn app() -> Element {
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
@@ -2586,6 +2598,7 @@ mod tests {
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
             let session = Session {
                 title: SPOOF.to_string(),
+                cwd: CWD.with(std::cell::Cell::get).to_string(),
                 ..row_specimen("spoofed")
             };
             rsx! {
@@ -2634,7 +2647,26 @@ mod tests {
         let quoted = format!("\"{escaped}\"");
         // Premise: escaping changes this title.
         assert_ne!(escaped, SPOOF);
-        for prompt in [(false, false), (true, false), (false, true)] {
+        for (prompt, cwd, shown) in [
+            ((false, false), "/home/example/project", "~/project"),
+            ((false, false), "", ""),
+            (
+                (false, false),
+                "/home/example/build\u{200B} \u{202E}lanif",
+                "~/build<U+200B> <U+202E>lanif",
+            ),
+            (
+                (true, false),
+                "/home/example/build\u{200B} \u{202E}lanif",
+                "~/build<U+200B> <U+202E>lanif",
+            ),
+            (
+                (false, true),
+                "/home/example/build\u{200B} \u{202E}lanif",
+                "~/build<U+200B> <U+202E>lanif",
+            ),
+        ] {
+            CWD.with(|cell| cell.set(cwd));
             PROMPT.with(|cell| cell.set(prompt));
             let mut dom = VirtualDom::new(app);
             // The actual text payloads the DOM receives, not a Debug dump
@@ -2648,6 +2680,17 @@ mod tests {
                     _ => None,
                 })
                 .collect();
+            if cwd.is_empty() {
+                assert!(
+                    texts.iter().all(|text| !text.contains("(empty)")),
+                    "an absent folder must not gain a visible placeholder: {texts:?}",
+                );
+            } else {
+                assert!(
+                    texts.iter().any(|text| text == shown),
+                    "the folder keeps home abbreviation and shows hidden characters: {texts:?}",
+                );
+            }
             // Isolation: every title surface is a `PeerTitle`, whose class and
             // `dir` reach the DOM as dynamic attributes.
             let attribute = |name: &str, wanted: &dyn Fn(&str) -> bool| {
