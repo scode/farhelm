@@ -196,6 +196,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
   setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
   SPEC.md's "Ownership during cleanup and provisioning" section states the rule.
+- Correct the OMP agent page's claim that `npx` launchers are recognized
+  (`website/src/content/docs/docs/agents/omp.md`). npm rewrites its own process command line when it starts, so a live
+  npm or npx process never shows the command line Farhelm's OMP process-chain check expects, and that recognition cannot
+  match anywhere in the chain; it is only covered by shape tests built on the expected command line. Found while landing
+  `omp-pane-guard-all-launches`, where a live `npx` run on Linux confirmed the rewrite. Say what actually works for npx
+  launches, or make the recognition match what live npm shows.
 
 ## Tricky bugs
 
