@@ -31,7 +31,7 @@ pub(crate) fn return_focus_to_gear() {
     ));
 }
 
-/// Put the automatic-updates checkbox back to the setting in force after a
+/// Put the automatic-updates switch back to the setting in force after a
 /// failed save.
 ///
 /// The browser has already flipped the box when `onchange` runs, and when
@@ -90,8 +90,10 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 div {
                     label { class: "app-settings-choice",
                         "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
+                        span { "set up new hosts without asking" }
                         input {
                             r#type: "checkbox",
+                            class: "host-settings-switch",
                             checked: setup,
                             aria_describedby: "host-setup-preference-help",
                             onchange: move |event| {
@@ -99,7 +101,6 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                                 store_preference(&setup_base, PreferenceValue::HostSetupConfirmation(event.checked()));
                             },
                         }
-                        "set up new hosts without asking"
                     }
                     p { id: "host-setup-preference-help", class: "host-settings-help",
                         if setup {
@@ -112,8 +113,10 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 div {
                     label { class: "app-settings-choice",
                         "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
+                        span { "remove hosts without asking" }
                         input {
                             r#type: "checkbox",
+                            class: "host-settings-switch",
                             checked: remove,
                             aria_describedby: "host-remove-preference-help",
                             onchange: move |event| {
@@ -121,7 +124,6 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                                 store_preference(&base, PreferenceValue::HostRemoveConfirmation(event.checked()));
                             },
                         }
-                        "remove hosts without asking"
                     }
                     p { id: "host-remove-preference-help", class: "host-settings-help",
                         if remove {
@@ -139,8 +141,10 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     div {
                         label { class: "app-settings-choice",
                             "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
+                            span { "install updates automatically" }
                             input {
                                 r#type: "checkbox",
+                                class: "host-settings-switch",
                                 checked: automatic(),
                                 aria_describedby: "automatic-updates-help",
                                 // Only a saved choice is shown as the choice: on
@@ -161,7 +165,6 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                                     }
                                 },
                             }
-                            "install updates automatically"
                         }
                         p { id: "automatic-updates-help", class: "host-settings-help",
                             if automatic() {

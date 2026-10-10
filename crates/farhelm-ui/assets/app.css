@@ -2522,7 +2522,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
 }
-.app-settings-dialog > .host-settings-help {
+/* Settings puts its switches after the text, so help at every nesting level
+   aligns with that text rather than leaving space for a leading checkbox. */
+.app-settings-dialog > .host-settings-help,
+.app-settings-dialog[aria-label="settings"] .host-settings-help {
   margin: 0;
 }
 /* The feedback dialog (feedback.rs): two labelled fields stacked full width,
@@ -2784,6 +2787,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 8px;
   color: var(--fg-0);
 }
+/* Feedback shares both dialog and choice classes for an ordinary checkbox.
+   The dialog's accessible name confines right-hand switches to Settings. */
+.app-settings-dialog[aria-label="settings"] .app-settings-choice {
+  justify-content: space-between;
+  gap: 16px;
+}
+.app-settings-dialog[aria-label="settings"] .app-settings-choice > span { min-width: 0; }
 /* The hint belongs to the permanent answer, including when actions wrap. */
 .host-permanent-answer {
   flex: 1 1 180px;

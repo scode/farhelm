@@ -192,7 +192,7 @@ pub(crate) fn SessionSounds(
     rsx! {}
 }
 
-/// Device switches use the same labelled checkbox style as the other settings.
+/// Device switches keep native label and keyboard behavior like host settings.
 /// Storage and the live checked properties belong to the audio asset; these
 /// controls deliberately send no helm preference writes.
 #[component]
@@ -214,8 +214,8 @@ pub(crate) fn SoundSettings() -> Element {
             ] {
                 label { class: "app-settings-choice",
                     "data-tooltip": help,
-                    input { r#type: "checkbox", checked: default, "data-sound-event": kind }
-                    "{label}"
+                    span { "{label}" }
+                    input { r#type: "checkbox", class: "host-settings-switch", checked: default, "data-sound-event": kind }
                 }
             }
         }

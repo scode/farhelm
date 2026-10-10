@@ -336,11 +336,11 @@ The update can also be checked for on demand: the local machine's host row offer
 [Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Either checks
 now and installs a newer release if there is one, even while an earlier update already waits for a restart. A check
 started this way always ends in a visible state, shown in the readout's hover: up to date, installing, update ready (the
-red readout), or the check failed, with the reason. The desktop settings dialog has a checkbox for installing updates
-automatically, on by default; unticking it stops the startup and daily checks and the background installs, while the two
-on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
-off, the user updates through either on-demand check or by running the installer, as before. None of this applies to the
-web UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
+red readout), or the check failed, with the reason. The desktop settings dialog has a switch for installing updates
+automatically, on by default; turning it off stops the startup and daily checks and the background installs, while the
+two on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic
+updates off, the user updates through either on-demand check or by running the installer, as before. None of this
+applies to the web UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
@@ -983,23 +983,23 @@ remembered by the helm as one preference shared by every client, together with t
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a client
 that has already loaded its preferences keeps its previous behavior until it reloads. The gear immediately to the right
-of the sidebar version opens a settings dialog with the host checkboxes `set up new hosts without asking` and
-`remove hosts without asking`, ticked when the respective confirmation is skipped. Unticking one restores that
-confirmation; ticking one makes the same choice as the host dialog's permanent answer. Changes take effect immediately
-in the current client. Each checkbox explains the current behavior, and each host dialog's permanent answer points to
-the gear as the place to undo it. Sounds has three device switches (see Status). The installed desktop app's dialog also
-has a checkbox for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
-the host choices it is a setting of that app installation, kept with the app rather than by the helm, and a browser
-never shows it. The two host confirmation choices apply to every host and client of this helm; existing controls with a
-natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
-after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
-same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
-different answers — is not wanted for these shared preferences (sidebar width, terminal text size and sound switches, by
-contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm
-for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference
-usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not
-comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the
-asking session.
+of the sidebar version opens a settings dialog with the host switches `set up new hosts without asking` and
+`remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
+confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
+immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
+points to the gear as the place to undo it. Sounds has three device switches (see Status). The installed desktop app's
+dialog also has a switch for installing updates automatically (see
+[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
+installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
+apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
+keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
+browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
+storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately per device; see
+Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
+No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
+the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
+it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,

@@ -471,12 +471,13 @@ until that status clears.
 The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
 cap the backdrop below main-pane surfaces. It holds the two app-wide host-confirmation choices, with state-specific help
 and an explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active,
-the automatic-updates checkbox, which reads and writes the desktop state file instead (see The desktop app's updater).
-Each host-confirmation checkbox reads `Some(true)` as without asking, updates `SharedPreferences` immediately and sends
-an explicit boolean through the existing sparse preference queue. Preference failures retain that queue's silent
-behavior. The dialog uses the host dialogs' shared focus/isolation helper with its own selector; opening focuses the
-first checkbox, Escape or `close` releases isolation and returns focus to the gear. The host setup and removal permanent
-answers each name that gear as the way to turn confirmation back on.
+the automatic-updates switch, which reads and writes the desktop state file instead (see The desktop app's updater). The
+switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation switch reads
+`Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean through the
+existing sparse preference queue. Preference failures retain that queue's silent behavior. The dialog uses the host
+dialogs' shared focus/isolation helper with its own selector; opening focuses the first switch, Escape or `close`
+releases isolation and returns focus to the gear. The host setup and removal permanent answers each name that gear as
+the way to turn confirmation back on.
 
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
