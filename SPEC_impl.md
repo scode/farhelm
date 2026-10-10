@@ -1059,27 +1059,39 @@ and the process reaped. The acknowledgement cannot share the output client's pro
 leave older positional command replies unread there. tmux applies `no-output` by discarding all pending pane blocks for
 that client and refusing new ones, so this is a client-wide boundary rather than a racy list of panes that existed when
 teardown began. Closing or killing tmux 3.7b's client while one of those blocks remains can abort the whole private
-server with `fatal: not enough data`; the acknowledged transition is therefore part of the handoff contract, not cleanup
-polish. Pane modes, a history snapshot, a visible-screen snapshot, and a final
-`refresh-client -f !no-output,pause-after=N` are submitted as one semicolon-separated command group through that
-replacement. The matching `%end` for the final refresh block is the cutover: earlier pane bytes are represented by the
-snapshot, later ones arrive as live output, and `no-output` advances rather than queueing a second copy for delivery.
-Normal-screen replay selects the history snapshot; alternate-screen replay selects the visible snapshot so normal
-history is not mixed into a full-screen app. Known limitation, accepted: an alternate-screen replay carries only that
-screen, so when the full-screen program later exits, the browser's normal buffer behind it is empty until new output
-arrives, where tmux's own grid still held the pre-program scrollback. Replaying both would add two captures to every
-attach for a cosmetic gain, and was declined (review finding A7-C8).
+server with `fatal: not enough data`; the existing handoff therefore retains the acknowledged no-output transition. Pane
+modes, a history snapshot, a visible-screen snapshot, and a final `refresh-client -f !no-output,pause-after=N` are
+submitted as one semicolon-separated command group through that replacement. The matching `%end` for the final refresh
+block is the cutover: earlier pane bytes are represented by the snapshot, later ones arrive as live output, and
+`no-output` advances rather than queueing a second copy for delivery. Normal-screen replay selects the history snapshot;
+alternate-screen replay selects the visible snapshot so normal history is not mixed into a full-screen app. Known
+limitation, accepted: an alternate-screen replay carries only that screen, so when the full-screen program later exits,
+the browser's normal buffer behind it is empty until new output arrives, where tmux's own grid still held the
+pre-program scrollback. Replaying both would add two captures to every attach for a cosmetic gain, and was declined
+(review finding A7-C8).
 
-The initial foreign-pane filters must be arguments of that same cutover `refresh-client` invocation. Clearing
-`no-output` resets the client's per-pane state, so sending the filters as a separate earlier command silently loses
-them. The first bounded batch rides the cutover; any overflow is explicitly filtered afterwards, when no subsequent
-`no-output` transition will erase it. Late panes use the live filtering path, with a bounded memo to avoid issuing a
-filter command for every output notification. The session sink must keep those filtered panes readable; local dropping
-of foreign bytes remains separate from this reduction in tmux notification traffic.
+Planned supervisor stops give orderly output-client teardown ten seconds, including waiting for the attachment lock. On
+expiry, one best-effort attempt lists the private server's control clients and switches them to no-output, within two
+additional seconds. It neither kills clients nor retries or verifies the roster; failure is logged and the process still
+exits. This can quiet existing clients even when the attachment lock spent the original budget, but does not guarantee
+that every client closes safely.
 
-Setting `pause-after` on that same cutover (M2.5) changes the dialect the client then reads, which the parser must
-handle rather than discard: pane bytes arrive as `%extended-output <pane-id> <age> ... : <data>` instead of `%output`,
-and `%pause`/`%continue` notifications appear. Both output dialects are accepted unconditionally and decoded
+Further defenses against a tmux abort on abrupt closure of an output-bearing control client are not worth significant
+complexity without an observed abort on tmux 3.7c or later. The recorded aborts are on distro tmux 3.6 and tmux 3.7b;
+applicability to 3.7c remains unverified. Until that evidence exists, a rare path bypassing the existing safe-teardown
+discipline is not a reason for further design or code. The existing discipline stays in place; an observed abort on 3.7c
+or later reopens this decision.
+
+The initial foreign-pane filters must be arguments of the cutover's final `refresh-client` invocation, described above.
+Clearing `no-output` resets the client's per-pane state, so sending the filters as a separate earlier command silently
+loses them. The first bounded batch rides the cutover; any overflow is explicitly filtered afterwards, when no
+subsequent `no-output` transition will erase it. Late panes use the live filtering path, with a bounded memo to avoid
+issuing a filter command for every output notification. The session sink must keep those filtered panes readable; local
+dropping of foreign bytes remains separate from this reduction in tmux notification traffic.
+
+Setting `pause-after` on that final cutover refresh (M2.5) changes the dialect the client then reads, which the parser
+must handle rather than discard: pane bytes arrive as `%extended-output <pane-id> <age> ... : <data>` instead of
+`%output`, and `%pause`/`%continue` notifications appear. Both output dialects are accepted unconditionally and decoded
 identically, including across a switch mid-stream, because the passthrough decoder carries state between notifications.
 `%pause` is acted on — it means tmux cut this client's stream, and the dropped bytes are recoverable only by replaying
 history — while `%continue` is discarded like any other chatter, since it arrives inside the reply block of the command

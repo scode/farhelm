@@ -1285,7 +1285,8 @@ impl StateDirOwnership {
     /// This is what lets Farhelm be reopened right after it was quit. A
     /// stopping supervisor stops answering on its socket immediately and
     /// then keeps `supervisor.lock` for up to [`SHUTDOWN_OUTPUT_BUDGET`]
-    /// while it closes its terminal-output clients in order. A successor
+    /// (plus a two-second quiet-down if that budget expires) while it
+    /// closes its terminal-output clients in order. A successor
     /// started in that window used to find the lock held, start read-only,
     /// and have `serve` refuse it, so the desktop app refused to open. The
     /// wait lives here, in the supervisor that needs the lock, rather than
@@ -14615,7 +14616,8 @@ const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 /// app's stdin tether; callers without one pass a future that never
 /// completes). On any of them the supervisor closes every terminal-output
 /// client through its orderly no-output boundary, within
-/// [`SHUTDOWN_OUTPUT_BUDGET`], and then returns. That handler is the point
+/// [`SHUTDOWN_OUTPUT_BUDGET`], followed on expiry by one best-effort quiet-down
+/// attempt lasting at most two more seconds, and then returns. That handler is the point
 /// of this function's shape, not ceremony: without it every planned stop,
 /// restart, or upgrade (which `KillMode=process` makes a SIGTERM to this
 /// process alone) killed the process with every output client still

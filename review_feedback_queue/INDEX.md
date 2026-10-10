@@ -5,7 +5,6 @@ One line per open item. This file must always match the feedback files in this d
 ## Highest priority: security or data loss
 
 - `uninstall-reload.md` — Uninstall can lose process-only kill policy before stopping.
-- `shutdown-expiry.md` — Planned shutdown exits before every output client becomes safe.
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 - `omp-bun-pane-proof.md` — A nested OMP conversation can be accepted for an unreadable Bun foreground.
 
