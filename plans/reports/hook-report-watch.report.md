@@ -114,3 +114,40 @@ macOS batching. Required inherited-model resume and report cold reads are separa
 Implementation and investigation stayed with the executing agent; delegation was limited to prescribed reviews. Native
 tools expose requested reviewer configurations, but not independently reported runtime model identities or token
 counters. Private review evidence remains in the executor's session record and working log.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1776, one squash commit on main, in the plan's second round. The first landing attempt
+was blocked: the plan made the supervisor's periodic pass skip a session whose report is being taken in, and an older
+test that proves a stop lets a pass already underway finish had used exactly that wait to pause the pass, so it could
+never reach its setup. You chose to rework the test, with a test-only hold point if needed, under a complexity gate.
+
+#### Fixes made while landing (first attempt, kept)
+
+The first landing attempt fixed two problems that stay in what landed: a report folder removed while the supervisor was
+refreshing its list of watched folders switched immediate pickup off for the rest of that supervisor's life (it now
+retries, and still gives up on errors a retry cannot fix, such as the system's limit on watches); and SPEC_impl.md, two
+code comments and the new file-watching library's declaration were corrected.
+
+#### Review before merging
+
+A separate reviewer read this round by reading the code only. The reworked test holds the periodic pass at its existing
+report-listing point, after the pass's last stop check and before the warning it ends with, with the file watcher
+disabled (and that refusal checked) so the periodic pass is the only thing that can do the work. A stop that cancelled
+the pass instead of letting it finish would leave the warning unset, so the test still tells the two apart. No test seam
+reaches the shipped binary, and nothing else changed since the earlier review. Two nits were left as they are: if a
+future change made startup create the reports folder early, the test would hang until the runner's limit instead of
+failing with a clear message; and the hold point's documentation still describes only its first users.
+
+#### Checks
+
+- Run now, on the plan rebased onto main: `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and the supervisor's unit tests in full through the recorder with
+  pinned tmux 3.7c, four slots and no retries (run `d8fc910c`, 1083 of 1084). The one failure was a tmux output-filter
+  test this plan does not touch, which waits a fixed window for a filtered pane's output to resume; it ran while the
+  machine's load average was between 17 and 26 on 18 CPUs, and then passed ten times in a row on its own. A single
+  failure under that load is not logged as a flake.
+- Reused from the executor: its runs of the reworked test and of the real-hook selection from the first round; the
+  landing changed nothing this round.
+
+Nothing in the report above was made untrue by the landing.
