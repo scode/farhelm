@@ -7147,3 +7147,298 @@
   documentation claim is a separate TODO; middle-link rules stay as they are.
 - Execution: complete: change `uouxtvtp`, bookmark `plan/omp-pane-guard-all-launches/01-omp-pane-guard`;
   [PR #1779](https://github.com/scode/farhelm/pull/1779/changes).
+
+## status-badges-render-unescaped-host-supplied-text.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. A session's status badge appends the supervisor-supplied exit
+  annotation and error detail verbatim (`crates/farhelm-ui/src/status.rs`, `status_badge`, around 157–174) and renders
+  the result raw both as visible text and in `data-tooltip` (around 256–258); only the compact sidebar tooltip escapes
+  it (`crates/farhelm-ui/src/list/row.rs` around 1504). The error detail can carry the agent's `argv[0]`
+  (`crates/farhelm-supervisor/src/launch.rs` around 950). Invisible or direction-changing characters can therefore hide
+  or reorder the diagnostic, contrary to `peer.rs`'s rule that peer text shown to the user goes through `display_peer`
+  and SPEC.md's treatment of supervisor messages as untrusted. Precedent: `session-header-raw-peer-text.md`
+  (`fix code`).
+- Decision: fix it; one of 18 highest-bucket items the user accepted as clearly a bug with a straightforward fix,
+  without per-item discussion. Grouped with the other untrusted-text escaping outcomes into one PR, at the user's
+  request to batch related outcomes. Complexity gate: the fix should stay about as small as assessed (escape both values
+  with `display_peer` in `status_badge`, plus a test). If it needs significantly more, stop and bring it back to the
+  user.
+- Completion criteria: the badge's visible text and tooltip show the annotation and error detail escaped; the sidebar
+  tooltip stays correct (escaping twice is harmless); a test covers a zero-width or direction-override character in the
+  detail. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## sidebar-directories-visually-disguise-sessions-actual-folder.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. The sidebar row computes the shown folder with
+  `abbreviate_home(&session.cwd)` (`crates/farhelm-ui/src/list/row.rs` around 894), escapes it for the tooltip with
+  `display_peer` (around 1688) but renders the visible text raw (around 1689). Invisible or direction-changing
+  characters in a path can make it look like a different folder. Precedent: the session header's folder and sidebar
+  titles (`session-header-raw-peer-text.md` and its neighbours, `fix code`); this row is a missed sibling.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other untrusted-text escaping
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (render the folder through
+  `display_peer` inside the existing `dir="ltr"` span, plus a test). If it needs significantly more, stop and bring it
+  back to the user.
+- Completion criteria: the visible folder text is escaped like its tooltip; an empty folder does not newly render as
+  `(empty)` unless that is already how an empty folder appears; a test covers a zero-width or direction-override
+  character. The host name rendered raw nearby (around 1664) is not part of this finding. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## malformed-supervisor-messages-inject-terminal-controls-into.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. A message with an unknown type name fails to parse with serde's
+  "unknown variant" error, which embeds the peer's string raw (`crates/farhelm-proto/src/io.rs`, `parse_control`, around
+  241), and the helm logs it as a field, `warn!(error = %e, ...)` (`crates/farhelm-helm/src/client.rs` around 1526). The
+  log formatter escapes control characters only in the message, not in fields, so a supervisor can write terminal
+  control sequences into the operator's terminal. This breaks SPEC_impl.md's rule that peer-supplied error text is
+  normalized wherever it is logged.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other untrusted-text escaping
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (route the logged error through
+  the helm's existing `peer_text` helper, as `manager.rs` already does). If it needs significantly more, stop and bring
+  it back to the user.
+- Completion criteria: the parse-failure log line carries the error normalized by the existing helper; a test, where a
+  practical seam exists, shows a control character in an unknown message type does not reach the log raw. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## remote-attach-errors-inject-terminal-controls-into.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. A supervisor's refusal of a terminal attach becomes a
+  `SupervisorError` whose Display is the raw message (`crates/farhelm-helm/src/client.rs` around 213 and 2527); it
+  propagates through `crates/farhelm-helm/src/terminal.rs` (around 203) and is logged as a field,
+  `error!(error = %e, ...)` (around 407). Same formatter gap and same SPEC_impl.md rule as
+  `malformed-supervisor-messages-inject-terminal-controls-into.md`.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other untrusted-text escaping
+  outcomes into one PR. Complexity gate: as for its sibling, a one-line change through `peer_text`. If it needs
+  significantly more, stop and bring it back to the user.
+- Completion criteria: the attach-failure log line carries the error normalized by the existing helper. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-cache-refresh-overwrite-another-repositorys-branches.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. The git children that prepare a session's checkout
+  (`crates/farhelm-supervisor/src/launch.rs` around 996–1036) inherit `GIT_DIR`, `GIT_WORK_TREE` and `GIT_COMMON_DIR`
+  from the login environment, and an inherited `GIT_DIR` overrides `git -C <cache>`. The cache refresh runs a forced
+  `fetch --prune` (around 1515–1533), so it would overwrite and delete that other repository's branches and tags.
+  Repository discovery already strips these variables for exactly this reason
+  (`crates/farhelm-supervisor/src/repository_discovery.rs` around 239–253); the launch tests strip them only in the
+  harness (`launch.rs` around 4071).
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the matching test-fixture outcome
+  into one PR. Complexity gate: the fix should stay about as small as assessed (remove the repository-selecting git
+  variables on the preparation children, cached and uncached, sharing the list repository discovery uses where
+  practical). If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: checkout preparation's git children run without the variables that select a repository
+  (`git rev-parse --local-env-vars` lists them); the agent's own environment is unchanged; a regression test passes a
+  `GIT_DIR` to the preparation path through injection, never by changing the test process's environment, and shows the
+  other repository untouched. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## git-fixture-setup-modify-delete-callers-repository.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at `e1ea1929`, reproduced in a scratch directory. The repository-discovery test fixtures run git
+  through a helper (`crates/farhelm-supervisor/src/repository_discovery.rs` around 984–991) that does not scrub the
+  environment, unlike the production helper (around 239–250). With `GIT_DIR` set, as git does for hooks, one fixture
+  wrote a remote into the caller's repository and replaced its `.git` directory with a gitfile pointing into a temporary
+  directory that is later deleted; another writes `include.path` into it (around 564–573).
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the checkout-cache outcome into one
+  PR. Complexity gate: the fix should stay about as small as assessed (remove the same variables on the fixture's child
+  `Command`). If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: the fixture's git children run without the repository-selecting and `GIT_CONFIG_*` variables;
+  only the child environment changes, never the test process's own. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## unsupported-c-escapes-become-different-executable-instead.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at `e1ea1929`, checked against systemd 255's `systemd-analyze verify`. The reader of Farhelm's
+  service files drops the backslash of any escape it does not know (`crates/farhelm-helm/src/units.rs` around 288), so
+  `\x20` reads as `x20` and uninstall or setup sees a different program path, contradicting the function's own docstring
+  (around 268–273) and SPEC.md's rule that ambiguous ownership refuses. systemd decodes `\x20` as a space. The renderer
+  only ever writes `\\` and `\"`.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the lowercase-section outcome and
+  the macOS argument outcome into one PR (Farhelm misreading what the operating system reports). Complexity gate: the
+  fix should stay about as small as assessed (accept only the escapes the renderer writes and return no answer for any
+  other, which callers already turn into a refusal, plus a test). If it needs significantly more, stop and bring it back
+  to the user. The `$$` handling in the same function belongs to the separate dollar-path items and is not part of this.
+- Completion criteria: an unknown backslash escape yields no program path, so ownership is refused; a test covers
+  `\x20`. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## lowercase-sections-override-ownership-despite-being-ignored.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at `e1ea1929`, checked with `systemd-analyze verify`, which reports "Unknown section 'service'.
+  Ignoring.". The service-file reader matches the section name case-insensitively (`crates/farhelm-helm/src/units.rs`
+  around 238), and a test asserts that behavior with a comment that misstates systemd (around 1058–1062).
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other service-file and macOS
+  argument outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (exact match on
+  `Service` and flip the test). If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: only `[Service]` counts; the test expects a lowercase section to be ignored and its comment is
+  corrected. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## large-macos-environments-corrupt-otherwise-valid-hook-argument.md
+
+- Outcome: `fix code`.
+- Assessment: likely, by inspection at `e1ea1929`; not run on macOS. The supervisor sizes the whole `KERN_PROCARGS2`
+  answer (executable path, arguments and environment) at the 64 KiB argument budget
+  (`crates/farhelm-supervisor/src/procs.rs` around 1589), on the assumption in its comment (around 1611) that an
+  undersized buffer fails. The same file documents XNU succeeding with a zero-filled buffer instead (around 1453–1466),
+  which parses as an empty argument list, so a hook process with a large environment has its report refused and Restart
+  has no conversation to resume. Unverified: whether the kernel zero-fills or truncates; either outcome loses the
+  arguments.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the service-file reader outcomes
+  into one PR. Complexity gate: the fix should stay about as small as assessed (size the buffer from `arg_max()` as the
+  environment reader already does, keep the 64 KiB budget in the parser, correct the comment). If it needs significantly
+  more, or a macOS compile cannot be obtained (the hosted `uninstall-macos` suite builds on macOS), stop and bring it
+  back to the user.
+- Completion criteria: the argument read uses a buffer large enough for the whole answer; the parser still enforces the
+  argument budget; the comment matches the documented kernel behavior; the change compiles on macOS. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## arrow-navigation-retains-obsolete-position-item-disappears.md
+
+- Outcome: `fix code`.
+- Assessment: likely, by code reading at `e1ea1929`; no browser reproduction. Arrow keys in a session's menu step from
+  the last requested position rather than the focused item (`crates/farhelm-ui/src/menu_panel.rs` around 548 and 604).
+  When the item set changes, focus is re-aimed by action but the requested position is not
+  (`crates/farhelm-ui/src/list/row.rs` around 1284–1319), on the reasoning that a stale position falls out of range
+  (around 1120–1126). That is false when a middle item disappears: with Replace selected and the agent ending, "Mark
+  seen" vanishes and the next Down lands on Delete instead of Stop, and Enter on an ended session without tabs deletes
+  it without confirmation.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other small UI interaction
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (re-aim or clear the requested
+  position in the same effect that re-aims focus, correct the comment, plus a test). If it needs significantly more,
+  stop and bring it back to the user.
+- Completion criteria: after an item set change, the next arrow step moves from the item the user had selected; the
+  comment's reasoning is corrected; a test covers a middle item disappearing. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## plain-clicks-overwrite-clipboard-old-selection.md
+
+- Outcome: `fix code`.
+- Assessment: likely, by code reading at `e1ea1929`; no interactive reproduction. With a program using legacy mouse
+  reporting, a forced selection (Shift-drag, Option-drag on Mac) stays on screen; a later plain click is passed to the
+  program without clearing it, and copy-on-select copies the retained selection on mouse-up
+  (`crates/farhelm-ui/assets/copy-on-select.js` around 77; `terminal.js` around 5294–5302), overwriting newer clipboard
+  contents. The module's own header states a plain click without a drag must not clobber the clipboard. Unverified: how
+  common legacy encoding is among pane programs.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other small UI interaction
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (skip the copy for a press that
+  happened under mouse tracking without being forced, plus a `node --test` case). If it needs significantly more, stop
+  and bring it back to the user.
+- Completion criteria: a plain click under mouse tracking does not copy a retained selection; forced selections still
+  copy; reselection without tracking is unchanged; a JS unit test covers it. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## replace-omits-conversation-loss-warning-failed-resume.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. A resume-restart whose agent fails to start leaves the conversation
+  capture in place (`crates/farhelm-supervisor/src/store.rs` around 4081–4100), and the Resume offer follows the
+  capture, not the status (`crates/farhelm-supervisor/src/service/status.rs` around 372), so an errored session can
+  still offer Resume. Replace's confirmation for the error state says only that the agent never started
+  (`crates/farhelm-ui/src/status.rs` around 538), while every other Replace wording warns that the conversation is
+  discarded. Unverified: that a resume-restart reaches the error state rather than another non-running state.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other small UI interaction
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (reword the error-state
+  confirmation, optionally conditional on a Resume offer). If it needs significantly more, stop and bring it back to the
+  user.
+- Completion criteria: Replace's confirmation on an errored session warns that a resumable conversation is discarded
+  whenever one exists; tests covering the wording are updated. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`; test code only. A tmux probe test writes process-id files through
+  paths placed unquoted after `>` in an inner bash script (`crates/farhelm-supervisor/src/tmux.rs` around 4837–4843);
+  the path helper rejects only apostrophes (around 4735–4742). A temporary directory containing a space sends the write
+  to the part of the path before the space, which can truncate a file outside the test directory.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Fixed together with
+  `unquoted-probe-fixture-paths-inherited-pipe-fixture-inherited-pipe-fixture.md`, the same bug at a second site, and
+  grouped with the other harness and tooling outcomes into one PR. Complexity gate: quoting or positional arguments in
+  the fixture. If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: the inner script quotes the paths or receives them as positional arguments; the path helper's
+  documentation matches what it guarantees. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## unquoted-probe-fixture-paths-inherited-pipe-fixture-inherited-pipe-fixture.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`; the same unquoted redirect in the inherited-pipe fixture
+  (`crates/farhelm-supervisor/src/tmux.rs` around 4900).
+- Decision: fix it, together with
+  `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md`, under the same gate.
+- Completion criteria: the redirect target is quoted. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## real-agent-cleanup-forget-somebody-elses-workspace.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. The opt-in real-agent spawn test uses the fixed jj workspace name
+  `spawned-workspace` in the real repository (`e2e/tests/spawn.spec.ts` around 250) and forgets it unconditionally on
+  cleanup (around 287–305), so it can unregister a sibling run's workspace. Root `AGENTS.md` forbids fixed names in a
+  harness.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other harness and tooling
+  outcomes into one PR. Complexity gate: the fix should stay about as small as assessed (derive the workspace name from
+  the run's own stamp or scratch directory). If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: the workspace name is unique per run and cleanup forgets only that name. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## stale-deflake-pid-terminate-unrelated-work.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. The deflake daemon writes its process number to a file under the
+  user's state directory (`deflake/bin/deflake` around 76 and 822) and removes it only on orderly exit (around 888).
+  `deflake stop` signals that number after a bare `kill -0` check (around 611–618 and 1456–1463), so after an abnormal
+  exit or a reboot it can terminate an unrelated process. SPEC_impl.md forbids storing a process number for later use.
+- Decision: fix it; one of the 18 accepted without per-item discussion, with the screening's caveat that this fix adds a
+  small mechanism. Grouped with the other harness and tooling outcomes into one PR. Complexity gate: the fix should stay
+  about as small as assessed (record the process start time beside the number and treat a mismatch as not running,
+  roughly 20 lines in one file). If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: `deflake stop` and the liveness check signal or trust the recorded process only when its start
+  time matches; a stale file is treated as not running. Validate per `deflake/EVAL.md` if the change touches what it
+  covers. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## qualified-hostname-scrubbing-leaves-private-domain.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. The agent-screen capture tool scrubs only the first label of the
+  host name (`scripts/capture-agent-screens.py` around 118), so a fully qualified name on screen would leave the private
+  domain in public fixtures, and the leftover check would not catch it. Unverified: that an agent screen shows the full
+  host name.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other harness and tooling
+  outcomes into one PR. Complexity gate: add the full host name, when it contains a dot, to the literal replacements and
+  the forbidden list ahead of the short name. If it needs significantly more, stop and bring it back to the user.
+- Completion criteria: a fully qualified host name is scrubbed and checked for. No agent screens are re-captured. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## release-failure-advice-tells-operator-reuse-tag.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by inspection at `e1ea1929`. When a release tag does not match the workspace version, the
+  release workflow prints advice to delete and re-push the tag (`.github/dist-build-setup.yml` around 96, generated into
+  `.github/workflows/release.yml` around 144), contradicting `releasing/AGENTS.md`, which says tags are never deleted or
+  reused.
+- Decision: fix it; one of the 18 accepted without per-item discussion. Grouped with the other harness and tooling
+  outcomes into one PR. Complexity gate: reword the advice in the source file and regenerate. If it needs significantly
+  more, stop and bring it back to the user.
+- Completion criteria: the printed advice says the tag is spent and to cut the next version per `releasing/AGENTS.md`;
+  `release.yml` is regenerated with the pinned cargo-dist and `dist generate --check` passes. Remove this feedback file
+  and its index entry.
+- Execution: `pending`.
