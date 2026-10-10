@@ -5290,6 +5290,8 @@ mod tests {
 
     /// Malformed control JSON is a fatal protocol violation. Ignoring it
     /// loses the req_id and leaves the matching request parked forever.
+    /// The peer retains both transport halves until the client closes, so
+    /// an ordinary peer EOF cannot satisfy the pending-request assertion.
     #[farhelm_testtrace::test]
     async fn malformed_control_frame_fails_pending_requests() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -5309,6 +5311,15 @@ mod tests {
                 })
                 .await
                 .unwrap();
+            // Keep both halves alive: EOF from this peer must not be the
+            // reason the pending request fails. Observe the client's close.
+            assert!(
+                timeout(Duration::from_secs(5), reader.read_frame())
+                    .await
+                    .expect("malformed input must close the client transport")
+                    .unwrap()
+                    .is_none()
+            );
         });
         let (r, w) = tokio::io::split(client_side);
         let client = SupervisorClient::start(r, w).await.unwrap();

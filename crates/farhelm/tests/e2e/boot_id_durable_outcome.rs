@@ -647,22 +647,37 @@ async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere()
 /// upstream failure into a setup failure with its own name.
 #[farhelm_testtrace::test]
 async fn a_list_polling_through_a_stop_never_erases_the_annotation() {
+    // First success is the readiness oracle; all later observer errors remain
+    // test failures rather than quietly removing the concurrent participant.
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
     let poller = h.second_client().await;
     let id = session.id.clone();
+    let (ready, started) = tokio::sync::oneshot::channel();
     let polling = tokio::spawn(async move {
-        for _ in 0..200 {
-            if poller.list_sessions().await.is_err() {
-                break;
-            }
+        poller
+            .list_sessions()
+            .await
+            .expect("the concurrent observer must list successfully");
+        ready.send(()).expect("the test must await the observer");
+        for _ in 1..200 {
+            poller
+                .list_sessions()
+                .await
+                .expect("concurrent listing must not fail during stop");
             // sleep-ok: pace the finite series of list requests that races the stop operation.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        200
     });
+    // A failed or never-scheduled participant cannot count as race coverage.
+    tokio::time::timeout(Duration::from_secs(20), started)
+        .await
+        .expect("the observer never started")
+        .expect("the observer failed before its first successful list");
     h.client.stop_session(&session.id).await.expect("stop");
-    polling.await.expect("the poller must not panic");
+    assert_eq!(polling.await.expect("the poller must not panic"), 200);
 
     let stopped = listed(&h.client, &id).await;
     assert!(

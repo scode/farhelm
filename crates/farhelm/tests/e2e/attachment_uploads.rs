@@ -2269,6 +2269,8 @@ async fn the_upload_admission_bound_is_per_connection() {
 /// forever — a transfer that never advances, never times out, and holds
 /// its staging file indefinitely, which is precisely the forever-pending
 /// upload the timeout exists to prevent.
+/// The abort must arrive while chunks are still being supplied; an abort
+/// after the finite stimulus ends would also accept counting empties as progress.
 #[farhelm_testtrace::test]
 async fn an_empty_chunk_flood_does_not_defeat_the_stall_timeout() {
     let h = harness_with_timeouts(SupervisorTimeouts {
@@ -2282,15 +2284,43 @@ async fn an_empty_chunk_flood_does_not_defeat_the_stall_timeout() {
     let started = peer.begin(1, &session.id, 1, "shot.png", 1 << 20).await;
     assert!(matches!(started, ControlMsg::UploadStarted { .. }));
 
-    let flooding = tokio::spawn(async move {
-        // Faster than the progress window, for well past it.
-        peer.send_paced_chunks(1, &[], 60, Duration::from_millis(50))
-            .await;
-        peer
-    });
-    let mut peer = flooding.await.expect("the flood task must not panic");
-
-    let outcome = peer.next_outcome(20).await;
+    // Both halves advance together. Dropping these futures on either outcome
+    // also ends the stimulus; no detached sender survives an assertion failure.
+    let RawPeer {
+        mut reader,
+        mut writer,
+    } = peer;
+    let flooding = async {
+        for _ in 0..60 {
+            writer
+                .write_frame(&farhelm_proto::Frame::data(1, Vec::new()))
+                .await
+                .expect("send an empty chunk");
+            // sleep-ok: supply empty traffic faster than the progress window while observing abort concurrently.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    let observing = async {
+        loop {
+            let frame = reader
+                .read_frame()
+                .await
+                .expect("read upload event")
+                .expect("the supervisor must keep the connection open");
+            if frame.kind == farhelm_proto::FrameKind::Control {
+                let message =
+                    farhelm_proto::io::parse_control(&frame).expect("decode upload event");
+                if !matches!(message, ControlMsg::UploadAck { .. }) {
+                    return message;
+                }
+            }
+        }
+    };
+    let outcome = tokio::select! {
+        biased;
+        _ = flooding => panic!("empty traffic ended before the stall abort arrived"),
+        outcome = observing => outcome,
+    };
     let ControlMsg::UploadAborted { reason, .. } = outcome else {
         panic!("an empty-chunk flood must not keep a transfer alive, got: {outcome:?}");
     };
