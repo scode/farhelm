@@ -7239,6 +7239,8 @@ mod tests {
     /// Why this test matters: every restart resumes, so version 1 must
     /// survive the relaunch with the conversation it proves — clearing it
     /// would strand a proven binding its own restart could no longer offer.
+    /// The restart must actually claim a new generation: a refused claim
+    /// leaves the same capture intact without exercising preservation.
     /// And a restart claim read at an older version must not resume a
     /// binding whose provenance changed underneath it.
     #[farhelm_testtrace::test]
@@ -7257,15 +7259,23 @@ mod tests {
             captured_conversation: Some("conv-proven".to_string()),
             capture_ownership_version: 1,
         };
-        store
+        let RelaunchDecision::Claimed(claim) = store
             .begin_relaunch("proven-resume", basis, true)
             .await
-            .expect("resume relaunch");
+            .expect("resume relaunch")
+        else {
+            panic!("a valid resume must claim the relaunch");
+        };
+        assert_eq!(claim.generation, 1, "the claim must advance generation 0");
         let preserved = store
             .session("proven-resume")
             .await
             .expect("read preserved row")
             .expect("row survives");
+        assert_eq!(
+            preserved.generation, claim.generation,
+            "the new generation must be durable before preservation is checked"
+        );
         assert_eq!(
             preserved.captured_conversation.as_deref(),
             Some("conv-proven"),

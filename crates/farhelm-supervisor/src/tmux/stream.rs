@@ -3292,8 +3292,8 @@ mod tests {
         shutdown_test_stream(stream).await;
     }
 
-    /// A filter command written while output is live must not desynchronize
-    /// the catch-up replay that may follow it immediately.
+    /// An outstanding filter reply must not desynchronize the catch-up
+    /// replay that follows it.
     ///
     /// The two share one stdout and read it differently: the filter's reply
     /// arrives as chatter whenever it happens to arrive, while
@@ -3316,8 +3316,9 @@ mod tests {
     /// call returns and the test regains control. The debt is real, and it
     /// is settled correctly; there is simply no instant a test can observe
     /// it from outside. Writing the command directly puts the stream in
-    /// exactly the state a filter written moments before a `%pause` leaves
-    /// it in, which is the state the catch-up path has to survive.
+    /// exactly the reply-debt state a filter written moments before a
+    /// `%pause` leaves it in. Pause and its reply finish first so the setup
+    /// itself cannot consume that debt before catch-up is tested.
     #[farhelm_testtrace::test]
     async fn a_late_pane_filter_does_not_desynchronize_the_catch_up_replay() {
         let server = ScratchServer::start().await;
@@ -3359,16 +3360,8 @@ mod tests {
             .expect("replay stream");
         pump_own_pane_ticks(&server, &mut stream, 3, 30).await;
 
-        // A real filter command, left with its reply outstanding.
-        stream
-            .send_filter_command(&silence_live_pane_command(std::slice::from_ref(&neighbour)))
-            .await
-            .expect("writing a pane filter");
-        assert_eq!(
-            stream.pending_filter_replies, 1,
-            "a written filter command must be recorded as owed a reply"
-        );
-
+        // Finish the forced pause before creating filter debt: pumping
+        // toward the pause would consume any earlier filter reply.
         stream
             .send_raw_command(&format!("refresh-client -A \"{agent}:pause\""))
             .await
@@ -3378,6 +3371,17 @@ mod tests {
             .drain_command_reply()
             .await
             .expect("pause command reply");
+
+        // A real filter command, left with its reply outstanding at the
+        // exact boundary the catch-up path must recover from.
+        stream
+            .send_filter_command(&silence_live_pane_command(std::slice::from_ref(&neighbour)))
+            .await
+            .expect("writing a pane filter");
+        assert_eq!(
+            stream.pending_filter_replies, 1,
+            "catch-up must begin with exactly one filter reply outstanding"
+        );
 
         // The catch-up must settle the filter debt first; if it did not,
         // this returns the wrong block for every field it parses.
