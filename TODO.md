@@ -160,7 +160,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   re-read their launch status file, query checkout provenance, and re-parse their checkout-preparation JSON on every
   ticker tick and every list, forever. Settle how fresh a list must be, and keep pane liveness (`list-panes`) on the
   list if exit reporting needs to stay immediate. Needs SPEC_impl.md edits where it says the capture sweep rides
-  `ListSessions` on purpose. Details: `lore/2026-10-08-supervisor-idle-cpu.md`.
+  `ListSessions` on purpose. Details: `lore/2026-10-08-supervisor-idle-cpu.md`. Plan: `plans/queue/sweep-on-timer.md`.
 
 - **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
   win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
@@ -171,12 +171,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Resizable sidebar.** Let the user resize the sidebar by dragging a handle on its edge, with sensible minimum and
   maximum widths. Decide whether the width is remembered per device, like the terminal text size, or shared by every
-  client.
+  client. Plan: `plans/queue/resizable-sidebar.md`.
 
 - **Improve the agent action approval card.** When an agent asks to do something that needs the user's approval, the
   card that asks (SPEC.md: shown in a fixed corner of the window, offering Allow, Always allow and Deny) came up as a
   giant vertical box along the very right edge of the screen the first time it was seen. Improve how it looks and where
-  it sits; details to be decided with the maintainer.
+  it sits; details to be decided with the maintainer. Plan: `plans/queue/approval-card-layout.md`.
 
 - **Show Claude as working while it compacts.** While Claude compacts its conversation (the screen shows "Compacting
   conversation…" with a running timer and token count, sometimes for a minute or more), Farhelm does not show the
