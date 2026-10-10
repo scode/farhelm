@@ -165,7 +165,10 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expectCovered(page, "host row menu", ".host-row-menu-panel", 3);
   await page.locator(".host-settings").click();
   await expect(page.locator(".host-settings-dialog")).toBeVisible();
-  await expectCovered(page, "host settings dialog", ".host-settings-dialog", 2);
+  // The sweep ignores hidden controls; establish the new header action's
+  // visibility directly so the existing controls cannot satisfy its premise.
+  await expect(page.locator(".host-settings-dismiss")).toBeVisible();
+  await expectCovered(page, "host settings dialog", ".host-settings-dialog", 4);
   await page.locator(".host-settings-close").first().click();
   await expect(page.locator(".host-settings-dialog")).toHaveCount(0);
 

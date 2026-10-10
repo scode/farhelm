@@ -6,6 +6,11 @@
 //! buttons crowded the values, and the YOLO explanation wrapped awkwardly.
 //! The dialog shows every value in full and edits one field at a time, in
 //! place, saving each change on its own (there is no dialog-wide Save).
+//! A host-specific header identifies the peer and its reported connection
+//! state, while Connection and Permissions group the existing controls. The
+//! refresh has its own CSS class because the base dialog styles also serve
+//! unrelated modals. The switches remain native checkboxes, including their
+//! write-disable, refused-write reset and keyboard contracts.
 //!
 //! What this module owns is presentation and focus. The state it renders
 //! (which host is open, which field is being edited, the draft, the outcome
@@ -43,10 +48,11 @@
 
 use dioxus::prelude::*;
 
-use super::{EditField, HostDestinationForm, gui_host_name};
+use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
+use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::{Host, HostId};
+use crate::{Host, HostId, HostKind, HostPhase};
 
 /// The selector the isolation and the focus scripts find the dialog by.
 const DIALOG_SELECTOR: &str = r#".host-settings-dialog[role="dialog"]"#;
@@ -130,7 +136,12 @@ pub(crate) fn return_focus_to_row(id: HostId) {
 /// It also starts remembering the last control inside the dialog that had
 /// focus, for `refocus_after_write`.
 fn install_dialog() {
-    install_dialog_with_initial_focus("button, input");
+    // The header's quiet close button is earlier in DOM order, but opening
+    // settings still starts at the first editable setting, as it did before
+    // the header existed. Removal's safe-first rule uses its own installer.
+    install_dialog_with_initial_focus(
+        ".host-edit, .host-alias, .host-yolo-without-asking-toggle, .host-settings-close",
+    );
 }
 
 /// Install modal isolation while putting the destructive dialog's safe escape
@@ -337,8 +348,12 @@ fn commands_help(commands_without_asking: bool) -> &'static str {
     }
 }
 
-/// The dialog itself. Every prop is state or a handler owned by `HostsPanel`;
-/// see this module's doc for the division of labor.
+/// Edit one host's settings without giving a refresh ownership of its draft.
+///
+/// The panel owns every value and write handler so a host-list refresh can
+/// update the header and controls without discarding an editor or its outcome.
+/// Grouping and switch styling do not introduce a dialog-wide save: each
+/// change still uses the panel's operation token and existing focus recovery.
 #[component]
 pub(super) fn HostSettingsDialog(
     host: Host,
@@ -368,6 +383,13 @@ pub(super) fn HostSettingsDialog(
     let alias_supported = host.alias.is_some();
     let destination = host.destination.clone().unwrap_or_default();
     let alias = host.alias.clone().flatten();
+    // A version belongs to a peer that actually reported one. The remote
+    // executable path is not a version and must not fill an unknown value.
+    let reported_version = match &host.state {
+        HostPhase::Connected { build_version, .. } => Some(build_version.clone()),
+        HostPhase::VersionSkew { peer_build, .. } => Some(peer_build.clone()),
+        _ => None,
+    };
 
     // Recover focus a write's disabled control dropped; see
     // `refocus_after_write`.
@@ -421,7 +443,7 @@ pub(super) fn HostSettingsDialog(
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
-                class: "host-settings-dialog",
+                class: "host-settings-dialog host-settings-refreshed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "host settings · {shown_name}",
@@ -446,11 +468,45 @@ pub(super) fn HostSettingsDialog(
                         on_close.call(());
                     }
                 },
-                h2 { class: "host-settings-title",
-                    "host settings · "
-                    span { class: "peer-value", dir: "ltr", "{shown_name}" }
+                div { class: "host-settings-header",
+                    div { class: "host-settings-mark", "aria-hidden": "true",
+                        match host.kind {
+                            HostKind::Local => rsx! { LocalHostIcon {} },
+                            HostKind::Ssh => rsx! { RemoteHostIcon {} },
+                            HostKind::Unrecognized => rsx! {},
+                        }
+                    }
+                    div { class: "host-settings-heading",
+                        h2 { class: "host-settings-title",
+                            span { class: "peer-value", dir: "ltr", "{shown_name}" }
+                        }
+                        div { class: "host-settings-summary",
+                            span { class: "host-status {phase_class(&host.state)}",
+                                span { class: "status-dot", "aria-hidden": "true" }
+                                "{phase_display_label(&host.state)}"
+                            }
+                            if let Some(version) = reported_version {
+                                span { class: "host-settings-version",
+                                    "Farhelm "
+                                    span { class: "peer-value", dir: "ltr", "{display_peer(&version)}" }
+                                }
+                            }
+                        }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "host-settings-dismiss",
+                        aria_label: "close host settings",
+                        "data-tooltip": "close: done with this host's settings",
+                        onclick: move |_| on_close.call(()),
+                        "×"
+                    }
                 }
+                div { class: "host-settings-body",
                 {outcome_for(None)}
+                if manageable || alias_supported {
+                section { class: "host-settings-section", aria_label: "Connection",
+                    h3 { class: "host-settings-section-title", "Connection" }
                 if manageable {
                     div { class: "host-settings-row", "data-setting": "destination",
                         span { class: "host-settings-label", "destination" }
@@ -513,12 +569,17 @@ pub(super) fn HostSettingsDialog(
                         {outcome_for(Some(SettingsField::Alias))}
                     }
                 }
+                }
+                }
+                section { class: "host-settings-section", aria_label: "Permissions",
+                    h3 { class: "host-settings-section-title", "Permissions" }
                 div { class: "host-settings-yolo",
                     label { class: "host-yolo-without-asking",
                         "data-tooltip": "start YOLO sessions on this host without asking first",
+                        span { "Start YOLO sessions without asking" }
                         input {
                             r#type: "checkbox",
-                            class: "host-yolo-without-asking-toggle",
+                            class: "host-yolo-without-asking-toggle host-settings-switch",
                             checked: host.yolo_without_asking,
                             "data-yolo-without-asking": "{host.yolo_without_asking}",
                             // One setting at a time: a toggle while a field
@@ -527,7 +588,6 @@ pub(super) fn HostSettingsDialog(
                             disabled: busy || editing.is_some(),
                             onchange: move |event| on_yolo_without_asking.call((id, event.checked())),
                         }
-                        span { "start YOLO sessions here without asking" }
                     }
                     p { class: "host-settings-help", "{yolo_help(host.yolo_without_asking)}" }
                     {outcome_for(Some(SettingsField::YoloWithoutAsking))}
@@ -535,21 +595,24 @@ pub(super) fn HostSettingsDialog(
                 div { class: "host-settings-commands",
                     label { class: "host-commands-without-asking",
                         "data-tooltip": "let agents in this host's sessions start, stop and change sessions and templates without asking first",
+                        span { "Run farhelm commands without asking" }
                         input {
                             r#type: "checkbox",
-                            class: "host-commands-without-asking-toggle",
+                            class: "host-commands-without-asking-toggle host-settings-switch",
                             checked: host.commands_without_asking,
                             "data-commands-without-asking": "{host.commands_without_asking}",
                             // One setting at a time, as for the YOLO box above.
                             disabled: busy || editing.is_some(),
                             onchange: move |event| on_commands_without_asking.call((id, event.checked())),
                         }
-                        span { "run farhelm commands from this host without asking" }
                     }
                     p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
                     {outcome_for(Some(SettingsField::CommandsWithoutAsking))}
                 }
-                div { class: "host-settings-actions",
+                }
+                }
+                div { class: "host-settings-actions host-settings-footer",
+                    span { "changes save as you make them" }
                     button {
                         r#type: "button",
                         class: "btn btn-neutral host-settings-close",
