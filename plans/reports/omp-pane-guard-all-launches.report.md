@@ -76,3 +76,44 @@ native GPT-6.1-sol at medium effort. The resume and report cold reads used fresh
 inherited by request. A separate documentation pass covered every touched file. Actual native model attribution and
 usage counters are unavailable; requested model names are not proof of runtime attribution. Private delegation evidence
 is retained under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf`.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1779, one squash commit on main, in the plan's second round. The first landing attempt
+was blocked: the agreed rule would have refused every live npm or npx launcher at the session's top process, likely
+removing Resume for those OMP sessions on macOS. You chose to narrow the rule (option 1), and this round built that.
+Since the stack was based, main gained only plan bookkeeping and the BusyBox/uninstall spec wording, neither of which
+touches OMP attribution; the rebase was clean.
+
+#### Review before merging
+
+A separate reviewer read the round against main by reading the code only. It confirmed the first round's problem is
+gone: a readable npm-style top process is accepted under Bun and npm launches with no launcher match, and an unreadable
+non-reporting Bun or Node top process refuses. It also found that the executor had read the decision more loosely than
+you meant, and that the ledger recorded that reading as yours.
+
+#### A fix made while landing
+
+For OMP started with the installed `omp` command, main already refused any Bun or Node top process that is not the
+reporting OMP, readable or not; an earlier fix (#1459) added that on purpose. The executor dropped that refusal, so a
+readable non-reporting top process was accepted for installed `omp` too, because the agreed restatement said both "for
+every way of launching OMP" and "accepted as it is today". Asked at landing, you confirmed the refusal stays. The
+landing restored it for installed `omp` launches only (one added condition in the corridor), flipped that launch's row
+in the readable-pane test back to a refusal, corrected the triage ledger's "Later decision" line to say what you decided
+and how the first reading differed, rewrote SPEC_impl.md's corridor sentence to state the installed-`omp` exception (and
+split the run-on sentence the reviewer noted), and rewrote the changelog fragment in user terms: sessions launched with
+the installed `omp` command behave as before. All in #1779 before it merged.
+
+Not changed: one older test's unreadable-pane loop for installed `omp` now duplicates the new all-launch test, and the
+macOS npm launch path is still untested live, as the report says.
+
+#### Checks
+
+- Run now, on the plan with the landing's fix: `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and the supervisor's process-chain and OMP unit tests through the
+  recorder with pinned tmux 3.7c, four slots and no retries (run `5fcf04af`, 141 of 141).
+- Reused from the executor: its focused run of the corridor tests, formatting and the changelog lint; the landing's
+  change is covered by the run above.
+
+The report says installed-`omp` launches now accept a readable non-reporting top process; that is no longer true. They
+refuse it, as before this plan.
