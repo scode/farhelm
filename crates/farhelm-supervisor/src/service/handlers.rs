@@ -4079,9 +4079,12 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn stop_survives_connection_task_cancellation() {
         let state = StateDir::new();
-        let session_id = "s1";
-        let mut child =
-            crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)]);
+        // Host-wide marker sweeps must distinguish simultaneous fixture runs.
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = crate::procs::sleeper::spawn(&[(
+            crate::launch::SESSION_ID_ENV_VAR,
+            session_id.as_str(),
+        )]);
         let pid = child.id();
         let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
         assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
@@ -4117,7 +4120,7 @@ mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    tmux_name: "fh-s1".to_string(),
+                    tmux_name: format!("fh-{session_id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
@@ -4131,7 +4134,7 @@ mod tests {
             .expect("store fixture");
         sup.sessions.lock().await.insert(
             session_id.to_string(),
-            fake_entry(session_id, 1_700_000_000),
+            fake_entry(&session_id, 1_700_000_000),
         );
 
         let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
@@ -4159,7 +4162,7 @@ mod tests {
         // the initial SIGTERM from ending the test process before the sweep.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
-            if sup.lifecycle_locks.claimed_for_test(session_id) {
+            if sup.lifecycle_locks.claimed_for_test(&session_id) {
                 break;
             }
             assert!(

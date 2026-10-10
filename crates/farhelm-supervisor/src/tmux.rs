@@ -5453,8 +5453,14 @@ mod tests {
             return;
         };
 
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
         let driver = TmuxDriver::new_with_program(dir.path(), TmuxBudgets::default(), new);
+        // Own shutdown before startup; declaration order keeps the private
+        // socket directory alive until the old server has been stopped.
+        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
+            driver.socket.clone(),
+            &old,
+        );
         // The same config the driver would write, so the pre-existing
         // server is the one `ensure_server` would have produced on this
         // socket — including `exit-empty off`, without which a
@@ -5504,12 +5510,6 @@ mod tests {
             "the refused server must still be running: {}",
             String::from_utf8_lossy(&alive.stderr)
         );
-
-        let _ = std::process::Command::new(&old)
-            .arg("-S")
-            .arg(&driver.socket)
-            .arg("kill-server")
-            .status();
     }
 
     /// Item 8: the generated-config write must be injectable through its

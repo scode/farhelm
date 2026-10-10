@@ -313,6 +313,8 @@ async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
 /// so it cannot produce the malformed launches a broken or hostile client
 /// could; this writes the `RestartSession` frame directly, the way the
 /// rename tests drive their verb.
+/// Unsolicited session notifications can precede the answer on this connection;
+/// only a reply to request 1 answers the restart. All frames share one deadline.
 async fn raw_restart_with(
     sup: &Arc<Supervisor>,
     session_id: &str,
@@ -348,7 +350,10 @@ async fn raw_restart_with(
             .expect("read frame")
             .expect("connection closed before the restart-with was answered");
         if frame.kind == FrameKind::Control {
-            return parse_control(&frame).expect("parse control");
+            let message = parse_control(&frame).expect("parse control");
+            if message.reply_req_id() == Some(1) {
+                return message;
+            }
         }
     }
 }

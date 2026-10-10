@@ -346,7 +346,9 @@ pub fn run(
         Script::FloodRegion => flood_region(sync_output),
         Script::Hexecho => hexecho(),
         Script::MouseModes => mouse_modes(),
-        Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
+        // The trailing command prevents shells such as bash from replacing
+        // themselves with sleep; tests require an intermediate shell.
+        Script::Spawner => spawn_and_echo("sleep 3600; exit $?", "spawner"),
         Script::Spawn => spawn_session(),
         Script::SpawnerStubborn => spawn_and_echo(
             // HUP as well as TERM: the pane process itself dies to the
@@ -2475,11 +2477,10 @@ fn mouse_modes() -> anyhow::Result<()> {
 /// "killed the agent's whole tree". The child runs under `sh -c` rather
 /// than a second copy of this binary — no argv-parsing or subcommand
 /// plumbing needed, and every POSIX host this project targets has `sh` —
-/// and `sh -c '<simple command>'` genuinely forks rather than exec-
-/// replacing itself (verified empirically against `/bin/sh` on this
-/// project's Linux targets), so the printed child pid and its own
-/// eventual descendant (e.g. `sleep`, forked by `sh` to run it) form a
-/// real three-level chain for tests that need one. The child deliberately
+/// and callers that need a three-level chain must keep work after the
+/// descendant command. Some shells exec their final command instead of
+/// forking it, collapsing the shell and descendant into one process.
+/// The child deliberately
 /// outlives this process without being waited on: nothing here calls
 /// `Child::wait`, so it keeps running (invisible to us) until something
 /// else — ordinarily the very process-tree kill this fixture exists to

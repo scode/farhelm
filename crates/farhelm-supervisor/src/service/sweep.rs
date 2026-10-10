@@ -2444,9 +2444,23 @@ mod tests {
     /// so the identity passed to the guard cannot name an unrelated process.
     #[farhelm_testtrace::test]
     async fn stopped_process_guard_resumes_a_stopped_owned_process() {
+        /// Own termination even outside the production guard's lifetime.
+        /// That guard only resumes recorded processes; an assertion before
+        /// it is armed or after it is dropped can leave this sleeper stopped
+        /// forever. Child retains the exit status after manual reaping, so
+        /// Drop also remains safe on the success path.
+        struct FixtureChild(std::process::Child);
+
+        impl Drop for FixtureChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
         let session_id = uuid::Uuid::new_v4().to_string();
-        let mut child = spawn_marked_process(&session_id);
-        let pid = child.id();
+        let mut child = FixtureChild(spawn_marked_process(&session_id));
+        let pid = child.0.id();
         let (_, starttime, _) = procs::read_process(pid)
             .expect("the owned fixture must be readable")
             .expect("the owned fixture must be alive after spawn");
@@ -2507,7 +2521,7 @@ mod tests {
 
         let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
         assert_eq!(result, 0, "SIGKILL must reach the owned fixture");
-        child.wait().expect("the owned fixture must be reaped");
+        child.0.wait().expect("the owned fixture must be reaped");
     }
 
     /// The ORDER of stop's two mechanisms, which nothing about the end

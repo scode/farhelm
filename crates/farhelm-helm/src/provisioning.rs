@@ -253,7 +253,8 @@ mod tests {
     /// PATH that starts with a fixture `bin` directory, so a real reach-check
     /// script runs against a scratch user-unit directory and a fake
     /// `systemctl` instead of this machine's own user manager and units.
-    /// Only the child's environment is set; the test process's is untouched.
+    /// XDG overrides are removed from the child so config and state both
+    /// belong to that HOME. The test process's environment is untouched.
     struct FixtureHomeLauncher {
         home: PathBuf,
         bin: PathBuf,
@@ -272,6 +273,7 @@ mod tests {
                 .env("HOME", &self.home)
                 .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
                 .env_remove("XDG_CONFIG_HOME")
+                .env_remove("XDG_STATE_HOME")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -9594,6 +9596,15 @@ mod tests {
             .arg(&unit_path)
             .output()
             .unwrap();
+        // Enabling can leave a live unit even if a later setup step fails.
+        // Own cleanup before checking activation or starting tmux; the root
+        // directory must outlive this guard so its socket remains reachable.
+        let guard = UnitGuard {
+            unit: unit.clone(),
+            unit_path: unit_path.clone(),
+            state_dir: root.path().to_path_buf(),
+            cleaned: false,
+        };
         assert!(
             activated.status.success(),
             "failed to activate nonce unit: {}",
@@ -9611,15 +9622,7 @@ mod tests {
             "failed to start nonce tmux server: {}",
             String::from_utf8_lossy(&tmux_started.stderr)
         );
-        assert!(
-            planted_failure(UnitGuard {
-                unit: unit.clone(),
-                unit_path: unit_path.clone(),
-                state_dir: root.path().to_path_buf(),
-                cleaned: false,
-            })
-            .is_err()
-        );
+        assert!(planted_failure(guard).is_err());
         assert!(
             !unit_path.exists(),
             "the unit file survived failure teardown"

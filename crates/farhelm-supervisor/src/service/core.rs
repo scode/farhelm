@@ -27403,19 +27403,22 @@ exit 0
     /// Read the stub shim's directory witness before checking launch authority.
     ///
     /// Creation of the supervisor's launch request does not prove that
-    /// the shim ran. Wait for its file to become readable, preserving the
-    /// caller's separate comparison with the canonical directory.
+    /// the shim ran. Wait for its newline-terminated record: redirection
+    /// creates a readable empty file before `pwd` writes. The caller still
+    /// compares the reported directory with the canonical directory.
     async fn wait_for_shim_directory_report(path: &Path) -> String {
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
-            if let Ok(reported) = std::fs::read_to_string(path) {
+            if let Ok(reported) = std::fs::read_to_string(path)
+                && reported.ends_with('\n')
+            {
                 return reported;
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "the stub shim never reported the directory it started in"
+                "the stub shim never completed its directory report"
             );
-            // sleep-ok: the separately spawned shim publishes its directory witness asynchronously; retry readability at the original cadence.
+            // sleep-ok: poll for the separately spawned shim's complete newline-terminated directory record.
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }

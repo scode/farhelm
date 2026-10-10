@@ -9232,7 +9232,9 @@
 - Completion criteria: Wait until the file holds a complete newline-terminated line before comparing. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## directory-report-polling-accept-unfinished-write.md
 
@@ -9248,7 +9250,9 @@
 - Completion criteria: Require a complete newline-terminated record before comparing. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## wrapper-stop-test-fails-sh-uses-bashs-final-command.md
 
@@ -9265,7 +9269,9 @@
 - Completion criteria: Keep the fixture's shell alive (for example `sleep 3600; exit $?`). If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## fixed-process-marker-lets-concurrent-stop-tests.md
 
@@ -9282,7 +9288,9 @@
 - Completion criteria: Use a fresh UUID for the marker and the stored session. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## uninstall-test-inherits-unrelated-state-directory.md
 
@@ -9299,7 +9307,9 @@
 - Completion criteria: Also remove `XDG_STATE_HOME` from the child command's environment (the test process's own
   environment is not touched). If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## fixture-startup-leave-real-systemd-service-behind.md
 
@@ -9315,7 +9325,9 @@
 - Completion criteria: Create the unit's cleanup guard immediately after enabling it. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## generic-launch-assertion-uses-different-argv-encoding-fixture.md
 
@@ -9332,7 +9344,9 @@
 - Completion criteria: Compare against the shell-word join and fix the comment. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## raw-restart-helper-mistakes-notifications-replies.md
 
@@ -9348,7 +9362,9 @@
 - Completion criteria: Skip notifications until the reply carrying the request's id. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## foreign-origin-test-finish-observing-sending-request.md
 
@@ -9365,7 +9381,9 @@
 - Completion criteria: Keep observing until the response has come back, then check that no frame arrived. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## failed-adoption-test-leaks-private-tmux-server.md
 
@@ -9381,7 +9399,9 @@
 - Completion criteria: Install the existing tmux server guard before starting the server and use the test-state tempdir,
   as the scratch-server helper does. If that turns out significantly more complicated than expected, leave it unfixed
   and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## upload-memory-test-leaks-mib-fixture-successful-runs.md
 
@@ -9396,7 +9416,9 @@
   triage."
 - Completion criteria: Drop or close the tempdir before exiting. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## stopped-fixture-could-survive-assertion-failure.md
 
@@ -9413,7 +9435,9 @@
 - Completion criteria: Own the child in a drop guard that kills and reaps it from spawn until the manual cleanup. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/linux-test-false-failures.md`.
+- Execution: complete in jj change `luuxpkqmvvkloxouqyzlyysptstlkxrp`, bookmark
+  `plan/linux-test-false-failures/01-linux-test-false-failures`;
+  [draft PR #1814](https://github.com/scode/farhelm/pull/1814/changes).
 
 ## orderly-shutdown-assertion-vacuous-macos.md
 
