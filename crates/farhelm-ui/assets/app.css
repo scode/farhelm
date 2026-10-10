@@ -1150,6 +1150,49 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   unicode-bidi: isolate;
   pointer-events: none;
 }
+/* File checks disclose the full host path. Unlike a web address, this is
+   the evidence needed to admit a click, so long paths wrap rather than elide. */
+.terminal-file-target { max-height: calc(100vh - 8px); overflow: auto; }
+.terminal-file-checking::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: terminal-file-spin 1s steps(10) infinite;
+}
+@keyframes terminal-file-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .terminal-file-checking::before { animation: none; }
+}
+.terminal-file-message {
+  position: absolute;
+  /* Leave the agent's input and newest transcript at the bottom unobscured. */
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  /* Low on the z-index ladder (see `.header-confirm`): a status line inside
+     the terminal must not cover header confirmations, menus, dialogs or the
+     file hover disclosure that names what a click would download. */
+  z-index: 12;
+  padding: 4px 6px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+  /* A failure stays until the next click, and its text can be a long host
+     message or path; cap it so it never reaches the agent's input below. */
+  max-height: 4.5em;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.terminal-file-message.showing { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .terminal-file-message { transition: none; }
+}
 .terminal-link-target strong { color: var(--fg-bright); }
 /* The loud form of the same display, used when the link's underlined text
    is itself a URL that names somewhere else (terminal-links.js,
@@ -1358,6 +1401,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
      1  `.terminal-connecting` — a terminal pane's own attach/reconnect
         placeholder, scoped to that pane and never contesting the two below
      2  `.attach-status` — the same pane's upload indicator, same scope
+     12 `.terminal-file-message` — a terminal's download status line, above
+        xterm's own layers (its scrollbar is 11) and below everything else
      20 `.session-row-menu-panel` — a sidebar row's action menu
      25 `.drag-copy-notice` — guidance at the drag-release pointer, allowed
         to overlap the sidebar and its row menus but below the warnings at 30

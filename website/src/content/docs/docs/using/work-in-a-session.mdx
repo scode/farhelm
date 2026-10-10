@@ -46,6 +46,15 @@ Links in the terminal open in your browser. Some programs print a link under tex
 those shows where it really goes, and Farhelm warns you when the text is itself a web address that names a different
 place.
 
+To bring a file back from the session's host, hover over its path in the terminal. Farhelm checks it and shows the host,
+full path and size. Click when the check succeeds. Your browser downloads it under its filename; the desktop app saves
+it into Downloads, chooses a new name if needed, and tells you where it went. A failed transfer leaves no partial file.
+
+Paths can start with `/` or `~/`, contain a slash, or end in a file extension, such as `report.pdf`. A relative path uses
+the directory the session started in; it can miss after a shell changes directory. Programs can also print file links
+under their own text. Directories and files over 100 MB cannot be downloaded. Check the host and path before clicking:
+an agent's path can name any file its account can read on that host.
+
 The terminal keeps at least the last 10,000 lines for scrolling back. How much of that history survives a restart is in
 [What survives what](/docs/how-it-works/what-survives-what/).
 

@@ -1608,6 +1608,22 @@ destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `repo
 final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A standalone
 helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or webview fallback.
 
+`terminal-files.js` supplies conservative token recognition and a terminal-owned xterm addon below the existing OSC 8
+and web providers. Public buffer cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs.
+Logical lines over 8192 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary
+paths; filenames with spaces require an OSC file link. Plain schemes and protocol-relative tokens are excluded. File
+URIs decode once; their path belongs to the session host regardless of URI authority. No shell directory tracking or
+hover cache is introduced.
+
+The OSC handler enables `allowNonHttpProtocols` and owns the explicit scheme boundary: parsed http/https targets go
+unchanged to the existing opener, valid file targets go to file lookup/download, and every other scheme does nothing.
+Fresh hover evidence owns an AbortController and click admission; leaving cancels and invalidates it, including raced
+replies. Plain links underline before lookup but gain a pointer only when ready. Click reopens the disclosed canonical
+path independently. Browser bodies become a bounded Blob only after successful EOF; an object URL is released after the
+save click. The desktop handoff secret identifies native mode, which requests `save_to_downloads` and never falls back
+to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode format escapes. The
+addon is disposed with its terminal, cancelling pending work; retained reconnect terminals retain it.
+
 ## Supervisor internals
 
 ### Owned checkout admission and lifetime

@@ -1360,6 +1360,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
   always names the real host, is what remains. The hover display is the whole safeguard. Plain URLs printed as text need
   no such display, because what is shown is what opens.
 
+- File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
+  paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
+  plain words, version numbers and plain scheme-bearing text do not. Diagnostic line/column suffixes and trailing
+  punctuation are excluded. Relative paths use the session's directory, not a shell's later directory. Hover immediately
+  underlines the path and shows a checking spinner, then the host, full resolved path and size or refusal. Each hover
+  checks afresh; leaving cancels it. Only a successful check admits a click (OSC hyperlinks may show a pointer earlier).
+  Files must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A
+  browser saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it
+  went, with no partial file after failure or interruption. Status appears at the top of that terminal: success fades
+  after a few seconds, while a failure stays until the next click or download there. Nothing is opened or executed. Any
+  file the session's account can read is in reach, within the existing shell authority; hover discloses the
+  agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink
+  schemes are explicitly limited to http, https and file; every other scheme is ignored.
+
 ## Attachments
 
 Attachments are intended for ordinary session inputs such as screenshots and documents, not giant bulk transfers such as
@@ -2256,6 +2270,12 @@ direction-changing characters are visible, wherever it appears and however it re
 a template from a cloned session, for example). Identity labels the user compares, such as installation ids in the adopt
 prompt, also show spaces visibly, so two different identities never look alike. Terminal output is not part of this
 rule; it is the remote program's own display.
+
+Clicking a disclosed file path in a terminal transfers that file from the session's host to the user's machine. Any file
+the session's Unix account can read is in reach; the hover shows the host, resolved path and size before the click can
+download it. Farhelm never opens or executes the result. The desktop app deliberately does not set the macOS quarantine
+flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a browser save would
+carry. The click authorizes this transfer across the host boundary, including for agent-controlled files.
 
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,
