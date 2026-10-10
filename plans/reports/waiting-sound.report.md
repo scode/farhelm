@@ -111,3 +111,51 @@ observation rather than adding a timed coordinator.
 
 Commit and PR wording passed a fresh gpt-6.1-sol medium cold read. The delivery report receives a separate fresh native
 cold read before submission.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1768 (play sounds when agents need attention), one squash commit on main, in the plan's
+second round, directly after sweep-on-timer's follow-up. The first landing attempt was blocked because the sounds made
+their own session-list request, which broke four existing browser specs; you chose to sound only for what the current
+filtered list shows, read from the sidebar's own listing.
+
+#### Review before merging
+
+A separate reviewer read the round by reading the code only and found every point of your decision met: no second
+session-list request exists, so the specs that broke keep their assumption; approval requests sound whatever the filter
+is; sessions brought into view by a filter or host change start from a silent baseline; audio unlocks on a touch
+release, click or key press; SPEC.md's Settings paragraph names the shared choices and lists the sound switches as per
+device; and the storage-refusal unit test first proves a sound plays. The sound code still makes its own approval
+requests beside the approval cards'; no spec counts or holds those apart from the new sounds spec, which does so on
+purpose. A sound for a status change only plays once an approval read has succeeded, which the report documents as a
+deliberate choice.
+
+#### Fixes made while landing
+
+Two wording fixes: the sounds code's note on signing in now says that only a browser sign-in starts from silence, while
+a desktop re-sign-in keeps history so changes made meanwhile can still sound; and SPEC.md's per-device sentence now
+points to all three sections that define those settings.
+
+Smaller notes left as they are: a sort change near the list's size cap can bring already-waiting sessions into view as
+new rows and sound them; the sounds heading in Settings has no styling of its own; and one change-feed spec gained a
+wait whose purpose its description does not explain (it passed in the run below).
+
+#### Checks
+
+All three plans of this round (sweep-on-timer's follow-up, waiting-sound, terminal-file-download) were stacked in
+landing order and checked together.
+
+- Run now: `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and `cargo build` (clean after the landing's fixes below); the
+  supervisor, helm, UI and protocol unit tests in full with the file-download end-to-end tests, through the recorder
+  with pinned tmux 3.7c, four slots and no retries (run `6225cfec`, 2699 of 2700; the failure is sweep-on-timer's
+  database upgrade test, fixed as described in its notes, after which the upgrade, schema and store tests passed 113 of
+  113 in run `106eaf3c`); the UI JavaScript tests run directly (226 of 226); the desktop asset comparison (run
+  `d09df54a`, 24 assets on both sides); and, on Chromium and WebKit with one worker and no retries, the sounds,
+  settings, change-feed, sort, stale-read, filter, approval-layout and terminal-file specs (run `208a7db7`, 122 of 122),
+  which include the four specs the first waiting-sound round broke.
+- Between the checks and the merges, main gained the 2026-10-10 triage decisions written into SPEC.md (#1801) and its
+  plan (#1802). They touch none of these plans' subjects; the only effect was a textual SPEC.md conflict in the last
+  terminal-file-download PR, resolved by keeping both texts. No checks were re-run for that.
+
+Nothing in the report above was made untrue by the landing.
