@@ -315,3 +315,23 @@ above, and every PR that changes code, tests or scripts passed the review gate. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan,
 steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog.
 Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-10 (claim 88c8ce).
+
+### Two review findings to settle before landing
+
+This plan lets you click a file path an agent printed in a terminal and download that file from the session's host,
+after a hover that shows the host, full path and size. The landing review (nothing of this plan is on main; PRs #1769,
+#1771 and #1773 are open) found authorization, path handling and the click requirement sound, and raised two points.
+
+1. After the first download in a terminal, a status strip ("downloading…", then "saved to …" or "download failed: …")
+   stays pinned over the terminal's bottom rows, usually the agent's input box or status line, until the terminal
+   closes. Nothing removes it and clicks pass through it.
+2. The desktop app saves downloaded files into the Downloads folder without the macOS quarantine flag a browser save
+   would carry, so a file a remote host chose opens without the "downloaded from the internet" prompt. SPEC.md's
+   security section does not mention this new path from a host to the user's own machine.
+
+Since the plan was built, managed-checkout-trash landed with helm-to-supervisor protocol version 44, which this plan
+also claims; the next round must move it to 45.
