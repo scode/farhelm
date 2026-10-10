@@ -127,8 +127,7 @@ fresh-context planning review already shaped D2, D4, D5 and D6):
 - D6. The measurement is best-effort and does not gate completion. Use a supervisor started from temporary state and a
   synthetic client that issues `ListSessions` at the helm's cadence (3 s, plus bursts as hints would cause) with about
   ten sessions, never a helm, so nothing can touch the live install. Report the supervisor's CPU from `/proc/<pid>/stat`
-  over a fixed window, and optionally counts of `list-panes` and launch-status opens from `strace -f
-  -c` on your own
+  over a fixed window, and optionally counts of `list-panes` and launch-status opens from `strace -f -c` on your own
   child process. Add no product counters for it. Take the baseline on main (the test-seam PR changes no product code).
   If the machine is loaded by other agents, say so with the numbers, or skip with the reason logged.
 - The PR slicing in Outline.
@@ -139,8 +138,7 @@ fresh-context planning review already shaped D2, D4, D5 and D6):
   `SupervisorSeams::ticker_interval`), `start_ticker`, `tick` (takes `sampling_admission`, runs `sample_pass`, then
   `capture_now`), and `sample_pass`: pane states, `publish_pane_deaths`, `reap_dead_tabs`, then `observe_entry` only for
   entries whose pane is absent or present under the entry's own tmux name and dead
-  (`state.session_name ==
-  terminal.tmux_name && state.dead`), with `transition_many` and `mirror_committed_outcome`,
+  (`state.session_name == terminal.tmux_name && state.dead`), with `transition_many` and `mirror_committed_outcome`,
   cleanup for error rows, then a budgeted screen sample. `reap_pass` (the pane-died wake) hints, reads pane states,
   publishes deaths and reaps dead tabs; it deliberately does not observe or commit today, and its doc says why (the
   tick's other work there would let every exit pull the tick forward). Observing only the newly dead agent panes is
@@ -161,9 +159,8 @@ fresh-context planning review already shaped D2, D4, D5 and D6):
   transition could not be committed (its doc cites "never let the reply itself regress to a stale Exited"); the tick
   keeps its own sentinel hits only in a local set today, which is why D4 is needed.
 - The stopped-session reads are inside `observe_entry`, gated by
-  `sentinel_could_still_apply(&recorded) &&
-  dead_or_absent` (an unattributed pane counts as "dead or absent" there
-  too, though it is usually alive): `read_launch_sentinel` (via `spawn_blocking`), `wrapper_failure_detail`, and
+  `sentinel_could_still_apply(&recorded) && dead_or_absent` (an unattributed pane counts as "dead or absent" there too,
+  though it is usually alive): `read_launch_sentinel` (via `spawn_blocking`), `wrapper_failure_detail`, and
   `interrupted_preparation_detail`, which calls `store.preparation_origin` and then `launch::read_preparation_state`, a
   synchronous `std::fs::read` plus serde on the async worker; a `Ready` state yields nothing and records nothing.
   `sentinel_could_still_apply` (`service/launch_artifacts.rs`) is false only for `Error` and an annotated `Exited`; its

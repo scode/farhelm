@@ -80,15 +80,13 @@ Line numbers drift; find the code by name. Verified on main at 814a1129.
   Add a test in the style of the neighbouring row tests. The host name rendered raw nearby is not part of this finding;
   leave it.
 - Helm log, malformed message: `crates/farhelm-helm/src/client.rs`,
-  `warn!(error = %e, "invalid frame from
-  supervisor")`. The error can embed the peer's unknown message type verbatim
+  `warn!(error = %e, "invalid frame from supervisor")`. The error can embed the peer's unknown message type verbatim
   (serde's "unknown variant" text), and the log formatter does not escape fields. Log
   `error = %crate::manager::peer_text(&format!("{e:#}"))`, the helper `manager.rs` already uses for peer text
   (`pub fn peer_text`).
 - Helm log, refused attach: `crates/farhelm-helm/src/terminal.rs`,
-  `error!(error = %e, "terminal websocket ended with
-  error")`, where `e` can carry a supervisor's refusal message.
-  Same change. Escaping errors that originate in the helm itself is harmless.
+  `error!(error = %e, "terminal websocket ended with error")`, where `e` can carry a supervisor's refusal message. Same
+  change. Escaping errors that originate in the helm itself is harmless.
 - Tests for the helm lines: `farhelm-helm` has no log-capture facility, so these two lines get no new test; the helper
   itself is covered by `peer_text_bounds_and_escapes`. Do not build log-capture machinery for this.
 - Expected side effect: an empty or whitespace-only status detail now shows as `display_peer`'s placeholder (`(empty)`
