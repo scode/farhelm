@@ -226,51 +226,75 @@ narrowed as this file says. Open, not merged. If a `## Decisions` section exists
 satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its report through
 the queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-10 (claim 88c8ce).
+### 2026-10-10: answer to a blocked question
 
-### The agreed fix would likely take Resume away from OMP sessions started through npm or npx on macOS
+The question, as the executor put it:
 
-This plan carries out the triage decision on `omp-bun-pane-proof.md`. That decision is about which program in an OMP
-session's chain of processes Farhelm trusts when Farhelm's reporter, which runs inside OMP and tells Farhelm which
-conversation is open, says which conversation a session can resume. The gap: when an OMP session is launched through Bun
-or npm rather than the installed `omp` command, and the session's top process (the first program the session started;
-OMP runs at or beneath it) has command-line arguments Farhelm cannot read (over 64 KiB), a second OMP running inside the
-session could have its conversation taken for the session's own, so Resume would open the wrong conversation. You
-decided to close it with a small rule: for every way of launching OMP, the session's top process must either be the OMP
-whose reporter is speaking, or have readable arguments that match that launch method's expected launcher. The completion
-criteria asked for a test showing a readable npm launcher at the top is still accepted.
+> Blocked while landing on 2026-10-10 (claim 88c8ce).
+>
+> ### The agreed fix would likely take Resume away from OMP sessions started through npm or npx on macOS
+>
+> This plan carries out the triage decision on `omp-bun-pane-proof.md`. That decision is about which program in an OMP
+> session's chain of processes Farhelm trusts when Farhelm's reporter, which runs inside OMP and tells Farhelm which
+> conversation is open, says which conversation a session can resume. The gap: when an OMP session is launched through
+> Bun or npm rather than the installed `omp` command, and the session's top process (the first program the session
+> started; OMP runs at or beneath it) has command-line arguments Farhelm cannot read (over 64 KiB), a second OMP running
+> inside the session could have its conversation taken for the session's own, so Resume would open the wrong
+> conversation. You decided to close it with a small rule: for every way of launching OMP, the session's top process
+> must either be the OMP whose reporter is speaking, or have readable arguments that match that launch method's expected
+> launcher. The completion criteria asked for a test showing a readable npm launcher at the top is still accepted.
+>
+> The plan's PR (#1779, not merged; nothing of this plan is on main) implements exactly that, and its tests pass. The
+> landing review found the rule rests on an assumption that does not hold for npm: npm (which runs as a Node process)
+> rewrites its own command line when it starts, so a real npm or npx process never shows the command line the rule
+> expects. The plan's npm test passes because it uses that expected shape, not one a live npm process has. The reviewer
+> confirmed the rewrite with a live `npx` run on Linux; Bun's `bun x` and `bunx` keep their arguments and do match.
+>
+> What that means for users depends on the system shell that npm uses to start the program:
+>
+> - Linux, where `/bin/sh` is usually dash: no change. npm's own shell stays in the chain and is refused by the current
+>   code as an unrecognized program in between, so these sessions lack Resume before and after this change; only the
+>   wording of the refusal changes.
+> - macOS, where `/bin/sh` is bash: bash hands its process over to the program, so npm's process is the session's top
+>   process and was accepted until now. With the new rule it is refused every time, so Resume for npm- and npx-launched
+>   OMP sessions on macOS would most likely stop working. This was not tested on a Mac.
+>
+> Meanwhile the gap being closed needs a top process with over 64 KiB of arguments and a nested OMP that loads Farhelm's
+> reporter, which triage judged negligible.
+>
+> ### Options
+>
+> 1. Narrow the rule: refuse a non-reporting Bun or Node top process only when its arguments are unreadable, which is
+>    the actual gap, and keep accepting readable ones as today. Readable Bun or Node programs at the top stay accepted
+>    even when they are not the expected launcher, exactly as today. This closes the gap with no change for npm or npx
+>    launches, but revises your earlier decision: the launcher match is dropped. Recommended.
+> 2. Apply the launcher match only to Bun launches (where the arguments really are kept), and keep npm launches as they
+>    are today. This keeps the stricter check where it can work, at the cost of a rule that differs per launcher.
+> 3. Land it as is, accepting that npm and npx OMP launches on macOS likely lose Resume.
+> 4. Drop the fix, given how unlikely the gap is.
+>
+> Separately, and not caused by this plan: Farhelm's documentation lists `npx` launchers as recognized for OMP, and the
+> same npm rewrite means that recognition cannot match a live npm process wherever npm sits in the chain. Whatever you
+> choose here, that claim may need correcting.
 
-The plan's PR (#1779, not merged; nothing of this plan is on main) implements exactly that, and its tests pass. The
-landing review found the rule rests on an assumption that does not hold for npm: npm (which runs as a Node process)
-rewrites its own command line when it starts, so a real npm or npx process never shows the command line the rule
-expects. The plan's npm test passes because it uses that expected shape, not one a live npm process has. The reviewer
-confirmed the rewrite with a live `npx` run on Linux; Bun's `bun x` and `bunx` keep their arguments and do match.
+The maintainer's answer:
 
-What that means for users depends on the system shell that npm uses to start the program:
+The maintainer's answer, verbatim:
 
-- Linux, where `/bin/sh` is usually dash: no change. npm's own shell stays in the chain and is refused by the current
-  code as an unrecognized program in between, so these sessions lack Resume before and after this change; only the
-  wording of the refusal changes.
-- macOS, where `/bin/sh` is bash: bash hands its process over to the program, so npm's process is the session's top
-  process and was accepted until now. With the new rule it is refused every time, so Resume for npm- and npx-launched
-  OMP sessions on macOS would most likely stop working. This was not tested on a Mac.
+> (1) should be way way way simpler right? again gap is unlikely but this should not add lots of complexity?
 
-Meanwhile the gap being closed needs a top process with over 64 KiB of arguments and a nested OMP that loads Farhelm's
-reporter, which triage judged negligible.
+and, on the restatement below: "yes go ahead".
 
-### Options
+Agreed restatement:
 
-1. Narrow the rule: refuse a non-reporting Bun or Node top process only when its arguments are unreadable, which is the
-   actual gap, and keep accepting readable ones as today. Readable Bun or Node programs at the top stay accepted even
-   when they are not the expected launcher, exactly as today. This closes the gap with no change for npm or npx
-   launches, but revises your earlier decision: the launcher match is dropped. Recommended.
-2. Apply the launcher match only to Bun launches (where the arguments really are kept), and keep npm launches as they
-   are today. This keeps the stricter check where it can work, at the cost of a rule that differs per launcher.
-3. Land it as is, accepting that npm and npx OMP launches on macOS likely lose Resume.
-4. Drop the fix, given how unlikely the gap is.
-
-Separately, and not caused by this plan: Farhelm's documentation lists `npx` launchers as recognized for OMP, and the
-same npm rewrite means that recognition cannot match a live npm process wherever npm sits in the chain. Whatever you
-choose here, that claim may need correcting.
+- Option 1. For every way of launching OMP, a Bun or Node top process that is not the reporting OMP runtime refuses
+  attribution only when its arguments are unreadable (over the read budget or otherwise not readable). A top process
+  with readable arguments is accepted as it is today, whatever launcher it is. This revises the earlier completion
+  criteria: the expected-launcher match for the top process is dropped, and so is the npm positive control built on a
+  command line no live npm process has; replace it with a test that a readable npm-style top process is accepted. The
+  existing test that an unreadable Bun top process is refused stays. SPEC_impl.md's OMP corridor text says the rule this
+  way. The change should stay well inside the original "about ten lines plus two or three tests" bound.
+- Out of scope: the OMP docs page's claim that `npx` launchers are recognised, which cannot match a live npm process
+  because npm rewrites its own command line. That is an older, separate inaccuracy, tracked as its own TODO entry.

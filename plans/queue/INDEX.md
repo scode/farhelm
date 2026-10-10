@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight ead7df] `waiting-sound.md` — sounds when a session waits, an approval arrives, or (opt-in) a turn finishes, each switchable per device in Settings
 - [landing 88c8ce] `terminal-file-download.md` — path-shaped text in a terminal is checked on hover and downloads from the session's host on click (100 MB limit; desktop saves to Downloads)
 - [blocked] `hook-report-watch.md` — the supervisor applies conversation reports as soon as they are written, via a file watch, with the timer as backstop (after `sweep-on-timer.md`)
-- [blocked] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
+- [pending] `omp-pane-guard-all-launches.md` — the OMP Resume ownership check refuses an unrecognised Bun or Node pane for every launch type, not only installed `omp`
