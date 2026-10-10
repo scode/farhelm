@@ -402,6 +402,11 @@ a plan to execute" and "execute the next plan" (with "in order" or a named plan 
 blocked plans" (or "check for blocked plans"), "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read
 it before any of those, or before changing anything in the directory.
 
+Once working, executors and the landing monitor never ask the maintainer anything in conversation, not even an optional
+question, an offer of more work, or a harness question tool's prompt: nobody is watching, so the plan stalls until
+someone looks. A decision only the maintainer can make is a block; everything else is decided and logged, and whatever
+the maintainer should know goes into the report. `plans/AGENTS.md` (Unattended means no questions) has the details.
+
 Every planning-system flow starts on a clean working copy of the latest `main`, and a dirty working copy aborts the flow
 with a report to the maintainer. A drain returns to clean `main` between plans; `plans/AGENTS.md` defines the exact jj
 boundary and applies it to the related planning and landing flows as well.

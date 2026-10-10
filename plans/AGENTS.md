@@ -235,6 +235,33 @@ cold reads of a Blocked question and of a report. Every plan needs them, so they
 against delegating its work, and they are not routed through galaxy-brain. The monitor uses sub-agents the same way for
 its independent review of what is about to land and for the cold read of a Blocked question it writes.
 
+## Unattended means no questions
+
+NOTE: Executors and the monitor run unattended. Nobody watches their conversation, so a question asked there is one
+nobody answers, and the plan sits stalled until the maintainer happens to look at that terminal. A block is the only way
+a question reaches the maintainer.
+
+Picking, executing, draining (with or without monitoring), and every landing flow never ask the maintainer anything in
+conversation. That is wider than direct questions: no harness question tool (Codex's `request_user_input` and the queued
+questions it shows, Claude Code's `AskUserQuestion`), no approval or plan-mode prompt the model can choose to raise, no
+"want me to also ...?" or "should I ...?" closing a turn, no menu of optional next steps, and no turn that ends waiting
+for a confirmation this file does not call for. The rule holds whatever a plan's goal file says or leaves unsaid (plans
+written before this section included), whatever a skill loaded during the plan suggests, and whatever the harness's own
+defaults encourage.
+
+Every fork goes one of two ways instead. A decision only the maintainer can make (the goal file's unattended fallback,
+or a landing conflict that needs a design choice) is a block: write the question per Writing for the maintainer and run
+`queue block`, which puts it where the review flow finds it and notifies. Everything else is the agent's to decide: take
+the option that best fits the plan, its Decisions and the specs, log it as a DECISION, and carry on. Things the
+maintainer should know, optional extras, and possible follow-ups are not questions either. They go into the report's
+"things you should know" and "open questions and possible follow-ups" sections (or the monitor's landing notes), written
+as statements the maintainer can act on during review. An optional idea is never a reason to stop, ask, or block.
+
+The one question these flows ask in conversation is whether to carry on without notifications when the ntfy topic file
+is missing (Notifications above), at the start of a flow, before any claim, while the maintainer who started it is still
+there. Stopping and telling the maintainer something (a dirty working copy at the start, a drain's closing summary) is a
+report, not a question, and reads as statements.
+
 ## Planning: "plan to implement <TODO items>"
 
 That request, or anything like it, starts the planning flow. Each named TODO entry gets its own plan, including when the
@@ -271,7 +298,10 @@ with these overrides on top of the skill's own rules:
 - A TODO plan's last code PR removes the TODO entries it covers.
 - The done criterion: every PR exists and has passed its review gate, and the latest `## Decisions` entry, if any, is
   satisfied. Delivering the report is the executor's closing step, not part of the goal.
-- The unattended fallback blocks per Executing one plan (Blocking).
+- The unattended fallback blocks per Executing one plan (Blocking), and states the rule in Unattended means no questions
+  above in the goal file's own words: the executor never asks the maintainer anything in conversation, not even an
+  optional question or offer; a fork is decided and logged or it is a block; things to know and possible follow-ups go
+  into the report.
 - If the plan depends on another plan's work being on main first, the goal file says which, and so does its `INDEX.md`
   line.
 
