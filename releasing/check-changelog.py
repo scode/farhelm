@@ -58,29 +58,62 @@ FRAGMENT_README = "README.md"
 
 # The category table IS the format: names, emoji, and order are all fixed here and nowhere else. `releasing/AGENTS.md`
 # repeats it in prose for humans; if the two ever disagree, this table is what the gate enforces.
+#
+# Fixes come in two categories. Fixes worth highlighting holds the ones a reader should not miss; Misc fixes is the long
+# tail most projects would collapse into one "various bug fixes" line, listed in full for transparency. Misc fixes sits
+# last, below Removed, because it is the part of a release a reader can most safely skip.
 CATEGORIES: tuple[tuple[str, str], ...] = (
     ("Breaking", "\U0001f4a5"),  # collision
     ("Added", "\U0001f680"),  # rocket
     ("Changed", "\U0001f504"),  # counterclockwise arrows
-    ("Fixed", "\U0001f527"),  # wrench
+    ("Fixes worth highlighting", "\U0001f527"),  # wrench
     ("Removed", "\U0001f5d1️"),  # wastebasket with emoji presentation selector
+    ("Misc fixes", "\U0001fa79"),  # adhesive bandage
 )
-CATEGORY_ORDER = {name: index for index, (name, _emoji) in enumerate(CATEGORIES)}
-CATEGORY_HEADING = {f"### {emoji} {name}": name for name, emoji in CATEGORIES}
 
-# Historical sections used this prose category before the current bullet-only format. It remains accepted so changing
-# the release process never forces a rewrite of approved or in-flight release notes. New sections must follow
-# `CATEGORIES`; this compatibility table is not a recommendation for new curation.
-LEGACY_CATEGORIES: tuple[tuple[str, str], ...] = (("Highlights", "✨"),)
-LEGACY_CATEGORY_ORDER = {name: index for index, (name, _emoji) in enumerate(LEGACY_CATEGORIES)}
-LEGACY_CATEGORY_HEADING = {f"### {emoji} {name}": name for name, emoji in LEGACY_CATEGORIES}
-CATEGORY_HEADINGS = {**CATEGORY_HEADING, **LEGACY_CATEGORY_HEADING}
-# These sections were already curated under the retired Highlights layout. A new release version must not silently
-# revive it; add a version here only when an in-flight section was approved before the format changed.
+# Misc fixes opens with exactly this paragraph, then its bullets. The fixed wording is what tells a reader of the GitHub
+# release or the docs website why a release lists fixes they would not care about; a curator rewording it per release
+# would only add a second thing to review.
+MISC_FIXES_PREAMBLE = (
+    '*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the'
+    " complete list is included.*"
+)
+
+# Historical sections used these categories before the current format. They remain accepted so changing the release
+# process never forces a rewrite of approved or in-flight release notes. New sections must follow `CATEGORIES`; these
+# compatibility tables are not a recommendation for new curation.
+#
+# Highlights was a prose category above Breaking. These sections were already curated under it; a new release version
+# must not silently revive it, so add a version here only when an in-flight section was approved before a format change.
+LEGACY_HIGHLIGHTS: tuple[str, str] = ("Highlights", "\u2728")  # sparkles
 LEGACY_HIGHLIGHTS_VERSIONS = frozenset({"0.12.0", "0.13.0"})
+# Before the fix split, every fix went under one Fixed category in place of the two fix categories. Sections up to and
+# including this version use it, and only those may.
+PRE_SPLIT_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("Breaking", "\U0001f4a5"),
+    ("Added", "\U0001f680"),
+    ("Changed", "\U0001f504"),
+    ("Fixed", "\U0001f527"),
+    ("Removed", "\U0001f5d1️"),
+)
+LAST_PRE_SPLIT_VERSION = (0, 25, 0)
 
-# Fragment kinds map onto the bullet categories; `none` records a deliberate "considered, nothing user-facing" so the
-# coverage sweep can tell an omission from a decision.
+
+def categories_for(version: str) -> tuple[tuple[str, str], ...]:
+    """The categories a release section of this version may use, in their required order.
+
+    A version is held to the layout that was current when it was curated, which is what lets the format change without
+    a rewrite of the sections already published under the old one. `version` must already be a valid `X.Y.Z`.
+    """
+    categories = PRE_SPLIT_CATEGORIES if _version_tuple(version) <= LAST_PRE_SPLIT_VERSION else CATEGORIES
+    if version in LEGACY_HIGHLIGHTS_VERSIONS:
+        categories = (LEGACY_HIGHLIGHTS, *categories)
+    return categories
+
+
+# Fragment kinds map onto the bullet categories, with `fixed` covering both fix categories: which of the two a fix lands
+# in is decided at curation, against the whole release, not by the PR author. `none` records a deliberate "considered,
+# nothing user-facing" so the coverage sweep can tell an omission from a decision.
 FRAGMENT_KINDS = ("breaking", "added", "changed", "fixed", "removed", "none")
 
 # Conventional Commit types whose commits must leave a fragment. Any type carrying `!` joins them regardless.
@@ -191,8 +224,11 @@ def check_changelog_format(text: str) -> list[str]:
 
 
 def _check_release_body(version: str, lines: list[str]) -> list[str]:
-    """Validate the fixed category order and require a referenced bullet for every entry."""
+    """Validate the version's category set and order, and the shape each category's body must have."""
     problems: list[str] = []
+    allowed = categories_for(version)
+    headings = {f"### {emoji} {name}": name for name, emoji in allowed}
+    order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
     categories: list[tuple[str, list[str]]] = []
     stray: list[str] = []
     in_fence = False
@@ -200,13 +236,10 @@ def _check_release_body(version: str, lines: list[str]) -> list[str]:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
         if not in_fence and line.startswith("### "):
-            name = CATEGORY_HEADINGS.get(line)
-            if name == "Highlights" and version not in LEGACY_HIGHLIGHTS_VERSIONS:
-                name = None
+            name = headings.get(line)
             if name is None:
-                headings = CATEGORY_HEADINGS if version in LEGACY_HIGHLIGHTS_VERSIONS else CATEGORY_HEADING
-                allowed = ", ".join(f"`{heading}`" for heading in headings)
-                problems.append(f"unknown category heading `{line}`; the headings are {allowed}")
+                listed = ", ".join(f"`{heading}`" for heading in headings)
+                problems.append(f"unknown category heading `{line}`; the headings are {listed}")
                 categories.append(("?", []))
             else:
                 categories.append((name, []))
@@ -222,23 +255,34 @@ def _check_release_body(version: str, lines: list[str]) -> list[str]:
     for name, body in categories:
         if name == "?":
             continue
-        order = LEGACY_CATEGORY_ORDER[name] if name in LEGACY_CATEGORY_ORDER else len(LEGACY_CATEGORIES) + CATEGORY_ORDER[name]
+        order = order_of[name]
         if order <= last_order:
-            order_names = (
-                [name for name, _emoji in LEGACY_CATEGORIES] + [name for name, _emoji in CATEGORIES]
-                if version in LEGACY_HIGHLIGHTS_VERSIONS
-                else [name for name, _emoji in CATEGORIES]
-            )
             problems.append(
-                f"category `{name}` is out of order or repeated; the order is {', '.join(order_names)}"
+                f"category `{name}` is out of order or repeated; the order is {', '.join(n for n, _e in allowed)}"
             )
         last_order = order
         if not any(line.strip() for line in body):
             problems.append(f"category `{name}` is empty; omit a category with no entries")
             continue
-        checker = _check_highlights if name in LEGACY_CATEGORY_ORDER else _check_bullets
+        if name == LEGACY_HIGHLIGHTS[0]:
+            checker = _check_highlights
+        elif name == "Misc fixes":
+            checker = _check_misc_fixes
+        else:
+            checker = _check_bullets
         problems.extend(f"under `{name}`: {item}" for item in checker(body))
     return problems
+
+
+def _check_misc_fixes(lines: list[str]) -> list[str]:
+    """Misc fixes is the fixed preamble paragraph, then ordinary bullets; nothing may precede the preamble."""
+    content = [index for index, line in enumerate(lines) if line.strip()]
+    if lines[content[0]] != MISC_FIXES_PREAMBLE:
+        return [f"the category must open with exactly this paragraph: {MISC_FIXES_PREAMBLE}"]
+    rest = lines[content[0] + 1 :]
+    if not any(line.strip() for line in rest):
+        return ["the preamble needs at least one bullet entry after it; omit the category when there is none"]
+    return _check_bullets(rest)
 
 
 def _check_highlights(lines: list[str]) -> list[str]:
@@ -621,6 +665,37 @@ Notable user-facing changes in each stable release.
 """
 
 
+# The reference changelog above predates the fix split (its versions sit below `LAST_PRE_SPLIT_VERSION`), so it
+# exercises the rules every layout shares and the retained Fixed category. This one is the current layout.
+SPLIT_CHANGELOG = f"""# Changelog
+
+Notable user-facing changes in each stable release.
+
+## v1.1.0 - 2027-02-01
+
+### \U0001f527 Fixes worth highlighting
+
+- A fix most users would notice. (#21)
+
+### \U0001f5d1️ Removed
+
+- A setting nobody used. (#22)
+
+### \U0001fa79 Misc fixes
+
+{MISC_FIXES_PREAMBLE}
+
+- A rare fix. (#23)
+- Another rare fix. (#24, #25)
+
+## v1.0.0 - 2027-01-01
+
+### \U0001f680 Added
+
+- Everything. (#1)
+"""
+
+
 def _run_git(repo: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
@@ -699,6 +774,29 @@ def self_test() -> int:
     expect(check_changelog_format(fenced_code) != [], "the format check rejects fenced code in a historical subsection")
     no_highlight_reference = old_highlights.replace("Prose. (#12)", "Prose.")
     expect(check_changelog_format(no_highlight_reference) != [], "the format check rejects a historical subsection without a PR reference")
+
+    expect(check_changelog_format(SPLIT_CHANGELOG) == [], "the split-fixes changelog passes the format check")
+    misc_heading = "### \U0001fa79 Misc fixes"
+    split_variants = {
+        "the retired Fixed category in a new section": SPLIT_CHANGELOG.replace(
+            "### \U0001f527 Fixes worth highlighting", "### \U0001f527 Fixed"
+        ),
+        "Misc fixes without its preamble": SPLIT_CHANGELOG.replace(f"{MISC_FIXES_PREAMBLE}\n\n", ""),
+        "a reworded preamble": SPLIT_CHANGELOG.replace(MISC_FIXES_PREAMBLE, MISC_FIXES_PREAMBLE.replace("complete", "full")),
+        "a bullet before the preamble": SPLIT_CHANGELOG.replace(
+            f"{misc_heading}\n\n", f"{misc_heading}\n\n- Early. (#20)\n\n"
+        ),
+        "a preamble with no bullets": SPLIT_CHANGELOG.replace("- A rare fix. (#23)\n- Another rare fix. (#24, #25)\n", ""),
+        "a Misc fixes bullet without a PR reference": SPLIT_CHANGELOG.replace("- A rare fix. (#23)", "- A rare fix."),
+        "Misc fixes above Removed": SPLIT_CHANGELOG.replace(
+            "### \U0001f5d1️ Removed\n\n- A setting nobody used. (#22)\n\n", ""
+        ).replace("- Another rare fix. (#24, #25)\n", "- Another rare fix. (#24, #25)\n\n### \U0001f5d1️ Removed\n\n- Late. (#22)\n"),
+        "the split categories in a pre-split section": GOOD_CHANGELOG.replace(
+            "### \U0001f527 Fixed", "### \U0001f527 Fixes worth highlighting"
+        ),
+    }
+    for what, text in split_variants.items():
+        expect(check_changelog_format(text) != [], f"the format check rejects {what}")
 
     good_fragment = "---\nkind: added\npr: 12, 13\n---\n\nThe thing.\n"
     fragment = parse_fragment(Path("x.md"), good_fragment)
