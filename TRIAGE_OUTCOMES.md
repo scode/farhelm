@@ -8585,7 +8585,7 @@
 - Completion criteria: Run the forward on a helm-owned task through the helm's existing `run_owned` helper, so a
   disconnect loses only the reply. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## grok-trust.md
 
@@ -8602,7 +8602,7 @@
 - Completion criteria: Clear the workspace-trust choice in the Grok early-return branch as well. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## font-focus.md
 
@@ -8619,7 +8619,7 @@
 - Completion criteria: Hand focus back to the terminal even when the size does not change; keep the font update and
   refit only for a real change. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## selecting-osc-hyperlink-open-it-unintentionally.md
 
@@ -8637,7 +8637,7 @@
 - Completion criteria: Add the same non-empty-selection guard to the OSC 8 handler's `activate`. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## older-listing-replace-newly-opened-session-another.md
 
@@ -8654,7 +8654,7 @@
 - Completion criteria: Fence earlier listing reads on the create and replace success paths, as delete already does. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## codex-draft-mistaken-for-question.md
 
@@ -8671,7 +8671,7 @@
 - Completion criteria: Run the queued-question check only on lines above the last input prompt line, with test cases for
   a draft and a real question. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## uninstall-cancel.md
 
@@ -8689,7 +8689,7 @@
 - Completion criteria: Run the update and uninstall planners through `run_owned`, as discovery does. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## cancellation-protection-starts-too-late.md
 
@@ -8706,7 +8706,7 @@
 - Completion criteria: Create the abort guard before spawning the supervising task and move it into the future. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## token-recovery-path.md
 
@@ -8723,7 +8723,7 @@
 - Completion criteria: Refuse a non-UTF-8 state directory at the start of `rotate`, before anything changes. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## template-dot-name.md
 
@@ -8740,7 +8740,7 @@
 - Completion criteria: Refuse dot-only names in the template shape check with a clear message. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## literal-helm-state-path-breaks-ssh-connections.md
 
@@ -8757,7 +8757,7 @@
 - Completion criteria: When the path contains `${`, fall back to the existing arguments that turn off connection
   sharing. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## setups-sign-in-command-ignores-selected-state-directory.md
 
@@ -8773,7 +8773,7 @@
 - Completion criteria: Append the shell-quoted `--state-dir` when one was chosen, as the rotate recovery command already
   does. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-cli-fixes.md`.
 
 ## update-popup-stops-following-current-step-opening.md
 
@@ -8790,7 +8790,7 @@
 - Completion criteria: Make the scroll effect also re-run when the current step changes. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## non-ascii-template-names-lose-exact-match-priority.md
 
@@ -8808,7 +8808,7 @@
 - Completion criteria: Use the same Unicode lowercasing for the exact-match check as the filter. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## failed-notification-read-mark-suppresses-subsequent-retries.md
 
@@ -8825,7 +8825,7 @@
 - Completion criteria: On failure, roll back the cached mark for that session if it still holds the mark that failed, so
   a newer successful mark is not undone. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## earlier-setup-uninstall-error-hides-later-update.md
 
@@ -8842,7 +8842,7 @@
 - Completion criteria: When an Update starts, also clear the setup/uninstall error and warning. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## rename-refusal-text-bypasses-peer-text-rendering.md
 
@@ -8859,7 +8859,7 @@
 - Completion criteria: Render the error through the existing peer-text rendering, as the row error line does. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## restart-refusal-text-bypasses-peer-text-rendering.md
 
@@ -8874,7 +8874,7 @@
 - Completion criteria: Render the error through the existing peer-text rendering. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## rename-original-title-display-conceals-title-characters-original-title-original-title-display.md
 
@@ -8891,7 +8891,7 @@
 - Completion criteria: Show the current title through the existing peer-title rendering; the stored title is not
   touched. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## ime-confirmation-save-template-prematurely.md
 
@@ -8908,7 +8908,7 @@
 - Completion criteria: Add the same composition check before saving on Enter. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-correctness-fixes.md`.
 
 ## uninstall-documentation-promises-protection-modified-mac-app.md
 
@@ -8925,7 +8925,7 @@
 - Completion criteria: Documentation only: limit the changed-contents guarantee to what is actually checked and describe
   what the Mac check covers. If that turns out significantly more complicated than expected, leave it unfixed and return
   it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## light-theme-documentation-headings-have-unreadably-low-contrast.md
 
@@ -8942,7 +8942,7 @@
 - Completion criteria: Give those headings a readable light-theme colour. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## local-desktop-build-recipe-fails-relative-target.md
 
@@ -8959,7 +8959,7 @@
 - Completion criteria: Export the normalized target directory before the builds. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## centos-test-changes-meaning-existing-global-ssh.md
 
@@ -8977,7 +8977,7 @@
 - Completion criteria: End the inserted block with a `Match all` (or `Host *`) line so the original configuration is
   read with global scope again. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## tmux-build-script-bash32.md
 
@@ -8993,7 +8993,7 @@
 - Completion criteria: Expand the optional arrays with the portable empty-safe form, or refuse bash older than 4.4 up
   front. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## plans-heading-splice.md
 
@@ -9010,7 +9010,7 @@
 - Completion criteria: Make the guard also catch indented ATX headings and setext underlines at or above the section
   level, with a round-trip test. If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## watcher-revision-cache.md
 
@@ -9027,7 +9027,7 @@
 - Completion criteria: Resolve the branch to one commit per poll and use it for both reads. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## checkout-discovery-strips-valid-trailing-path-characters.md
 
@@ -9043,7 +9043,7 @@
   triage."
 - Completion criteria: Remove only git's trailing newline. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## initial-result-publication-failure-erases-observed-child-result.md
 
@@ -9060,7 +9060,7 @@
 - Completion criteria: Keep the observed result available to the fallback write so it is preserved. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## cutover-probe-ignores-output-asserted-boundary.md
 
@@ -9076,7 +9076,7 @@
 - Completion criteria: Assert that no output notification appears before the cutover point. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## non-fragment-files-satisfy-changelog-coverage.md
 
@@ -9093,7 +9093,7 @@
 - Completion criteria: Apply the loader's top-level `*.md` rule (README excluded) to the paths the sweep counts. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## video-recording-use-stale-builds-successful-build.md
 
@@ -9110,7 +9110,7 @@
 - Completion criteria: Refuse (or point the launch at the resolved target directory) when the target directory is
   outside the checkout's `target/`, as the docs screenshot script does. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## readme-capture-use-stale-builds-successful-build.md
 
@@ -9126,7 +9126,7 @@
 - Completion criteria: Refuse an outside override before building, as the docs screenshot script does. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## hero-publisher-self-test-requires-different-hashes-potentially.md
 
@@ -9143,7 +9143,7 @@
 - Completion criteria: Make the second publish differ deterministically, for example with a second test image. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/docs-and-capture-fixes.md`.
 
 ## optional-desktop-interaction-smoke-times-out-during.md
 
@@ -9160,7 +9160,7 @@
 - Completion criteria: Raise that delete's time limit to 30 seconds, matching the default leg. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-fixes.md`.
 
 ## directory-witness-read-pwd-writes-it.md
 
@@ -9176,7 +9176,7 @@
 - Completion criteria: Wait until the file holds a complete newline-terminated line before comparing. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## directory-report-polling-accept-unfinished-write.md
 
@@ -9192,7 +9192,7 @@
 - Completion criteria: Require a complete newline-terminated record before comparing. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## wrapper-stop-test-fails-sh-uses-bashs-final-command.md
 
@@ -9209,7 +9209,7 @@
 - Completion criteria: Keep the fixture's shell alive (for example `sleep 3600; exit $?`). If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## fixed-process-marker-lets-concurrent-stop-tests.md
 
@@ -9226,7 +9226,7 @@
 - Completion criteria: Use a fresh UUID for the marker and the stored session. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## uninstall-test-inherits-unrelated-state-directory.md
 
@@ -9243,7 +9243,7 @@
 - Completion criteria: Also remove `XDG_STATE_HOME` from the child command's environment (the test process's own
   environment is not touched). If that turns out significantly more complicated than expected, leave it unfixed and
   return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## fixture-startup-leave-real-systemd-service-behind.md
 
@@ -9259,7 +9259,7 @@
 - Completion criteria: Create the unit's cleanup guard immediately after enabling it. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## generic-launch-assertion-uses-different-argv-encoding-fixture.md
 
@@ -9276,7 +9276,7 @@
 - Completion criteria: Compare against the shell-word join and fix the comment. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## raw-restart-helper-mistakes-notifications-replies.md
 
@@ -9292,7 +9292,7 @@
 - Completion criteria: Skip notifications until the reply carrying the request's id. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## foreign-origin-test-finish-observing-sending-request.md
 
@@ -9309,7 +9309,7 @@
 - Completion criteria: Keep observing until the response has come back, then check that no frame arrived. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## failed-adoption-test-leaks-private-tmux-server.md
 
@@ -9325,7 +9325,7 @@
 - Completion criteria: Install the existing tmux server guard before starting the server and use the test-state tempdir,
   as the scratch-server helper does. If that turns out significantly more complicated than expected, leave it unfixed
   and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## upload-memory-test-leaks-mib-fixture-successful-runs.md
 
@@ -9340,7 +9340,7 @@
   triage."
 - Completion criteria: Drop or close the tempdir before exiting. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## stopped-fixture-could-survive-assertion-failure.md
 
@@ -9357,7 +9357,7 @@
 - Completion criteria: Own the child in a drop guard that kills and reaps it from spawn until the manual cleanup. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/linux-test-false-failures.md`.
 
 ## orderly-shutdown-assertion-vacuous-macos.md
 
@@ -9374,7 +9374,7 @@
 - Completion criteria: Use a portable liveness check (signal 0 returning no-such-process), confirmed to see the live
   process first. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
   user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## eof-replacement-test-cannot-detect-overlap-macos.md
 
@@ -9390,7 +9390,7 @@
 - Completion criteria: The same portable liveness check, inside the replacement callback. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## replacement-open-shutdown-test-assumes-procfs.md
 
@@ -9405,7 +9405,7 @@
   triage."
 - Completion criteria: The same portable liveness check. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## checkout-validation-test-cannot-construct-fixture-apfs.md
 
@@ -9421,7 +9421,7 @@
 - Completion criteria: Gate or split out the invalid-name part so the portable checks still run on macOS. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## rss-measurement-undercounts-larger-page-linux-systems.md
 
@@ -9437,7 +9437,7 @@
   triage."
 - Completion criteria: Multiply by the system page size. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## birth-oracle.md
 
@@ -9454,7 +9454,7 @@
 - Completion criteria: Make the probe distinguish supported, unavailable and failed, use the BSD `stat` form on macOS,
   and fail on probe errors. If that turns out significantly more complicated than expected, leave it unfixed and return
   it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## failed-upload-regression-fails-native-macos-tools.md
 
@@ -9469,7 +9469,7 @@
   triage."
 - Completion criteria: Gate it to Linux like the sibling. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## orphan-cleanup-regression-requires-gnu-tools-platform-guard.md
 
@@ -9483,7 +9483,7 @@
   triage."
 - Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## tampering-regression-fails-reaching-tampering-boundary-macos.md
 
@@ -9498,7 +9498,7 @@
   triage."
 - Completion criteria: Gate it to Linux. If that turns out significantly more complicated than expected, leave it
   unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## tilde-replay-test-equates-display-canonical-paths.md
 
@@ -9514,7 +9514,7 @@
 - Completion criteria: Canonicalize the expected value for the canonical-path assertion only. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## checkout-recovery-compares-canonical-roots-unresolved-fixture.md
 
@@ -9529,7 +9529,7 @@
   triage."
 - Completion criteria: Canonicalize the fixture roots before comparing. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md
 
@@ -9544,7 +9544,7 @@
   triage."
 - Completion criteria: Canonicalize the fixture path before comparing. If that turns out significantly more complicated
   than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/test-portability-fixes.md`.
 
 ## cgroup-cleanup-masks-dead-pane-sweep-regression.md
 
@@ -9561,7 +9561,7 @@
 - Completion criteria: Run it on a harness with cgroup scopes disabled and check the launch really ran unscoped. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## cgroup-cleanup-masks-closure-seeding-regression.md
 
@@ -9577,7 +9577,7 @@
 - Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## cgroup-cleanup-masks-fork-quiescing-regression.md
 
@@ -9593,7 +9593,7 @@
 - Completion criteria: Same change: scopes disabled, launch confirmed unscoped. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## signal-cleanup-test-interrupts-cleanup-exists.md
 
@@ -9610,7 +9610,7 @@
 - Completion criteria: Send the signal only once the staging directory exists. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## distinct-payload-test-observe-payload-bytes.md
 
@@ -9627,7 +9627,7 @@
 - Completion criteria: Use the fake backend's stateful mode, as other tests do, and assert the bytes at both
   destinations. If that turns out significantly more complicated than expected, leave it unfixed and return it to the
   user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## empty-chunk-test-accepts-upload-stalls-only-traffic.md
 
@@ -9644,7 +9644,7 @@
 - Completion criteria: Require the abort to arrive while the flood is still running. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## releasing-both-relay-gates-establish-reverse-reply.md
 
@@ -9660,7 +9660,7 @@
 - Completion criteria: Release the second session, await its answer, then release the first. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## concurrent-list-test-silently-accepts-failure-polling-participant.md
 
@@ -9676,7 +9676,7 @@
 - Completion criteria: Make the poller fail on a list error and assert that it polled successfully. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## later-refresh-hide-stale-refresh-regression.md
 
@@ -9693,7 +9693,7 @@
 - Completion criteria: Hold the successor listing until the assertions finish and wait on this host's count relative to
   the hold. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## malformed-message-test-pass-through-ordinary-eof.md
 
@@ -9710,7 +9710,7 @@
 - Completion criteria: Keep the fake supervisor's connection open until the request has failed. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-helm-test-oracles.md`.
 
 ## shutdown-test-accepts-forced-cancellation-natural-completion.md
 
@@ -9726,7 +9726,7 @@
 - Completion criteria: Await the writer task directly under a short timeout and require success. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## replay-test-consumes-outstanding-reply-testing-recovery.md
 
@@ -9743,7 +9743,7 @@
 - Completion criteria: Reorder the commands so exactly one filter reply is outstanding when replay starts, and assert
   that. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for
   triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## omp-transition-assertions-cannot-detect-stale-conversation.md
 
@@ -9759,7 +9759,7 @@
 - Completion criteria: Give the transitions distinct ids and files and check the binding after each. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## lock-test-establish-contender-reached-lock.md
 
@@ -9775,7 +9775,7 @@
 - Completion criteria: Wait on the existing arrival observer instead of yielding. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## ended-session-replay-test-accepts-relaunch-under-same.md
 
@@ -9792,7 +9792,7 @@
 - Completion criteria: Also assert the stored row is still exited with its original exit code. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## invalid-key-test-overlooks-permanently-settled-reservations.md
 
@@ -9809,7 +9809,7 @@
 - Completion criteria: Assert no reservation of any state exists for each refused key. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## oversized-resume-test-overlooks-settled-storage.md
 
@@ -9824,7 +9824,7 @@
 - Completion criteria: Assert no reservation of any state exists for the key. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## resume-preservation-test-never-verifies-relaunch-was-accepted.md
 
@@ -9840,7 +9840,7 @@
 - Completion criteria: Require the restart to be claimed, with a generation bump, before the preservation assertions. If
   that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-test-oracles.md`.
 
 ## intentional-child-passes-because-it-failed-wrong.md
 
@@ -9857,7 +9857,7 @@
 - Completion criteria: Record body completion after the final assertion. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## client-log-test-establish-claimed-later-capture.md
 
@@ -9874,7 +9874,7 @@
 - Completion criteria: Flush the shim and assert the later message was actually sent, as neighbouring tests do. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## title-retry-test-changes-folder-too-masking.md
 
@@ -9891,7 +9891,7 @@
 - Completion criteria: Change only the title and require two distinct, non-empty keys. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## notification-stub-accepts-writes-wrong-session.md
 
@@ -9907,7 +9907,7 @@
 - Completion criteria: Match or record the session id and assert the other session gets no mark. If that turns out
   significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## sticks-test-wait-additional-refresh-it-claims.md
 
@@ -9924,7 +9924,7 @@
 - Completion criteria: Take the baseline after the unread state is visible and wait for a later completed listing read.
   If that turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## failed-clone-setup-leaves-hosts-route-permanently.md
 
@@ -9940,7 +9940,7 @@
 - Completion criteria: Release the held request at the start of the cleanup block. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## empty-frame-test-stops-stimulus-checking-watchdog.md
 
@@ -9957,7 +9957,7 @@
 - Completion criteria: Require the reveal before the empty-frame injection ends. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## reconnect-deadline-test-permits-deadline-reset-regression.md
 
@@ -9973,7 +9973,7 @@
 - Completion criteria: Keep switching until the remount is seen, with a cap, or bound recovery against the original
   deadline. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## outstanding-heartbeat-test-accept-probe-answered-wedge.md
 
@@ -9988,7 +9988,7 @@
   triage."
 - Completion criteria: Count only heartbeats sent after silencing. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## link-drag-fixture-mistake-wrapped-url-single-row-url.md
 
@@ -10003,7 +10003,7 @@
   triage."
 - Completion criteria: Assert the whole URL is on the head row. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## resize-teardown-accepts-refused-deletion-success.md
 
@@ -10018,7 +10018,7 @@
   triage."
 - Completion criteria: Use the shared session-cleanup helper. If that turns out significantly more complicated than
   expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## multi-session-test-hold-delete-request.md
 
@@ -10034,7 +10034,7 @@
   triage."
 - Completion criteria: Match on the URL's pathname. If that turns out significantly more complicated than expected,
   leave it unfixed and return it to the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## exited-session-test-bypasses-delete-gate.md
 
@@ -10050,7 +10050,7 @@
 - Completion criteria: Match on the pathname and release the hold in the cleanup block. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## remote-browse-witness-accept-earlier-tests-request.md
 
@@ -10066,7 +10066,7 @@
 - Completion criteria: Search only the log bytes written after clicking Browse. If that turns out significantly more
   complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## failed-setup-overwrite-ownership-running-replacement-supervisor.md
 
@@ -10083,7 +10083,7 @@
 - Completion criteria: Restore only when nothing is serving, as the reboot group's teardown already does. If that turns
   out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## phantom-tab-regression-test-never-waits-claimed-later.md
 
@@ -10099,7 +10099,7 @@
 - Completion criteria: Wait for a session-detail response that started after the close, then check once without
   retrying. If that turns out significantly more complicated than expected, leave it unfixed and return it to the user
   for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## yolo-refusal-fixture-unintentionally-puts-page-into.md
 
@@ -10115,7 +10115,7 @@
 - Completion criteria: Capture the helm's build before faking replies and assert no mismatch banner appears. If that
   turns out significantly more complicated than expected, leave it unfixed and return it to the user for triage. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
 
 ## mouse-fidelity-assertion-accepts-utf-corrupted-reports.md
 
@@ -10131,7 +10131,7 @@
 - Completion criteria: Assert the exact report bytes from the known click coordinates. If that turns out significantly
   more complicated than expected, leave it unfixed and return it to the user for triage. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-terminal-test-oracles.md`.
 
 ## failed-add-host-assertions-leave-extra-registered-host.md
 
@@ -10147,4 +10147,4 @@
 - Completion criteria: In cleanup, find the host by its unique destination when no id was recorded, and require the
   delete to succeed. If that turns out significantly more complicated than expected, leave it unfixed and return it to
   the user for triage. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-sidebar-test-oracles.md`.
