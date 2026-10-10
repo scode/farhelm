@@ -95,3 +95,31 @@ artifacts. Actual native model attribution and usage counters are not exposed by
 
 Implementation and investigation were done by the executor under the plan's no-workhorse rule; only the required reviews
 were delegated. The PR stays a draft; the executor neither marks it ready nor merges it.
+
+### Landing
+
+Landed on 2026-10-10 (UTC) as #1834. The rebase met no conflicts.
+
+#### Review before merging
+
+No blocker or should-fix findings. Since the plan ran, the checkout-folder plan changed how checkout roots resolve and
+reworded its refusals, in the same files as four of these tests; the review checked each against the new behaviour, and
+the canonicalized roots, refusal substrings and nothing-created checks all still hold. Notes left as they are:
+
+- The macOS creation-time probe runs `stat` from PATH. With GNU `stat` first on PATH (Homebrew's gnubin), it fails
+  loudly on correct behaviour; calling `/usr/bin/stat` on macOS would avoid that.
+- The upload-memory test now multiplies by the system page size, but it still reads `/proc` and is not gated, so it
+  still fails on macOS; that was out of this plan's scope.
+
+#### Checks
+
+This plan was landed alone, on main after checkout-folder-and-ui-fixes and ui-correctness-fixes merged. It was landed
+after them on purpose: plans that only change tests no longer hold back plans that change the product.
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (283 delays, none without a reason),
+  `cargo clippy --all-targets -- -D warnings`; and the supervisor and helm unit tests with the create-idempotency and
+  GitHub-checkout end-to-end tests, through the recorder with pinned tmux 3.7c, four slots and no retries (run
+  `867ae203`, 2150 of 2150). That covers every test this plan changed, now running against the checkout-folder changes.
+- Not run: macOS; the checks above are Linux only.
+
+Nothing in the report above was made untrue by the landing.
