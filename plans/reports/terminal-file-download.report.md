@@ -1,135 +1,127 @@
+## Since the last review
+
+The same three draft PRs remain. The host-side read PR (#1769) now uses protocol 45 alongside main's checkout-trash
+protocol 44 and coalesces short filesystem reads into full frames, ending at the first EOF. The endpoint/native-save PR
+(#1771) was rebased without changing its implementation. The terminal PR (#1773) now places status at the top, fades
+success after five seconds, dismisses failure on the next terminal click or download, and documents intentional saves
+without macOS quarantine. No PR was added or dropped.
+
 ## What this was about
 
-Agents often return a file by printing its path, including a path on another host. Farhelm previously offered no way to
-save that file from the terminal. The maintainer chose a hover check that discloses the source, followed by an explicit
-click, with a 100 MB limit and native Downloads saves in the desktop app.
+Agents often return a file by printing its path, including one on another host. Farhelm previously offered no way to
+save that file from the terminal. The maintainer chose a fresh hover that discloses host, resolved path and size before
+an explicit click, a 100 MB limit, browser saves by basename, and direct Downloads saves in the desktop app.
 
-The stack recognizes absolute and home paths, relative paths containing a slash or file extension, and OSC 8 file links.
-A fresh hover shows checking immediately, then the session host, resolved path and size, or the reason it cannot be
-downloaded. Browser clicks save the complete file under its basename. Desktop clicks save directly into Downloads, pick
-an unused name, and show the saved location. The covered TODO entry is removed.
+Absolute and home paths, relative paths containing a slash or file extension, and OSC 8 file hyperlinks are recognized.
+A hover immediately shows checking, then the source or a refusal. Downloads are complete before publication, native
+saves pick an unused name, and failed or interrupted native saves leave no partial file. The covered TODO entry is
+removed.
 
 ## Things you should know
 
-Relative paths use the session's launch directory. Farhelm does not follow later shell directory changes. Ordinary
-printed paths stop at whitespace, quotes and brackets; paths containing spaces can be supplied through an OSC 8 file
-link. Diagnostic line/column suffixes and sentence punctuation are excluded. Plain words, numeric versions and
-scheme-bearing plain text are not file links. Existing http(s) links retain their behavior; OSC 8 accepts only http,
-https and file, so enabling file links does not admit script or data links.
+Relative paths use the session's launch directory, not a shell's later directory. Ordinary printed paths stop at
+whitespace, quotes and brackets; OSC file hyperlinks can carry spaces. Diagnostic line/column suffixes and sentence
+punctuation are excluded. Words, numeric versions and scheme-bearing plain text are not file links. Existing web links
+retain their behavior; OSC accepts only http, https and file.
 
-The source text is controlled by the agent. Hover discloses the resolved host and path before a click is admitted, and
-nothing downloads without that click. Any regular file readable by the session's Unix account is within reach, including
-symlink targets; this uses Farhelm's existing host trust model. Agent-authenticated peers cannot request these reads.
-Directories, unreadable or missing files and files over 100,000,000 bytes are refused. The size bound is enforced again
-while streaming, including growth after admission. Failed transfers show an in-page message; unfinished native saves
-leave no partial download. Browser saves buffer the complete file, which is why the size limit is deliberately modest.
+Any regular file readable by the session's Unix account is in reach, including symlink targets. Agent-controlled text
+remains data, and only the helm may request host-side file reads. A fresh disclosed hover and explicit click authorize
+the host-to-viewer transfer. Directories, unreadable or missing files and files over 100,000,000 bytes are refused;
+growth beyond the limit fails during streaming. Nothing opens or executes the result. The desktop app deliberately adds
+no macOS quarantine flag, as the maintainer decided; SPEC.md now records that choice in its security section.
 
-The host protocol moves from version 43 to 44. A mismatched supervisor must be updated before connecting, through the
-existing update path; no new compatibility layer or installer behavior was introduced.
+Status stays away from the agent's input and recent transcript at the bottom. Both browser and desktop success notices
+fade after five seconds. Failures stay until the next click or download in that terminal. Notice timers and listeners
+belong to the terminal mount; late cancelled replies cannot restore them after closing it.
 
-I inspected real Chromium screenshots and saved bytes from local and SSH sessions after widening the sidebar by dragging
-its edge: both hovers showed the owning host, complete path and size, and both saves matched the source bytes.
+The protocol now moves from main's 44 to 45. Mismatched supervisors use the existing update path before reconnecting; no
+compatibility layer or installer behavior was added. Careful rebase preserved the landed checkout-trash dispatch, host
+icons, sidebar geometry and session-directory contracts. Review also exposed a queue assumption: byte credit alone did
+not bound the number of legally short filesystem reads. The producer now fills frames and treats its first partial EOF
+as final, preserving the bounded queue for slow consumers without another subsystem.
 
-I inspected a real Linux desktop window: hover disclosed the host, full path and 27-byte size, a click saved the
-expected bytes to an isolated Downloads folder and showed its location, and a second click saved an identical copy with
-an unused name. macOS was not tried.
+Earlier execution inspected real Chromium local/SSH hovers and exact saved bytes after sidebar drags, plus a real Linux
+desktop save and unused-name second save into an isolated Downloads folder. Those observations cover the unchanged
+lookup/native-save behavior. This round's rendered notice evidence and current matching-build tests are listed below.
+macOS was not tried.
 
 ## Open questions and possible follow-ups
 
-No implementation decision is awaiting the maintainer. A macOS native-window check remains useful because its folder
-resolution and embedded engine were not exercised here.
+No implementation decision awaits the maintainer. A macOS native-window check remains useful because platform folder
+resolution and the embedded shell were not exercised on macOS.
 
 ## PRs
 
-- [#1769](https://github.com/scode/farhelm/pull/1769/changes): host-side file inspection and bounded streamed reads.
-- [#1771](https://github.com/scode/farhelm/pull/1771/changes): authenticated helm endpoints and native Downloads saves.
-- [#1773](https://github.com/scode/farhelm/pull/1773/changes): terminal recognition, hover, click, specs and user docs.
+- [#1769](https://github.com/scode/farhelm/pull/1769/changes): host-side inspection and bounded streamed reads.
+- [#1771](https://github.com/scode/farhelm/pull/1771/changes): authenticated endpoints and native Downloads saves.
+- [#1773](https://github.com/scode/farhelm/pull/1773/changes): terminal recognition, hover, click, notices, specs and
+  user docs.
 
 ## Checks run, reused and skipped
 
-Implementation and runtime validation used an owned Linux container with four CPUs and 12 GB memory, pinned nextest
-0.9.143 and tmux 3.7c. Rust selections used four slots and zero retries; browser selections used one worker and zero
-retries. No selected successful run printed a runtime substrate skip. The SSH browser fixture's connected state was
-explicitly established.
+Ran the focused supervisor/protocol checks (`94649fe6-8986-4df9-86c6-b559397a71e2`): five passed, covering protocol 45,
+access checks, credit, growth and full frames through first EOF. Its source was tip `75b963476df7`; the only subsequent
+Rust change collapses a fixture condition with identical behavior, independently reviewed. Current supervisor Clippy and
+formatting pass. Endpoint/native-save checks (`3eaff8e0-0674-4e2b-a744-5b69d78a563b`) passed seven, including auth,
+CORS, streaming, unique names and cleanup. Selection exclusions were not runtime skips.
 
-The pre-rebase checks cover the behavior pushed as `325a8b1fbdc8`, `da88f155c0c1` and `3e15bc10194e`, including recorded
-dirty-tree snapshots before those commits. Comparing the entire stack diff before and after rebase preserved every added
-and removed line. Checks reused below still cover those same contracts.
+Ran final terminal JavaScript (`2db72d0d-93f3-4eee-9eba-f67025ae1fd4`): nine passed, including pre-open mount/disposal,
+default browser timers, both save outcomes and stale replies. The earlier whole UI harness
+(`9372cbd0-44c4-4e75-8e64-973b9805401c`) passed 212; its other 204 cases are unchanged and reused. Both cargo and
+corrected web builds passed. Current matching-build file spec (`69d5d639-be2d-4795-b8ba-99b71d342901`) passed all eight
+across Chromium/WebKit, one worker and no retries/skips: local/SSH exact saves, top placement, five-second fade, click
+dismissal, OSC refusals and hover cancellation. Runtime Rust runs used pinned nextest 0.9.143 and tmux 3.7c, four slots
+and zero retries.
 
-Runtime commands below ran through `python3 scripts/record-test-run.py`, with `--runner nextest` or
-`--runner playwright` for the corresponding suites and generic recording for JS/manual attempts. Rust and browser runs
-used `--tmux required`; pure JS used `--tmux none`. The focused child commands were
-`cargo nextest run -p farhelm-supervisor -p farhelm-helm -p farhelm-proto --lib -E '<download units, restricted peer and version pin>'`,
-`cargo nextest run -p farhelm --test e2e -E 'test(file_downloads::)'`, and
-`cargo nextest run -p farhelm-helm --lib -E 'test(downloads::tests::)'`.
+Protocol integration run `67ddc08b-dff7-4eaa-8b72-a88f6a4577b5` passed four cases after its fixture build: complete
+credit-paced reads, control traffic and abort, channel reuse, and oversized-file refusals. No selected test printed a
+runtime substrate skip.
 
-Before rebase, recorded supervisor/protocol units passed five cases in `e4021572-a966-4308-bbee-942312da9bf1`;
-file-download protocol end-to-end tests passed four in `42f2f7c8-8443-46fd-8ca9-01e55074a819`; authenticated
-endpoint/native-save tests passed seven in `4fdb34e2-d6ba-466f-8a74-bc32ab928a2a`. These cover resolution, symlinks,
-kind/permission/size refusals, growth at a credit boundary, restricted-agent refusal, cancellation and channel reuse,
-bounded replies, device authentication, desktop CORS, unused names and staging cleanup.
-`cargo clippy -p farhelm-proto -p farhelm-supervisor -p farhelm-helm --all-targets -- -D warnings` and the later
-helm-only all-target lint passed, as did `cargo check -p farhelm-ui --features desktop` and
-`cargo check -p farhelm-desktop`.
+Manual run `150e1295-1964-4351-8646-3debca511dbf` passed local and SSH saves with exact byte equality after verified
+sidebar drags. The executor inspected four screenshots: host, full path and size fit the hover without clipping, file
+text was underlined, and the success strip sat at the terminal top while leaving the bottom clear. Both success notices
+faded. These are browser observations; macOS was not tried.
 
-`cd crates/farhelm-ui/js-tests && node --test` discovery initially passed 206 cases and failed the new spinner's
-animation contract. After correction, focused file/link/CSS cases passed 37 in `1dca4eba-0a41-480c-934e-0260328ed3af`,
-and final URI negatives passed four in `c8bfc51b-3b41-4444-9ad5-f83d161e7ec2`. The earlier successful unrelated cases
-are reused because their source did not change. Cargo and release web builds passed. All eight new browser scenarios
-passed on Chromium and WebKit in `b73b3bba-6b5d-4d72-b9ce-922c818f20d8`; all 28 existing web-link scenarios passed in
-`3872b9b8-455e-462d-96b8-eb56d209b21b`. They cover real local/SSH bytes, checking and click refusal, fresh and cancelled
-hovers, OSC file saves, symlink-sensitive paths, failure after a file vanishes, forbidden schemes, wrapping, replay,
-selection and resizing. The manual Linux native attempt passed in `6c7e190d-ff49-44c6-b77e-adf72d92fc2d` with separately
-inspected screenshots and saved bytes.
+Ran final formatting, changed-spec Markdown checks, changelog lint (34 fragments), and the isolated delay checker (279
+delays, zero missing rationales); all passed. Later main changes through `8bc1af9a5d9c` affect OMP Resume attribution,
+host-support/uninstall prose and shared bookkeeping; they change no download contract, caller or dependency. Existing
+coverage therefore applies without another rebase or broad runtime run.
 
-The docs website `bun install --frozen-lockfile && bun run build` passed from a private source copy; a pre-existing
-generated-file ownership issue in the checkout was not changed. Clean bundle comparison passed all 22 requested desktop
-assets. Formatting, targeted Markdown dprint, changelog format and the isolated test-delay checker passed before rebase.
+Prior evidence covers the old pushed heads `1e68f6e5bd75`, `6e69f0f242f8`, and `bd8f1c0e5591` and their pre-rebase
+source snapshots. Added/removed-line comparison against the new main preserved every plan line except the intended
+protocol-version changes; this round separately validates the notice and producer corrections. Authenticated
+endpoint/native-save run `4fdb34e2-d6ba-466f-8a74-bc32ab928a2a` passed seven cases. Existing web-link run
+`3872b9b8-455e-462d-96b8-eb56d209b21b` passed 28 cases, and later integrated file/wrapped-link run
+`8490694e-ba4f-4297-9b55-4e830927145a` passed ten across Chromium/WebKit. The unchanged web recognizer, scheme handling,
+selection and wrapping contracts retain that evidence; current file tests cover changed integration.
 
-The careful rebase onto `3c434a81` preserved all plan edits alongside sidebar resizing, compact approval cards and
-timer-owned supervisor work. The file protocol retained version 44, both asset registrations survived, and stored
-session launch directories retained their meaning. Post-rebase protocol run `7811524d-67a9-49a9-b919-ba80fa5ba65c`
-passed all four cases; 361 unrelated cases were selected out, with no runtime substrate skip. This checks the actual
-file dispatcher against the updated supervisor. Cargo and release web builds passed again.
-`cargo clippy -p farhelm --bins -- -D warnings` passed with test seams disabled, covering the configuration earlier
-all-target lint did not inspect. `cargo fmt --all -- --check`, targeted `dprint check`,
-`python3 releasing/check-changelog.py format` and the isolated `python -B scripts/check-test-sleeps.py` passed after
-rebase; the last inspected 277 delays with zero missing rationales. Subsequent main changes inspected so far were
-queue/report metadata only.
+Earlier desktop feature and binary compile checks, asset parity, docs website build, and the inspected Linux native
+attempt `6c7e190d-ff49-44c6-b77e-adf72d92fc2d` are reused. This revision changes no native folder API, native save
+implementation, asset registrations, website source, executable examples or generated artifacts. The native notice's
+shared JavaScript lifetime is exercised this round; WebKit browser coverage checks the engine family, not the desktop
+shell. Old unit/Clippy evidence is supplementary; current protocol/producer checks cover the changed invariant.
 
-The manual browser attempt passed in `57606a8d-fabc-4d85-8a6b-c5b00995d7db`, with local and SSH byte equality and
-visually inspected hover screenshots after actual sidebar drags. The preliminary attempts failed private readiness and
-drag-coordinate assumptions before any file save; their records remain retained.
+The full Rust/browser batteries, desktop shell rerun, doctests, installer, provisioning, release workflow and hosted CI
+were skipped because targeted checks cover the changed contracts and concrete interactions. No deployment, release or
+live-install mutation was performed.
 
-Browser child commands were `cd e2e && npx playwright test terminal-files.spec.ts`, the corresponding
-`terminal-links.spec.ts` selection, and the final two-file selection with a name filter for all file cases and the
-wrapped-link resize case. Manual child commands are recorded as `node <owned browser attempt>` and
-`python3 <owned native attempt>` here; the plan's working log preserves their private script identities.
-
-Post-rebase Chromium/WebKit run `8490694e-ba4f-4297-9b55-4e830927145a` passed all ten selected cases: the eight file
-scenarios and the two existing wrapped-link resize cases. This closes the grid/asset/layout integration risk introduced
-by the new sidebar. The other 26 earlier web-link passes are reused because link parsing, selection and opening behavior
-were preserved and the rebase did not alter them. A portable retained-run summary was archived privately; generic JS and
-manual attempts have no structured case counts, so their stated outcomes come from retained console output and the
-separately inspected artifacts rather than an aggregate case denominator.
-
-Failed or incomplete records remain retained: initial Rust fixture compile failures, endpoint fixture label/origin and
-unanswered-request failures, the spinner assertion, browser prerequisite refusals and a host-response-envelope fixture
-error. Later passes are separate evidence. The first native attempt lacked embedded UI assets and proved no download;
-the corrected build was used for the successful attempt. A private manual-browser probe used a nonexistent readiness
-endpoint and was corrected to the public page. These were same-session development or prerequisite failures, not latent
-flakes, and no overall pass is claimed for them.
-
-The full Rust and browser batteries, doctests, installer, provisioning, release checks and hosted CI were skipped:
-targeted cases cover the changed contracts and identified interactions; no executable examples, installer or release
-procedure changed. No release, website deployment or live-install mutation was requested or performed.
+Failed and interrupted evidence remains private. In this round `231f8236-24cc-484c-b395-2932170d537e` failed a new JS
+fixture's guessed microtask readiness; an explicit gate fixed that premise, and later runs are separate observations.
+Unit run `8aafd23b-fca2-4a9f-a7f2-ced0ef2b8be7` and its concurrent build were deliberately interrupted before another
+producer correction; no runtime pass is claimed. Earlier development/prerequisite failures remain retained in the plan's
+working log. Browser run `7b31637c-50ad-44df-9460-ca5c4c573f4e` passed four and failed four: files saved completely, but
+the default success timer had an invalid browser receiver and reported failure. That defect was fixed in this session.
+The first supervisor Clippy attempt also found a nested-if style error in the new fixture, corrected without changing
+behavior. None is classified as a latent flake.
 
 ## Review gate outcome
 
-Each code PR passed the demanded fresh-context gpt-6.1-sol high review for correctness, design and language idiom, with
-the full test-authoring checklist. The review fixes addressed bounded replies and channel reuse; native staging privacy
-and cancellation ownership; parser scheme/URI boundaries, tooltip ownership and hover readiness. Scope review found no
-unnecessary mechanism after correction. The final API-envelope fixture follow-up had no findings. Every touched file
-received a separate documentation pass. Commit/PR wording passed fresh gpt-6.1-sol medium cold reads. Implementation,
-source inspection and execution evidence belong to the executor; review agents ran no tests or VCS operations. Native
-usage counters and exact runtime-model reporting were unavailable.
+The revised protocol and terminal PRs passed fresh-context gpt-6.1-sol high general reviews with the full test-authoring
+checklist. Corrected findings were the pre-open xterm lifecycle and the short-read/first-EOF queue invariant.
+Matching-build browser checks also caught a default timer receiver error after a successful save; global-call wrappers
+fixed it, with a controlled regression and a further accepted source review. The endpoint PR's prior review is reused
+because its implementation is preserved. Required scope reassessment assessed the corrections; it found no unnecessary
+mechanism. Every touched file received a separate documentation pass. The host-read commit and PR description were
+refreshed to protocol 45 and passed a new wording cold read; the other wording retains its earlier cold-read results.
+Reviewers performed source inspection; runtime results and artifact inspection belong to the executor. Native exact
+model reporting and usage counters were unavailable.
