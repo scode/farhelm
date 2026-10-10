@@ -2381,14 +2381,21 @@ mod tests {
             Err(WorkingCopyError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound
         ));
 
-        let iterator = std::iter::once(Err(std::io::Error::new(
+        // NotFound may describe an iterator failure after the root opened;
+        // callers must not turn that failed scan into empty occupancy.
+        for kind in [
             std::io::ErrorKind::PermissionDenied,
-            "injected directory read failure",
-        )));
-        assert!(matches!(
-            occupied_related_names_from_entries(iterator, "bar", 8),
-            Err(WorkingCopyError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied
-        ));
+            std::io::ErrorKind::NotFound,
+        ] {
+            let iterator = std::iter::once(Err(std::io::Error::new(
+                kind,
+                "injected directory read failure",
+            )));
+            assert!(matches!(
+                occupied_related_names_from_entries(iterator, "bar", 8),
+                Err(WorkingCopyError::Io(error)) if error.kind() == kind
+            ));
+        }
     }
 
     /// The cap bounds calls to `next`: EOF is queried once within budget,

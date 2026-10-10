@@ -4688,7 +4688,8 @@ impl Supervisor {
     /// Inspect immediate clone origins beneath the effective checkout root.
     /// No ownership or directory-admission lock is taken: discovery is bounded
     /// observation, and races with filesystem changes report incomplete results
-    /// through the scanner. Configuration and host claims remain helm-owned.
+    /// through the scanner. A not-yet-created root is a complete empty result;
+    /// discovery never creates it. Configuration and host claims remain helm-owned.
     pub(crate) async fn github_repo_search(
         &self,
         root: Option<&str>,
@@ -4712,6 +4713,16 @@ impl Supervisor {
         // until kill/reap completes; timing out never makes a live child free.
         tokio::time::timeout(Duration::from_secs(5), async {
             let root = self.resolve_checkout_root(root).await?;
+            match tokio::fs::symlink_metadata(&root).await {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(crate::repository_discovery::DiscoveryResult {
+                        repos: Vec::new(),
+                        truncated: false,
+                    });
+                }
+                Err(error) => return Err(error.into()),
+                Ok(_) => {}
+            }
             self.repository_scanner.scan(Path::new(&root), query).await
         })
         .await
@@ -4720,8 +4731,9 @@ impl Supervisor {
 
     /// The supervisor's half of the GitHub-checkout preview: expand `~`
     /// in the helm-resolved root against THIS daemon's captured home,
-    /// canonicalize it, prove it is a real usable directory, run the
-    /// bounded occupancy scan, and propose the deterministic name.
+    /// resolve existing symlink ancestors, run the bounded occupancy scan,
+    /// and propose the deterministic name. A missing root is empty; only
+    /// creation makes it and its parents.
     ///
     /// NOTHING is created — preview is a precondition, not a reservation:
     /// the exclusive mkdir happens at admission time under
@@ -4778,16 +4790,29 @@ impl Supervisor {
         // One bounded scan feeds both the occupancy set (titled names) and
         // the lowest-free number (untitled). The scan cap refusal is
         // honest incompleteness, never a guessed name.
-        let scan = crate::working_copies::occupied_related_names(
-            std::path::Path::new(&canonical_root),
-            &repo.name,
-            crate::working_copies::OCCUPANCY_SCAN_CAP,
-        )?;
-        let occupied = scan.names;
+        // Only an absent root is empty. An entry-read error from an existing
+        // directory is incomplete evidence, even when its OS kind is NotFound.
+        let occupied = match tokio::fs::symlink_metadata(&canonical_root).await {
+            Ok(_) => {
+                crate::working_copies::occupied_related_names(
+                    std::path::Path::new(&canonical_root),
+                    &repo.name,
+                    crate::working_copies::OCCUPANCY_SCAN_CAP,
+                )?
+                .names
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::collections::HashSet::new()
+            }
+            Err(error) => return Err(error.into()),
+        };
         let rows = sup.store.working_copy_rows().await?;
         let claimed = registry_claimed_basenames(&canonical_root, &rows);
         let name = checkout_basename(&repo, title, &|candidate| {
-            occupied.contains(candidate) || claimed.contains(candidate)
+            // The archive namespace is reserved even before the root exists.
+            candidate == crate::working_copies::ARCHIVE_DIR_NAME
+                || occupied.contains(candidate)
+                || claimed.contains(candidate)
         })
         .map_err(|error| match error {
             farhelm_proto::github_checkout::NameError::EmptySlug => RequestError::new(
@@ -7183,11 +7208,13 @@ impl Supervisor {
         .await
     }
 
-    /// Everything checkable before the world is touched: the working
-    /// directory is usable, the invocation parses into an argv, the
+    /// Prepare a launch before checkout allocation or session recording: the
+    /// working directory is usable, the invocation parses into an argv, the
     /// integration snapshot resolves, and the title is resolved — refused
     /// if the caller spelled a control character into it, defaulted from
     /// the cwd (with control characters sanitized) when they omitted it.
+    /// Fresh-checkout preparation may create its already-bound root and parents;
+    /// a later validation refusal can leave those empty directories behind.
     ///
     /// Split out of `create_session` because the idempotency state machine
     /// must be able to run its reservation lookup WITHOUT it (see that
@@ -7446,8 +7473,10 @@ impl Supervisor {
     /// Resolve a configured root identically for preview and creation, using
     /// this supervisor's captured home. A symlink to a directory is usable;
     /// the canonical target, not the alias, is bound to the preview and registry.
-    /// Refuse paths the UTF-8 wire cannot represent exactly, and never create
-    /// the root as a side effect of configuration or preview.
+    /// Missing normal components are appended to the deepest existing directory's
+    /// canonical path. Unresolved `..` and dangling symlinks refuse: neither is
+    /// evidence of a future directory at that spelling. Refuse paths the UTF-8
+    /// wire cannot represent exactly. Resolution itself never creates anything.
     async fn resolve_checkout_root(&self, root: &str) -> anyhow::Result<String> {
         if root.len() > 4096 {
             return Err(RequestError::new(
@@ -7464,23 +7493,57 @@ impl Supervisor {
             )
             .into());
         }
-        let canonical = tokio::fs::canonicalize(expanded.as_ref())
-            .await
-            .map_err(|error| {
-                RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!(
-                        "the checkout folder is not usable on this host: {error}; create it or \
-                         change the folder in Settings"
-                    ),
-                )
-            })?;
+        let unusable = |error: std::io::Error| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "the checkout folder is not usable on this host: {error}; \
+                     change the folder in Settings"
+                ),
+            )
+        };
+        let mut ancestor = PathBuf::from(expanded.as_ref());
+        let mut missing = Vec::new();
+        let mut canonical = loop {
+            match tokio::fs::canonicalize(&ancestor).await {
+                Ok(path) => break path,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // A dangling link also makes canonicalize return NotFound.
+                    // Peel only paths with no filesystem entry of their own.
+                    // Trailing `/` or `/.` makes lstat follow a terminal link.
+                    // Components remove those suffixes but preserve `..`, so
+                    // check the entry itself without changing canonicalize's
+                    // directory semantics for the configured spelling.
+                    let entry: PathBuf = ancestor.components().collect();
+                    match tokio::fs::symlink_metadata(&entry).await {
+                        Ok(_) => return Err(unusable(error).into()),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(unusable(error).into()),
+                    }
+                    let Some(std::path::Component::Normal(name)) =
+                        ancestor.components().next_back()
+                    else {
+                        return Err(RequestError::new(
+                            ErrorKind::InvalidRequest,
+                            "a missing checkout folder must not contain unresolved parent components",
+                        )
+                        .into());
+                    };
+                    missing.push(name.to_os_string());
+                    ancestor.pop();
+                }
+                Err(error) => return Err(unusable(error).into()),
+            }
+        };
         if !tokio::fs::metadata(&canonical).await?.is_dir() {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
                 "the checkout root is not a directory",
             )
             .into());
+        }
+        for name in missing.into_iter().rev() {
+            canonical.push(name);
         }
         let canonical = canonical.to_str().ok_or_else(|| {
             RequestError::new(
@@ -7508,10 +7571,9 @@ impl Supervisor {
     /// supervisor trusts the RESOLVED payload, never raw repo text — the
     /// helm refuses unparsable repo text before this is ever called):
     ///
-    /// - the configured root is re-resolved on THIS host and must be a
-    ///   real directory (`canonicalize` + `is_dir`); a symlink that
-    ///   resolves to a directory is accepted, its RESOLUTION is what is
-    ///   recorded — the preview's own root was canonical on the same rule;
+    /// - the configured root is re-resolved on THIS host, using the same
+    ///   existing-ancestor rule as preview; missing directories are created
+    ///   only after the binding agrees, then re-resolution must still agree;
     /// - the preview binding must name exactly this root and the exact
     ///   `root/basename` cwd the browser was shown (a stale preview is
     ///   refused, never re-aimed);
@@ -7523,9 +7585,10 @@ impl Supervisor {
     ///   Numeric suffixes do not identify untitled intent: an explicit
     ///   title such as `bar-7` names that exact directory.
     ///
-    /// The planned cwd is returned as a CANDIDATE. Nothing here creates
-    /// anything; the exclusive mkdir in `working_copies::allocate` is the
-    /// whole race policy.
+    /// The planned cwd is returned as a CANDIDATE. This may create the root
+    /// and its parents, using the ordinary umask, but never the checkout itself:
+    /// exclusive mkdir in `working_copies::allocate` remains its race policy.
+    /// A later refusal may leave an empty root behind.
     async fn validate_destination(
         &self,
         resolved: &farhelm_proto::ResolvedGithubCheckout,
@@ -7598,6 +7661,24 @@ impl Supervisor {
                      ({planned_cwd}); request a new preview",
                     preview.cwd
                 ),
+            )
+            .into());
+        }
+        // Create the already-bound canonical path, not an alias which could be
+        // retargeted during mkdir. Re-resolve the configured spelling afterwards
+        // before capturing identity or admitting a checkout under it.
+        tokio::fs::create_dir_all(&canonical_root)
+            .await
+            .map_err(|error| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("could not create the checkout folder on this host: {error}"),
+                )
+            })?;
+        if self.resolve_checkout_root(&resolved.root).await? != canonical_root {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the checkout root changed while preparing this checkout; request a new preview",
             )
             .into());
         }
@@ -29290,6 +29371,173 @@ exit 0
                 assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
             }
         }
+    }
+
+    /// A saved future root must support discovery and preview without writing,
+    /// then admission creates its missing parents at the exact previewed path.
+    /// The symlink case distinguishes ancestor canonicalization from a textual
+    /// guess (including platforms whose temporary directory is itself an alias).
+    #[farhelm_testtrace::test]
+    async fn missing_checkout_roots_are_empty_until_create_and_resolve_symlink_ancestors() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(home.path(), home.path().join("alias")).unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        for (configured, suffix) in [
+            (home.path().join("parents/plain/root"), "parents/plain/root"),
+            (home.path().join("alias/linked/root"), "linked/root"),
+        ] {
+            let expected = home.path().canonicalize().unwrap().join(suffix);
+            assert!(!configured.exists());
+            assert!(!expected.exists());
+            let configured = configured.to_str().unwrap();
+            let discovery = sup.github_repo_search(Some(configured), "").await.unwrap();
+            assert!(discovery.repos.is_empty());
+            assert!(!discovery.truncated, "a future root is complete-empty");
+            let preview = Supervisor::github_checkout_preview(
+                &sup,
+                "acme/bar",
+                None,
+                Some(configured.into()),
+                Some(1),
+            )
+            .await
+            .unwrap();
+            assert_eq!(preview.canonical_root, expected.to_str().unwrap());
+            assert_eq!(preview.basename, "bar-1");
+            assert!(
+                !expected.exists(),
+                "read-only setup must not create the root"
+            );
+            let mut checkout = checkout_fixture(home.path());
+            checkout.root = configured.into();
+            checkout.preview.canonical_root = preview.canonical_root;
+            checkout.preview.basename = preview.basename;
+            checkout.preview.cwd = preview.cwd.clone();
+            let launch = sup
+                .validate_create(CreateInputs {
+                    cwd: "",
+                    parent: None,
+                    github_checkout: Some(checkout),
+                    launch: SessionLaunch::plain_command("agent"),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                })
+                .await
+                .unwrap();
+            assert_eq!(launch.cwd, preview.cwd);
+            assert_eq!(expected.canonicalize().unwrap(), expected);
+            assert_eq!(std::fs::read_dir(&expected).unwrap().count(), 0);
+            assert!(
+                !Path::new(&launch.cwd).exists(),
+                "admission has not allocated the checkout"
+            );
+            assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        }
+    }
+
+    /// Missing filesystem state does not permit guessing through a dangling
+    /// symlink or `..`, and does not free the archive namespace. A symlink
+    /// retargeted after preview must refuse before either prospective root exists.
+    #[farhelm_testtrace::test]
+    async fn missing_checkout_roots_refuse_ambiguous_paths_reserved_names_and_changed_binding() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let dangling = home.path().join("dangling");
+        std::os::unix::fs::symlink(home.path().join("absent-target"), &dangling).unwrap();
+        std::fs::write(home.path().join("file"), "existing file").unwrap();
+        assert!(
+            std::fs::symlink_metadata(&dangling)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(home.path().join("file").is_file());
+        for path in [
+            home.path().join("missing/../root"),
+            dangling.clone(),
+            PathBuf::from(format!("{}/", dangling.display())),
+            dangling.join("."),
+            dangling.join("root"),
+            home.path().join("file/root"),
+        ] {
+            let error = sup
+                .resolve_checkout_root(path.to_str().unwrap())
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<RequestError>().unwrap().kind,
+                ErrorKind::InvalidRequest
+            );
+        }
+        assert!(!home.path().join("missing").exists());
+        assert!(!home.path().join("absent-target").exists());
+        let future = home.path().join("future");
+        let error = Supervisor::github_checkout_preview(
+            &sup,
+            "acme/farhelm",
+            Some(crate::working_copies::ARCHIVE_DIR_NAME),
+            Some(future.to_str().unwrap().into()),
+            Some(1),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("already exists"),
+            "archive name remains reserved: {error}"
+        );
+        assert!(!future.exists());
+
+        let first = home.path().join("first");
+        let second = home.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        let alias = home.path().join("changing");
+        std::os::unix::fs::symlink(&first, &alias).unwrap();
+        let configured = alias.join("root");
+        let preview = Supervisor::github_checkout_preview(
+            &sup,
+            "acme/bar",
+            None,
+            Some(configured.to_str().unwrap().into()),
+            Some(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            preview.canonical_root,
+            first.canonicalize().unwrap().join("root").to_str().unwrap()
+        );
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&second, &alias).unwrap();
+        assert_eq!(
+            alias.canonicalize().unwrap(),
+            second.canonicalize().unwrap()
+        );
+        let mut checkout = checkout_fixture(home.path());
+        checkout.root = configured.to_str().unwrap().into();
+        checkout.preview.canonical_root = preview.canonical_root;
+        checkout.preview.basename = preview.basename;
+        checkout.preview.cwd = preview.cwd;
+        let error = sup
+            .validate_destination(&checkout, None)
+            .await
+            .err()
+            .expect("changed root refused");
+        assert_eq!(
+            error.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::Conflict
+        );
+        assert!(error.to_string().contains("root changed"));
+        assert!(!first.join("root").exists());
+        assert!(!second.join("root").exists());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
     }
 
     /// The binding cannot choose a different name than the requested intent,
