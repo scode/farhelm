@@ -1684,6 +1684,23 @@ recorded destination after its separately recorded original basename, accepting 
 collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the rename's
 timestamp.
 
+The UI reads each connected host independently, without sizes for the sidebar count and with sizes for the open dialog.
+Load, connection changes, its own affirmative archive Delete, a managed row disappearing between complete fleet
+listings, dialog open and cleanup completion trigger reads; no new poll runs. A same-connection count remains visible
+during measurement, but an old read generation cannot overwrite this client's deletion result. Other clients' cleanup
+can leave the count stale until the dialog opens. Host-list refresh failures are disclosed rather than treated as proof
+of current reachability. Unknown host counts stay unknown; the global cleanup requires successful, settled listings from
+every reachable host, and refuses a host above the protocol's 10,000-ID batch limit rather than silently omitting it.
+
+Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
+forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
+connection identity and takes the existing shared operation guard. Separate host requests run concurrently; the guard
+lasts until all replies arrive. Successful record removals are folded into the displayed listing, all issues retained,
+and every completion refetches. A lost cleanup reply warns that some contents may already be deleted and refetches; it
+never claims that a folder is intact. The archive cue stores row geometry on the persistent trash button, consumes it on
+the local Delete reply, and uses finite Web Animations with reduced-motion refusal. No global geometry cache or new
+asset file is introduced.
+
 ### Runtime state
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's

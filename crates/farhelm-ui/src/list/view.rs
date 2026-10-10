@@ -762,6 +762,9 @@ pub(crate) fn ListView(
         }
     });
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
+    // A confirmed local archive and an observed managed row disappearing both
+    // invalidate the count. The trash reads only on these edges, never a timer.
+    let mut trash_revision = use_signal(|| 0_u64);
     // The same generation discipline the hosts read has, for the same
     // reason and against a slower race: a listing read that started before
     // a delete can easily still be in flight when the delete's own refresh
@@ -1399,6 +1402,22 @@ pub(crate) fn ListView(
             && authoritative
             && absence_is_evidence(listing)
         {
+            // Filtered and truncated omissions cannot prove an archive was
+            // created. Compare only complete fleet replies before refreshing.
+            let managed_disappeared = listing_signal
+                .peek()
+                .as_ref()
+                .and_then(|value| value.as_ref().ok())
+                .filter(|previous| absence_is_evidence(previous))
+                .is_some_and(|previous| {
+                    previous.sessions.iter().any(|session| {
+                        session.working_copy.is_some()
+                            && !listing.sessions.iter().any(|next| next.id == session.id)
+                    })
+                });
+            if managed_disappeared {
+                trash_revision += 1;
+            }
             // Drop any `confirming` entry whose session is gone from
             // this fetch entirely — the counterpart to the "a poll
             // refresh must not clear an in-progress confirmation"
@@ -1886,12 +1905,18 @@ pub(crate) fn ListView(
         // open, the header switch to their in-progress state. Cleared beside
         // each `end_row_op` below, on success and on failure alike.
         deleting.write().insert(id.clone());
+        super::trash::capture_row(&id);
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
         spawn(async move {
             let outcome = delete_session(&base, &id, guard).await;
-            if let Ok(notice) = &outcome {
-                delete_notice.publish(notice.clone());
+            let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
+            super::trash::finish_row_cue(&id, archived);
+            if let Ok(reply) = &outcome {
+                delete_notice.publish(reply.notice.clone());
+                if reply.archived {
+                    trash_revision += 1;
+                }
             }
             match outcome.err() {
                 Some(e) => {
@@ -3266,8 +3291,8 @@ pub(crate) fn ListView(
             },
         }
         // The session list's own header: count, compact preference, and the
-        // creation action share one line so neither former control row costs
-        // vertical space in the fixed sidebar.
+        // creation actions share a band. The trailing pair stays together;
+        // at the minimum width it wraps instead of clipping either action.
         div { class: "list-header",
             div { class: "session-heading",
                 if let Some(Ok(listing)) = &*listing.read() {
@@ -3307,66 +3332,72 @@ pub(crate) fn ListView(
                     }
                     "compact"
                 }
-                button {
-                r#type: "button",
-                // Focus restoration and the Mac Cmd+N shortcut select this
-                // live control by class, so both retain its ordinary guards.
-                class: "btn btn-primary new-session-button",
-                "data-tooltip": NEW_SESSION_TOOLTIP,
-                // The heading keeps the short visible word "new" while the
-                // accessible name preserves the object named by the former
-                // full-width label.
-                aria_label: "new session",
-                // This control UNMOUNTS the create form, so it must not act
-                // while anything is in flight: dropping the component drops
-                // its `spawn`ed task's ability to ever act on the response,
-                // silently losing track of whether the create happened.
-                disabled: busy,
-                onclick: move |_| {
-                    // The token, read synchronously here rather than through
-                    // the attribute above: a rerender's DOM update is not
-                    // synchronous with a click, so a second click landing in
-                    // that gap still reaches this handler.
-                    if ops.busy_now() {
-                        return;
+                div { class: "session-heading-actions",
+                    super::trash::TrashControl {
+                        hosts, revision: trash_revision,
+                        gate: crate::ops::PaneGate::new(ops, row_ops),
                     }
-                    let opening = !show_create();
-                    if opening {
-                        open_new.call(None);
-                        return;
-                    }
-                    {
-                        // Closing the dialog discards its host choice with
-                        // every other draft it holds. The signal lives up here
-                        // because target identity and idempotency are shared
-                        // with the list's create wiring; it would otherwise be
-                        // the one piece of form state that survived a cancel.
-                        // SPEC.md's
-                        // creation default is about a FRESH dialog, not about
-                        // where the last one was pointed.
-                        chosen_host.set(None);
-                        // Same reasoning as `chosen_host` right above:
-                        // without this, the next "new session" open would
-                        // silently reopen pre-filled from whatever row was
-                        // last cloned.
-                        clone_prefill.set(None);
-                        initial_create_action.set(None);
-                        ordinary_new_cwd.set(None);
-                    }
-                    show_create.set(false);
-                },
-                    "new"
-                }
-                // Beside New, the action it feeds (SPEC.md: "The Templates
-                // control sits beside New in the session list header").
-                button {
+                    button {
                     r#type: "button",
-                    class: "btn btn-neutral templates-button",
-                    "data-tooltip": "templates: saved session setups to start from",
-                    aria_haspopup: "dialog",
+                    // Focus restoration and the Mac Cmd+N shortcut select this
+                    // live control by class, so both retain its ordinary guards.
+                    class: "btn btn-primary new-session-button",
+                    "data-tooltip": NEW_SESSION_TOOLTIP,
+                    // The heading keeps the short visible word "new" while the
+                    // accessible name preserves the object named by the former
+                    // full-width label.
+                    aria_label: "new session",
+                    // This control UNMOUNTS the create form, so it must not act
+                    // while anything is in flight: dropping the component drops
+                    // its `spawn`ed task's ability to ever act on the response,
+                    // silently losing track of whether the create happened.
                     disabled: busy,
-                    onclick: move |_| { initial_template.set(None); templates_open.set(true); },
-                    "templates"
+                    onclick: move |_| {
+                        // The token, read synchronously here rather than through
+                        // the attribute above: a rerender's DOM update is not
+                        // synchronous with a click, so a second click landing in
+                        // that gap still reaches this handler.
+                        if ops.busy_now() {
+                            return;
+                        }
+                        let opening = !show_create();
+                        if opening {
+                            open_new.call(None);
+                            return;
+                        }
+                        {
+                            // Closing the dialog discards its host choice with
+                            // every other draft it holds. The signal lives up here
+                            // because target identity and idempotency are shared
+                            // with the list's create wiring; it would otherwise be
+                            // the one piece of form state that survived a cancel.
+                            // SPEC.md's
+                            // creation default is about a FRESH dialog, not about
+                            // where the last one was pointed.
+                            chosen_host.set(None);
+                            // Same reasoning as `chosen_host` right above:
+                            // without this, the next "new session" open would
+                            // silently reopen pre-filled from whatever row was
+                            // last cloned.
+                            clone_prefill.set(None);
+                            initial_create_action.set(None);
+                            ordinary_new_cwd.set(None);
+                        }
+                        show_create.set(false);
+                    },
+                        "new"
+                    }
+                    // Beside New, the action it feeds (SPEC.md: "The Templates
+                    // control sits beside New in the session list header").
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral templates-button",
+                        "data-tooltip": "templates: saved session setups to start from",
+                        aria_haspopup: "dialog",
+                        disabled: busy,
+                        onclick: move |_| { initial_template.set(None); templates_open.set(true); },
+                        "templates"
+                    }
                 }
             }
             if templates_open() {

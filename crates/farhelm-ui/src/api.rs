@@ -2572,62 +2572,82 @@ pub(crate) async fn replace_session(
     replace_reply(resp).await.map_err(ActionRefusal::from)
 }
 
-/// DELETE a session. See `stop_session`'s docs — same error-surfacing
-/// shape (including the body-read-failure context), different verb and
-/// endpoint.
-///
-/// `guard` adds `?only_if_nothing_alive=true` or `?only_if_agent_ended=true`:
-/// the precondition the confirmation the user answered (or its absence)
-/// covered, which the supervisor enforces with a conflict (surfaced as the
-/// ordinary error text) instead of killing an agent or tab nobody was warned
-/// about.
-///
-/// `Ok(Some(notice))` is a completed delete that left something the user
-/// must be told about, today a checkout the host could not archive and left
-/// in place (SPEC.md "Managed checkouts": that outcome is never
-/// silent). The notice is peer text from the host. A success whose body
-/// cannot be read or decoded is still a completed delete, but it may have
-/// carried such a notice, so it yields a notice saying so rather than
-/// passing for a delete with nothing to report (see [`delete_reply_notice`]).
+/// Delete with the precondition covered by the user's confirmation.
+/// `guard` carries the query precondition for the warning shown at the press.
+/// The supervisor answers with a conflict if the session became more live, so
+/// stale UI cannot authorize a deletion the user was never asked to confirm.
+/// A successful but unreadable body still means the session was deleted: keep
+/// that outcome, disclose a possibly lost checkout notice, and play no archive
+/// cue without the host's affirmative fact.
 pub(crate) async fn delete_session(
     base: &str,
     id: &str,
     guard: crate::DeleteGuard,
-) -> Result<Option<String>, String> {
+) -> Result<farhelm_proto::SessionDeleteOutcome, String> {
     let url = delete_url(base, id, guard);
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
-    Ok(delete_reply_notice(
-        resp.text().await.map_err(|e| e.to_string()),
-    ))
+    Ok(delete_reply(resp.text().await.map_err(|e| e.to_string())))
 }
 
-/// The notice a successful delete's body carries, given the body as read.
-///
-/// `{}` (what an older helm sends, and what a delete with nothing to report
-/// sends) is no notice. A body that could not be read or is not the expected
-/// JSON is a notice of its own: the delete happened, but whatever it had to
-/// report was lost, and a lost archive notice must not pass for silence.
-fn delete_reply_notice(body: Result<String, String>) -> Option<String> {
-    let parsed =
-        body.and_then(|text| serde_json::from_str::<DeleteReply>(&text).map_err(|e| e.to_string()));
+/// Bare successes retain their old shape; only `archived: true` authorizes a
+/// local archive cue. Losing the reply must never lose a preservation notice.
+fn delete_reply(body: Result<String, String>) -> farhelm_proto::SessionDeleteOutcome {
+    let parsed = body.and_then(|text| {
+        serde_json::from_str::<farhelm_proto::SessionDeleteOutcome>(&text)
+            .map_err(|e| e.to_string())
+    });
     match parsed {
-        Ok(reply) => reply.notice,
-        Err(e) => Some(format!(
-            "The session was deleted, but the reply could not be read ({e}), so a notice about \
-             its checkout may have been lost."
-        )),
+        Ok(reply) => reply,
+        Err(e) => farhelm_proto::SessionDeleteOutcome {
+            archived: false,
+            notice: Some(format!(
+                "The session was deleted, but the reply could not be read ({e}), so a notice about \
+                 its checkout may have been lost."
+            )),
+        },
     }
 }
 
-/// The success body of `DELETE /api/sessions/{id}`: `{}`, or `{"notice":
-/// ...}` for a delete that left something behind. See [`delete_session`].
-#[derive(Deserialize)]
-struct DeleteReply {
-    #[serde(default)]
-    notice: Option<String>,
+/// Read archives from one observed host. Sizes are requested only for the
+/// open dialog; the sidebar's count never walks checkout trees.
+pub(crate) async fn fetch_checkout_trash(
+    base: &str,
+    host: HostId,
+    incarnation: u64,
+    measure_sizes: bool,
+) -> Result<farhelm_proto::CheckoutTrashListing, String> {
+    let url = format!("{base}/api/checkout-trash/list");
+    let resp = send(client().post(&url).json(&serde_json::json!({
+        "host": host, "expected_incarnation": incarnation, "measure_sizes": measure_sizes,
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+/// Empty a frozen confirmed selection on its original host connection.
+/// A transport error can follow completed deletion, so callers always refetch
+/// and describe the outcome as uncertain instead of inventing per-item failures.
+pub(crate) async fn empty_checkout_trash(
+    base: &str,
+    host: HostId,
+    incarnation: u64,
+    ids: &[String],
+) -> Result<farhelm_proto::CheckoutTrashDeleted, String> {
+    let url = format!("{base}/api/checkout-trash/delete");
+    let resp = send(client().post(&url).json(&serde_json::json!({
+        "host": host, "expected_incarnation": incarnation, "ids": ids,
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json().await.map_err(|e| e.to_string())
 }
 
 /// The URL [`delete_session`] sends, split out so the precondition's
@@ -3667,16 +3687,24 @@ mod tests {
     /// report.
     #[farhelm_testtrace::test]
     fn a_delete_reply_that_cannot_be_read_is_not_silent() {
-        assert_eq!(delete_reply_notice(Ok("{}".to_string())), None);
+        let bare = delete_reply(Ok("{}".to_string()));
+        assert_eq!(bare.notice, None);
+        assert!(!bare.archived);
+        assert!(delete_reply(Ok(r#"{"archived":true}"#.into())).archived);
         assert_eq!(
-            delete_reply_notice(Ok(r#"{"notice":"left /work/bar"}"#.to_string())),
+            delete_reply(Ok(r#"{"notice":"left /work/bar"}"#.to_string())).notice,
             Some("left /work/bar".to_string())
         );
         for unreadable in [
             Ok("{\"notice\":".to_string()),
             Err("connection reset".to_string()),
         ] {
-            let notice = delete_reply_notice(unreadable).expect("a notice");
+            let reply = delete_reply(unreadable);
+            assert!(
+                !reply.archived,
+                "uncertainty cannot authorize an archive cue"
+            );
+            let notice = reply.notice.expect("a notice");
             assert!(notice.contains("may have been lost"), "{notice}");
         }
     }

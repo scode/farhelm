@@ -21,6 +21,7 @@ async function headingActionsFit(page: Page): Promise<void> {
   for (const selector of [
     ".hosts-heading .add-host-button",
     ".hosts-heading .update-all-button",
+    ".session-heading .checkout-trash-button",
     ".session-heading .new-session-button",
     ".session-heading .templates-button",
   ]) {
@@ -32,6 +33,11 @@ async function headingActionsFit(page: Page): Promise<void> {
       sidebar.x + sidebar.width - 1,
     );
   }
+  const trash = (await page.locator(".session-heading .checkout-trash-button").boundingBox())!;
+  const next = (await page.locator(".session-heading .new-session-button").boundingBox())!;
+  expect(trash.height, "trash and New use the same control height").toBe(next.height);
+  expect(trash.y, "the pair stays on the same wrapped header line").toBe(next.y);
+  expect(next.x - trash.x - trash.width, "trash sits immediately left of New").toBeLessThanOrEqual(6);
 }
 
 /** Drag the real separator from its current position, including outside it. */

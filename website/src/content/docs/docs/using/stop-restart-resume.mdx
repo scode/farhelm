@@ -54,8 +54,10 @@ already ended and has no shell tabs open is deleted at once.
 For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into
 `farhelm-archived-working-copies` under the configured checkout root. This archive is the checkout's trash: the move
-preserves its contents and frees no disk space. If the move fails, Delete still removes the session and tells you which
-directory was left behind; Farhelm no longer manages it.
+preserves its contents and frees no disk space. The [trash button beside
+New](/docs/using/session-list/#managed-checkout-trash) shows where to recover that work and lets you delete it
+permanently after confirmation. If the move fails, Delete still removes the session and tells you which directory was
+left behind; Farhelm no longer manages it.
 
 ## After a reboot
 

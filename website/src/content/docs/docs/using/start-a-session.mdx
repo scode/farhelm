@@ -131,10 +131,11 @@ machine you are using.
 
 A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
 managed checkout: it makes the directory for the session and moves it into the trash when its last session is deleted
-(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). Choose **managed checkout** under destination,
-enter the repository as `owner/repo`, and select its suggestion. You can also type `gh:owner/repo` in the search box and
-choose **Managed checkout: owner/repo**. Farhelm suggests repositories you have launched or cloned before, but it does
-not search GitHub, so type a new one in full.
+(see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). The
+[trash](/docs/using/session-list/#managed-checkout-trash) beside **new** shows where those directories are and lets you
+clean them up. Choose **managed checkout** under destination, enter the repository as `owner/repo`, and select its
+suggestion. You can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm
+suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
@@ -160,9 +161,9 @@ by hand at any time; existing checkouts stay independent, and the next managed c
 that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
 place so concurrent checkouts still take turns. A cache failure names its path in the terminal and stops the clone.
 
-Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that directory
-on each host you want to clone on, then run this on the machine that runs the helm (the program that serves the Farhelm
-app; see [The pieces](/docs/how-it-works/the-pieces/)):
+Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that
+directory on each host you want to clone on, then run this on the machine that runs the helm (the program that serves
+the Farhelm app; see [The pieces](/docs/how-it-works/the-pieces/)):
 
 ```sh
 farhelm helm checkout-config set-root '~/work'

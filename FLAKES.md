@@ -1778,3 +1778,37 @@ Error: no feed socket is open to notify on
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-10-10 — `borrowers retain the checkout until the final stopped session is deleted` (e2e/tests/github-checkouts.spec.ts)
+
+The managed-checkout trash plan's final checkout/sidebar selection reproduced the existing 60-second borrower timeout on
+WebKit in run `6a629bb4-ed2b-4d80-9a8e-c95f71f0d192`: 27 passed, this one timed out, with no skipped or unstarted cases.
+The tested parent was `3edcbbc228c4f3ee0852a13cd3fe09b732802550`, with the final trash UI, docs and browser-fixture
+changes uncommitted. Selection was `npx playwright test 'github-checkouts.spec.ts' 'sidebar-resize.spec.ts'`, both
+engines, one worker and zero retries. Chromium's same case passed in 42.5 seconds; the WebKit result includes 66.4
+seconds through teardown. Its trace shows continued progress through the final filesystem comparison, whose assertions
+completed just after the total deadline; several terminal keyboard typing calls took 2–3 seconds. An exact fresh-stack
+WebKit reproduction, run `7510f5f0-49da-4204-aba6-13a6aee817e0`, failed one of one at the same unchanged limit while
+reaching the final borrower's stop, followed by request-context closure during cleanup. Its child command was
+`npx playwright test --project=webkit-github-checkouts --workers=1 --retries=0 --grep 'borrowers retain the checkout until the final stopped session is deleted' --output '<private artifacts>'`.
+An earlier anchored-title attempt, `bde25312-4a1f-417f-bb8c-fab07f764101`, selected no tests and is not a reproduction.
+The owned Linux x86_64 sandbox had a four-CPU quota and 12 GiB memory cap; no other build or test ran inside it. A later
+case's single sample reached 413% CPU and used 4 GiB, but load during the failing borrower and host-wide activity are
+unavailable, so that sample does not establish causation. Recorded tools were Node 22.22.1, Playwright 1.62.0, Python
+3.14.4 and kernel 6.8.0-146-generic; compiler and browser build identities were not captured in this run's manifest. The
+recorded tmux executable was 3.7c with SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Locale
+was `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` absent. No ambient `FARHELM_*` names were present; the full selection
+supplied recorder-owned `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, and generic reproduction supplied
+only the trace name. The October 8 entry already establishes this timeout on clean main and tracks the associated
+cleanup cascade. The new fixture close can restore configuration after its own trash-cleanup failure, but an earlier
+session-cleanup exception can still skip calling it. Cause remains unknown; the existing Deflake TODO stays open, and no
+test deadline was changed. Full traces and run records remain privately retained on the executing machine without hosted
+expiry.
+
+```text
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown
