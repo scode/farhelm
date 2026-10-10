@@ -7167,7 +7167,7 @@
 - Completion criteria: the badge's visible text and tooltip show the annotation and error detail escaped; the sidebar
   tooltip stays correct (escaping twice is harmless); a test covers a zero-width or direction-override character in the
   detail. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
 
 ## sidebar-directories-visually-disguise-sessions-actual-folder.md
 
@@ -7185,7 +7185,7 @@
   `(empty)` unless that is already how an empty folder appears; a test covers a zero-width or direction-override
   character. The host name rendered raw nearby (around 1664) is not part of this finding. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
 
 ## malformed-supervisor-messages-inject-terminal-controls-into.md
 
@@ -7203,7 +7203,7 @@
 - Completion criteria: the parse-failure log line carries the error normalized by the existing helper; a test, where a
   practical seam exists, shows a control character in an unknown message type does not reach the log raw. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
 
 ## remote-attach-errors-inject-terminal-controls-into.md
 
@@ -7218,7 +7218,7 @@
   significantly more, stop and bring it back to the user.
 - Completion criteria: the attach-failure log line carries the error normalized by the existing helper. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/untrusted-text-escaping.md`.
 
 ## checkout-cache-refresh-overwrite-another-repositorys-branches.md
 
@@ -7238,7 +7238,7 @@
   (`git rev-parse --local-env-vars` lists them); the agent's own environment is unchanged; a regression test passes a
   `GIT_DIR` to the preparation path through injection, never by changing the test process's environment, and shows the
   other repository untouched. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/git-env-isolation.md`.
 
 ## git-fixture-setup-modify-delete-callers-repository.md
 
@@ -7253,7 +7253,7 @@
   `Command`). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the fixture's git children run without the repository-selecting and `GIT_CONFIG_*` variables;
   only the child environment changes, never the test process's own. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/git-env-isolation.md`.
 
 ## unsupported-c-escapes-become-different-executable-instead.md
 
@@ -7270,7 +7270,7 @@
   to the user. The `$$` handling in the same function belongs to the separate dollar-path items and is not part of this.
 - Completion criteria: an unknown backslash escape yields no program path, so ownership is refused; a test covers
   `\x20`. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/os-readback-fixes.md`.
 
 ## lowercase-sections-override-ownership-despite-being-ignored.md
 
@@ -7283,7 +7283,7 @@
   `Service` and flip the test). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: only `[Service]` counts; the test expects a lowercase section to be ignored and its comment is
   corrected. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/os-readback-fixes.md`.
 
 ## large-macos-environments-corrupt-otherwise-valid-hook-argument.md
 
@@ -7303,7 +7303,7 @@
 - Completion criteria: the argument read uses a buffer large enough for the whole answer; the parser still enforces the
   argument budget; the comment matches the documented kernel behavior; the change compiles on macOS. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/os-readback-fixes.md`.
 
 ## arrow-navigation-retains-obsolete-position-item-disappears.md
 
@@ -7322,7 +7322,7 @@
 - Completion criteria: after an item set change, the next arrow step moves from the item the user had selected; the
   comment's reasoning is corrected; a test covers a middle item disappearing. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
 
 ## plain-clicks-overwrite-clipboard-old-selection.md
 
@@ -7340,7 +7340,7 @@
 - Completion criteria: a plain click under mouse tracking does not copy a retained selection; forced selections still
   copy; reselection without tracking is unchanged; a JS unit test covers it. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
 
 ## replace-omits-conversation-loss-warning-failed-resume.md
 
@@ -7357,7 +7357,7 @@
   user.
 - Completion criteria: Replace's confirmation on an errored session warns that a resumable conversation is discarded
   whenever one exists; tests covering the wording are updated. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-interaction-fixes.md`.
 
 ## unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md
 
@@ -7372,7 +7372,7 @@
   the fixture. If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the inner script quotes the paths or receives them as positional arguments; the path helper's
   documentation matches what it guarantees. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
 
 ## unquoted-probe-fixture-paths-inherited-pipe-fixture-inherited-pipe-fixture.md
 
@@ -7382,7 +7382,7 @@
 - Decision: fix it, together with
   `unquoted-probe-fixture-paths-escaping-descendant-fixture-escaping-descendant-fixture.md`, under the same gate.
 - Completion criteria: the redirect target is quoted. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
 
 ## real-agent-cleanup-forget-somebody-elses-workspace.md
 
@@ -7396,7 +7396,7 @@
   the run's own stamp or scratch directory). If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: the workspace name is unique per run and cleanup forgets only that name. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
 
 ## stale-deflake-pid-terminate-unrelated-work.md
 
@@ -7412,7 +7412,7 @@
 - Completion criteria: `deflake stop` and the liveness check signal or trust the recorded process only when its start
   time matches; a stale file is treated as not running. Validate per `deflake/EVAL.md` if the change touches what it
   covers. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
 
 ## qualified-hostname-scrubbing-leaves-private-domain.md
 
@@ -7426,7 +7426,7 @@
   the forbidden list ahead of the short name. If it needs significantly more, stop and bring it back to the user.
 - Completion criteria: a fully qualified host name is scrubbed and checked for. No agent screens are re-captured. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
 
 ## release-failure-advice-tells-operator-reuse-tag.md
 
@@ -7441,4 +7441,4 @@
 - Completion criteria: the printed advice says the tag is spent and to cut the next version per `releasing/AGENTS.md`;
   `release.yml` is regenerated with the pinned cargo-dist and `dist generate --check` passes. Remove this feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/harness-tooling-fixes.md`.
