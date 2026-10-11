@@ -1264,6 +1264,33 @@ async fn create_for_agent(
     };
     let intent_key = asker_scoped_intent_key(asking_session, intent_key);
     let resolved = resolve_agent_create(state, origin, &edits).await?;
+    if resolved.resolution.github_repo.is_some() {
+        // Only the helm turns session-authenticated repository intent into
+        // a checkout payload. Recovery must precede preview and the card:
+        // a taken path may be this approved attempt's own allocation.
+        // Only a keyed request has an attempt to abandon; telling an unkeyed
+        // one to pick a new key would point the agent at the wrong fix.
+        let keyed = intent_key.is_some();
+        return create_checkout_for_agent(
+            state,
+            origin,
+            asking_session,
+            resolved,
+            intent_key,
+            request_fingerprint,
+        )
+        .await
+        .map_err(|error| {
+            if keyed
+                && crate::find_cause::<crate::SupervisorError>(&error)
+                    .is_some_and(|e| e.kind == ErrorKind::CheckoutConflict)
+            {
+                error.context("this checkout attempt was refused; retry with a new idempotency key")
+            } else {
+                error
+            }
+        });
+    }
     let verb = match &edits.spawn {
         Some(placement) if placement.inherit_agent => LaunchVerb::SpawnInherited,
         Some(_) => LaunchVerb::Spawn,
@@ -1278,6 +1305,7 @@ async fn create_for_agent(
             host: resolved.host,
             host_name: resolved.host_name.clone(),
             cwd: resolved.resolution.cwd.clone(),
+            repo: None,
             title: resolved.resolution.title.clone(),
             launch: resolved.resolution.launch.clone(),
             source: None,
@@ -1297,6 +1325,109 @@ async fn create_for_agent(
         },
     )
     .await
+}
+
+/// Execute managed intent on one target connection, from recovery through
+/// approval and dispatch. Keeping the claim avoids approving one directory
+/// and then silently creating it on a replacement installation.
+async fn create_checkout_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    resolved: ResolvedCreate,
+    intent_key: Option<String>,
+    request_identity: Option<String>,
+) -> anyhow::Result<AgentReply> {
+    let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+    if let Some(error) = template_host_moved(
+        resolved.template_identity.as_deref(),
+        &claim,
+        &resolved.host_name,
+    ) {
+        return Err(error);
+    }
+    let resolution = resolved.resolution;
+    let repo = resolution
+        .github_repo
+        .expect("managed destination selected");
+    crate::yolo_guard::check_agent(state, claim.host, &resolution.launch).await?;
+    // Unkeyed requests never reconcile; their identity still has to satisfy
+    // the supervisor's nonempty checkout identity contract.
+    let identity = request_identity.unwrap_or_else(|| "unkeyed_agent_create_v1".to_string());
+    if let Some(key) = &intent_key
+        && let Some(session) = on_host(
+            crate::sessions::reconcile_agent_checkout(state, &claim, &client, key, &identity).await,
+            &resolved.host_name,
+        )?
+    {
+        return Ok(agent_created_reply(
+            state,
+            &claim,
+            session,
+            origin.host,
+            asking_session,
+        ));
+    }
+    let preview = on_host(
+        crate::sessions::preview_github_checkout(
+            state,
+            &claim,
+            &client,
+            repo.clone(),
+            resolution.title.clone(),
+        )
+        .await,
+        &resolved.host_name,
+    )?;
+    approve_launch(
+        state,
+        origin,
+        asking_session,
+        LaunchApproval {
+            verb: LaunchVerb::Create,
+            host: claim.host,
+            host_name: resolved.host_name.clone(),
+            cwd: preview.binding.cwd.clone(),
+            repo: Some(repo.clone()),
+            title: resolution.title.clone(),
+            launch: resolution.launch.clone(),
+            source: None,
+        },
+    )
+    .await?;
+    // Every other agent mutation leaves a line in the helm log; a clone is the
+    // one that can run the maintainer's post-clone command on code the agent
+    // chose, so it must not be the one that leaves no record.
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        host = escape_for_log(&resolved.host_name).as_str(),
+        repo = escape_for_log(&repo).as_str(),
+        "an agent is creating a session in a managed checkout"
+    );
+    let session = on_host(
+        crate::sessions::create_agent_checkout(
+            state,
+            &claim,
+            &client,
+            farhelm_proto::GithubCheckoutRequest {
+                repo,
+                title: resolution.title,
+                preview: Some(preview),
+            },
+            resolution.launch,
+            intent_key,
+            identity,
+        )
+        .await,
+        &resolved.host_name,
+    )?;
+    Ok(agent_created_reply(
+        state,
+        &claim,
+        session,
+        origin.host,
+        asking_session,
+    ))
 }
 
 /// Resolve an agent's create request to a host and a launch; see
@@ -1409,6 +1540,7 @@ fn inherited_spawn_resolution(
         host_name,
         resolution: crate::agent_launch::Resolution {
             cwd,
+            github_repo: None,
             launch,
             title: name.clone(),
             template_host: None,
@@ -1424,6 +1556,8 @@ struct LaunchApproval {
     host: HostId,
     host_name: String,
     cwd: String,
+    /// GitHub repository for the source-qualified card row; absent for folders and clones.
+    repo: Option<String>,
     title: Option<String>,
     launch: farhelm_proto::SessionLaunch,
     source: Option<farhelm_proto::approvals::ApprovalSession>,
@@ -1457,6 +1591,7 @@ async fn approve_launch(
         verb: approval.verb,
         host_name: approval.host_name,
         cwd: approval.cwd,
+        repo: approval.repo,
         title: approval.title,
         launch: approval.launch,
         source: approval.source,
@@ -1592,8 +1727,8 @@ async fn dispatch_agent_create(
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
                 intent_key: dispatch.intent_key,
-                // Agent creates never carry a fresh-checkout payload: the
-                // CLI refuses a template that names one.
+                // Managed destinations take the claim-bound fresh pipeline
+                // before this ordinary folder/spawn dispatch.
                 github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // `create` names a directory and a launch rather than a
@@ -1641,8 +1776,7 @@ struct TemplateWrite {
 /// The host is named by display name and written as that host's recorded
 /// install identity, which is how every template names a host; a `host` field
 /// in the request itself is refused, so an agent cannot pin a template to an
-/// install the helm did not resolve. A fresh-checkout destination is refused,
-/// as the CLI refuses applying one. An edit sets only the fields it is given
+/// install the helm did not resolve. An edit sets only the fields it is given
 /// (SPEC.md: no way to unset one). The template is read again after the
 /// approval, and a write whose template changed during the wait is refused
 /// rather than applied over a change the card did not show.
@@ -1661,16 +1795,6 @@ async fn write_template_for_agent(
     if fields.host.is_some() {
         return Err(crate::sessions::invalid_request(
             "name the template's host with --host, by the name farhelm agent hosts shows"
-                .to_string(),
-        ));
-    }
-    if matches!(
-        fields.destination,
-        Some(farhelm_proto::launcher::TemplateDestination::Github(_))
-    ) {
-        return Err(crate::sessions::invalid_request(
-            "a template written from the farhelm command line cannot use a managed \
-             checkout; give --cwd a folder"
                 .to_string(),
         ));
     }
@@ -2047,6 +2171,7 @@ async fn clone_for_agent(
             host,
             host_name: host_name.clone(),
             cwd: cwd.clone(),
+            repo: None,
             title: Some(title.clone()),
             launch: mode.clone(),
             source: Some(
@@ -6794,7 +6919,8 @@ mod tests {
     /// that host's install identity and refuses a taken name; `template edit`
     /// sets only the fields it is given, keeping the command text the agent
     /// never saw; `template delete` removes it; a template naming its host
-    /// directly, or a fresh-checkout destination, is refused. An agent-type-only
+    /// directly is refused; a managed-checkout destination is stored and can
+    /// be changed without dropping the unseen command. An agent-type-only
     /// create pins the agent kind, so a later command edit is refused rather
     /// than reinterpreting the template as a different launch.
     ///
@@ -6833,6 +6959,54 @@ mod tests {
         let stored = h.store.launch_templates().await.unwrap();
         assert_eq!(stored[0].fields.host.as_deref(), Some("identity-local"));
 
+        let checkout = farhelm_proto::launcher::TemplateDestination::Github("o/r".into());
+        let created_checkout = ask(AgentVerb::TemplateCreate {
+            name: "checkout".into(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                destination: Some(checkout.clone()),
+                ..template_fields("checkout-command")
+            },
+            host: None,
+        })
+        .await;
+        assert!(
+            matches!(created_checkout, AgentOutcome::Ok { .. }),
+            "{created_checkout:?}"
+        );
+        let edited_checkout = ask(AgentVerb::TemplateEdit {
+            name: "checkout".into(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
+                    "o/next".into(),
+                )),
+                ..Default::default()
+            },
+            host: None,
+        })
+        .await;
+        assert!(
+            matches!(edited_checkout, AgentOutcome::Ok { .. }),
+            "{edited_checkout:?}"
+        );
+        let saved_checkout = h
+            .store
+            .launch_templates()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|template| template.name == "checkout")
+            .unwrap();
+        assert_eq!(
+            saved_checkout.fields.destination,
+            Some(farhelm_proto::launcher::TemplateDestination::Github(
+                "o/next".into()
+            ))
+        );
+        assert_eq!(
+            saved_checkout.fields.command.as_deref(),
+            Some("checkout-command")
+        );
+
         let taken = ask(AgentVerb::TemplateCreate {
             name: "t".to_string(),
             fields: template_fields("other"),
@@ -6860,13 +7034,17 @@ mod tests {
         })
         .await;
         assert!(matches!(edited, AgentOutcome::Ok { .. }), "{edited:?}");
-        let stored = h.store.launch_templates().await.unwrap();
-        assert_eq!(
-            stored[0].fields.command.as_deref(),
-            Some("secret-tool --go")
-        );
-        assert_eq!(stored[0].fields.name.as_deref(), Some("titled"));
-        assert_eq!(stored[0].fields.host.as_deref(), Some("identity-local"));
+        let stored = h
+            .store
+            .launch_templates()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|template| template.name == "t")
+            .unwrap();
+        assert_eq!(stored.fields.command.as_deref(), Some("secret-tool --go"));
+        assert_eq!(stored.fields.name.as_deref(), Some("titled"));
+        assert_eq!(stored.fields.host.as_deref(), Some("identity-local"));
 
         // Use the real create path: its newly inferred kind must also make
         // the existing edit refusal apply to an agent-type-only template.
@@ -6918,20 +7096,6 @@ mod tests {
                 },
                 ErrorKind::InvalidRequest,
                 "with --host",
-            ),
-            (
-                AgentVerb::TemplateCreate {
-                    name: "checkout".to_string(),
-                    fields: farhelm_proto::launcher::TemplateFields {
-                        destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
-                            "o/r".to_string(),
-                        )),
-                        ..template_fields("x")
-                    },
-                    host: None,
-                },
-                ErrorKind::InvalidRequest,
-                "managed checkout",
             ),
             (
                 AgentVerb::TemplateEdit {
@@ -6987,7 +7151,11 @@ mod tests {
                 other => panic!("refused, got {other:?}"),
             }
         }
-        assert_eq!(h.store.launch_templates().await.unwrap().len(), 2);
+        assert_eq!(
+            h.store.launch_templates().await.unwrap().len(),
+            3,
+            "refused writes preserve all three created templates"
+        );
         let after_refusal = h
             .store
             .launch_templates()
@@ -7016,8 +7184,8 @@ mod tests {
         );
         assert_eq!(
             h.store.launch_templates().await.unwrap().len(),
-            1,
-            "only the agent-kind fixture is left"
+            2,
+            "the agent-kind and checkout fixtures are left"
         );
     }
 

@@ -158,15 +158,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
   to miss. Solution to be worked out. Plan: `plans/queue/update-check-feedback.md`.
 
-- **Let agents start sessions in a new managed checkout.** The goal is that this works when typed to an agent: "$farhelm
-  for each of the TODO items above, start a session in a new managed checkout of acme/web, named after the item". Today
-  it gets a refusal. `farhelm agent create` needs `--cwd` naming an existing directory and has no repository option, and
-  a template whose destination is a managed checkout is refused on the CLI; SPEC.md says so directly ("refused on the
-  CLI, which does not create checkouts"), and the helm's launch code enforces it. Give the agent CLI a way to ask for a
-  fresh managed checkout of a GitHub repository, as a `gh:` launch in the launcher does, with the matching SPEC change.
-  Then switch the $farhelm example in the README and docs to the managed-checkout version, which was held back because
-  it would promise something agents cannot do yet. Plan: `plans/queue/agent-managed-checkout.md`.
-
 - **Pin the app settings dialog's header and footer, and add an × close.** The settings dialog opened from the gear at
   the top of the sidebar has grown (host choices, checkout folder, post-clone command, and more) until it runs past the
   bottom of the window, and its close button only appears once you scroll down to it. Give it a header and footer that

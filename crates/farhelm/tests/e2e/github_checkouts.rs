@@ -23,6 +23,163 @@ const REPO_TEXT: &str = "acme/bar";
 const SENTINEL_NAME: &str = "checkout-sentinel.txt";
 const SENTINEL_CONTENT: &str = "private checkout fixture\n";
 
+/// The shipped CLI must turn repository intent into one owned checkout and
+/// reconcile keyed retries before proposing a new name. The post-clone
+/// marker and retained untracked file distinguish replay from a second clone.
+#[farhelm_testtrace::test]
+async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
+    use crate::agent_listing_real_stack::{
+        attach_terminal, hosts_until_attached, session_token, spawn_agent_command_args,
+    };
+    let stack = CheckoutStack::start().await;
+    for (route, field) in [
+        ("commands-without-asking", "commands_without_asking"),
+        ("yolo-without-asking", "yolo_without_asking"),
+    ] {
+        let (status, body) = post(
+            &stack.client,
+            &format!("{}/api/hosts/{}/{route}", stack.helm().base, stack.claim.id),
+            json!({field: true}),
+        )
+        .await;
+        assert!(status.is_success(), "allow fixture commands: {body}");
+    }
+    let (status, body) = post(
+        &stack.client,
+        &format!("{}/api/sessions", stack.helm().base),
+        json!({"cwd": stack.markers.path(), "command": {
+            "command": fixture_cmd("fake-agent --script basic"), "yolo": false,
+        }, "title": "checkout-requester"}),
+    )
+    .await;
+    assert!(status.is_success(), "create requester: {body}");
+    let requester: SessionInfo = serde_json::from_str(&body).unwrap();
+    let _terminal = attach_terminal(stack.helm(), &stack.secret, &requester.id).await;
+    let token = session_token(stack.supervisor.state.path(), &requester.id).await;
+    let socket = stack.supervisor.state.path().join("supervisor.sock");
+    hosts_until_attached(&requester.id, &token, &socket).await;
+    let command = fixture_cmd("fake-agent --script basic");
+    let args = [
+        "create",
+        "--host",
+        "this machine",
+        "--gh",
+        REPO_TEXT,
+        "--title",
+        "Fix parser",
+        "--command",
+        &command,
+        "--no-yolo",
+        "--idempotency-key",
+        "checkout-key",
+    ];
+    let created = spawn_agent_command_args(&args, &requester.id, &token, &socket).await;
+    assert!(
+        created.status.success(),
+        "create: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let id = String::from_utf8(created.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let session = await_server_session(stack.supervisor.state.path(), "Fix parser").await;
+    assert_eq!(session.id, id);
+    assert_eq!(
+        session.cwd,
+        stack.root_a.path().join("bar-fix-parser").to_str().unwrap()
+    );
+    wait_for_agent_ready(&stack.supervisor.state.path().join("tmux.sock"), &id).await;
+    stack.git.assert_clone(&session.cwd);
+    let retained = Path::new(&session.cwd).join("untracked-retry-proof");
+    std::fs::write(&retained, "keep this work").unwrap();
+    let replay = spawn_agent_command_args(&args, &requester.id, &token, &socket).await;
+    assert!(
+        replay.status.success(),
+        "replay: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(String::from_utf8(replay.stdout).unwrap().trim(), id);
+    assert_eq!(
+        std::fs::read_to_string(&retained).unwrap(),
+        "keep this work"
+    );
+    assert_eq!(
+        std::fs::read_to_string(stack.hook_a())
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    assert_eq!(std::fs::read_dir(stack.root_a.path()).unwrap().count(), 1);
+    let mut changed = args;
+    changed[6] = "Different title";
+    let refused = spawn_agent_command_args(&changed, &requester.id, &token, &socket).await;
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("different create request"));
+    let taken = spawn_agent_command_args(&args[..10], &requester.id, &token, &socket).await;
+    assert!(!taken.status.success(), "a taken name must refuse");
+    // Preview refuses the occupied name before producing a destination path.
+    // Preserve the launcher's existing refusal and prove there was no suffix
+    // or replacement of the first checkout's untracked work.
+    assert!(
+        String::from_utf8_lossy(&taken.stderr)
+            .contains("a directory with that checkout name already exists; choose another title"),
+        "taken-name refusal: {}",
+        String::from_utf8_lossy(&taken.stderr)
+    );
+    assert_eq!(std::fs::read_dir(stack.root_a.path()).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&retained).unwrap(),
+        "keep this work"
+    );
+
+    let template = spawn_agent_command_args(
+        &[
+            "template",
+            "create",
+            "managed",
+            "--github",
+            REPO_TEXT,
+            "--command",
+            &command,
+            "--no-yolo",
+        ],
+        &requester.id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        template.status.success(),
+        "template: {}",
+        String::from_utf8_lossy(&template.stderr)
+    );
+    let from_template = spawn_agent_command_args(
+        &["create", "--host", "this machine", "--template", "managed"],
+        &requester.id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        from_template.status.success(),
+        "apply template: {}",
+        String::from_utf8_lossy(&from_template.stderr)
+    );
+    let automatic = await_server_session(stack.supervisor.state.path(), "bar-1").await;
+    wait_for_agent_ready(
+        &stack.supervisor.state.path().join("tmux.sock"),
+        &automatic.id,
+    )
+    .await;
+    stack.git.assert_clone(&automatic.cwd);
+    assert_eq!(
+        automatic.cwd,
+        stack.root_a.path().join("bar-1").to_str().unwrap()
+    );
+}
+
 /// A private bare remote plus the Git configuration mapping one exact URL.
 ///
 /// A separate seed working tree populates the remote. The child config denies

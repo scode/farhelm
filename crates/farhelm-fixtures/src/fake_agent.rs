@@ -516,7 +516,11 @@ pub const AGENT_RELAY_ERROR_MARKER: &str = "CLONE-ERROR:";
 /// clone at a directory the target does not have, which is the create
 /// refusal SPEC.md's agent section requires to arrive verbatim.
 ///
-/// A request is served in two steps, and the first is not ceremony: the
+/// Checkout tests instead send `$farhelm create checkout <JSON>` with repo,
+/// host, title and key fields. That structured fixture input drives the same
+/// installed CLI without shell quoting; it does not parse natural language.
+///
+/// A clone request is served in two steps, and the first is not ceremony: the
 /// fixture runs `farhelm agent hosts` and refuses a name that is not in
 /// that listing. That is the behavior the feature is FOR — an agent naming
 /// a target it read out of the fleet rather than one it guessed — and
@@ -558,6 +562,14 @@ fn agent_relay() -> anyhow::Result<()> {
 
     for line in std::io::stdin().lock().lines() {
         let line = line.context("reading an agent-relay fixture request")?;
+        if let Some(request) = line.trim().strip_prefix("$farhelm create checkout ") {
+            match run_checkout_create(request) {
+                Ok(id) => writeln!(out, "CREATED:{id}\r")?,
+                Err(message) => writeln!(out, "{AGENT_RELAY_ERROR_MARKER}{message}\r")?,
+            }
+            out.flush()?;
+            continue;
+        }
         match clone_request(line.trim()) {
             Some((host, cwd)) => match run_clone(&host, cwd.as_deref()) {
                 Ok(id) => writeln!(out, "{AGENT_RELAY_CLONED_MARKER}{id}\r")?,
@@ -573,6 +585,46 @@ fn agent_relay() -> anyhow::Result<()> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// Drive the real create CLI from a terminal using explicit JSON inputs.
+/// This fixture syntax avoids shell interpretation of host names and titles;
+/// approval, repository resolution and checkout preparation remain product code.
+fn run_checkout_create(request: &str) -> Result<String, String> {
+    let request: serde_json::Value =
+        serde_json::from_str(request).map_err(|error| error.to_string())?;
+    let field = |name: &str| {
+        request[name]
+            .as_str()
+            .ok_or_else(|| format!("missing {name}"))
+    };
+    let fixture = std::env::current_exe().map_err(|error| error.to_string())?;
+    let command = format!(
+        "{} fake-agent --script basic",
+        shell_words::quote(&fixture.to_string_lossy())
+    );
+    let result = std::process::Command::new("farhelm")
+        .args([
+            "agent",
+            "create",
+            "--gh",
+            field("repo")?,
+            "--host",
+            field("host")?,
+            "--title",
+            field("title")?,
+            "--idempotency-key",
+            field("key")?,
+            "--command",
+            &command,
+            "--no-yolo",
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !result.status.success() {
+        return Err(String::from_utf8_lossy(&result.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&result.stdout).trim().to_string())
 }
 
 /// Find this launch's injected `--settings` JSON, run the `SessionStart`

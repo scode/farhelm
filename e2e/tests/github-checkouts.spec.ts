@@ -8,9 +8,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, localHostId, openRowMenu, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, waitForTermText, answerYolo } from "./helpers/term";
+import { attachSession, waitForTermText, answerYolo, termText } from "./helpers/term";
 
 const run = promisify(execFile);
 
@@ -132,6 +133,86 @@ async function checkoutFixture(repoName: string) {
     },
   };
 }
+
+/** The real relay must show repository and exact directory before admission.
+ * Denial spends no key; approval does. A subsequent keyed retry must complete
+ * while commands still require approval, preserving the clone and hook bytes. */
+test("agent managed checkout approval and keyed recovery", async ({ page, context, request }) => {
+  const fixture = await checkoutFixture("agent-checkout");
+  const ids: string[] = [];
+  const driver = await context.newPage();
+  try {
+    await setLocalYoloWithoutAsking(request, true);
+    await setLocalCommandsWithoutAsking(request, false);
+    const stack = JSON.parse(await fs.readFile(path.resolve(__dirname, "../.stack-info.json"), "utf8"));
+    // Complete the observer's attachment before the requester exists. Both
+    // pages otherwise auto-select the new requester, and a delayed observer
+    // attachment can detach the driver under the one-client terminal rule.
+    const before = await request.get("/api/sessions");
+    expect(before.ok()).toBe(true);
+    const observerId = (await before.json()).sessions[0]?.id;
+    expect(observerId, "the stack must supply an existing observer session").toBeTruthy();
+    await page.goto("/");
+    await attachSession(page, observerId);
+    const requester = await createSession(request, {
+      cwd: fixture.root,
+      invocation: `"${stack.fixtures}" fake-agent --script agent-relay`,
+      agent_kind: "claude",
+      title: "checkout requester",
+    });
+    ids.push(requester.id);
+    await expect(page.locator(`.session-row[data-session-id="${observerId}"]`))
+      .toHaveAttribute("data-session-selected", "true");
+    await driver.goto("/");
+    await attachSession(driver, requester.id);
+    await waitForTermText(driver, "FAKE-AGENT READY", 20_000);
+    await waitForTermText(driver, "INSTRUCTIONS:ok", 20_000);
+    const title = "Fix parser";
+    const cwd = path.join(fixture.root, "agent-checkout-fix-parser");
+    const prompt = "$farhelm create checkout " + JSON.stringify({
+      repo: fixture.repo, host: "this machine", title, key: "browser-checkout-key",
+    });
+    await driver.keyboard.type(prompt);
+    await driver.keyboard.press("Enter");
+    await answerCard(page, "deny", [`GitHub: ${fixture.repo}`, cwd, title]);
+    await waitForTermText(driver, "ERROR:", 20_000);
+    expect(await fs.readdir(fixture.root)).toEqual([]);
+    await driver.keyboard.type(prompt);
+    await driver.keyboard.press("Enter");
+    await answerCard(page, "allow", [`GitHub: ${fixture.repo}`, cwd, title]);
+    await expect.poll(async () => {
+      const response = await request.get("/api/sessions");
+      expect(response.ok()).toBe(true);
+      const sessions = (await response.json()).sessions;
+      return sessions.find((session: any) => session.title === title)?.id;
+    }).toBeTruthy();
+    const listing = await (await request.get("/api/sessions")).json();
+    const created = listing.sessions.find((session: any) => session.title === title);
+    ids.push(created.id);
+    expect(created.cwd).toBe(cwd);
+    await waitForTermText(driver, `CREATED:${created.id}`, 20_000);
+    await assertLive(page, created.id);
+    expect(await fixture.git("-C", cwd, "rev-parse", "HEAD")).toBe(fixture.commit);
+    expect(await fs.readFile(path.join(cwd, "hook-count"), "utf8")).toBe("once\n");
+    await fs.writeFile(path.join(cwd, "retry-proof"), "keep work\n");
+    // Count completed replies, rather than matching the old success marker.
+    // The requester stays attached and retains the same scoped key.
+    await driver.keyboard.type(prompt);
+    await driver.keyboard.press("Enter");
+    await expect.poll(async () => {
+      return (await termText(driver)).replace(/\n/g, "").split(`CREATED:${created.id}`).length - 1;
+    }, { timeout: 20_000 }).toBe(2);
+    await expect(page.locator(".approval-card")).toHaveCount(0);
+    expect(await fs.readFile(path.join(cwd, "hook-count"), "utf8")).toBe("once\n");
+    expect(await fs.readFile(path.join(cwd, "retry-proof"), "utf8")).toBe("keep work\n");
+  } finally {
+    await driver.close();
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await setLocalCommandsWithoutAsking(request, false);
+    await setLocalYoloWithoutAsking(request, false);
+    await fixture.close(request);
+  }
+});
 
 /** Opening a fresh dialog has no accepted destination or agent. */
 async function openComposer(page: Page, host: number): Promise<Locator> {

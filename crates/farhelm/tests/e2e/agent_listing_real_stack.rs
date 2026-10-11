@@ -58,7 +58,11 @@ use farhelm_proto::{
 /// which is not a quirk of the test: browsers cannot set headers on a
 /// WebSocket handshake, so this is the only way the helm's own client
 /// authenticates one (`farhelm-helm`'s `auth`).
-async fn attach_terminal(helm: &HelmProcess, secret: &str, session: &str) -> tokio::net::TcpStream {
+pub(crate) async fn attach_terminal(
+    helm: &HelmProcess,
+    secret: &str,
+    session: &str,
+) -> tokio::net::TcpStream {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let addr = helm.addr();
@@ -108,7 +112,7 @@ async fn attach_terminal(helm: &HelmProcess, secret: &str, session: &str) -> tok
 /// Polled rather than read once: the store is a live database another
 /// process is writing, and a create that has returned over HTTP may still
 /// be a moment away from being readable by a second connection.
-async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
+pub(crate) async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     loop {
         if let Ok(store) = SessionStore::open(&state_dir.join("supervisor.db"), false).await
@@ -139,7 +143,7 @@ async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
 /// `--session` flag and its value) while the two read-only verbs need one.
 /// A single-verb wrapper would cover only the shorter half and be exactly
 /// as long as the slice literal it replaced.
-async fn spawn_agent_command_args(
+pub(crate) async fn spawn_agent_command_args(
     args: &[&str],
     session: &str,
     token: &str,
@@ -240,7 +244,11 @@ const NO_HELM_ATTACHED_REFUSAL: &str = "no helm is attached to this session";
 /// 20-second budget on it. Once `hosts` succeeds the attachment is proven
 /// present and stays that way for the rest of the test (nothing detaches
 /// the held terminal socket), so nothing later needs to repeat this dance.
-async fn hosts_until_attached(session: &str, token: &str, socket: &std::path::Path) -> String {
+pub(crate) async fn hosts_until_attached(
+    session: &str,
+    token: &str,
+    socket: &std::path::Path,
+) -> String {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let mut last_refusal = None;
     loop {

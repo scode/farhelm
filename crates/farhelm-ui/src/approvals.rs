@@ -499,6 +499,7 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
         ApprovalAction::Launch {
             host_name,
             cwd,
+            repo,
             title,
             launch,
             source,
@@ -514,6 +515,12 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 );
             }
             rows.push(CardRow::Value("new session on host", host_name.clone()));
+            if let Some(repo) = repo {
+                rows.push(CardRow::Value(
+                    "managed checkout of",
+                    format!("GitHub: {repo}"),
+                ));
+            }
             rows.push(CardRow::Value("folder", cwd.clone()));
             match title {
                 Some(title) => rows.push(CardRow::Value("title", title.clone())),
@@ -732,9 +739,10 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
         Some(TemplateDestination::Folder(folder)) => {
             rows.push(CardRow::Value("folder", folder.clone()))
         }
-        Some(TemplateDestination::Github(repo)) => {
-            rows.push(CardRow::Value("managed checkout of", repo.clone()))
-        }
+        Some(TemplateDestination::Github(repo)) => rows.push(CardRow::Value(
+            "managed checkout of",
+            format!("GitHub: {repo}"),
+        )),
         None => {}
     }
     if let Some(name) = &fields.name {
@@ -815,6 +823,7 @@ mod tests {
             verb: LaunchVerb::Create,
             host_name: "box".to_string(),
             cwd: "/w".to_string(),
+            repo: None,
             title: None,
             launch: SessionLaunch::Command(CommandLaunch {
                 command: "agent --go".to_string(),

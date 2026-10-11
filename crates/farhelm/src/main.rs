@@ -284,6 +284,9 @@ enum AgentCmd {
         /// invent a path that means nothing over there.
         #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
         cwd: Option<String>,
+        /// Create a fresh managed checkout of this GitHub repository on the target host.
+        #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
+        gh: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
         /// Required unless a template sets the host, and always with
         /// `--idempotency-key`.
@@ -428,6 +431,9 @@ struct TemplateFieldFlags {
     /// Folder sessions launched from the template start in, on their host.
     #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
     cwd: Option<String>,
+    /// Create a fresh managed checkout of this GitHub repository when applying the template.
+    #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
+    gh: Option<String>,
     /// Session name sessions launched from the template get.
     #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
     title: Option<String>,
@@ -448,7 +454,13 @@ impl TemplateFieldFlags {
                  template holds only what you wrote"
             );
         }
-        Ok(self.launch.edits(self.cwd.clone(), self.title.clone()))
+        let mut fields = self.launch.edits(self.cwd.clone(), self.title.clone());
+        if let Some(repo) = &self.gh {
+            fields.destination = Some(farhelm_proto::launcher::TemplateDestination::Github(
+                repo.clone(),
+            ));
+        }
+        Ok(fields)
     }
 }
 
@@ -493,6 +505,7 @@ impl AgentCmd {
             }),
             AgentCmd::Create {
                 cwd,
+                gh,
                 host,
                 launch,
                 title,
@@ -501,7 +514,15 @@ impl AgentCmd {
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: host.clone(),
                 templates: launch.templates.clone(),
-                edits: launch.edits(cwd.clone(), title.clone()),
+                edits: {
+                    let mut edits = launch.edits(cwd.clone(), title.clone());
+                    if let Some(repo) = gh {
+                        edits.destination = Some(
+                            farhelm_proto::launcher::TemplateDestination::Github(repo.clone()),
+                        );
+                    }
+                    edits
+                },
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: false,
                 spawn: None,
@@ -527,6 +548,14 @@ impl AgentCmd {
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
     }
+}
+
+/// Validate repository spellings with the launcher's parser while retaining
+/// the original request text for keyed retry comparison.
+fn parse_checkout_repo(value: &str) -> Result<String, String> {
+    farhelm_proto::parse_github_repo(value)
+        .map(|_| value.to_string())
+        .map_err(|error| error.to_string())
 }
 
 /// The refusal for the removed `farhelm agent restart --mode`, whatever
@@ -2231,6 +2260,79 @@ mod tests {
         );
         let permissions = create(&["--agent", "codex", "--permissions", "free"]);
         assert!(permissions.contains("smart_approve"), "{permissions}");
+    }
+
+    /// Managed checkout flags express repository intent only on create and
+    /// template writes. Pin both spellings and the folder conflict here so
+    /// spawn and clone cannot accidentally inherit this new authority.
+    #[farhelm_testtrace::test]
+    fn managed_checkout_flags_are_scoped_to_create_and_template_writes() {
+        use farhelm_proto::launcher::TemplateDestination;
+        for flag in ["--gh", "--github"] {
+            let Cmd::Agent { command } = Cli::try_parse_from([
+                "farhelm", "agent", "create", "--host", "h", flag, "acme/web", "--agent", "codex",
+            ])
+            .unwrap()
+            .command
+            else {
+                panic!("agent create");
+            };
+            let Some(farhelm_proto::AgentVerb::Create { edits, .. }) = command.verb() else {
+                panic!("create request");
+            };
+            assert_eq!(
+                edits.destination,
+                Some(TemplateDestination::Github("acme/web".into()))
+            );
+            for verb in ["create", "edit"] {
+                let Cmd::Agent {
+                    command: AgentCmd::Template(template),
+                } = Cli::try_parse_from([
+                    "farhelm", "agent", "template", verb, "t", flag, "acme/web",
+                ])
+                .unwrap()
+                .command
+                else {
+                    panic!("template command");
+                };
+                let fields = match template {
+                    TemplateCmd::Create { fields, .. } | TemplateCmd::Edit { fields, .. } => fields,
+                    _ => panic!("template write"),
+                };
+                assert_eq!(
+                    fields.fields().unwrap().destination,
+                    Some(TemplateDestination::Github("acme/web".into()))
+                );
+                assert!(
+                    Cli::try_parse_from([
+                        "farhelm", "agent", "template", verb, "t", flag, "acme/web", "--cwd", "/w",
+                    ])
+                    .is_err()
+                );
+            }
+            assert!(
+                Cli::try_parse_from([
+                    "farhelm", "agent", "create", flag, "acme/web", "--cwd", "/w"
+                ])
+                .is_err()
+            );
+            assert!(Cli::try_parse_from(["farhelm", "spawn", flag, "acme/web"]).is_err());
+            assert!(
+                Cli::try_parse_from([
+                    "farhelm",
+                    "agent",
+                    "clone",
+                    "--source-session",
+                    "s",
+                    "--host",
+                    "h",
+                    flag,
+                    "acme/web"
+                ])
+                .is_err()
+            );
+        }
+        assert!(Cli::try_parse_from(["farhelm", "agent", "create", "--gh", "not-a-repo"]).is_err());
     }
 
     /// Spec: the launch flags become the launcher edits the helm applies

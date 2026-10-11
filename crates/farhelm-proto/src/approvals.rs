@@ -80,6 +80,11 @@ pub enum ApprovalAction {
         /// The target host's display name.
         host_name: String,
         cwd: String,
+        /// GitHub repository spelling for a fresh managed checkout; the UI
+        /// names that source explicitly. An older UI ignores this field and
+        /// still shows the exact destination, while new UIs accept old cards.
+        #[serde(default)]
+        repo: Option<String>,
         /// The requested title; `None` lets the supervisor generate one.
         title: Option<String>,
         /// The whole launch the new session will run, as resolved. Whether

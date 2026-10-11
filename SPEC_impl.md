@@ -1569,16 +1569,18 @@ asking session (the helm marks the spawn's create with `key_lives_with_session`,
 agent's `create`/`clone` may land on a supervisor that has never heard of the asking session, so the key currently gets
 the same permanent, interactive scope any other helm-mediated create gets. Permanent retention is not a security
 requirement for these agent-originated requests: a retry is a new request that the user approves like any other
-(SPEC.md, Agent-spawned sessions), so how long a key is kept is not what authorizes it. The current implementation
-remains described here until a separate retention change is made. Session-lifetime scoping is not merely unimplemented
-here — it is not expressible, since the target supervisor may never have heard of the asking session. Every kind of key
-is stored scoped to the asking session by the helm relay, so a key only ever replays for the session that used it. Every
-spawn is an agent `create` placed on the asking session's own host and goes through the helm, so the user can be asked
-first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With `--inherit-agent` the asking session's
-supervisor fills in that session's exact stored launch (`SpawnPlacement::inherited_launch`, overwriting whatever the CLI
-sent) before relaying it, and the helm launches that launch rather than resolving templates and flags. A
-session-authenticated `CreateSession` sent straight to the supervisor is refused outright (protocol 41), so the relay is
-the only way a session creates one.
+(SPEC.md, Agent-spawned sessions), so how long a key is kept is not what authorizes it. A keyed create into a managed
+checkout is the exception: its retry returns or finishes the approved attempt without a new card, which only ever
+completes that exact request for the session that asked (SPEC.md, Local authority and trust between hosts). The current
+implementation remains described here until a separate retention change is made. Session-lifetime scoping is not merely
+unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking session.
+Every kind of key is stored scoped to the asking session by the helm relay, so a key only ever replays for the session
+that used it. Every spawn is an agent `create` placed on the asking session's own host and goes through the helm, so the
+user can be asked first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With `--inherit-agent` the asking
+session's supervisor fills in that session's exact stored launch (`SpawnPlacement::inherited_launch`, overwriting
+whatever the CLI sent) before relaying it, and the helm launches that launch rather than resolving templates and flags.
+A session-authenticated `CreateSession` sent straight to the supervisor is refused outright (protocol 41), so the relay
+is the only way a session creates one.
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -4162,16 +4164,17 @@ the Templates dialog closes, using the existing revision bump and focus return.
 NAME, and for a spawn a placement naming the parent. The helm's `agent_launch::resolve` applies the templates and then
 the flags to an empty launcher with the same `apply_templates` the GUI uses, so the CLI and `tl:` cannot disagree about
 what a template means; a refusal of the flags names the flag (`--model applies to an agent launch ...`) rather than an
-unnamed template. The result must have a folder (a fresh-checkout destination is refused, since the CLI creates no
-checkouts, unless `--cwd` replaced it), and either an agent type or a command and a YOLO answer; the launch is then
-validated by the same `sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch
-kind: the agent-launch flags leave it alone, so on a command template they are refused naming the flag, as the same edit
-is refused in the launcher. `--model`, `--effort`, `--permissions` and `--trust` accept `default`, sent as `null`, which
-resets a choice a template made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The
-CLI has no way to clear a command launch's declared agent type that a template set. clap refuses a repeated flag (other
-than `--template`) and `--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64
-template names of at most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether
-it says enough to launch is the helm's to decide.
+unnamed template. The result must have a folder or, for agent create, a managed checkout (`--gh`, aliased as `--github`,
+sets `TemplateDestination::Github` and conflicts with `--cwd`). Spawn still refuses a managed destination. Either
+requires an agent type or a command and a YOLO answer; the launch is then validated by the same
+`sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch kind: the agent-launch
+flags leave it alone, so on a command template they are refused naming the flag, as the same edit is refused in the
+launcher. `--model`, `--effort`, `--permissions` and `--trust` accept `default`, sent as `null`, which resets a choice a
+template made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The CLI has no way to
+clear a command launch's declared agent type that a template set. clap refuses a repeated flag (other than `--template`)
+and `--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64 template names of
+at most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether it says enough to
+launch is the helm's to decide.
 
 The host is the asking session's own for a spawn (which also makes a template that sets a host a refusal, through the
 launcher's host-fixed rule); otherwise an explicit `--host` name, then the install a template named, matched among host
@@ -4209,6 +4212,16 @@ key reuse and never duplicated, the rule "Launch-kinds reservations" already app
 create's first resolution (`agent_create_bindings`, for 30 days) to spare retries from template edits; schema 42 drops
 that table, and the 38→39 step no longer creates it. A keyed spawn re-run after its child was deleted creates a new
 child from the templates as they are now, because the spawn's session-lifetime reservation is pruned with the child.
+
+Managed-checkout agent creates use that same frozen `agent_create_v1` digest as the checkout's `client_identity`,
+without a `request_fingerprint`. The helm resolves the request and host, checks the agent YOLO rule, and performs
+lookup-only reconciliation before preview or approval. Only unknown keys proceed to the shared claim-bound preview, card
+and fresh-create pipeline; known accepted attempts finish or return their recorded session without another card. Fresh
+dispatch repeats lookup to settle concurrent approvals, revalidates configuration and the accepted installation, and
+uses `CreateOrigin::Agent`, including the dispatch-time YOLO guard and no remembered GUI selection. Local failures after
+approval use the browser's durable refusal settlement. A template that flips between a folder and checkout encounters an
+incompatible reservation and is refused as key reuse. Agent template writes store managed destinations through the same
+editor path as folder destinations. No supervisor protocol or frozen digest encoding changes.
 
 ### Permission prompts for agent actions
 

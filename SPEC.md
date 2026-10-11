@@ -666,11 +666,13 @@ the session itself — **error** when the agent process could not be started at 
 ### Managed checkouts
 
 The user-facing name is managed checkout: a repository clone Farhelm made for a session, rather than an ordinary
-directory the user supplied. Session rows with a current checkout association show a branch glyph and the repository in
-place of the directory. Compact rows put the glyph after the name. Its tooltip names the repository and actual checkout
-path and explains that the directory moves to the trash when its last session is deleted. The session view shows the
-same mark beside its directory. Sessions using another session's checkout, including its subdirectories, carry the mark
-too; requesting a checkout at launch does not establish current membership.
+directory the user supplied. Interfaces do not assume GitHub will remain the only repository source: wherever a
+repository is selected or requested, its source is explicit, such as the launcher's `gh:` prefix or the CLI's `--gh`
+flag. Session rows with a current checkout association show a branch glyph and the repository in place of the directory.
+Compact rows put the glyph after the name. Its tooltip names the repository and actual checkout path and explains that
+the directory moves to the trash when its last session is deleted. The session view shows the same mark beside its
+directory. Sessions using another session's checkout, including its subdirectories, carry the mark too; requesting a
+checkout at launch does not establish current membership.
 
 The launcher and template editor use the same segmented destination control: folder or managed checkout, with a folder
 glyph or branch glyph. Selecting managed checkout reveals a repository field and explains the directory's lifetime.
@@ -1810,14 +1812,15 @@ fact grid reflows in a narrow main area, and the whole request region scrolls on
 of the full main area; command text stays full and wrapped. The rest of the app stays usable, and cards remain
 answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting list or the expanded request changes,
 so a click already aimed at the previous request cannot answer the next one. It names the requesting session and its
-host, the action, and its target. For a launch it shows the target host, the folder, the agent type and its choices or
-the full command and resume command text, and whether the launch is YOLO. For a template write it shows the whole
-resulting template, including the command and resume command text that the templates listing withholds from agents, and
-for a template delete the template being deleted. Text an agent controls (session titles, folders, command lines) is
-shown as labelled data, never in a way that could pass for Farhelm's own wording. The card offers Allow, Always allow
-from the requesting host, and Deny. Always allow turns that host's setting on and then approves the request; if turning
-the setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
-answered on: other cards already waiting from that host stay until they are answered.
+host, the action, and its target. For a launch it shows the target host, the folder (the exact previewed directory and
+source-qualified repository for a managed checkout), the agent type and its choices or the full command and resume
+command text, and whether the launch is YOLO. For a template write it shows the whole resulting template, including the
+command and resume command text that the templates listing withholds from agents, and for a template delete the template
+being deleted. Text an agent controls (session titles, folders, command lines) is shown as labelled data, never in a way
+that could pass for Farhelm's own wording. The card offers Allow, Always allow from the requesting host, and Deny.
+Always allow turns that host's setting on and then approves the request; if turning the setting on fails, nothing is
+approved and the card stays up with the reason. It approves only the request it was answered on: other cards already
+waiting from that host stay until they are answered.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
@@ -1828,10 +1831,12 @@ out after any of them. While it waits, the CLI itself says once on stderr, after
 that it is waiting for the user to approve the request in Farhelm. Deleting a session first denies the requests it has
 waiting. An approval holds only for the host connection the request arrived on: a request whose host was replaced or
 re-identified while it waited is refused rather than carried out. An approval that arrives after the asking CLI was
-killed still carries out exactly what the card showed. A retry is a new request and is asked about like one; when it
-carries the first request's idempotency key, approving it returns the session the first approval created rather than
-creating another. A host's sessions can keep only a few cards waiting at a time; a misbehaving host that keeps asking is
-answered by denying its cards or removing the host, and that nuisance is accepted.
+killed still carries out exactly what the card showed. An approved managed-checkout create's keyed retry returns or
+finishes that attempt's session without another card; a request never approved still asks as usual. Other retries are
+new requests and are asked about like one; when one carries the first request's idempotency key, approving it returns
+the session the first approval created rather than creating another. A host's sessions can keep only a few cards waiting
+at a time; a misbehaving host that keeps asking is answered by denying its cards or removing the host, and that nuisance
+is accepted.
 
 On a host that asks before YOLO launches, an agent may only start what runs the way the user already approved. The helm
 refuses, without asking, an agent's create, clone or spawn (`--inherit-agent` included) whose launch is YOLO, and any of
@@ -1856,47 +1861,54 @@ like a GUI launch, with the same refusals naming the field, and the remembered G
 same templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag
 required by the verb, such as `--cwd` or the target host, may be omitted when an applied template sets that field, and
 an explicit flag wins over a template. `farhelm spawn` targets its own host, so a template that sets a host is refused
-there. A template whose destination is a managed checkout is refused on the CLI, which does not create checkouts.
-`--inherit-agent` is exclusive with every launch flag. A command flag repeated or contradicted (`--yolo` with
-`--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
-`farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
-is not an agent type is refused with the list of agent types. A retry under an idempotency key is matched by the request
-as the agent sent it, not by what that request resolved to. Retrying `farhelm agent create` or `farhelm spawn` with the
-same key, host, template names, flags and spawn placement, or `farhelm agent clone` with the same key, source, host and
-`--cwd`/`--title` overrides (an override given counts as different from one left out), returns the first attempt's
-session, or the refusal its host recorded, even if a template it names or the clone's source was edited in between, for
-as long as the request still names something the helm can resolve. A retry that no longer resolves (a template deleted
-or edited into something the CLI refuses, an unconnected host, a clone source that is gone, unreachable or legacy) is
-refused, and never starts a second session. The same key with a different request is refused as key reuse. The approval
-card and the agent YOLO rule judge a keyed retry by what its request resolves to now, so a retry whose templates changed
-into a launch the host's YOLO rule refuses is refused even where a replay would have been harmless, and a retry whose
-first attempt was interrupted before its session started is refused, rather than started with what the first attempt
-resolved to, when its launch, folder or title differs. `farhelm spawn --inherit-agent` is the exception: its retry is
-compared by the launch it inherits. `farhelm agent create` requires `--host` with an idempotency key, because the key's
-record lives only on the host the first attempt reached, and a host taken from a template could change between an
-attempt and its retry. A host name that comes to mean another machine between the two (hosts renamed or reassigned) is a
-known, accepted gap: the retry is then a new create on that machine and starts a second session, with every check a
-fresh create gets. `farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named
-host, verbatim. Clone carries no translation between hosts: a command written for one machine may name a binary that is
-absent, a different build, or one that takes different flags on another.
+there. `farhelm agent create` accepts `--gh <owner/repo>` (`--github` is an alias), mutually exclusive with `--cwd`, or
+a template whose destination is a managed checkout. It uses the launcher's checkout root, post-clone command, repository
+spellings, naming and refusals: `--gh acme/web --title "Fix parser"` creates `web-fix-parser`; without a title it
+chooses the next free `web-N`, and a taken or over-long title-derived name is refused without a suffix. `farhelm spawn`
+and `farhelm agent clone` do not request fresh checkouts; spawn refuses a checkout template. `--inherit-agent` is
+exclusive with every launch flag. A command flag repeated or contradicted (`--yolo` with `--no-yolo`) is refused rather
+than resolved by order. The removed selectors `--profile` and `--profile-id`, and `farhelm agent restart --mode`, are
+refused with a message naming what replaced them, and `--agent` given something that is not an agent type is refused
+with the list of agent types. A retry under an idempotency key is matched by the request as the agent sent it, not by
+what that request resolved to. Retrying `farhelm agent create` or `farhelm spawn` with the same key, host, template
+names, flags and spawn placement, or `farhelm agent clone` with the same key, source, host and `--cwd`/`--title`
+overrides (an override given counts as different from one left out), returns the first attempt's session, or the refusal
+its host recorded, even if a template it names or the clone's source was edited in between, for as long as the request
+still names something the helm can resolve. A retry that no longer resolves (a template deleted or edited into something
+the CLI refuses, an unconnected host, a clone source that is gone, unreachable or legacy) is refused, and never starts a
+second session. The same key with a different request is refused as key reuse, including when a template's destination
+changed between a folder and a managed checkout. For managed-checkout creates an approved first attempt is reconciled
+before another directory preview or card, including its interrupted start; the agent YOLO rule still checks today's
+resolved launch. Other creates retain the rule below. The approval card and the agent YOLO rule judge a keyed retry by
+what its request resolves to now, so a retry whose templates changed into a launch the host's YOLO rule refuses is
+refused even where a replay would have been harmless, and a retry whose first attempt was interrupted before its session
+started is refused, rather than started with what the first attempt resolved to, when its launch, folder or title
+differs. `farhelm spawn --inherit-agent` is the exception: its retry is compared by the launch it inherits.
+`farhelm agent create` requires `--host` with an idempotency key, because the key's record lives only on the host the
+first attempt reached, and a host taken from a template could change between an attempt and its retry. A host name that
+comes to mean another machine between the two (hosts renamed or reassigned) is a known, accepted gap: the retry is then
+a new create on that machine and starts a second session, with every check a fresh create gets. `farhelm agent clone`
+copies its explicitly selected source's stored launch onto an explicitly named host, verbatim. Clone carries no
+translation between hosts: a command written for one machine may name a binary that is absent, a different build, or one
+that takes different flags on another.
 
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
-helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd`, `--title`, `--host`
-and the launch flags other than `--template`; `--host` names a host by its display name, is resolved when the template
-is written, and is stored as that host's install. Create writes the agent launch kind when any agent-launch choice is
-given, including an agent type alone, and the command kind for command-launch choices. A template setting only host,
-destination and session name does not switch launch kind. Templates already stored without a kind keep applying as
-stored. Edit, `farhelm agent template edit <name>`, takes the same flags and sets only the fields it is given, with no
-way to unset one: the templates listing withholds command text, so an agent cannot reproduce a template it did not
-write, and replacing the whole template would silently drop that text. To drop a field, delete the template with
-`farhelm agent template delete <name>` and create it again; the same goes for turning an agent-launch template into a
-command-launch one or back, which an edit refuses, since a template mixing the two could never apply. A command line
-given to a template write needs `--yolo` or `--no-yolo` with it, since a YOLO assertion is about one command line. A
-managed checkout destination is refused, as it is when applying a template from the CLI. These writes go through the
-same path as the GUI's template editor, with one difference: an agent's write or delete lands only on the template its
-card showed, and is refused, with nothing written, if that template changed or appeared while the card waited. This is
-the one exception to last-write-wins for templates (Concepts), and it exists because an approval covers exactly what the
-card showed.
+helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd` or
+`--gh`/`--github`, `--title`, `--host` and the launch flags other than `--template`; `--host` names a host by its
+display name, is resolved when the template is written, and is stored as that host's install. Create writes the agent
+launch kind when any agent-launch choice is given, including an agent type alone, and the command kind for
+command-launch choices. A template setting only host, destination and session name does not switch launch kind.
+Templates already stored without a kind keep applying as stored. Edit, `farhelm agent template edit <name>`, takes the
+same flags and sets only the fields it is given, with no way to unset one: the templates listing withholds command text,
+so an agent cannot reproduce a template it did not write, and replacing the whole template would silently drop that
+text. To drop a field, delete the template with `farhelm agent template delete <name>` and create it again; the same
+goes for turning an agent-launch template into a command-launch one or back, which an edit refuses, since a template
+mixing the two could never apply. A command line given to a template write needs `--yolo` or `--no-yolo` with it, since
+a YOLO assertion is about one command line. A managed checkout destination is allowed, with the same repository
+spellings as create. These writes go through the same path as the GUI's template editor, with one difference: an agent's
+write or delete lands only on the template its card showed, and is refused, with nothing written, if that template
+changed or appeared while the card waited. This is the one exception to last-write-wins for templates (Concepts), and it
+exists because an approval covers exactly what the card showed.
 
 Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
 with their values except a command line or resume command, which are listed as set without their text. Discovery also
@@ -2322,8 +2334,11 @@ That is what keeps a session on one host from gaining execution on another throu
 stopping and restarting sessions across hosts, and writing the templates any host may launch from, are authorized by the
 user, not by the request. A user who turns that setting on for a host grants that host's sessions exactly that authority
 over the fleet, including changing what later launches from those templates run anywhere. A retried create is a new
-request and is asked about like one, so how long agent-originated retry records are kept is not a security question.
-None of this waives correctness of user-initiated GUI requests.
+request and is asked about like one, so how long agent-originated retry records are kept is not a security question. The
+one exception is a create into a managed checkout: a retry with the same idempotency key returns, or finishes, the
+attempt the user already approved, without asking again. That stays outside the retention question because the replay
+can only complete that exact approved request, and only for the session that asked. None of this waives correctness of
+user-initiated GUI requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a
