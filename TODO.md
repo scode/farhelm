@@ -169,6 +169,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
   to miss. Solution to be worked out.
 
+- **Fix the flickering hover on a path that cannot be downloaded.** Hovering a file path in terminal output is meant to
+  check it once per hover: a checking spinner, then the host, full path and size, or the reason it is refused. Hovering
+  a path that could not be downloaded (the maintainer thinks it was a directory) instead made the hover flicker rapidly
+  and keep flickering while the pointer stayed on it. The suspicion, not yet confirmed, is that a refused check starts
+  another check, so the hover loops between the spinner and the refusal for as long as it lasts.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
