@@ -2,6 +2,33 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.27.0 - 2026-10-11
+
+### 🚀 Added
+
+- Agents can start a session in a fresh GitHub checkout with `farhelm agent create --gh owner/repo`. The approval card shows the repository and the folder the checkout goes in. (#1886)
+- Set the command that runs in each fresh GitHub checkout before the agent starts, in Settings. A change applies to checkouts made after it. (#1858)
+- The trash shows which hosts are still deleting, so a slow cleanup no longer looks stuck. (#1864)
+- Delete a single checkout from the trash with its own delete button. It deletes at once, without asking. (#1888)
+
+### 🔄 Changed
+
+- The session launcher's folder field now offers your recent folders, and your home folder on the host or on this machine, in a dropdown. Typing filters the list. (#1874)
+- Dialogs leave space above and below them, even in short windows. Host settings and the trash keep their heading and buttons in view while you scroll. (#1860, #1862, #1863)
+- The dialogs for adding, setting up and removing a host, and for uninstalling Farhelm from it, are laid out more clearly, with their answers always in view. Two answers are renamed: **set up, don't ask again** and **remove, don't ask again**. (#1866, #1867)
+
+### 🔧 Fixes worth highlighting
+
+- Text fields across the app, such as template commands, no longer spell check or autocorrect what you type. (#1859)
+- Hovering a file path in a terminal no longer flickers while the terminal updates. (#1879)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- When a host confirmation opens, its cancel button no longer shows a tooltip over the other answers. (#1868)
+- The **Save** button for where fresh GitHub checkouts go, and its **Retry** button, now explain themselves on hover. (#1859)
+
 ## v0.26.1 - 2026-10-10
 
 ### 💥 Breaking
