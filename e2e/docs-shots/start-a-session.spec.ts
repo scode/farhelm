@@ -37,7 +37,7 @@ test("launch button", async ({ page, request }) => {
   // In the margin left of the launcher, pointing in at the button.
   await director.callout(
     submit,
-    "Spells out what it will start: the agent, the host, and the directory. Disabled until an agent is chosen and the host is connected.",
+    "Spells out what it will start: the agent, the host, and the directory. Greyed out until the launch is complete; hover it to see what is missing.",
     { side: "left" },
   );
   // Also in the left margin, under the first, so the crop stays narrow.
@@ -56,22 +56,56 @@ test("destination", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   const destination = form.locator(".launch-composer-destination");
+  // Four callouts stacked down the left margin, each nudged (dy) so the
+  // boxes clear one another while the arrows stay level with their controls.
+  await director.callout(
+    destination.locator(".destination-type-control"),
+    "folder starts in a directory that already exists; managed checkout clones a GitHub repository into a new one.",
+    { side: "left", dy: -70 },
+  );
   await director.callout(
     destination.locator(".create-session-host"),
     "The host the session runs on. Starts on the host of the session you have open.",
-    { side: "left", dy: -30 },
+    { side: "left", dy: 20 },
   );
   await director.callout(
     destination.getByLabel("folder", { exact: true }),
     "The directory the agent starts in. ~ is your home on that host, not on the machine in front of you.",
-    { side: "left", dy: 20 },
+    { side: "left", dy: 40 },
   );
   await director.callout(
     destination.getByLabel("recent folders"),
     "Directories you launched in recently on this host, newest first. Local home is your home on the machine in front of you.",
-    { side: "left", dy: 80 },
+    { side: "left", dy: 130 },
   );
   await shot(page, `${PAGE}/destination`, [destination]);
+});
+
+/**
+ * The launcher in managed checkout mode on a helm with no checkout directory
+ * configured yet, which is the staged fleet's state: the launcher asks for
+ * one in place of the directory preview. Stops before save, so the fleet's
+ * configuration stays unset for every other shot.
+ */
+test("checkout setup", async ({ page, request }) => {
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const destination = form.locator(".launch-composer-destination");
+  await destination.locator(".destination-type-control button", { hasText: "managed checkout" }).click();
+  const field = destination.locator(".checkout-root-field");
+  await expect(field).toBeVisible();
+  await field.locator("input").fill("~/work");
+  await director.callout(
+    field.locator("input"),
+    "Asked once: the directory every host's managed checkouts go into. ~ is each host's own home, and Farhelm creates the directory on first use.",
+    { side: "left" },
+  );
+  await director.callout(
+    field.getByRole("button", { name: "save" }),
+    "Saves it for every host. Change it later in settings.",
+    { side: "left", dy: 40 },
+  );
+  await shot(page, `${PAGE}/checkout-setup`, [destination], { maxWidth: 930 });
 });
 
 test("harness and model", async ({ page, request }) => {
@@ -88,12 +122,12 @@ test("harness and model", async ({ page, request }) => {
   await director.callout(
     harness,
     "Pick the agent first. Nothing is chosen when the launcher opens, and the choices below change to what that agent offers.",
-    { side: "right", dx: 60, dy: -15 },
+    { side: "right", dx: 60, dy: -30 },
   );
   await director.callout(
     model,
     "Which model. harness default leaves it to the agent's own setting; type a name to use one the list doesn't show.",
-    { side: "right", dx: 60, dy: 15 },
+    { side: "right", dx: 60, dy: 30 },
   );
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
@@ -252,12 +286,14 @@ test("host yolo setting", async ({ page, request }) => {
   await expect(dialog).toBeVisible();
   const toggle = dialog.locator(".host-yolo-without-asking-toggle");
   await director.highlight(toggle, { pad: 4 });
-  // Right of the dialog, beside the switch at its right edge, so the
-  // setting's own label and explanation stay readable.
+  // Right of the switch, which sits at the dialog's right edge, so the
+  // setting's own label and explanation stay readable. The crop keeps only
+  // the dialog's Permissions section: the rest of the dialog is Manage
+  // hosts' to explain.
   await director.callout(
     toggle,
-    "Ticked: YOLO launches on this host start without asking. Unticked: Farhelm asks every time.",
+    "On: YOLO launches on this host start without asking. Off: Farhelm asks every time.",
     { side: "right" },
   );
-  await shot(page, `${PAGE}/host-yolo-setting`, [dialog]);
+  await shot(page, `${PAGE}/host-yolo-setting`, [dialog.locator("section[aria-label=Permissions]")]);
 });

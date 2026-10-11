@@ -89,6 +89,43 @@ export interface ScenarioTemplate {
   fields: Record<string, unknown> & { host?: string };
 }
 
+/**
+ * One managed checkout in a host's trash (docs screenshots only), as the trash
+ * dialog lists it. Staged fleets have no managed checkouts (making one needs a
+ * real GitHub clone), so the trash listing is answered in transit from these,
+ * and only for a shot that asks for it; every other shot keeps the fleet's
+ * real, empty trash. `root` is the invented directory the host's checkouts go
+ * into, and the archive's path and name are built from it the way Farhelm
+ * names an archive: `<root>/farhelm-archived-working-copies/<checkout>-<time>`.
+ */
+export interface ScenarioTrashedCheckout {
+  host: string;
+  repository: string;
+  /** The checkout's own directory name before it was archived, such as `farhelm-2`. */
+  checkout: string;
+  root: string;
+  /** Seconds before the capture that the checkout was moved to the trash. */
+  age: number;
+  /** Disk usage the dialog shows. */
+  bytes: number;
+}
+
+/**
+ * A file a session's terminal names, as hovering over its path reports it
+ * (docs screenshots only). The staged sessions' real directories are the
+ * run's temporary state, which no shot may show, and the transcripts name
+ * files that do not exist there, so the hover's check is answered in transit
+ * from these, and only for a shot that asks for it.
+ */
+export interface ScenarioTerminalFile {
+  host: string;
+  /** The path as the terminal prints it, which is what the hover asks about. */
+  path: string;
+  /** The full path the hover reports, invented like every path the scenario shows. */
+  shown_path: string;
+  size: number;
+}
+
 /** One remembered folder, offered under the launcher's folder field (docs screenshots only). */
 export interface ScenarioFolder {
   host: string;
@@ -128,6 +165,8 @@ export interface Scenario {
   folders?: ScenarioFolder[];
   add_host?: ScenarioAddHost;
   templates?: ScenarioTemplate[];
+  checkout_trash?: ScenarioTrashedCheckout[];
+  terminal_files?: ScenarioTerminalFile[];
 }
 
 const STATUSES: TargetStatus[] = ["running", "waiting", "idle", "exited"];
@@ -254,7 +293,37 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
     if (template.fields.host !== undefined && !keys.has(template.fields.host)) fail(`template ${template.name}: unknown host`);
   }
 
-  return { viewport, hosts, sessions, launch_history: launchHistory, folders, add_host: addHost, templates };
+  const checkoutTrash = (raw.checkout_trash as ScenarioTrashedCheckout[] | undefined) ?? [];
+  for (const checkout of checkoutTrash) {
+    const name = `checkout_trash entry ${JSON.stringify(checkout)}`;
+    if (!keys.has(checkout.host)) fail(`${name}: unknown host`);
+    if (!/^[^/\s]+\/[^/\s]+$/.test(checkout.repository ?? "")) fail(`${name}: repository must be owner/name`);
+    if (!checkout.checkout || checkout.checkout.includes("/")) fail(`${name}: checkout must be a directory name`);
+    if (!checkout.root?.startsWith("/")) fail(`${name}: root must be an absolute path`);
+    if (!Number.isInteger(checkout.age) || checkout.age < 0) fail(`${name}: age must be a non-negative integer`);
+    if (!Number.isInteger(checkout.bytes) || checkout.bytes < 0) fail(`${name}: bytes must be a non-negative integer`);
+  }
+
+  const terminalFiles = (raw.terminal_files as ScenarioTerminalFile[] | undefined) ?? [];
+  for (const file of terminalFiles) {
+    const name = `terminal_files entry ${JSON.stringify(file)}`;
+    if (!keys.has(file.host)) fail(`${name}: unknown host`);
+    if (!file.path) fail(`${name}: path is required`);
+    if (!file.shown_path?.startsWith("/")) fail(`${name}: shown_path must be an absolute path`);
+    if (!Number.isInteger(file.size) || file.size < 0) fail(`${name}: size must be a non-negative integer`);
+  }
+
+  return {
+    viewport,
+    hosts,
+    sessions,
+    launch_history: launchHistory,
+    folders,
+    add_host: addHost,
+    templates,
+    checkout_trash: checkoutTrash,
+    terminal_files: terminalFiles,
+  };
 }
 
 /** The env var handing the add-host stand-in's configuration (JSON) to the stack script. */

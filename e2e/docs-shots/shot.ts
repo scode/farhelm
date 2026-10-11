@@ -55,6 +55,13 @@ export interface CropOptions {
    * text column, about 930 CSS pixels wide.
    */
   maxWidth?: number;
+  /**
+   * Leave the pointer where the shot put it. By default the pointer moves to
+   * the corner first, so no hover text the shot did not ask for shows; a shot
+   * of something only hovering shows, such as a terminal file's check, keeps
+   * it instead.
+   */
+  keepPointer?: boolean;
 }
 
 /**
@@ -89,7 +96,7 @@ export async function shot(page: Page, name: string, regions: Locator[], options
 
   const output = path.join(process.env[DOCS_OUTPUT_ENV] || DOCS_DEFAULT_OUTPUT, `${name}.png`);
   mkdirSync(path.dirname(output), { recursive: true });
-  await page.mouse.move(0, 0);
+  if (!options.keepPointer) await page.mouse.move(0, 0);
   await page.screenshot({
     path: output,
     clip: { x: left, y: top, width: right - left, height: bottom - top },

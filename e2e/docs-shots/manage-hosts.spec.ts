@@ -50,9 +50,9 @@ test("host settings", async ({ page, request }) => {
   await row.locator(".host-settings").click();
   const dialog = page.locator(".host-settings-dialog");
   await expect(dialog).toBeVisible();
-  // All four callouts down the right of the dialog, where the arrows stay
-  // short and cross no text: the edit buttons sit at the dialog's right edge,
-  // and each checkbox's callout points at the end of its label. Anywhere else
+  // All the callouts down the right of the dialog, where the arrows stay
+  // short and cross no text: the edit buttons and the switches sit at the
+  // dialog's right edge, and the icon grid ends short of it. Anywhere else
   // either crosses the help text or widens the crop past the docs' text column.
   await director.callout(dialog.locator(".host-edit"), "Change how Farhelm reaches the host over ssh.", {
     side: "right",
@@ -63,13 +63,18 @@ test("host settings", async ({ page, request }) => {
     dy: 30,
   });
   await director.callout(
+    dialog.locator(".host-appearance-icons"),
+    "The mark this host's sessions carry in the session list, the host list, and the launcher's host menu.",
+    { side: "right" },
+  );
+  await director.callout(
     dialog.locator(".host-yolo-without-asking"),
-    "Ticked: YOLO launches here start without asking.",
+    "On: YOLO launches here start without asking.",
     { side: "right", dy: 60 },
   );
   await director.callout(
     dialog.locator(".host-commands-without-asking"),
-    "Ticked: agents here run farhelm commands without asking you first.",
+    "On: agents here run farhelm commands without asking you first.",
     { side: "right", dy: 50 },
   );
   await shot(page, `${PAGE}/host-settings`, [dialog], { maxWidth: 930 });
@@ -97,13 +102,27 @@ test("app settings", async ({ page, request }) => {
   await page.locator(".app-settings-toggle").click();
   const dialog = page.locator(".app-settings-dialog");
   await expect(dialog).toBeVisible();
-  // Aimed at the two host questions at the top of the dialog rather than at
-  // the dialog as a whole: Settings now holds more below them, and an arrow
-  // at the dialog's middle would point at one of those instead.
+  // Down the left of the dialog, one per part, each level with what it
+  // explains; the dialog's own help text says the rest.
   await director.callout(
     dialog.locator(".app-settings-choice").first(),
     "Both questions Farhelm asks about hosts can be turned off, or back on, here.",
-    { side: "left", dy: 60 },
+    { side: "left" },
+  );
+  await director.callout(
+    dialog.locator(".checkout-root-field"),
+    "The directory managed checkouts go into, on every host.",
+    { side: "left" },
+  );
+  await director.callout(
+    dialog.locator(".checkout-post-clone-field"),
+    "A command to run in each new managed checkout before its agent starts, on every host.",
+    { side: "left" },
+  );
+  await director.callout(
+    dialog.locator("section[aria-label=sounds]"),
+    "Sounds for when a session needs you, on this device only.",
+    { side: "left" },
   );
   await shot(page, `${PAGE}/app-settings`, [dialog, page.locator(".app-settings-toggle")], { maxWidth: 930 });
 });

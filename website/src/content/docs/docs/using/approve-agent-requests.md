@@ -34,9 +34,9 @@ words, not Farhelm's; each one sits under its own label.
 The card has three buttons:
 
 - **allow** lets this one request go ahead.
-- **always allow from** the host lets this request go ahead and turns on that host's **run farhelm commands from this
-  host without asking** setting, so agents there stop asking (see below). Other cards from that host that are already
-  waiting stay up until you answer them.
+- **always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
+  asking** setting, so agents there stop asking (see below). Other cards from that host that are already waiting stay up
+  until you answer them.
 - **deny** refuses it, and the agent is told you declined.
 
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
@@ -62,7 +62,7 @@ If the session that asked is deleted while its card waits, the request is refuse
 
 ## Stop asking for a host
 
-Each host has a **run farhelm commands from this host without asking** setting, in its settings next to the YOLO one
+Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
 that host's sessions start, stop, restart, rename, and copy sessions on any of your hosts, and change templates, without
 asking you. Turn it on only for a host whose agents you would let do that unsupervised.
@@ -77,7 +77,7 @@ start a YOLO session at all, with or without your approval. It cannot start a se
 [custom command](/docs/agents/custom-commands/) there either, because Farhelm never reads a command to check whether it
 runs without approval prompts, and an agent's word on that is not enough. The same goes for copying a session that an
 older version of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents
-do any of these on a host, turn on its **start YOLO sessions here without asking** setting.
+do any of these on a host, turn on its **Start YOLO sessions without asking** setting.
 
 [Restarting](/docs/using/stop-restart-resume/) a session that already exists is not affected: a restart resumes the
 session with the settings it has saved, and is asked about like any other request.

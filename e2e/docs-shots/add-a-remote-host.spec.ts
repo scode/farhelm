@@ -61,11 +61,13 @@ test("setup plan", async ({ page, request }) => {
     "Everything setup will create on the host, all inside your own home directory. Nothing has changed yet.",
     { side: "left" },
   );
-  await director.callout(yes, "Sets the host up as listed.", { side: "left", dy: 30 });
+  // Both below the dialog's row of answers, side by side and well clear of
+  // it, so neither covers cancel or the other answer.
+  await director.callout(yes, "Sets the host up as listed.", { side: "bottom", dx: -70, dy: 40 });
   await director.callout(
     dialog.locator(".host-setup-permanent"),
     "Sets it up, and sets up later hosts without asking.",
-    { side: "bottom", dy: 20 },
+    { side: "bottom", dx: -230, dy: 40 },
   );
   await shot(page, `${PAGE}/setup-plan`, [dialog], { maxWidth: 930 });
 });

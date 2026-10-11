@@ -108,4 +108,25 @@
     { name: "api-repo", fields: { host: "build-box", destination: { folder: "~/src/api" } } },
     { name: "quick-claude", fields: { kind: "agent", agent: "claude", effort: "low" } },
   ],
+
+  // Managed checkouts whose last session was deleted, for the trash dialog on
+  // the session list page. The staged fleet has no managed checkouts, so the
+  // trash listing is answered from these in transit, and only for a shot that
+  // asks for it. `root` is the invented directory checkouts go into on that
+  // host; `age` is seconds since the checkout moved to the trash; `bytes` is
+  // the disk usage shown.
+  checkout_trash: [
+    { host: "local", repository: "acme/web", checkout: "web-fix-login", root: "/Users/you/work", age: 5400, bytes: 48200000 },
+    { host: "local", repository: "acme/api", checkout: "api-2", root: "/Users/you/work", age: 259200, bytes: 213000000 },
+    { host: "build-box", repository: "acme/api", checkout: "api-1", root: "/home/dev/work", age: 86400, bytes: 187000000 },
+  ],
+
+  // Files the open session's terminal names, for the download hover on the
+  // Work in a session page. The staged sessions' real directories are the
+  // run's temporary state, so the hover's check is answered from these in
+  // transit, and only for a shot that asks for it. `path` is as the terminal
+  // prints it; `shown_path` is the invented full path the hover reports.
+  terminal_files: [
+    { host: "local", path: "e2e/attach.spec.ts", shown_path: "/Users/you/src/farhelm/e2e/attach.spec.ts", size: 6412 },
+  ],
 }
