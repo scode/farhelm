@@ -266,7 +266,15 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    asset the release contract names present and NO `SHA256SUMS` or `SHA256SUMS.minisig` (those belong on get.farhelm.io;
    the workflow refuses them), the release NOT marked prerelease, and the release page showing the changelog section
    above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish at
-   its version path, and that `/latest` must not move yet. Once they have, check get.farhelm.io (read-only):
+   its version path, and hand them exactly this line, with the version filled in, to run from their release management
+   location (outside this repository; agents never run it):
+
+   ```
+   ./bin/publish-release.sh vX.Y.Z && ./bin/deploy.sh
+   ```
+
+   It publishes the release at its version path without moving `/latest`. The maintainer asked for this one line on
+   2026-10-10, for convenience. Once they have run it, check get.farhelm.io (read-only):
    `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and `install.sh` answer, and
    `https://get.farhelm.io/latest` still names the previous stable release.
 
