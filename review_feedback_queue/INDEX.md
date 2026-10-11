@@ -27,12 +27,6 @@ triage.
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the
   host.
 
-- `supervisor-cannot-start-farhelms-executable-path-contains.md` — A dollar in the executable path makes the supervisor
-  service unusable.
-- `helm-cannot-start-farhelms-executable-path-contains.md` — A dollar in the executable path prevents the helm service
-  from starting.
-- `dollar-escaping-changes-executable-path.md` — Service rendering changes the executable selected by a
-  dollar-containing path.
 - `uninstall-race-first-time-service-setup.md` — Concurrent setup and uninstall can leave services pointing at a deleted
   executable.
 - `interrupted-paired-writes-still-split-service-state.md` — Interrupted service reconfiguration can persist
@@ -50,18 +44,6 @@ triage.
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
   open dialogs.
-- `composition-fallback-resend-previously-typed-input.md` — Composition fallback could resend retained terminal input.
-- `split-utf-characters-disappear-terminal-output.md` — Valid Unicode output can disappear at chunk boundaries.
-- `erasing-through-bottom-right-cell-throws-interrupts-output.md` — An erase command could wedge a connected terminal's
-  output.
-- `narrowing-terminal-corrupts-combining-character-text.md` — Narrowing the terminal changes combining-character text.
-- `relative-cursor-movement-adds-scrolling-margin-twice.md` — Relative cursor movement draws on the wrong row with a
-  nonzero scrolling margin.
-- `column-positioning-unexpectedly-changes-row.md` — Setting the cursor column also changes its row.
-- `alternate-horizontal-positioning-command-changes-row.md` — The alternate column-positioning command independently
-  moves the cursor's row.
-- `setup-writes-unusable-service-paths-executable-path.md` — Setup persistently writes the wrong service executable for
-  dollar-containing paths.
 - `incomplete-latest-response-select-wrong-release.md` — A truncated latest-version response could install an unintended
   older release.
 - `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
@@ -94,8 +76,6 @@ triage.
   needed to retry process cleanup.
 - `template-command-editor-displays-untrusted-command-bytes.md` — The template launch-command editor hides meaningful
   remote-derived characters.
-- `template-resume-command-editor-has-same-unsafe-display.md` — The template resume-command editor can misrepresent its
-  retained command.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
 - `live-processes-reported-dead-macos.md` — macOS process checks can certify death without observing the process.
@@ -129,8 +109,6 @@ triage.
   is removed.
 - `prompt-classification-test-finish-waiting-prompt-appears.md` — A delayed prompt could make its classification test
   fail on correct behavior.
-- `foreign-destination-fixture-reuse-identity-it-expects-reject.md` — The foreign-directory test could accidentally
-  recreate the original identity.
 - `shutdown-race-test-establish-intended-interleaving.md` — The shutdown-race test does not hold reconciliation at the
   database boundary.
 - `logging-test-establish-refresh-completed.md` — The quiet-logging test could inspect logs before any refresh
@@ -175,22 +153,12 @@ triage.
   from its retained bytes.
 - `stored-template-resume-commands-have-same-independent.md` — The template resume seed conceals bytes kept for later
   execution.
-- `scrollbar-dragging-reverses-very-short-terminal.md` — A very short terminal reverses scrollbar dragging.
-- `ordinary-creation-never-refreshes-sidebar-under-build.md` — Creation under build mismatch could leave the new session
-  absent from navigation.
 - `successful-notification-reads-leave-bell-unread-under.md` — A successful notification read leaves the bell stale
   under build mismatch.
 - `clearing-notifications-leaves-cleared-bell-entries-visible.md` — Cleared notifications reappear under build mismatch.
 - `manual-read-unread-toggles-cannot-visibly-toggle.md` — A manual read toggle cannot visibly reverse under build
   mismatch.
 - `ship-font-license-embedded-ui.md` — Release bundles could omit the license required with embedded fonts.
-- `hyperlink-starting-final-content-cell-disappears.md` — A hyperlink beginning in the row's final content cell
-  disappears.
-- `resizing-resurrects-cleared-selection-highlight.md` — Resizing brings back a selection highlight that was cleared.
-- `concealed-wide-characters-collapse-terminal-columns-concealed-concealed-character-in-merged-span.md` — A concealed
-  wide character collapses columns inside a merged span.
-- `concealed-wide-characters-collapse-terminal-columns-concealed-concealed-character-in-new-span.md` — A concealed wide
-  character also collapses columns in a new span.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
@@ -215,10 +183,6 @@ triage.
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
   global serialization guard.
-- `saving-restoring-cursor-attributes-loses-extended-formatting.md` — Cursor restore leaves extended formatting changed
-  after the save.
-- `scrolling-downward-inserts-rows-wrong-background.md` — Downward scrolling inserts blank rows with the default
-  background.
 - `classification-counts-runner-failures-deterministic-test-failures.md` — The failure classifier treats runner errors
   as proof of deterministic test failure.
 - `history-fixture-enables-yolo-installing-restoration-guard.md` — History-test setup can leak its changed confirmation
@@ -283,12 +247,8 @@ triage.
   feed counted as an available GUI.
 - `template-supplied-session-names-rendered-raw.md` — A template's saved session name could be misleading in the
   launcher.
-- `recursive-selection-across-very-long-wrapped-word.md` — Selecting a very long wrapped word could exhaust the
-  browser's stack.
 - `watchdog-logs-rather-recovering-window.md` — A persistent desktop bridge outage could accumulate native query
   entries.
-- `mouse-handlers-surviving-disposal-during-drag.md` — Disposal during a lost mouse release could leave document
-  handlers attached.
 - `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
   template.
 - `concurrent-starts-bypass-sweep-serialization.md` — Concurrent sweep starts could publish the losing run as current.
