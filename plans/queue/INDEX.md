@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `supervisor-lifecycle-test-fixes.md` — make seven supervisor lifecycle tests clean up their fixtures and prove the paths they name
 - [in-flight b406d5] `helm-and-portability-test-fixes.md` — make five helm routing, upload, portability and timing tests prove what they claim
 - [complete] `e2e-session-test-fixes.md` — make seven end-to-end terminal and session tests prove what they claim
-- [pending] `browser-spec-fixes.md` — recover credentials after a failed rotation test, tighten the long-folder sidebar test, and clean up after the real-Claude spawn test
+- [in-flight 39e34e] `browser-spec-fixes.md` — recover credentials after a failed rotation test, tighten the long-folder sidebar test, and clean up after the real-Claude spawn test
