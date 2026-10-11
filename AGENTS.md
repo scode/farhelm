@@ -662,6 +662,14 @@ and committing the new version directory it writes; `docs/agent-screen-fixtures.
 and how to read a failure. It spends real vendor turns, so run it when asked or after an agent upgrade, never as part of
 ordinary validation.
 
+# Driving real agent TUIs
+
+When a claim about how an installed agent behaves in a terminal matters (which prompts it shows at start, what a screen
+looks like, how it reacts to a key) and nothing in the repo proves it, look rather than trust SPEC.md, a docs page, or
+memory: `scripts/agent-tui.py` runs the agent in a private tmux server and lets you read its screen and type at it,
+without touching the live install. `.agents/real-agent-tui.md` is the recipe, including how to start an agent the way
+Farhelm does, why every first-run check needs a fresh directory, and which answers leave traces in vendor configuration.
+
 # The live install is off-limits
 
 This machine may run the maintainer's own Farhelm, an ordinary installation that is installed and updated the way any
