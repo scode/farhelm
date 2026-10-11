@@ -237,6 +237,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   expects an attempt. Stage the mismatch after the first witnessed attempt, keeping ordinary displacing attaches
   observable throughout the rollback window; increasing the wait cannot repair the premature mismatch.
 
+- **Idle heartbeat during busy terminal output.** `heartbeat-stays-idle-under-output` in
+  `e2e/tests/terminal-reconnect.spec.ts` counted one ping instead of zero in Chromium during sweep run
+  `58927983-76d4-4669-8bc0-92ae16cfab01`. Exact both-engine reruns passed (`62ae7a7d-bc34-4884-83e9-946b0731afea`),
+  failed in both engines (`5336ef1f-951c-4209-94a1-93d76787321d`), then passed (`a1cc2246-ac82-46d5-a7bd-70a9fb3fc2b0`)
+  on unchanged clean main `3f0e21b3`. The cause is unestablished: the ping counter includes setup before the busy
+  window, and the test does not establish that every output gap stays below its 1.5-second idle threshold. Separate
+  legitimate idle probes from probes during witnessed busy traffic before deciding whether the heartbeat is wrong
+  (FLAKES.md, 2026-10-10).
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
