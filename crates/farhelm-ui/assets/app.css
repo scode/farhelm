@@ -7023,8 +7023,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-sizing: border-box;
   max-width: 100%;
   max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
-  overflow-y: auto;
-  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-2);
@@ -7036,12 +7038,27 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .checkout-trash-header,
 .checkout-trash-host-header,
 .checkout-trash-entry-heading,
-.checkout-trash-footer,
 .checkout-trash-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+/* Global actions cannot depend on the length of the archive list. Only the
+   body scrolls; wrapping the fixed header keeps both buttons usable on phones. */
+.checkout-trash-header {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  padding: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.checkout-trash-header-actions { display: flex; flex-shrink: 0; gap: 10px; margin-left: auto; }
+.checkout-trash-total { flex: 1 1 12em; min-width: 0; color: var(--fg-1); }
+.checkout-trash-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 18px;
 }
 
 .checkout-trash-header h2 {
@@ -7069,8 +7086,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   background: var(--bg-1);
 }
 
-.checkout-trash-host-header,
-.checkout-trash-footer {
+.checkout-trash-host-header {
   flex-wrap: wrap;
 }
 
@@ -7081,8 +7097,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .checkout-trash-host-header > div > div,
-.checkout-trash-entry-meta,
-.checkout-trash-footer > span {
+.checkout-trash-entry-meta {
   color: var(--fg-1);
 }
 
@@ -7140,12 +7155,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   background: var(--bg-1);
   border-top: 1px solid var(--border);
   overflow-wrap: anywhere;
-}
-
-.checkout-trash-footer {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
 }
 
 /* This node exists only for an affirmative local archive reply. Web Animations
