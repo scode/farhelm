@@ -10332,3 +10332,946 @@
 - Execution: complete in jj change `xtrpmrqtwulstuzpmukmwxknysmqpswp`, bookmark
   `plan/browser-sidebar-test-oracles/01-browser-sidebar-test-oracles`,
   [draft PR](https://github.com/scode/farhelm/pull/1821/changes).
+
+## installer-directory-target.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  installer replaces app files with `mv -f` (`replace_file` in `scripts/install.sh`), which moves the new file into a
+  directory, or a symlink to one, at the destination and still reports success; the update preflight checks folders but
+  not the exact file destinations. A damaged or modified app whose main program has become a folder therefore "updates"
+  successfully and still does not launch, and a linked folder receives installer writes outside the app. The installer
+  was not run. The symlinked-folder sibling was fixed in [#1656](https://github.com/scode/farhelm/pull/1656/changes),
+  and this extends the same preflight.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Before changing anything, an update refuses when any exact destination it replaces (main program,
+  forwarder, icon, `Info.plist`, installed-version record, installation marker) is a directory or a symlink to one.
+  `scripts/test-install-sh.sh` gains fixtures for a directory at the main program's path and a symlink to an outside
+  folder holding a sentinel: both refuse, the sentinel survives, and the installed record is unchanged. `sh -n`,
+  shellcheck and the installer test pass. If the fix turns out to need significant new complexity or a refactor, or
+  otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## incomplete-latest-response-select-wrong-release.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. An
+  unpinned install reads `/latest` with `|| true` (`scripts/install.sh`), which discards curl's exit status, and only
+  the HTTP status is checked afterwards. A 200 reply cut short can still parse as a valid but older tag (`v1.2.1` from
+  `v1.2.12`), and the installer then installs that release and reports success. The trigger is rare: the reply is one
+  short line, so it takes a misbehaving proxy or CDN. The desktop updater pins its version and is not affected.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: An unpinned install refuses whenever the `/latest` transfer did not complete, even with HTTP 200,
+  and requests nothing beyond `/latest`. A `scripts/test-install-sh.sh` fixture serves 200 with a body shorter than its
+  `Content-Length` and asserts the refusal, its message, and that nothing under the home directory changed. The existing
+  `/latest` cases, including the 404 message, are unchanged; `sh -n` and shellcheck stay clean. If the fix turns out to
+  need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
+  the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## retrying-through-unchanged-permission-choice-launch-duplicate.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. In the
+  new-session dialog, choosing an effort, permission or workspace-trust value always discards the retry key
+  (`crates/farhelm-ui/src/list/create_form.rs`), and Enter on an already-selected choice re-runs the launch. After a
+  lost reply, retrying that way sends a fresh key, so the supervisor cannot recognize the retry and can start a second
+  session, against SPEC.md's one-session-per-intended-create promise. The key is already re-minted whenever the request
+  snapshot changes, so clearing it on an unchanged choice adds nothing. Not checked: whether the tab and harness
+  callbacks, which also clear the key, can fire without changing the request.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Re-choosing an unchanged effort, permission or trust value keeps the key, so a retry after a lost
+  reply yields one session; a real change still mints a new key. `e2e/tests/terminal-create-idempotency.spec.ts` gains a
+  lost-reply retry through Enter on the selected choice, asserting that both requests carry the same key and exactly one
+  session exists. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
+  those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restored-terminal-snapshots-lose-select-to-copy.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. When a
+  terminal's reconnect fails (another client took the session over, or the attach stalled or was refused),
+  `cancelReconnect` in `crates/farhelm-ui/assets/terminal.js` shows the kept terminal as a frozen read-only snapshot but
+  never reinstalls the select-to-copy handlers its teardown removed, and the reconciler skips snapshots, so nothing
+  restores them later. Selecting text there highlights it but does not copy it, unlike every other terminal (SPEC.md
+  promises select-to-copy, and that a displaced client keeps a snapshot). Not run in a browser.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Selecting text in a restored snapshot copies it, under the same forcing and mouse-reporting rules
+  as a live terminal, and the handlers are removed when the snapshot is buried. No input or connection callbacks come
+  back. A browser regression test, extending the restored-snapshot scenario in `e2e/tests/terminal-reconnect.spec.ts`,
+  asserts the clipboard contents on Chromium and WebKit. The likely gate trigger: the live copy handler also drives the
+  "program handles selection itself" notice and the OSC 52 grace period, and a fix that has to restructure it, or
+  duplicate more than a small policy, no longer fits. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## successful-notification-reads-leave-bell-unread-under.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. While the
+  reload notice is showing (the window's build differs from the helm's), the sidebar's unattended refreshes stop.
+  Closing a session's notification list marks them read on the helm, but on success requests no explicit listing read
+  (`crates/farhelm-ui/src/list/view.rs`), so the bell stays loud until something else refreshes. SPEC_impl.md says
+  explicit user actions keep working under a mismatch, and delete, replace, rename and creation already refresh
+  explicitly. [#1832](https://github.com/scode/farhelm/pull/1832/changes) fixed this bell's failure-retry path, not its
+  success path. Not run in a browser.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: A successful read mark turns the bell grey under a latched build mismatch, without letting a
+  late, older listing reply bring the loud state back. Failure handling is unchanged. A regression test in
+  `e2e/tests/notifications.spec.ts` forces the mismatch. The clear and manual read/unread findings below have the same
+  shape and can share the change. If the fix turns out to need significant new complexity or a refactor, or otherwise
+  stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## clearing-notifications-leaves-cleared-bell-entries-visible.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The same
+  gap for Clear: on success, `clear_bell` in `crates/farhelm-ui/src/list/view.rs` removes the row's error line but
+  requests no listing read, so under a build mismatch the bell and the cleared entries stay until something else
+  refreshes. SPEC.md says Clear makes the bell disappear, and Clear is not among its best-effort exceptions.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: A successful Clear requests an explicit listing read, so the bell and its entries disappear under
+  a build mismatch, with a focused test in `e2e/tests/notifications.spec.ts`. The failed-clear error and the
+  close-marks-read path are unchanged. Check whether Clear needs the ordering guard rename uses against an older listing
+  read already in flight. If the fix turns out to need significant new complexity or a refactor, or otherwise stops
+  fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## manual-read-unread-toggles-cannot-visibly-toggle.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  sidebar's manual mark read / mark unread saves the change but requests no explicit listing read (`on_mark_seen` and
+  `seen_toggle_report` in `crates/farhelm-ui/src/list/view.rs`). The row's dot, label and next value come from the last
+  listing, so under a build mismatch the row does not change and a second click sends the same value again instead of
+  reversing it.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: After a successful toggle the row shows the new state even with notice-driven refreshes
+  withdrawn, with a regression test that the toggle requests an explicit listing read. The report runs from a writer
+  task that can outlive the list, so the refresh must tolerate an unmounted list; the
+  `seen-toggle-report-panics-after-unmount.md` fix must still hold. If the fix turns out to need significant new
+  complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-catalog-error.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  launcher turns a failed template read into an empty list (`unwrap_or_default` in
+  `crates/farhelm-ui/src/list/create_form.rs`), so `tl:` search looks exactly like having no saved templates, with no
+  error and no retry short of reopening the dialog. SPEC.md requires failed operations to surface an actionable error,
+  and template discovery is not among its best-effort exceptions. The same form already shows the model catalog's
+  failure with a retry button.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: A failed template read is visible and retryable from `tl:` search, mirroring the model catalog's
+  error, without blocking unrelated launcher choices. A focused test fails the templates request, asserts the error and
+  retry, then lists templates after a successful retry. The initial template action, which waits on that read, must
+  surface the failure rather than silently do nothing. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## ship-font-license-embedded-ui.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The web
+  UI and the desktop app ship the JetBrains Mono Nerd Font files, but `assets/fonts/OFL.txt` is not declared as an asset
+  (`crates/farhelm-ui/src/lib.rs`), so the license text the OFL requires alongside distributed copies is not shipped.
+  The same file declares the web-links addon's license for exactly this reason: "A source-side text file alone proves
+  nothing about distributed copies". The release bundle was not inspected.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The web bundle and the desktop app's embedded UI both carry the full OFL text at a stable,
+  unhashed path, and `scripts/check-desktop-assets.sh` passes. `addon-clipboard-LICENSES.txt` appears to have the same
+  gap: include it if the same declaration fixes it, and otherwise report it back. If the fix turns out to need
+  significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
+  user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## claiming-current-plan-refresh-plan-subsequently-executed.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by reading `plans/AGENTS.md`, not by a concurrent schedule. An executor fetches at the
+  clean-main boundary, claims through the queue script against GitHub's current state, then reads the plan from its
+  local `main@origin` with no fetch in between. A revision or release of that plan landed while it was picking (which
+  can take minutes) is missed, including a `## Decisions` entry that overrides the plan body.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: After a successful claim, the executor reads the plan and its Decisions from a freshly fetched
+  `main@origin`; the other steps keep their meaning. This is an instruction-only change, so the validation is
+  `dprint check plans/AGENTS.md`. If the fix turns out to need significant new complexity or a refactor, or otherwise
+  stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## partial-shell-result-parsing.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. Two
+  supervisor end-to-end tab tests (`crates/farhelm/tests/e2e/terminal_tabs.rs`, the working-directory and environment
+  probes) wait only for the opening marker and then parse whatever has arrived, so correct output split across terminal
+  chunks reads as a truncated path or value and fails the test. Test-only. FLAKES.md records no observed failure, and
+  how often a split lands there was not measured.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Both waits require the closing delimiter before parsing, using a closing marker the echoed
+  command cannot contain, and both tests keep their current assertions. If the fix turns out to need significant new
+  complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-rotation-assertion-invalidates-subsequent-tests-credentials.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. In the
+  token-rotation browser test (`e2e/tests/auth.spec.ts`), assertions between rotating the helm token and exchanging the
+  replacement can fail and leave the shared browser auth file holding the revoked credential, so every later browser
+  test fails authentication and one real failure shows up as a cascade. The test's own comment says its credential write
+  exists to prevent that cascade, but the write covers only later failures.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Any failure after rotation leaves the shared auth state with a working credential and still
+  reports the original failure; the success path and the stored shape are unchanged. Validate by temporarily injecting a
+  failure after rotation. If the recovery exchange itself fails, it must not hide the original error. If the fix turns
+  out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
+  back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replay-geometry-test-rejects-valid-live-output.md
+
+- Outcome: `fix code`.
+- Assessment: Partly confirmed by code reading on main at `f9634754` (screened 2026-10-11). The reattach replay-width
+  test (`crates/farhelm/tests/e2e/session_lifecycle.rs`) waits only for the bare payload, which the terminal's own echo
+  satisfies before the fake agent's echo arrives; a late agent echo is then appended to the replay buffer and trips the
+  check that rejects a contiguous payload. Whether the agent's echo can lag that far is unverified; it would take
+  shared-machine load.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test detaches only after the fake agent's echo of the payload has arrived, and still fails if
+  the replay is captured before the attach-time resize. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## skip-tmux-test-passes-tmux-queried.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `list_sessions_skips_pane_states_when_nothing_has_a_terminal` (`crates/farhelm-supervisor/src/service/handlers.rs`)
+  kills the private tmux server and claims a tmux query would then error, but the pane-state query treats a missing
+  server or socket as an empty success, so removing the listing's guard would not fail the test. No mutation run.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test uses a stimulus that makes a tmux query fail with a propagating error, proven by
+  asserting the pane-state query returns an error, and keeps its listing assertion and an updated doc. A one-off removal
+  of the guard makes it fail. The stimulus must behave the same on the pinned tmux. If the fix turns out to need
+  significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
+  user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## commit-race-test-exercise-only-pre-commit-abort-path.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. In the
+  upload commit-race test (`crates/farhelm-helm/src/uploads.rs`), the fake supervisor aborts right after the data frame
+  without waiting for the commit, so the helm can return an already-recorded abort before it sends anything and never
+  exercise the in-flight abort watcher the test's doc describes. Whether that early path actually wins on the test's
+  runtime was not shown.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The fake supervisor receives and asserts the commit before aborting, and never answers it. The
+  response bound and the reason check are unchanged. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## idle-flush-test-permits-deadline-extension-it-claims.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11) and Tokio's paused-clock
+  auto-advance; no mutant run. `unrelated_control_traffic_does_not_starve_the_idle_flush`
+  (`crates/farhelm-supervisor/src/tmux/stream.rs`) ends with an unbounded read on a paused clock, which advances to
+  whatever deadline is pending, so a regression where unrelated lines reset the deadline would still pass.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test requires the flush by the original deadline, fails when unrelated lines reset the
+  deadline, and passes reliably under load. The likely gate trigger: the fixture feeds through a real `cat` pipe, so
+  consumption times under a paused clock are not deterministic, and a fix that needs a new feed seam or observation
+  point in production code no longer fits. If the fix turns out to need significant new complexity or a refactor, or
+  otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## shutdown-tests-prove-session-existence-more-strongly.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `crates/farhelm/tests/e2e/supervisor_stop.rs` checks that the agent survives an orderly supervisor stop only with
+  `tmux has-session`, while dead panes are kept (`remain-on-exit on`), so a stop that killed the agent would still pass
+  in all three variants (systemd stop, desktop app exit, terminal hangup). No product loss of agents is claimed.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The shared stop helper also asserts the agent is alive, so all three variants fail if the agent
+  dies during the stop; the existing checks are unchanged. A slightly late death may need a short bounded re-check with
+  a `sleep-ok` reason. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
+  those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## stop-test-leave-fixture-permanently-stopped-failure.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `stop_survives_connection_task_cancellation` (`crates/farhelm-supervisor/src/service/handlers.rs`) SIGSTOPs a bare
+  sleeper and reaps it only at the end, so any panic in between leaves a permanently stopped process on the machine,
+  against the sleeper module's promise that panic paths leak at most one 30-second sleeper. The same class was fixed in
+  the sweep tests with a kill-and-reap guard ([#1814](https://github.com/scode/farhelm/pull/1814/changes)).
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The child is owned by a kill-and-reap guard from spawn, before the SIGSTOP, so it is killed and
+  reaped on every exit path; the assertions are unchanged. Fix together with
+  `restart-test-has-same-stopped-child-cleanup-gap.md`, sharing one guard. If the fix turns out to need significant new
+  complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-test-has-same-stopped-child-cleanup-gap.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  Restart twin, `restart_survives_connection_task_cancellation` in the same file, has the same gap: fallible steps
+  (supervisor construction, store setup, the dispatch wait and its deadline) sit between the SIGSTOP and the final reap,
+  with no unwind-safe owner.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The same guard as `stop-test-leave-fixture-permanently-stopped-failure.md` owns this child from
+  spawn onward; the success-path assertions are unchanged. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## browse-routing-test-discards-wrong-host-assertion.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  helm's folder-browse routing test (`crates/farhelm-helm/src/sessions_tests.rs`) aborts the local silent-supervisor
+  task instead of awaiting it, so the panic that task raises on receiving a request is lost, and a browse misrouted to
+  the helm's own host would pass. Sibling tests await their silent peers.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test awaits the local silent supervisor and fails when a browse reaches it; confirm once by
+  temporarily misrouting. The two-second silence window is a separate queued item
+  (`shared-silence-observers-have-same-premature-success-boundary.md`) and out of scope. If the fix turns out to need
+  significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
+  user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-spec-publication-test-observe-whether-tmux-started.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. A
+  supervisor test (`crates/farhelm-supervisor/src/service/core.rs`) claims to prove that no tmux window is created when
+  writing the launch spec fails, but asserts only the error and empty session records, which the failure path rolls back
+  anyway. A regression that created the window first would pass.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: After the refused create, the test asserts that no tmux pane exists, keeping its existing
+  assertions; confirm once by temporarily swapping the order. If the fix turns out to need significant new complexity or
+  a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## missing-workspaces-cleanup-diagnostic-recognized-despite-discarded.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. In the
+  opt-in real-Claude spawn test (`e2e/tests/spawn.spec.ts`, `FARHELM_REAL_AGENT=1`), cleanup runs `jj workspace forget`
+  with stderr discarded, so the "no such workspace" tolerance never matches. Any failure before Claude creates the
+  workspace then rethrows from cleanup, hides the real failure, and skips scratch removal and restoring the YOLO and
+  commands-without-asking preferences. jj's exact wording was not checked.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: A missing workspace is tolerated quietly and other `forget` failures are still reported, with the
+  matcher checked against the pinned jj's real message. Preference restoration and scratch removal run on every path. If
+  the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop
+  and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  upload memory test in `crates/farhelm-supervisor/src/files.rs` reads `/proc/self/statm` with no platform guard, so it
+  fails on macOS. [#1834](https://github.com/scode/farhelm/pull/1834/changes) fixed its page-size assumption but not the
+  `/proc` dependency. Not run on macOS.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test no longer touches `/proc` on non-Linux targets, gated the way other Linux-only
+  supervisor tests are, and still runs on Linux. If the fix turns out to need significant new complexity or a refactor,
+  or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## dead-tab-regression-cannot-pass-ordinary-macos.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  supervisor's tab-reaping test (`crates/farhelm-supervisor/src/service/ticker.rs`) has no Linux gate but depends on
+  `setsid` and `/proc`, so on macOS it fails in setup and never checks that dead tabs are cleaned up. Even a portable
+  fixture could not check the daemon sweep there, because `/bin/sleep` is a platform binary whose environment macOS
+  withholds. The same class was fixed in [#1834](https://github.com/scode/farhelm/pull/1834/changes). Not run on macOS.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Portable tab-reaping coverage runs on macOS without `setsid` or procfs, and the daemon-sweep
+  scenario moves to a Linux-only test that keeps its liveness premise. Confirm both compile on macOS. If the fix turns
+  out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
+  back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## cgroup-cleanup-masks-marker-discovery-regression.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `stop_kills_a_reparented_marked_daemon` (`crates/farhelm/tests/e2e/session_lifecycle.rs`) says it fails if marker
+  discovery is removed, but it runs with real systemd scopes, so on a systemd host the scope kill takes the daemon with
+  it either way. Its sibling test disables scopes for exactly this reason. No mutation run.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test runs with scopes disabled, asserts the launch recorded no scope, and still requires the
+  pane process and the reparented daemon to die after Stop. If the fix turns out to need significant new complexity or a
+  refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## long-cwd-test-never-supplies-long-path.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  sidebar test "a long cwd shows its tail" (`e2e/tests/sidebar.spec.ts`) uses `/tmp`, which never overflows the row, so
+  the tail-first clipping and the leading ellipsis are never exercised.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test uses a path that really overflows the row and fails if the ellipsis or the tail-first
+  clipping is removed, keeping its logical-order and direction checks, on Chromium and WebKit. If the fix turns out to
+  need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
+  the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## hook-test-startup-delete-newly-created-launch-specification.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  hook-identity end-to-end fixture (`ServeTask::spawn` in `crates/farhelm/tests/e2e/hook_identity.rs`) returns as soon
+  as a connect succeeds, which is right after bind and before the supervisor's startup sweep removes launch files of
+  sessions missing from its startup snapshot. The test's client talks over an in-memory pipe and can create a session in
+  that window, whose launch file the sweep may then delete. This is a test flake only: real clients are not accepted
+  until startup finishes. Not reproduced.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The fixture returns only after a protocol handshake over the real socket proves startup
+  reconciliation finished. Keep the change in the hook fixture rather than the shared readiness helper, which has about
+  eight callers. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
+  criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## orphan-client-test-accepts-failed-inspection-proof-no.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  leaked-writer check in `crates/farhelm/tests/e2e/terminal_tabs.rs` treats a failed or timed-out tmux client query as
+  "no clients", and an incomplete pipe scan as "no writers", so it can pass without inspecting anything; the replacement
+  supervisor's startup reap then hides the leak.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The check fails loudly when the client query or the scan cannot be performed, while a process
+  that exits during the scan still passes. If the fix turns out to need significant new complexity or a refactor, or
+  otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## post-stall-liveness-witness-include-replay.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction. The
+  stall-detach test in `crates/farhelm/tests/e2e/terminal_backpressure.rs` accepts its progress witness anywhere in the
+  reattach stream, including the initial replay, which probably already holds it because the counter keeps producing
+  during the stall. A pane that stays wedged can pass. The sibling forced-pause test already measures past the replay.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The witness requires output produced after the reattach's replay; the rest of the test is
+  unchanged. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
+  criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## hup-resistant-process-fixture-leaks-early-failure.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `delete_reaps_an_unmarked_process_under_a_tab_shell` (`crates/farhelm-supervisor/src/service/core.rs`) starts a shell
+  that ignores hangups and runs `sleep 1000`, and several fallible waits and asserts run before its only cleanup, so an
+  early failure leaves both running for about 17 minutes; killing tmux does not stop them. `.agents/test-authoring.md`
+  requires cleanup on failure paths, and [#1814](https://github.com/scode/farhelm/pull/1814/changes) fixed this class
+  elsewhere.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: Every early failure kills the shell and its sleep, a recycled pid is never signalled, and the
+  success-path assertions and sweep-reaping coverage are kept. If the fix turns out to need significant new complexity
+  or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## live-agent-restart-test-never-establishes-live-agent.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `restart_reuses_live_agent_and_preserves_tabs` (`crates/farhelm-supervisor/src/service/core.rs`) launches through a
+  nonexistent executable, so the agent dies quickly and the restart usually takes the dead-agent branch rather than the
+  live-agent branch it is named for. End-to-end coverage of restarting a running agent with an open tab exists in
+  `crates/farhelm/tests/e2e/terminal_tabs.rs`, so the gap is at unit level.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: The test shows the agent pane is live before the restart and asserts tab preservation through the
+  live-agent path, and dead-agent restart coverage stays. The likely gate trigger: a working launch in a supervisor unit
+  test may run into status classification, consent or sweep markers, and a fix that needs new fixture machinery to reach
+  the same restart path no longer fits. If the fix turns out to need significant new complexity or a refactor, or
+  otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## stop-intent-test-exercises-different-failure-path.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading on main at `f9634754` (screened 2026-10-11), not runtime reproduction.
+  `a_stop_that_cannot_record_its_intent_reports_instead_of_killing` (`crates/farhelm-supervisor/src/service/core.rs`)
+  builds a session with no terminal, so it takes the dead-or-absent branch, whose failure text is identical to the
+  running-agent branch's. Nothing proves that a Stop that cannot record its intent kills nothing when the agent is
+  running.
+- Decision: fix it. On 2026-10-11 the user asked for every queue finding that is clearly a bug (not ambiguous, and
+  needing no judgement about whether it should be fixed given the product and its spec), whose fix is reasonably
+  straightforward without significant new complexity or a refactor, and that is still relevant to current code, and
+  chose `fix code` for all 32 findings a screen of the queue found to meet those criteria. Complexity gate, in the
+  user's words: "it must bounce back to me if during fixing it turns out to be more complicated and not fit the
+  criteria."
+- Completion criteria: A test drives the running-agent stop path into the recording failure and proves the agent
+  survives; the dead-or-absent coverage stays under an accurate name. If the fix turns out to need significant new
+  complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## dollar-escaping-changes-executable-path.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `3502b690` in [#1817](https://github.com/scode/farhelm/pull/1817/changes) ("fix:
+  reject unsupported service setups and quote lock recovery"), which landed after the reviewed commit. Both service
+  units now render the program path through `systemd_program` (`crates/farhelm-helm/src/units.rs`), which refuses any
+  `$` before quoting, so a doubled `$$` can no longer reach the program position. Dollars in arguments are still
+  doubled, which is correct. Checked against `f9634754` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## helm-cannot-start-farhelms-executable-path-contains.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `3502b690` in [#1817](https://github.com/scode/farhelm/pull/1817/changes) ("fix:
+  reject unsupported service setups and quote lock recovery"), which landed after the reviewed commit. Setup now refuses
+  an executable path containing `$` with an actionable error instead of writing a helm unit that cannot start: the helm
+  unit's program path goes through `systemd_program` (`crates/farhelm-helm/src/units.rs`). Checked against `f9634754` on
+  2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## setup-writes-unusable-service-paths-executable-path.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `3502b690` in [#1817](https://github.com/scode/farhelm/pull/1817/changes) ("fix:
+  reject unsupported service setups and quote lock recovery"), which landed after the reviewed commit. Setup refuses a
+  `$` in the executable path before writing either service unit (`systemd_program` in
+  `crates/farhelm-helm/src/units.rs`, used by both renderers), with the regression test
+  `both_units_refuse_dollars_in_the_program_path`. Checked against `f9634754` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## supervisor-cannot-start-farhelms-executable-path-contains.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `3502b690` in [#1817](https://github.com/scode/farhelm/pull/1817/changes) ("fix:
+  reject unsupported service setups and quote lock recovery"), which landed after the reviewed commit. Setup refuses an
+  executable path containing `$` with an actionable error instead of writing a supervisor unit that cannot start: the
+  supervisor unit's program path goes through `systemd_program` (`crates/farhelm-helm/src/units.rs`). Checked against
+  `f9634754` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## ordinary-creation-never-refreshes-sidebar-under-build.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `7522d172` in [#1832](https://github.com/scode/farhelm/pull/1832/changes) ("fix:
+  correct launcher and session UI edge cases"), which landed after the reviewed commit. Creating a session now always
+  requests an explicit listing read (`created_listing(Trigger::Explicit)` in `crates/farhelm-ui/src/list/view.rs`), not
+  only for replace-with, so the new session shows in the sidebar under a build mismatch too. Checked against `f9634754`
+  on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## template-resume-command-editor-has-same-unsafe-display.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `dd9573cc` in [#1811](https://github.com/scode/farhelm/pull/1811/changes) ("fix:
+  make GUI pastes and template text safe"), which landed after the reviewed commit. Saving a presentation-unsafe resume
+  command as a template is now refused (`check_template_shape` in `crates/farhelm-proto/src/launcher.rs`, called from
+  both the save-from-launcher path and the template editor). This executed the ledger decision on
+  `template-command-editors-hide-meaningful-characters-silently-saved-resume-command-editor.md`. Templates saved before
+  the rule are explicitly accepted by SPEC.md: the editor can neither show nor keep them, and saving a change is refused
+  until the commands are fixed. Checked against `f9634754` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## foreign-destination-fixture-reuse-identity-it-expects-reject.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `c6cd7deb` in [#1845](https://github.com/scode/farhelm/pull/1845/changes) ("test:
+  stop a checkout-archive test from reusing the checkout's inode"), which landed after the reviewed commit. The fixture
+  in `crates/farhelm-supervisor/src/working_copies.rs` now creates the stranger directory before removing the source, so
+  the stranger can no longer take the source's freed inode. Checked against `f9634754` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## mouse-handlers-surviving-disposal-during-drag.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## relative-cursor-movement-adds-scrolling-margin-twice.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## resizing-resurrects-cleared-selection-highlight.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## scrollbar-dragging-reverses-very-short-terminal.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## column-positioning-unexpectedly-changes-row.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## hyperlink-starting-final-content-cell-disappears.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## concealed-wide-characters-collapse-terminal-columns-concealed-concealed-character-in-new-span.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## concealed-wide-characters-collapse-terminal-columns-concealed-concealed-character-in-merged-span.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## alternate-horizontal-positioning-command-changes-row.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## composition-fallback-resend-previously-typed-input.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug. The finding's own
+  confidence is "possible" and it does not demonstrate destructive execution, so it is a non-security bug under that
+  rule. It overlaps the open input-corruption investigation in TODO.md's Tricky bugs bucket, which stays open; this
+  removal says nothing about that investigation.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## erasing-through-bottom-right-cell-throws-interrupts-output.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## narrowing-terminal-corrupts-combining-character-text.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## scrolling-downward-inserts-rows-wrong-background.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## recursive-selection-across-very-long-wrapped-word.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## saving-restoring-cursor-attributes-loses-extended-formatting.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## split-utf-characters-disappear-terminal-output.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence lie entirely inside the vendored
+  xterm.js bundle (`crates/farhelm-ui/assets/vendor/xterm.js`), and it is not a security bug. The finding notes that
+  upstream has already fixed this, so the upgrade addresses it.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Terminal widget:
+  xterm.js island", decided 2026-10-10 that non-security bugs inside the bundle are fixed by upgrading it, not worked
+  around in Farhelm. On 2026-10-11 the user approved removing the terminal-library findings on that basis and is
+  handling the library upgrade separately.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
