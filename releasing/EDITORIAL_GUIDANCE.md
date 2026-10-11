@@ -36,3 +36,8 @@ with in place.
   Breaking entry modeled on v0.23.0's "After upgrading, you cannot go back to an earlier release …", and two of its
   fragments ended with the same warning; all three were dropped. (Stated by the maintainer during the v0.25.0 curation,
   2026-10-07.)
+- Keep each entry to what the user sees or has to do, in one or two short sentences. Leave out how it works, rare edge
+  cases and the conditions they need; keep a caveat only when a user would otherwise be caught out by it. The v0.26.0
+  draft's Codex entry ran six sentences, through when Farhelm reads a saved conversation, what happens if its file was
+  deleted and what a passing read error does; it became one sentence saying which sessions to relaunch and why. The
+  whole draft got the same pass. (Stated by the maintainer during the v0.26.0 curation, 2026-10-10.)
