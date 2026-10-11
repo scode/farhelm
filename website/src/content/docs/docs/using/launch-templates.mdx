@@ -118,10 +118,10 @@ An agent can start a fresh managed checkout with a template too, or give `farhel
 (`--github` is an alias). `--title "Fix parser"` names its directory `web-fix-parser`; without a title Farhelm picks
 the next free `web-N`. The approval card shows the repository and exact directory before starting it.
 
-`farhelm spawn` always starts on the agent's own host, so it refuses a template that sets a host or a managed checkout.
-`farhelm agent clone` copies the source's existing directory and takes no repository option. On a host that asks before YOLO launches, an
-agent cannot use a template that makes the launch YOLO or a custom command
-([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
+`farhelm spawn` always starts on the agent's own host and never makes a fresh checkout, so it refuses a template that
+sets a host or a managed checkout. `farhelm agent clone` copies the source's existing directory and takes no repository
+option. On a host that asks before YOLO launches, an agent cannot use a template that makes the launch YOLO or a custom
+command ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
 Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for an existing directory.

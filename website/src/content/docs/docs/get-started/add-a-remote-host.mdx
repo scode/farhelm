@@ -15,7 +15,11 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
 - Linux on an x86_64 or ARM (aarch64) machine, with systemd's services for your user account, which most distributions
   have. Farhelm needs no root or sudo there: everything it installs goes in your home directory.
 - Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
-  Farhelm uses your own ssh setup, so keys, the agent, and the aliases in `~/.ssh/config` all apply.
+  Farhelm uses your own ssh setup, so keys, the agent, and the aliases in `~/.ssh/config` all apply. A host that asks
+  for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
+  Farhelm's ssh connections to it by hand, which these pages do not cover yet. Adding or updating a host also opens one
+  ssh login of its own, so a key that asks for a touch on each login asks once more then.
+- Not BusyBox: hosts whose basic command-line tools come from BusyBox are not supported.
 - Your Mac downloads Farhelm for the host and copies it over ssh. The download starts at get.farhelm.io, which hands
   the release files themselves over from GitHub, so your Mac needs to reach both. The host does not: it never needs
   access to get.farhelm.io or GitHub.
