@@ -73,3 +73,34 @@ check passed. A separate native cold reader passed report clarity and public-rep
 are requested model selections; exact native model attribution and usage were unavailable. Private galaxy-brain evidence
 is retained under session UUID `a63f6b2c-45f7-4830-bf84-ea76de63472d`, with its location recorded in the plan working
 log beside the checkouts.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1908. The rebase met the review queue index; both plans' removals were kept.
+
+#### Review before merging
+
+No findings. A retry cannot launch twice or reuse a key for a changed request: the key is reused only when the whole
+launch selection equals the held one, and the new checks only stop an unchanged choice from discarding a key that would
+match. The snapshot copy listeners are removed with the snapshot, and nothing touches the link guards from #1832 or the
+steady path hover from #1879. The template error uses the safe peer-text rendering. Notes left as they are:
+
+- The snapshot copy test covers plain selection in a snapshot restored after a takeover; forced selection, mouse
+  reporting and the copy-versus-burial race were checked in source only.
+- The changelog says "Retry button" where the button reads "retry"; release curation can fix it.
+
+#### Checks
+
+These two plans were landed together, bell-build-mismatch-fixes first with launcher-and-terminal-copy-fixes on top.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `88bbf3a0`, 454 of 454);
+  the UI JavaScript tests (238 of 238); and on Chromium and WebKit with one worker and no retries the notifications,
+  launcher-enter, quick-switcher, templates, terminal-create-idempotency and terminal-reconnect specs (run `9222a97b`:
+  161 passed, 1 failed, described in bell-build-mismatch-fixes' notes).
+- After the test fix: the notifications spec (run `fcc7695f`, 16 passed) and the sidebar's read-mark, unread and
+  notification tests (run `6e2ea146`, 22 passed), both engines.
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
