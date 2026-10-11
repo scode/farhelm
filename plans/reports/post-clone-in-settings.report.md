@@ -87,3 +87,49 @@ report cold read use fresh native readers on the executing session's inherited m
 and usage counters were not exposed, so requested models are recorded without claiming measured usage. Private
 galaxy-brain records remain in the session `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf` under the configured state directory;
 the plan's working log beside the checkouts records the exact location and private evidence paths.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1858. The rebase met a conflict with text-fields-no-spellcheck, which landed first: both
+added hover help to the checkout-folder field's Retry and Save buttons. The landing kept this plan's wording.
+
+#### Fixes made while landing
+
+All in #1858, before it merged:
+
+- The "start a session" docs page still said the launcher shows "no checkout root is configured" until a folder is set.
+  That message no longer exists; the launcher offers a field to save the folder instead, and the page now says so.
+- The new Settings route accepted a command containing a NUL character, which the command line could never store and no
+  process can run: every later managed checkout would have cloned and then failed at the post-clone step. Saving one is
+  now refused with a message that does not quote the command, through the route and the command line alike, and a new
+  test covers it.
+- Saving a blank command cleared it but left the spaces in the field beside "post-clone command saved". The field now
+  shows it cleared.
+
+#### Review before merging
+
+No blockers. The review confirmed the trust boundary matches the amended specification: the new route is behind the same
+sign-in and origin guard as every other setting, per-host command-line overrides are neither read nor written by the
+browser, and a saved command reaches the host and runs exactly as a command-line one did. Notes left as they are:
+
+- A command set from the command line before this release, when the specification promised the browser would never see
+  it, now shows in Settings on every signed-in client. The changelog fragment could say so; release curation can add it.
+- A 16 KiB command made mostly of unusual control characters can exceed the supervisor's create-request size once
+  escaped; the supervisor then refuses the checkout visibly. The command line had the same exposure.
+- No end-to-end test runs a command saved through Settings; it goes through the same store the command-line tests
+  exercise.
+
+#### Checks
+
+These two plans were landed together, text-fields-no-spellcheck first with post-clone-in-settings on top.
+
+- Run now, on the two stacked, after the fixes listed in post-clone-in-settings' notes: `cargo fmt --all -- --check`,
+  `dprint check`, the changelog lint, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and `cargo check -p farhelm-ui --features desktop`; the supervisor,
+  helm, UI, protocol and CLI unit tests with the GitHub-checkout end-to-end tests, through the recorder with pinned tmux
+  3.7c, four slots and no retries (run `817f0fdc`, 2895 of 2895); the UI JavaScript tests (230 of 230); the docs website
+  build; and on Chromium and WebKit with one worker and no retries the settings, tooltip-coverage, terminal,
+  github-checkouts, github-checkout-composer, feedback, templates and quick-switcher specs (run `ccef1907`, 270 passed).
+- Between that run and the merges, main changed only release-testing documentation.
+
+Nothing in the report above was made untrue by the landing.
