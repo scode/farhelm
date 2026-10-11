@@ -110,3 +110,51 @@ Implementation and investigation stayed local under the no-workhorse requirement
 wording reviews were routed through galaxy-brain; the planning system's resume and report readers run separately.
 Private session evidence is retained under UUID `a63f6b2c-45f7-4830-bf84-ea76de63472d`; exact native model attribution
 and usage counters were unavailable, and delayed recording gaps are recorded there.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1874. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+- A mouse press inside the folder dropdown that missed an entry took focus from the folder field, and its blur closed
+  the list: a group heading, the "no recent folders" row, a gap between rows, and possibly the list's scrollbar while
+  the user drags it (eight recent folders overflow the list's height on a desktop). The list now keeps focus in the
+  field for any press inside it, and the dropdown browser test presses a heading and checks the list stays open with the
+  field focused. Scrollbar dragging itself has no test.
+- The sidebar test "composer focus-trap wraps reveal their targets at narrow width" timed out on both engines: after it
+  typed a folder, the open dropdown covered the harness buttons below at phone width, so its click on Codex could never
+  land. The plan's own checks ran selected sidebar tests, not this one. The test now closes the list with Escape before
+  choosing the harness, as a user would; the list covering what is below it while open is ordinary dropdown behaviour.
+- One assertion message in the destination-block test described the opposite of what it checks; it is reworded.
+
+#### Review before merging
+
+No blockers. Mouse and Enter choices go through the same guards as the old folder links; Escape closes only the list
+first; Enter launches only when no entry is highlighted; input-method composition is respected; corrections stay off;
+the combobox and listbox semantics are complete; host-supplied folder names are escaped before they are shortened; and
+suggestions come from the same history as before. Notes left as they are:
+
+- The highlight is kept as a position, so if history arrives while the list is open with an entry highlighted, the
+  highlight can move to a different entry; a quick Enter would choose it.
+- If a launch is refused while the list is open, the list may stay open until the field is focused and left again; the
+  repository and model pickers behave the same way.
+- Shortening a name can cut through an escaped character such as `<U+202E>`; the full name and tooltip stay intact.
+- The docs screenshot of the destination block was not regenerated, so its crop around the floating list is unchecked
+  until the next screenshot refresh.
+
+#### Checks
+
+- Run now, after the first fix: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `0d11d18e`, 448 of 448);
+  the UI JavaScript tests (230 of 230); the docs website build; and on Chromium and WebKit with one worker and no
+  retries the sidebar, destination-authority, github-checkout-composer, templates, f20 visual capture, launcher-enter,
+  launcher-tabs, yolo-guard, remembered-permissions and opencode specs (run `9956c2ca`: 361 passed, the focus-trap test
+  failed on both engines as described, and the WebKit visual capture skipped by design). The last five specs were added
+  because they type into the folder field and the plan had not run them.
+- After the focus-trap test fix: that test on both engines (run `4cb091e0`, 2 passed), and `dprint check`. Nothing else
+  changed, so the run above still covers the rest.
+- Between those runs and the merge, main changed only planning and agent documentation.
+
+Nothing in the report above was made untrue by the landing.
