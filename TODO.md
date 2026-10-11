@@ -145,7 +145,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Delete one checkout from the trash.** The trash dialog (archived managed checkouts, listed per host) can only delete
   everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
-  without taking the rest with it.
+  without taking the rest with it. Plan: `plans/queue/delete-one-trashed-checkout.md`.
 
 - **Send ntfy.sh notifications when an agent is blocked.** Today the only alert that a session needs the user (it starts
   waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
@@ -153,15 +153,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
   as a non-goal for v1, so this needs a SPEC change alongside it.
 
-- **Screenshot every dialog in the app for review.** Capture an image of every single dialog Farhelm can show, each in a
-  realistic state, so the maintainer can look through them and spot the ones that need fixing. The docs screenshot
-  machinery (`docs/docs-shots/SPEC.md`), which captures the web UI against a staged fleet, is a likely starting point.
-  The output is for review, not for publishing.
-
 - **Show that "check for updates" is doing something.** In the desktop app, clicking "check for updates" in the `?` menu
   gives no visible sign that a check started or is still running. You wait, and maybe the version readout turns red. The
   check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
-  to miss. Solution to be worked out.
+  to miss. Solution to be worked out. Plan: `plans/queue/update-check-feedback.md`.
 
 - **Let agents start sessions in a new managed checkout.** The goal is that this works when typed to an agent: "$farhelm
   for each of the TODO items above, start a session in a new managed checkout of acme/web, named after the item". Today
