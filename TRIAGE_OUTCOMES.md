@@ -10356,7 +10356,7 @@
   shellcheck and the installer test pass. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
 
 ## incomplete-latest-response-select-wrong-release.md
 
@@ -10378,7 +10378,7 @@
   `/latest` cases, including the 404 message, are unchanged; `sh -n` and shellcheck stay clean. If the fix turns out to
   need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
 
 ## retrying-through-unchanged-permission-choice-launch-duplicate.md
 
@@ -10401,7 +10401,7 @@
   lost-reply retry through Enter on the selected choice, asserting that both requests carry the same key and exactly one
   session exists. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
   those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
 
 ## restored-terminal-snapshots-lose-select-to-copy.md
 
@@ -10426,7 +10426,7 @@
   duplicate more than a small policy, no longer fits. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
 
 ## successful-notification-reads-leave-bell-unread-under.md
 
@@ -10450,7 +10450,7 @@
   shape and can share the change. If the fix turns out to need significant new complexity or a refactor, or otherwise
   stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
 
 ## clearing-notifications-leaves-cleared-bell-entries-visible.md
 
@@ -10470,7 +10470,7 @@
   close-marks-read path are unchanged. Check whether Clear needs the ordering guard rename uses against an older listing
   read already in flight. If the fix turns out to need significant new complexity or a refactor, or otherwise stops
   fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
 
 ## manual-read-unread-toggles-cannot-visibly-toggle.md
 
@@ -10492,7 +10492,7 @@
   `seen-toggle-report-panics-after-unmount.md` fix must still hold. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
 
 ## template-catalog-error.md
 
@@ -10515,7 +10515,7 @@
   surface the failure rather than silently do nothing. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
 
 ## ship-font-license-embedded-ui.md
 
@@ -10536,7 +10536,7 @@
   gap: include it if the same declaration fixes it, and otherwise report it back. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
 
 ## claiming-current-plan-refresh-plan-subsequently-executed.md
 
@@ -10577,7 +10577,7 @@
   command cannot contain, and both tests keep their current assertions. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## failed-rotation-assertion-invalidates-subsequent-tests-credentials.md
 
@@ -10598,7 +10598,7 @@
   failure after rotation. If the recovery exchange itself fails, it must not hide the original error. If the fix turns
   out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
   back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-spec-fixes.md`.
 
 ## replay-geometry-test-rejects-valid-live-output.md
 
@@ -10618,7 +10618,7 @@
   the replay is captured before the attach-time resize. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## skip-tmux-test-passes-tmux-queried.md
 
@@ -10638,7 +10638,7 @@
   of the guard makes it fail. The stimulus must behave the same on the pinned tmux. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## commit-race-test-exercise-only-pre-commit-abort-path.md
 
@@ -10658,7 +10658,7 @@
   response bound and the reason check are unchanged. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
 
 ## idle-flush-test-permits-deadline-extension-it-claims.md
 
@@ -10679,7 +10679,7 @@
   point in production code no longer fits. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
 
 ## shutdown-tests-prove-session-existence-more-strongly.md
 
@@ -10698,7 +10698,7 @@
   dies during the stop; the existing checks are unchanged. A slightly late death may need a short bounded re-check with
   a `sleep-ok` reason. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
   those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## stop-test-leave-fixture-permanently-stopped-failure.md
 
@@ -10719,7 +10719,7 @@
   `restart-test-has-same-stopped-child-cleanup-gap.md`, sharing one guard. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## restart-test-has-same-stopped-child-cleanup-gap.md
 
@@ -10738,7 +10738,7 @@
   spawn onward; the success-path assertions are unchanged. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## browse-routing-test-discards-wrong-host-assertion.md
 
@@ -10758,7 +10758,7 @@
   (`shared-silence-observers-have-same-premature-success-boundary.md`) and out of scope. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
 
 ## failed-spec-publication-test-observe-whether-tmux-started.md
 
@@ -10777,7 +10777,7 @@
   assertions; confirm once by temporarily swapping the order. If the fix turns out to need significant new complexity or
   a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## missing-workspaces-cleanup-diagnostic-recognized-despite-discarded.md
 
@@ -10797,7 +10797,7 @@
   matcher checked against the pinned jj's real message. Preference restoration and scratch removal run on every path. If
   the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop
   and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-spec-fixes.md`.
 
 ## upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md
 
@@ -10816,7 +10816,7 @@
   supervisor tests are, and still runs on Linux. If the fix turns out to need significant new complexity or a refactor,
   or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
 
 ## dead-tab-regression-cannot-pass-ordinary-macos.md
 
@@ -10836,7 +10836,7 @@
   scenario moves to a Linux-only test that keeps its liveness premise. Confirm both compile on macOS. If the fix turns
   out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
   back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
 
 ## cgroup-cleanup-masks-marker-discovery-regression.md
 
@@ -10855,7 +10855,7 @@
   pane process and the reparented daemon to die after Stop. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## long-cwd-test-never-supplies-long-path.md
 
@@ -10873,7 +10873,7 @@
   clipping is removed, keeping its logical-order and direction checks, on Chromium and WebKit. If the fix turns out to
   need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-spec-fixes.md`.
 
 ## hook-test-startup-delete-newly-created-launch-specification.md
 
@@ -10894,7 +10894,7 @@
   reconciliation finished. Keep the change in the hook fixture rather than the shared readiness helper, which has about
   eight callers. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
   criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## orphan-client-test-accepts-failed-inspection-proof-no.md
 
@@ -10913,7 +10913,7 @@
   that exits during the scan still passes. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## post-stall-liveness-witness-include-replay.md
 
@@ -10931,7 +10931,7 @@
 - Completion criteria: The witness requires output produced after the reattach's replay; the rest of the test is
   unchanged. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
   criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
 
 ## hup-resistant-process-fixture-leaks-early-failure.md
 
@@ -10952,7 +10952,7 @@
   success-path assertions and sweep-reaping coverage are kept. If the fix turns out to need significant new complexity
   or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## live-agent-restart-test-never-establishes-live-agent.md
 
@@ -10974,7 +10974,7 @@
   the same restart path no longer fits. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## stop-intent-test-exercises-different-failure-path.md
 
@@ -10994,7 +10994,7 @@
   survives; the dead-or-absent coverage stays under an accurate name. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
 
 ## dollar-escaping-changes-executable-path.md
 
