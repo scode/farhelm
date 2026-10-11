@@ -215,6 +215,10 @@ that its required systemd or SSH substrate ran.
   loop against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when
   it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no
   other network.
+- `python3 scripts/test-todo-picker.py` — the todo planning flow's checklist page (`scripts/todo-picker.py`): how
+  TODO.md buckets and entries are read, that entries with a plan are left out, that a summaries file written against an
+  older TODO.md is refused, and that summaries are escaped into the page. Run it when the script changes; seconds, no
+  network.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when
@@ -417,11 +421,12 @@ work" inventory above or the deflake sweep's phases change, update that file's l
 any number of concurrent executors, each claiming one plan at a time through `scripts/plans-queue.py`. One monitor lands
 what they finish without waiting for the maintainer, who reviews each landed plan's report afterwards.
 `plans/queue/INDEX.md` is the queue, with each plan's state, and `plans/REPORTS.md` lists the landed plans whose reports
-await review. "Plan to implement <TODO items>", "use the planning system to schedule these" (for triage outcomes), "pick
-a plan to execute" and "execute the next plan" (with "in order" or a named plan as variants), "drain the plans"
-(optionally "and keep monitoring"), "monitor for complete plans", "land the complete plans", "review the plans", "show
-blocked plans" (or "check for blocked plans"), "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read
-it before any of those, or before changing anything in the directory.
+await review. "Todo planning flow" (optionally naming a TODO.md bucket), "plan to implement <TODO items>", "use the
+planning system to schedule these" (for triage outcomes), "pick a plan to execute" and "execute the next plan" (with "in
+order" or a named plan as variants), "drain the plans" (optionally "and keep monitoring"), "monitor for complete plans",
+"land the complete plans", "review the plans", "show blocked plans" (or "check for blocked plans"), "release plan X",
+and "plan help" are defined in `plans/AGENTS.md`; read it before any of those, or before changing anything in the
+directory.
 
 Once working, executors and the landing monitor never ask the maintainer anything in conversation, not even an optional
 question, an offer of more work, or a harness question tool's prompt: nobody is watching, so the plan stalls until
