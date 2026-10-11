@@ -635,6 +635,14 @@ placement until each one points at the right thing and hides nothing the viewer 
 While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the machinery; say so when handing
 it over. The upload is manual; nothing in CI records or checks the video.
 
+# Docs refresh
+
+"Refresh the docs" means bringing the whole docs website up to date with everything that landed on main since the last
+full refresh: correcting what is now wrong, proposing new sections or material new text for the maintainer to confirm,
+and refreshing any screenshot that may be stale. `website/AGENTS.md`, "Refreshing the docs", is the procedure, and
+`website/src/data/docs-refresh.json` records the main commit the last full refresh read up to. Only a completed full
+refresh moves that marker; a single-page fix or a screenshot refresh on its own does not.
+
 # Docs screenshots
 
 The docs website's annotated screenshots are captured from the web UI against a staged fleet and published off main,

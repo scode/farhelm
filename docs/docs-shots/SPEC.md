@@ -132,6 +132,8 @@ calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regi
 
 ## Refreshing
 
+A full docs refresh ("Refreshing the docs" in `website/AGENTS.md`) runs this as one of its steps when the UI changed.
+
 "Refresh the docs screenshots" means, on a checkout of the latest main:
 
 1. Read `captured_from` in `website/src/data/docs-shots.json` and look at what changed in the app since then:
