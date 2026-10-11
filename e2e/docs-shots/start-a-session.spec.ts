@@ -59,6 +59,10 @@ test("destination", async ({ page, request }) => {
   await destination.getByRole("combobox", { name: "folder", exact: true }).focus();
   const folders = destination.getByRole("listbox", { name: "folders", exact: true });
   await expect(folders).toBeVisible();
+  // The dropdown floats past the end of the launcher's scrolling body, which
+  // clips it; scrolling its last entry into view is what a person does to
+  // reach it, and keeps local home, which the last callout names, in the shot.
+  await folders.getByRole("option", { name: "reset destination to local home" }).scrollIntoViewIfNeeded();
   // Four callouts stacked down the left margin, each nudged (dy) so the
   // boxes clear one another while the arrows stay level with their controls.
   await director.callout(

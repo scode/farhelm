@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 1858,
+      "name": "release-notes/v0-27-0-post-clone-command",
+      "alt": "The post-clone command field in Settings with npm ci typed, explained as running in each new managed checkout before its agent starts."
+    },
+    {
+      "entry": 1888,
+      "name": "release-notes/v0-27-0-trash-delete-one",
+      "alt": "The trash with a delete button beside each checkout, explained as deleting just that checkout at once."
+    },
+    {
+      "entry": 1874,
+      "name": "release-notes/v0-27-0-folder-dropdown",
+      "alt": "The session launcher's folder field with its dropdown open: recent directories, then home and local home, explained."
+    },
+    {
+      "entry": 1866,
+      "name": "release-notes/v0-27-0-host-setup",
+      "alt": "The redesigned set up host dialog: its heading, the scrolling plan, and the renamed set up, don't ask again answer, explained."
+    },
+    {
+      "entry": 1867,
+      "name": "release-notes/v0-27-0-host-remove",
+      "alt": "The redesigned remove host dialog: the host's heading and the renamed remove, don't ask again answer, explained."
+    }
+  ]
+}
