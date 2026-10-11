@@ -38,7 +38,8 @@ use crate::harness::*;
 /// its unix socket and running its ticker, as production's does.
 ///
 /// The accept loop is started before any session exists, and this returns
-/// only once it is bound. See [`ServeTask::spawn`] for both orderings.
+/// only once startup reconciliation has finished. See [`ServeTask::spawn`]
+/// for the orderings this fixture must preserve.
 ///
 /// Returns the [`ServeTask`] the caller must keep alive for as long as it
 /// expects hooks to work.
@@ -193,9 +194,9 @@ pub(crate) struct ServeTask(tokio::task::JoinHandle<anyhow::Result<()>>);
 
 impl ServeTask {
     /// Spawn `sup`'s accept loop and return once it is genuinely
-    /// listening on `state`'s socket.
+    /// accepting protocol clients after startup reconciliation on `state`'s socket.
     ///
-    /// Two orderings are load-bearing:
+    /// Three orderings are load-bearing:
     ///
     /// 1. The caller must not have created any session yet. `serve()`
     ///    reloads the session map wholesale and replaces it, which is only
@@ -205,6 +206,9 @@ impl ServeTask {
     ///    poll would then spend its whole 20 s budget before reporting a
     ///    socket that was never going to appear — with the actual error
     ///    discarded. Racing turns that into the bind error itself.
+    /// 3. A socket connection alone proves only bind, which precedes startup
+    ///    cleanup. A real handshake proves the accept loop has started; without
+    ///    it, the caller's duplex client can create a launch file mid-sweep.
     pub(crate) async fn spawn(sup: &Arc<Supervisor>, state: &std::path::Path) -> ServeTask {
         let serving = Arc::clone(sup);
         let mut task = tokio::spawn(async move { serving.serve().await });
@@ -212,7 +216,21 @@ impl ServeTask {
             finished = &mut task => panic!(
                 "the supervisor's accept loop ended before it was ready to accept: {finished:?}"
             ),
-            () = wait_for_supervisor_ready(state) => {}
+            () = async {
+                wait_for_supervisor_ready(state).await;
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    let stream = farhelm_supervisor::service::connect(state)
+                        .await
+                        .expect("connect for startup handshake");
+                    let (read, write) = tokio::io::split(stream);
+                    let client = SupervisorClient::start(read, write)
+                        .await
+                        .expect("startup handshake");
+                    drop(client);
+                })
+                .await
+                .expect("startup reconciliation must finish before fixture returns");
+            } => {}
         }
         ServeTask(task)
     }

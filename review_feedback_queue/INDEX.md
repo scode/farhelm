@@ -102,7 +102,6 @@ triage.
   completes.
 - `restart-test-requires-screen-content-restart-correctly.md` — The restart test waits for screen content that correct
   restart erases.
-- `cgroup-cleanup-masks-marker-discovery-regression.md` — Scope cleanup hides a broken portable marker-discovery path.
 - `readiness-failure-leave-systemd-probe-child-running.md` — Readiness failure could leave a systemd probe child without
   cleanup ownership.
 - `pipe-scan-assertion-failures-leave-fixture-processes-running.md` — Failed pipe-scan tests leave children and
@@ -120,8 +119,6 @@ triage.
   its whole process tree.
 - `dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md` — The dispatch-overlap fixture arms incomplete cleanup
   after fallible setup.
-- `orphan-client-test-accepts-failed-inspection-proof-no.md` — The orphan-client test accepts unknown inspection as
-  proof of no writer leak.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
@@ -167,10 +164,6 @@ triage.
   its known session.
 - `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` — Keyboard-launch teardown skips session
   deletion if policy restoration fails.
-- `hook-test-startup-delete-newly-created-launch-specification.md` — Hook-test startup could delete a launch
-  specification created during cleanup.
-- `replay-geometry-test-rejects-valid-live-output.md` — The replay-geometry test could mistake live output for a bad
-  replay.
 - `short-writer-timeout-masks-shutdown-drain-regression.md` — An independent writer timeout hides a broken
   shutdown-drain bound.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
@@ -204,10 +197,6 @@ triage.
   immediate-cache regression.
 - `wedged-browser-test-may-encounter-queue-backpressure-blocked.md` — Queue overflow can satisfy the wedged-browser test
   before socket cleanup.
-- `shutdown-tests-prove-session-existence-more-strongly.md` — Supervisor-shutdown tests could accept a dead agent in a
-  retained pane.
-- `partial-shell-result-parsing.md` — Prefix-only shell waits could parse incomplete directory or environment results.
-- `post-stall-liveness-witness-include-replay.md` — The post-detach progress test could accept records from old replay.
 - `sink-healing-witness-consume-queued-output.md` — The healed-sink test could consume output queued before the failure.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.

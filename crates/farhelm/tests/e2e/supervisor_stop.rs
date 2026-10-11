@@ -34,7 +34,7 @@ enum Stop {
 /// stderr closes, then SIGHUP reaches the supervisor's whole process group)
 /// runs the same orderly output shutdown as SIGTERM: the supervisor exits
 /// with status 0 after both output clients acknowledged `no-output`, and
-/// the session survives.
+/// the session survives and its agent answers a fresh input line after shutdown.
 ///
 /// Why it matters: a terminal hangup is how a hand-started
 /// `farhelm supervisor run` (or a desktop app launched from a terminal) is
@@ -53,13 +53,14 @@ async fn a_hangup_to_the_supervisors_group_closes_output_clients_in_order() {
 
 /// Spec: a supervisor holding a live, streaming terminal attachment answers
 /// SIGTERM by closing its output clients through the orderly path and
-/// exiting with status 0, and the session it was serving survives in tmux.
+/// exiting with status 0, and the agent it was serving still answers fresh input.
 ///
 /// Why it matters: a SIGTERM-killed process (exit by signal) is exactly the
 /// abrupt close that risks the whole tmux server; exit status 0 plus the
 /// "stopping" log line without the budget-exceeded warning is the evidence
 /// that the handler ran and completed. The session check guards the other
-/// direction: an orderly shutdown must not take the sessions down with it.
+/// direction: an orderly shutdown must not take the agents down with it;
+/// a retained dead pane would still satisfy session existence alone.
 #[farhelm_testtrace::test]
 async fn sigterm_closes_output_clients_in_order_and_exits_cleanly() {
     stop_attached_supervisor(Stop::Sigterm).await;
@@ -67,6 +68,8 @@ async fn sigterm_closes_output_clients_in_order_and_exits_cleanly() {
 
 /// Spec: the desktop app's stdin tether closing runs the same orderly output
 /// shutdown as SIGTERM before the managed supervisor exits.
+/// Its agent must still answer fresh input after the tether closes, since
+/// a retained dead pane alone would not prove running work survived.
 ///
 /// Why it matters: the tether used to be raced against the supervisor and
 /// win by dropping it mid-stream, which is the same abrupt close as a
@@ -113,7 +116,8 @@ fn no_output_recording_tmux(dir: &std::path::Path, log: &std::path::Path) -> std
 /// Start a real supervisor, give it a live attachment on a running fake
 /// agent, stop it the way `stop` says, and check the orderly shutdown ran
 /// and acknowledged `no-output` on the output-bearing clients, the process
-/// exited cleanly, and the session survived.
+/// exited cleanly, and the agent still answers fresh input. Session existence
+/// alone cannot distinguish a surviving agent from a retained dead pane.
 async fn stop_attached_supervisor(stop: Stop) {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
     let stderr_path = state.path().join("supervisor-stderr.log");
@@ -274,6 +278,46 @@ async fn stop_attached_supervisor(stop: Stop) {
         "{stop:?}: the session must survive its supervisor's orderly stop: {}",
         String::from_utf8_lossy(&has_session.stderr)
     );
+
+    // Plain capture strips the basic fixture's color codes. Only its new
+    // echo, not the terminal's input echo or retained history, proves progress.
+    let pane_target = format!("fh-{}", session.id);
+    let probe = format!("after-stop-{}", uuid::Uuid::new_v4());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let sent = tmux_query_before_deadline(
+        &sock,
+        &["send-keys", "-t", &pane_target, &probe, "Enter"],
+        deadline,
+    )
+    .await
+    .expect("post-stop input probe exceeded its deadline");
+    assert!(
+        sent.status.success(),
+        "{stop:?}: send the post-stop liveness probe"
+    );
+    let expected = format!("echo:{probe}");
+    loop {
+        let captured = tmux_query_before_deadline(
+            &sock,
+            &["capture-pane", "-p", "-t", &pane_target],
+            deadline,
+        )
+        .await
+        .expect("post-stop agent echo capture exceeded its deadline");
+        let screen = String::from_utf8_lossy(&captured.stdout);
+        if captured.status.success() && screen.contains(&expected) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{stop:?}: the agent must answer fresh input after shutdown; \
+             capture status={} stderr={} screen={screen}",
+            captured.status,
+            String::from_utf8_lossy(&captured.stderr)
+        );
+        // sleep-ok: poll for the post-stop agent echo inside the explicit ten-second deadline.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// Open a pseudo-terminal pair: the controlling (master) side, whose drop

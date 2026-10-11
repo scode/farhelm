@@ -1839,7 +1839,7 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
     // writes were blocked for the whole stall, and a detach that failed to
     // release the pane would leave them blocked forever while every
     // assertion above still passed. Requiring records strictly PAST the
-    // last one seen before the detach is what makes a still-wedged pane
+    // last one in the reattach's replay is what makes a still-wedged pane
     // fail.
     let last_before_detach = counter_records(&seen)
         .last()
@@ -1850,7 +1850,11 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
         .attach_live(&session.id, 80, 24)
         .await
         .expect("reattach after a stall detach");
-    let target = format!("CUTOVER-{:08}", last_before_detach + 50);
+    let last_replayed = counter_records(&replay)
+        .last()
+        .copied()
+        .unwrap_or(last_before_detach);
+    let target = format!("CUTOVER-{:08}", last_replayed + 50);
     wait_for_bytes(&mut rx2, &mut replay, target.as_bytes(), 60).await;
 }
 

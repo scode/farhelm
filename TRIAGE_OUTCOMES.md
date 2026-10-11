@@ -10595,7 +10595,8 @@
   command cannot contain, and both tests keep their current assertions. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## failed-rotation-assertion-invalidates-subsequent-tests-credentials.md
 
@@ -10636,7 +10637,8 @@
   the replay is captured before the attach-time resize. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## skip-tmux-test-passes-tmux-queried.md
 
@@ -10718,7 +10720,8 @@
   dies during the stop; the existing checks are unchanged. A slightly late death may need a short bounded re-check with
   a `sleep-ok` reason. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
   those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## stop-test-leave-fixture-permanently-stopped-failure.md
 
@@ -10881,7 +10884,8 @@
   pane process and the reparented daemon to die after Stop. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## long-cwd-test-never-supplies-long-path.md
 
@@ -10920,7 +10924,8 @@
   reconciliation finished. Keep the change in the hook fixture rather than the shared readiness helper, which has about
   eight callers. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
   criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## orphan-client-test-accepts-failed-inspection-proof-no.md
 
@@ -10939,7 +10944,8 @@
   that exits during the scan still passes. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## post-stall-liveness-witness-include-replay.md
 
@@ -10957,7 +10963,8 @@
 - Completion criteria: The witness requires output produced after the reattach's replay; the rest of the test is
   unchanged. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those
   criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-session-test-fixes.md`.
+- Execution: complete in jj change `szmpmnxkynrnknvwzzmrkxzvwzrksmyt`, bookmark
+  `plan/e2e-session-test-fixes/01-e2e-session-tests`, https://github.com/scode/farhelm/pull/1911/changes.
 
 ## hup-resistant-process-fixture-leaks-early-failure.md
 
