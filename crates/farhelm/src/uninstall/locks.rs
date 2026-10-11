@@ -367,10 +367,14 @@ mod tests {
     fn stale_install_lock_advice_omits_commands_for_unprintable_paths() {
         use std::os::unix::ffi::OsStringExt as _;
         let root = tempfile::tempdir().expect("fixture root");
-        for name in [
-            std::ffi::OsString::from("control\npath"),
-            std::ffi::OsString::from_vec(b"invalid-\xff".to_vec()),
-        ] {
+        let mut names = vec![std::ffi::OsString::from("control\npath")];
+        // APFS refuses invalid UTF-8 names at creation (EILSEQ), so no stale
+        // lock can sit under such a path on macOS. Keep the control-character
+        // case everywhere and the raw-byte case where the filesystem allows it.
+        if !cfg!(target_os = "macos") {
+            names.push(std::ffi::OsString::from_vec(b"invalid-\xff".to_vec()));
+        }
+        for name in names {
             let install = root.path().join(name);
             let dir = install.join(INSTALL_LOCK);
             fs::create_dir_all(&dir).unwrap();
