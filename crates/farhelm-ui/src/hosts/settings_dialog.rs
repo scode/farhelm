@@ -358,6 +358,72 @@ fn commands_help(commands_without_asking: bool) -> &'static str {
     }
 }
 
+/// Identify the host and the question without owning any dialog lifecycle.
+///
+/// Registered hosts retain their own mark, status and reported version. An
+/// add flow has no host yet, so it uses the default host mark. A supplied
+/// summary replaces the status line, with or without a host. Titles remain caller-rendered markup so peer values keep
+/// their escaping and direction isolation. Dismiss runs the caller's cancel
+/// path; this header must not decide when an operation permits cancellation.
+#[component]
+pub(crate) fn HostDialogHeader(
+    host: Option<Host>,
+    title: Element,
+    summary: Option<String>,
+    dismiss_label: String,
+    dismiss_tooltip: String,
+    on_dismiss: EventHandler<()>,
+) -> Element {
+    // Only a peer's actual report can supply a version. Executable paths and
+    // the helm's own version are not evidence of what this host is running.
+    let reported_version = host.as_ref().and_then(|host| match &host.state {
+        HostPhase::Connected { build_version, .. } => Some(build_version.clone()),
+        HostPhase::VersionSkew { peer_build, .. } => Some(peer_build.clone()),
+        _ => None,
+    });
+    rsx! {
+        div { class: "host-settings-header",
+            div { class: "host-settings-mark", "aria-hidden": "true",
+                match host.as_ref() {
+                    Some(host) => match host.kind {
+                        HostKind::Local => rsx! { LocalHostIcon {} },
+                        HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
+                        HostKind::Unrecognized => rsx! {},
+                    },
+                    None => rsx! { HostMark {} },
+                }
+            }
+            div { class: "host-settings-heading",
+                h2 { class: "host-settings-title", {title} }
+                div { class: "host-settings-summary",
+                    if let Some(summary) = summary {
+                        "{summary}"
+                    } else if let Some(host) = host {
+                        span { class: "host-status {phase_class(&host.state)}",
+                            span { class: "status-dot", "aria-hidden": "true" }
+                            "{phase_display_label(&host.state)}"
+                        }
+                        if let Some(version) = reported_version {
+                            span { class: "host-settings-version",
+                                "Farhelm "
+                                span { class: "peer-value", dir: "ltr", "{display_peer(&version)}" }
+                            }
+                        }
+                    }
+                }
+            }
+            button {
+                r#type: "button",
+                class: "host-settings-dismiss",
+                aria_label: "{dismiss_label}",
+                "data-tooltip": "{dismiss_tooltip}",
+                onclick: move |_| on_dismiss.call(()),
+                "×"
+            }
+        }
+    }
+}
+
 /// Edit one host's settings without giving a refresh ownership of its draft.
 ///
 /// The panel owns every value and write handler so a host-list refresh can
@@ -394,13 +460,6 @@ pub(super) fn HostSettingsDialog(
     let alias_supported = host.alias.is_some();
     let destination = host.destination.clone().unwrap_or_default();
     let alias = host.alias.clone().flatten();
-    // A version belongs to a peer that actually reported one. The remote
-    // executable path is not a version and must not fill an unknown value.
-    let reported_version = match &host.state {
-        HostPhase::Connected { build_version, .. } => Some(build_version.clone()),
-        HostPhase::VersionSkew { peer_build, .. } => Some(peer_build.clone()),
-        _ => None,
-    };
 
     // Recover focus a write's disabled control dropped; see
     // `refocus_after_write`.
@@ -479,39 +538,12 @@ pub(super) fn HostSettingsDialog(
                         on_close.call(());
                     }
                 },
-                div { class: "host-settings-header",
-                    div { class: "host-settings-mark", "aria-hidden": "true",
-                        match host.kind {
-                            HostKind::Local => rsx! { LocalHostIcon {} },
-                            HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
-                            HostKind::Unrecognized => rsx! {},
-                        }
-                    }
-                    div { class: "host-settings-heading",
-                        h2 { class: "host-settings-title",
-                            span { class: "peer-value", dir: "ltr", "{shown_name}" }
-                        }
-                        div { class: "host-settings-summary",
-                            span { class: "host-status {phase_class(&host.state)}",
-                                span { class: "status-dot", "aria-hidden": "true" }
-                                "{phase_display_label(&host.state)}"
-                            }
-                            if let Some(version) = reported_version {
-                                span { class: "host-settings-version",
-                                    "Farhelm "
-                                    span { class: "peer-value", dir: "ltr", "{display_peer(&version)}" }
-                                }
-                            }
-                        }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "host-settings-dismiss",
-                        aria_label: "close host settings",
-                        "data-tooltip": "close: done with this host's settings",
-                        onclick: move |_| on_close.call(()),
-                        "×"
-                    }
+                HostDialogHeader {
+                    host: host.clone(),
+                    title: rsx! { span { class: "peer-value", dir: "ltr", "{shown_name}" } },
+                    dismiss_label: "close host settings",
+                    dismiss_tooltip: "close: done with this host's settings",
+                    on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: "host-settings-body",
                 {outcome_for(None)}
