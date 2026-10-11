@@ -2,6 +2,67 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.26.0 - 2026-10-10
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#1787, #1769)
+- If a Codex session was already running when you update, and you start a new conversation in it with `/clear`, relaunch that session once so that **Restart** can resume the new conversation later. (#1738)
+
+### 🚀 Added
+
+- Click a file path in a terminal to download that file from the session's host. Files up to 100 MB can be downloaded. (#1769, #1771, #1773)
+- Sessions working in a fresh GitHub checkout are now marked in the session list. When you delete the last session in such a checkout, the checkout goes to a new trash next to **New**, where you can see how much space it takes and delete it for good. (#1785, #1786, #1787, #1788)
+- Choose where fresh GitHub checkouts go, in Settings or right in the session launcher. Farhelm creates the folder if it does not exist yet. (#1828, #1830, #1831)
+- Give each remote host its own icon and color, so you can tell its sessions apart at a glance. (#1770, #1775)
+- Farhelm can play a sound when a session is waiting for your answer or an agent asks for approval, and optionally when an agent finishes. Each sound can be turned off in Settings. (#1768)
+- Save the session launcher's current setup as a template. (#1717)
+- Drag the edge of the session list to make it wider or narrower. (#1759)
+- In the Mac app, hovering over **New** shows its ⌘N shortcut. (#1714)
+
+### 🔄 Changed
+
+- Agent approval requests now show as a compact card at the top of the window, instead of covering the sidebar and the terminal. (#1760)
+- Pressing Enter on a choice in the session launcher or in **Restart with** now launches or restarts right away. If the agent is busy, restarting stops it first. (#1735, #1737)
+- When the session launcher cannot launch, it now says why next to **Launch**. (#1729)
+- A fresh GitHub checkout of a repository you have checked out on that host before is faster. Farhelm keeps a copy of each repository on the host to make this work. (#1720)
+- Farhelm uses less CPU while sessions sit idle. Some updates, such as **Restart** becoming able to resume, can take a couple of seconds to show. (#1761)
+- Farhelm picks up which conversation an agent is in sooner. (#1776)
+- The warning that Farhelm does not know a session's conversation now says what to check. (#1723)
+- Uninstalling Farhelm from a remote host now also stops the tmux it ran that host's sessions in. (#1781)
+- Hovering the version number now tells you in plain words which Farhelm you are running and whether an update is waiting. (#1733)
+- In the Mac app, when an update is waiting, **what's new** in the red version number's menu now opens the release notes on the Farhelm website instead of GitHub. (#1709)
+- The hint shown when dragging in a terminal copied nothing is easier to see and to dismiss. (#1731)
+- Settings and host settings use switches, and host settings are laid out more clearly. (#1765, #1826)
+
+### 🔧 Fixes worth highlighting
+
+- Text pasted into a terminal can no longer smuggle in hidden keystrokes. Templates whose commands contain hidden characters still launch, but must be fixed before you can save changes to them. (#1811)
+- Claude sessions show as Running while Claude compacts its conversation. (#1774)
+- In the Mac app, session rows with a notification bell no longer show garbled characters. (#1724)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Starting a session in a fresh GitHub checkout can no longer change a different repository on the host, which could happen with some shell setups. (#1798)
+- Opening or replacing a session no longer occasionally closes it again right away. (#1832)
+- Template search puts an exact name first, and selecting text inside a link in the terminal no longer opens the link. (#1832)
+- Closing the page while feedback is sending no longer cancels it, and closing it during a host update no longer leaves the update half done. (#1813)
+- With a custom state folder, the sign-in command Farhelm suggests after setup now points at the right helm. (#1813)
+- A Codex message you have typed but not sent no longer makes the sidebar say the session needs an answer. (#1813)
+- Clicking in a terminal no longer copies an old selection again, and arrow keys in the session menu no longer skip around. (#1812)
+- The warning that Farhelm does not know a session's conversation now still works after Farhelm restarts, and no longer comes too early after you answer an agent's own question, such as Codex asking whether to trust a folder. (#1722, #1725)
+- OMP sessions started with a custom command no longer risk offering to resume the wrong conversation. (#1779)
+- Adding or updating a remote host no longer hangs forever when the upload stalls on some ssh setups. (#1728)
+- Setup refuses to install Farhelm in a folder whose path contains `$`, instead of setting up a service that cannot start. The advice for clearing a stuck install lock now works with unusual folder names. (#1817)
+- On Linux, setup and uninstall no longer misjudge which Farhelm a hand-edited service belongs to. On a Mac, agents with very large environments no longer keep **Restart** from resuming. (#1796)
+- Text from a host can no longer use hidden characters to disguise itself in a session's status or folder. (#1797)
+- Session names in approval cards no longer wrap needlessly. (#1824)
+- The save-as-template checkboxes line up with their labels. (#1825)
+- Checkout notes in the session launcher now match its other help text. (#1827)
+- On the Farhelm website, headings are readable in light mode. (#1809)
+
 ## v0.25.0 - 2026-10-07
 
 ### 🚀 Added
