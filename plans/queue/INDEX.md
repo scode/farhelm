@@ -1,3 +1,8 @@
 # Plans queue
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
+
+- [pending] `trash-and-host-settings-dialogs.md` — trash and host settings dialogs: margins for every dialog, pinned headers and footers, "delete all" at the top, per-host delete progress
+- [pending] `text-fields-no-spellcheck.md` — turn off spell checking and autocorrect in every text field
+- [pending] `post-clone-in-settings.md` — the all-hosts post-clone command in Settings
+- [pending] `launcher-folder-shortcuts.md` — replace the launcher's folder links with a dropdown on the folder field
