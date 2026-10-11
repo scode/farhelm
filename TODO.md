@@ -180,6 +180,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   broken. At minimum, make it obvious that the delete is in progress and still being waited on; ideally show progress.
   Details to be worked out.
 
+- **Fix the layout of the host setup confirmation.** When adding a host that Farhelm would set up, the dialog that shows
+  the setup plan and asks "yes" / "yes, and don't ask in the future" / "cancel" looks broken. It has no heading, so it
+  opens straight into the plan with nothing saying what is being asked. Plan lines that wrap continue at the left edge
+  with no hanging indent, so a wrapped step reads like a separate step. The three answers come out at three different
+  sizes on no common baseline: "yes" is small, the middle answer is in larger type and wraps onto two lines, and cancel
+  is larger again. The "You can turn this back on with the gear…" note sits under the middle button only, wraps, and
+  pushes cancel down off the row. Cancel is focused when the dialog opens, and its tooltip shows right away and covers
+  part of the middle button. Details of the redesign to be worked out.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
