@@ -95,13 +95,17 @@ An entry can show screenshots of what it changed, behind a closed **show screens
 pull request number the entry cites; the generator places them, and fails the build when no entry of that release cites
 the number. `CHANGELOG.md` and the GitHub release stay text only. The screenshots are ordinary docs shots: tests in
 `e2e/docs-shots/release-notes.spec.ts` named `release-notes/v<X-Y-Z>-<what>`, captured and published with every other
-shot. Give a screenshot only to an entry whose change is visible: a new dialog or control, or a redesign, not a fix or
-behaviour a picture cannot show. Most entries get none, and a release with no visible change gets no file.
+shot until their first publish, after which they are frozen (below). Give a screenshot only to an entry whose change is
+visible: a new dialog or control, or a redesign, not a fix or behaviour a picture cannot show. Most entries get none,
+and a release with no visible change gets no file.
 
-NOTE: A refresh recaptures those shots from the current UI like any other, which is wrong for a past release once a
-later one changes the same dialog. Until that has an answer, when a refresh would turn a past release's shot into a
-picture of later UI, keep its test's steps as they are and tell the maintainer rather than rewriting the shot to the new
-look.
+NOTE: Release notes are stable once published. The `CHANGELOG.md` sections of published releases, the generated page,
+`src/release-notes/*.json`, and the release shots with their tests are never part of a change by default: not a
+screenshot refresh, not a sweep across pages, not a rename or a wording cleanup, and not a UI change that makes an old
+shot look dated. They change only when a task specifically targets them, such as a correction to a published release.
+The tooling holds the screenshots to this (`docs/docs-shots/SPEC.md`, "Release shots are frozen"): once a release shot
+is published, a capture skips it and the publish carries it over unchanged, so its test may stop matching the current UI
+and that is fine. A correction recaptures it with `scripts/docs-screenshots.sh --recapture-release-shot <name>`.
 
 ## Internal links
 

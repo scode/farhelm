@@ -1,26 +1,32 @@
 /**
-  * Screenshots for the docs website's Release notes page: the visual changes of
+ * Screenshots for the docs website's Release notes page: the visual changes of
  * a release, each shown under the entry it belongs to behind a "show
  * screenshot" link, as website/src/release-notes/<version>.json attaches them
  * (website/AGENTS.md, "Release notes").
  *
  * Each test is one release's shot, named release-notes/v<X-Y-Z>-<what>, and
- * is meant to show the release it is named for. The capture cannot keep them
- * that way yet: a refresh recaptures them from the UI of the day like every
- * other shot, so once a later release changes one of these dialogs, its shot
- * needs the maintainer's decision rather than a rewrite to the new look
- * (website/AGENTS.md, "Release notes"). Like every docs shot, nothing here
- * launches a session, sends feedback, or saves a setting.
+ * shows the release it is named for. Once published, a shot is frozen: every
+ * test here calls skipFrozenReleaseShot first, so a capture leaves it alone
+ * and the publish carries the published image over, however much the UI has
+ * moved since (docs/docs-shots/SPEC.md, "Release shots are frozen"). That is
+ * why these tests are not updated in a screenshot refresh, a sweep, or a
+ * rename: a published test's steps only matter again for a deliberate
+ * correction, made with `--recapture-release-shot`. A new release's shots are
+ * added here and captured normally until their first publish. Like every docs
+ * shot, nothing here launches a session, sends feedback, or saves a setting.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { hostRowByName, openHostMenu } from "../tests/helpers/fleet";
 import { open, openLauncher } from "./open";
+import { skipFrozenReleaseShot } from "./release-shots";
 import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
 /** v0.25.0: Cmd+K / Ctrl+Shift+K finds a session on any host. */
 test("v0.25.0 quick switcher", async ({ page, request }) => {
+  const name = `${PAGE}/v0-25-0-quick-switcher`;
+  skipFrozenReleaseShot(name);
   // Narrow enough that the whole dialog fits the docs' text column.
   await page.setViewportSize({ width: 930, height: 1000 });
   const { director } = await open(page, request);
@@ -44,7 +50,7 @@ test("v0.25.0 quick switcher", async ({ page, request }) => {
     "Cmd+K on a Mac, Ctrl+Shift+K elsewhere, even from inside a terminal. Type part of a session's name; Enter jumps to it on whichever host it runs, and Escape takes you back.",
     { side: "bottom", dy: 10 },
   );
-  await shot(page, `${PAGE}/v0-25-0-quick-switcher`, [dialog], { maxWidth: 930 });
+  await shot(page, name, [dialog], { maxWidth: 930 });
 });
 
 /** Open the Templates dialog once its staged list has loaded (as on the Launch templates page). */
@@ -58,6 +64,8 @@ async function openTemplates(page: Page) {
 
 /** v0.25.0: the redesigned Templates dialog. */
 test("v0.25.0 templates dialog", async ({ page, request }) => {
+  const name = `${PAGE}/v0-25-0-templates-dialog`;
+  skipFrozenReleaseShot(name);
   await page.setViewportSize({ width: 930, height: 1100 });
   const { director } = await open(page, request);
   const dialog = await openTemplates(page);
@@ -82,11 +90,13 @@ test("v0.25.0 templates dialog", async ({ page, request }) => {
     "Duplicate a template, or delete it and undo for about ten seconds. Nothing is saved until you press save.",
     { side: "left", dy: 90 },
   );
-  await shot(page, `${PAGE}/v0-25-0-templates-dialog`, [dialog], { maxWidth: 930 });
+  await shot(page, name, [dialog], { maxWidth: 930 });
 });
 
 /** v0.25.0: Send feedback can remember how to reach you. */
 test("v0.25.0 feedback contact", async ({ page, request }) => {
+  const name = `${PAGE}/v0-25-0-feedback-contact`;
+  skipFrozenReleaseShot(name);
   const { director } = await open(page, request);
   await page.locator(".app-help-toggle").click();
   await page.locator('[data-bar-menu-item="send feedback"]').click();
@@ -104,7 +114,7 @@ test("v0.25.0 feedback contact", async ({ page, request }) => {
   );
   // Cropped above the "sent with it" list, which names the capturing
   // browser's operating system rather than one a reader would recognise.
-  await shot(page, `${PAGE}/v0-25-0-feedback-contact`, [dialog.locator(".host-settings-title"), reuse], {
+  await shot(page, name, [dialog.locator(".host-settings-title"), reuse], {
     pad: 12,
     maxWidth: 930,
   });
@@ -141,6 +151,7 @@ async function openRemoteHostSettings(page: Page, scenario: { hosts: { kind: str
 
 /** v0.26.1: Settings can play a sound when a session needs you. */
 test("v0.26.1 sounds", async ({ page, request }) => {
+  skipFrozenReleaseShot(`${PAGE}/v0-26-1-sounds`);
   await page.setViewportSize({ width: 1300, height: 1300 });
   const { director } = await open(page, request);
   const dialog = await openSettings(page);
@@ -167,6 +178,7 @@ test("v0.26.1 sounds", async ({ page, request }) => {
 
 /** v0.26.1: where Farhelm's GitHub checkouts go, set in Settings. */
 test("v0.26.1 checkout folder", async ({ page, request }) => {
+  skipFrozenReleaseShot(`${PAGE}/v0-26-1-checkout-folder`);
   await page.setViewportSize({ width: 1300, height: 1300 });
   const { director } = await open(page, request);
   const dialog = await openSettings(page);
@@ -185,6 +197,7 @@ test("v0.26.1 checkout folder", async ({ page, request }) => {
 
 /** v0.26.1: a remote host's own icon and color. */
 test("v0.26.1 host appearance", async ({ page, request }) => {
+  skipFrozenReleaseShot(`${PAGE}/v0-26-1-host-appearance`);
   await page.setViewportSize({ width: 1300, height: 1300 });
   const { scenario, director } = await open(page, request);
   const dialog = await openRemoteHostSettings(page, scenario);
@@ -207,6 +220,7 @@ test("v0.26.1 host appearance", async ({ page, request }) => {
 
 /** v0.26.1: host settings in sections, with switches. */
 test("v0.26.1 host settings", async ({ page, request }) => {
+  skipFrozenReleaseShot(`${PAGE}/v0-26-1-host-settings`);
   await page.setViewportSize({ width: 1300, height: 1300 });
   const { scenario, director } = await open(page, request);
   const dialog = await openRemoteHostSettings(page, scenario);
@@ -230,6 +244,7 @@ test("v0.26.1 host settings", async ({ page, request }) => {
 
 /** v0.26.1: the session launcher saves its current setup as a template. */
 test("v0.26.1 save as template", async ({ page, request }) => {
+  skipFrozenReleaseShot(`${PAGE}/v0-26-1-save-template`);
   // Narrow enough that the launcher's buttons and the save panel fit the
   // docs' text column.
   await page.setViewportSize({ width: 930, height: 1100 });

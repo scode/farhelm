@@ -21,10 +21,25 @@
 # captures, for the preview, but exits 3 to say its shots cannot be
 # published; that is decided before the slow part, and said up front.
 #
-# Usage: scripts/docs-screenshots.sh [--only PAGE] [--no-build]
+# Published release shots are frozen (docs/docs-shots/SPEC.md, "Release
+# shots are frozen"). A shot a release's screenshot list names
+# (website/src/release-notes/*.json) is, once the manifest says it is
+# published, never captured again by default, by a full run or by --only:
+# its test skips, the publish script carries the published image over, and
+# the release's notes keep showing the UI that release shipped. A release
+# shot not yet published is captured like any other. --recapture-release-shot
+# is for a deliberate correction: it takes the named published release shots
+# after all, and a complete run lists them under recaptured_release_shots in
+# capture.json, which is the only way a publish accepts a replacement.
+#
+# Usage: scripts/docs-screenshots.sh [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
 #   --only PAGE  capture only that page's shots (e2e/docs-shots/PAGE.spec.ts)
 #   --no-build   skip the cargo and dx builds even if their outputs are missing (the
 #                shots can then be previewed but not published)
+#   --recapture-release-shot NAME
+#                also capture the published release shot NAME
+#                (release-notes/v<X-Y-Z>-<what>) from the current UI, to correct it;
+#                repeatable, and refused for a name that is not a published release shot
 #
 # Prerequisites beyond the browser suite's own (rustup, dx, node, Playwright
 # with Chromium under e2e/): passwordless ssh to every destination the
@@ -38,6 +53,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 output="$repo/website/public/docs-shots-local"
 only=""
 build=true
+recapture=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --only)
@@ -46,6 +62,11 @@ while [ $# -gt 0 ]; do
       only="$1"
       ;;
     --no-build) build=false ;;
+    --recapture-release-shot)
+      shift
+      test -n "${1:-}" || { echo "--recapture-release-shot needs a shot name" >&2; exit 2; }
+      recapture+=("$1")
+      ;;
     -h | --help)
       # The header comment, however long it grows.
       awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
@@ -63,6 +84,33 @@ if [ -n "$only" ]; then
   esac
   test -f "$repo/e2e/docs-shots/$only.spec.ts" || { echo "no shots for page '$only' (e2e/docs-shots/$only.spec.ts)" >&2; exit 2; }
   specs=("docs-shots/$only.spec.ts")
+fi
+
+# A recapture must name a shot that is frozen now: a published release shot,
+# by the definition e2e/docs-shots/release-shots.ts and the publish script
+# share. Anything else is a typo or a misunderstanding (an unpublished
+# release shot is captured anyway), and is refused before the builds.
+# Release shots' tests all live in release-notes.spec.ts, so with --only no
+# other page can take one.
+if [ "${#recapture[@]}" -gt 0 ]; then
+  if [ -n "$only" ] && [ "$only" != release-notes ]; then
+    echo "--recapture-release-shot works only on a full run or with --only release-notes" >&2
+    exit 2
+  fi
+  python3 - "$repo/website/src/data/docs-shots.json" "$repo/website/src/release-notes" "${recapture[@]}" <<'EOF' || exit 2
+import json, pathlib, sys
+manifest, releases, *names = (pathlib.Path(arg) for arg in sys.argv[1:])
+published = set(json.loads(manifest.read_text(encoding="utf-8")).get("shots", {})) if manifest.is_file() else set()
+listed = set()
+for listing in sorted(releases.glob("*.json")) if releases.is_dir() else []:
+    listed.update(shot.get("name") for shot in json.loads(listing.read_text(encoding="utf-8")).get("screenshots", []))
+for name in map(str, names):
+    if name not in listed or name not in published:
+        raise SystemExit(
+            f"--recapture-release-shot {name}: not a published release shot "
+            "(one that a website/src/release-notes/*.json lists and website/src/data/docs-shots.json holds)"
+        )
+EOF
 fi
 
 # Whether this full run can produce a publishable record, and if not, why.
@@ -119,7 +167,12 @@ else
 fi
 mkdir -p "$output" || exit 1
 
-(cd "$repo/e2e" && FARHELM_DOCS_SHOTS_OUTPUT="$output" npx playwright test -c docs-shots.config.ts --reporter=line "${specs[@]}") || {
+# The recapture list reaches the Playwright child on its command line only
+# (RECAPTURE_RELEASE_SHOTS_ENV in e2e/docs-shots/paths.ts), comma separated,
+# which is safe because shot names are lowercase kebab case.
+recapture_list=$(IFS=,; printf '%s' "${recapture[*]}")
+(cd "$repo/e2e" && FARHELM_DOCS_SHOTS_OUTPUT="$output" FARHELM_DOCS_RECAPTURE_RELEASE_SHOTS="$recapture_list" \
+  npx playwright test -c docs-shots.config.ts --reporter=line "${specs[@]}") || {
   echo "the capture did not complete; see e2e/test-results for the trace" >&2
   exit 1
 }
@@ -128,24 +181,44 @@ if [ -n "$only" ]; then
 else
   found=$(find "$output" -name '*.png' 2>/dev/null | sort)
 fi
+if [ -z "$found" ] && [ "$only" = release-notes ]; then
+  # Every shot on that page is a published release shot, skipped as frozen;
+  # an empty result is then the expected one rather than a broken run.
+  echo "no Release notes shot to capture: published release shots are frozen (see --recapture-release-shot)" >&2
+  exit 0
+fi
 test -n "$found" || { echo "the capture reported success but wrote no PNGs under $output" >&2; exit 1; }
 printf '%s\n' "$found"
 
 # The record a publish needs, for a complete run that can vouch for showing
 # main's UI at $base (see above). It lists every PNG with its checksum, so a
 # shot overwritten afterwards (a stray single-spec Playwright run, an edit)
-# no longer matches and the publish refuses the mix.
+# no longer matches and the publish refuses the mix. It also lists the
+# published release shots this run recaptured on purpose, each of which must
+# be among its PNGs: the publish refuses any other published release shot
+# it finds in a record, so a capture by tooling that predates the freeze
+# cannot replace one by accident.
 test -z "$only" || exit 0
 if [ -n "$unpublishable" ]; then
   echo "captured, but these shots cannot be published: $unpublishable" >&2
   exit 3
 fi
-python3 - "$output" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$record.tmp" <<'EOF' || exit 1
+python3 - "$output" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${recapture[@]}" >"$record.tmp" <<'EOF' || exit 1
 import hashlib, json, pathlib, sys
-output, base, at = sys.argv[1:]
+output, base, at, *recaptured = sys.argv[1:]
 root = pathlib.Path(output)
 shots = {str(p.relative_to(root))[: -len(".png")]: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob("*.png"))}
-json.dump({"complete": True, "captured_from": base, "captured_at": at, "shots": shots}, sys.stdout, indent=2)
+for name in recaptured:
+    if name not in shots:
+        raise SystemExit(f"asked to recapture {name}, but the run wrote no such shot")
+record = {
+    "complete": True,
+    "captured_from": base,
+    "captured_at": at,
+    "shots": shots,
+    "recaptured_release_shots": sorted(set(recaptured)),
+}
+json.dump(record, sys.stdout, indent=2)
 print()
 EOF
 mv "$record.tmp" "$record" || exit 1

@@ -39,10 +39,11 @@ build. Screenshots for a release live on the website only (`website/AGENTS.md`, 
 step 7 of the stable procedure below has them added for each release.
 
 Curated release sections are historical records. Once a section has been approved or published, do not rewrite it to
-adopt a later layout rule, wording convention, or category set. A change to this process applies to sections curated
-after the change; the checker must retain compatibility with older sections so a release in flight does not require
-retroactive edits. When a new format is introduced, update the checker and its fixtures to recognize both the new format
-and the older formats that remain in the file.
+adopt a later layout rule, wording convention, or category set. More generally, a published release's section is never
+part of a change by default, a sweep or a rename included; it changes only as a correction a task specifically targets.
+A change to this process applies to sections curated after the change; the checker must retain compatibility with older
+sections so a release in flight does not require retroactive edits. When a new format is introduced, update the checker
+and its fixtures to recognize both the new format and the older formats that remain in the file.
 
 The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, and the single
 `### 🔧 Fixed` category in every section up to and including `v0.25.0`. It is a record of already-curated sections, not
