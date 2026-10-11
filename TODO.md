@@ -149,13 +149,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Put the post-clone command in Settings.** A managed checkout can run a shell command right after Farhelm clones the
-  repository (installing dependencies, say), but the only way to set it is `farhelm helm checkout-config set-post-clone`
-  on the helm's machine. Make the all-hosts post-clone command editable in the app's Settings dialog, beside the
-  checkout folder setting that is being planned there, keeping the existing meaning of an empty command (explicitly
-  disabled) versus no command. Per-host overrides stay command-line only unless decided otherwise. Plan:
-  `plans/queue/post-clone-in-settings.md`.
-
 - **Delete one checkout from the trash.** The trash dialog (archived managed checkouts, listed per host) can only delete
   everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
   without taking the rest with it.

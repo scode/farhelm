@@ -564,8 +564,8 @@ pub struct ClaimContext {
 /// The preview reply the helm returns for a fresh-checkout request: the
 /// exact proposed path plus the claim context it is valid against.
 ///
-/// Deliberately carries no hook configuration: the post-clone command is
-/// helm-side configuration and is not handed to the browser.
+/// This preview carries no effective hook configuration. Settings reads the
+/// all-hosts post-clone command separately, without host overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubPreviewResponse {
     /// The canonical absolute root the checkout would be created under.

@@ -145,8 +145,8 @@ pub(crate) struct BrowseDirectoryBody {
 }
 
 /// A browser request to preview a fresh GitHub checkout: the repo text and
-/// title as typed, scoped to the selected host. The browser never supplies
-/// the checkout root or sees the hook — the helm resolves its own
+/// title as typed, scoped to the selected host. This request supplies neither
+/// the checkout root nor the hook — the helm resolves its own
 /// configuration and the supervisor does the host-side naming.
 #[derive(Deserialize)]
 pub(crate) struct GithubCheckoutPreviewReq {
@@ -158,7 +158,7 @@ pub(crate) struct GithubCheckoutPreviewReq {
 
 /// The preview answer the composer renders before enabling Launch: the
 /// exact proposed path and host. The hook/post-clone command is never part
-/// of this payload — the browser does not receive it.
+/// of this payload. Settings reads only the all-hosts command separately.
 pub(crate) type GithubCheckoutPreviewBody = farhelm_proto::AcceptedGithubPreview;
 
 /// Repository completion is scoped to the destination connection selected by
@@ -1046,8 +1046,8 @@ pub(crate) struct CreateReq {
     /// under directory admission. A checkout root that is not configured
     /// is refused with the exact CLI command that fixes it. The root and
     /// post-clone hook come from helm configuration. Preview exposes the
-    /// target-resolved root and destination for acceptance; hook text stays
-    /// private to the helm and supervisor.
+    /// target-resolved root and destination for acceptance; the effective
+    /// hook text is excluded from preview and create replies.
     ///
     /// Restricted session-authenticated callers can never supply this:
     /// they reach the supervisor directly, never this body, and the
@@ -1131,8 +1131,8 @@ fn accepted_checkout_preview<'a>(
 /// they reach the supervisor directly, never this body, and the
 /// supervisor's restricted dispatcher refuses the create outright. The
 /// root and post-clone hook come from helm configuration. The accepted
-/// preview carries the target-resolved paths, but hook text is never sent
-/// to the browser.
+/// preview carries the target-resolved paths without the effective hook.
+/// Settings reads only the all-hosts command through a separate route.
 async fn github_checkout_resolution(
     state: &AppState,
     claim: &manager::SessionClaim,

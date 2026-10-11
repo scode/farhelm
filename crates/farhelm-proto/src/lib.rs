@@ -2611,8 +2611,8 @@ pub enum ControlMsg {
         /// credential or selector validation — the payload is
         /// helm-supplied, resolved from helm-side configuration (checkout
         /// root, post-clone hook) that a spawned session must never see or
-        /// influence, and the browser never sees the hook or the
-        /// post-clone command. The resolved value travels TO the
+        /// influence. Browser Settings can read the all-hosts command,
+        /// but never this host-resolved payload. The resolved value travels TO the
         /// supervisor; nothing on this wire ever carries it back out to a
         /// client.
         ///
@@ -2747,8 +2747,9 @@ pub enum ControlMsg {
     /// where new work may be materialized on the host — a full-authority
     /// question. The browser never sends this frame and never sees its
     /// reply's raw plumbing; the helm owns the preview REST surface, and
-    /// the post-clone hook configuration it resolves server-side never
-    /// appears in any reply.
+    /// the effective post-clone command it resolves server-side never
+    /// appears in a preview reply. Settings exposes the all-hosts command
+    /// separately, without host overrides.
     GithubCheckoutPreview {
         req_id: u64,
         request: GithubPreviewRequest,

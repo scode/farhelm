@@ -2794,22 +2794,28 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 16px;
 }
 .app-settings-dialog[aria-label="settings"] .app-settings-choice > span { min-width: 0; }
-/* This explicit-save field is shared by Settings and inline checkout setup.
-   Keep its layout independent of the launcher's label/form direction rules. */
-.checkout-root-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.checkout-root-field .checkout-root-label { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-.checkout-root-label input {
+/* The folder field is shared by Settings and inline checkout setup; the
+   command field is Settings-only. Both keep independent explicit saves and
+   layout independent of the launcher's label/form direction rules. */
+.checkout-root-field, .checkout-post-clone-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.checkout-root-field .checkout-root-label, .checkout-post-clone-field .checkout-root-label { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.checkout-root-label input, .checkout-root-label textarea {
   box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px;
   background: var(--well); border: 1.5px solid var(--border); border-radius: var(--radius-sm);
   color: var(--fg-0); font-size: 13px; padding: 0 12px;
 }
-.checkout-root-field button {
+/* Shell commands retain newlines and spacing; a few rows make that visible
+   without treating Enter as a form submission. */
+.checkout-post-clone-field textarea {
+  font-family: var(--font-mono); line-height: 1.5; padding: 8px 12px; resize: vertical;
+}
+.checkout-root-field button, .checkout-post-clone-field button {
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: transparent; color: var(--fg-0); font: inherit;
   padding: 6px 12px; cursor: pointer;
 }
-.checkout-root-field button:hover { background: var(--control-hover-bg); }
-.checkout-root-field button[aria-disabled="true"] { opacity: .5; cursor: default; }
+.checkout-root-field button:hover, .checkout-post-clone-field button:hover { background: var(--control-hover-bg); }
+.checkout-root-field button[aria-disabled="true"], .checkout-post-clone-field button[aria-disabled="true"] { opacity: .5; cursor: default; }
 .checkout-root-error, .checkout-root-success { font-size: 12px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .checkout-root-error { color: var(--danger); }
 .checkout-root-success { color: var(--fg-1); }

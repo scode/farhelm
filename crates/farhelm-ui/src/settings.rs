@@ -11,8 +11,8 @@
 //! to the app's own state file through the updater, never the helm.
 //! Sound switches belong to this device's webview storage and remain live
 //! even if a storage write fails; the sound asset owns those controls.
-//! The checkout folder is helm configuration, not a preference: its shared
-//! field explicitly saves validated text and shows the outcome beside it.
+//! The checkout folder and post-clone command are helm configuration, not
+//! preferences: each explicitly saves validated text and shows its outcome.
 
 use dioxus::prelude::*;
 
@@ -46,12 +46,12 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose host choices, device sounds, updates and the all-hosts checkout folder.
+/// Expose host choices, device sounds, updates and all-hosts checkout settings.
 ///
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
 /// surface, and closing the dialog must not cancel a queued preference write.
-/// The folder is the exception: its separate explicit save exposes validation
+/// The checkout fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
 #[component]
 pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
@@ -141,6 +141,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
                     on_saved: move |_| {},
                 }
+                crate::checkout_post_clone::CheckoutPostCloneField {}
                 crate::sounds::SoundSettings {}
                 if let Some(updater) = updater {
                     p { class: "host-settings-help",
