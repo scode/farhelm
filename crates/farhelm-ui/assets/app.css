@@ -47,8 +47,8 @@
  * same names — which only stays a one-block change for as long as no use
  * site holds a literal. */
 
-/* JetBrains Mono Nerd Font, vendored under assets/fonts/ (OFL.txt there
- * carries the full license) for the same self-contained reason xterm.js
+/* JetBrains Mono Nerd Font, vendored under assets/fonts/ (the full OFL.txt
+ * license ships at /assets/OFL.txt) for the same self-contained reason xterm.js
  * itself is vendored — see SPEC_impl.md's "Terminal widget: xterm.js
  * island". Two consumers share this one vendored face: terminal.js sets it
  * as xterm's `fontFamily`, and the `--font-ui` token below applies the same

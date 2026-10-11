@@ -1123,6 +1123,14 @@ declare_assets! {
         "/assets/vendor/addon-web-links-LICENSES.txt",
         AssetOptions::builder().with_hash_suffix(false)
     );
+    // The clipboard addon's MIT and bundled BSD notices ship with its bytes;
+    // WEB_LINKS_LICENSES explains why a source-side notice cannot
+    // establish that the web and desktop bundles carry it.
+    #[used]
+    static CLIPBOARD_LICENSES: Asset = asset!(
+        "/assets/vendor/addon-clipboard-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
     // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
     // item 1) — a separate asset, registered ahead of terminal.js, purely so
     // `node --test` can load this exact file rather than a copy of its logic.
@@ -1165,8 +1173,8 @@ declare_assets! {
     // `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded
     // as WOFF2 from the project's vendored TTF (fontTools, lossless — every
     // glyph survives) since chrome now fetches this file on pages that never
-    // open a terminal at all. Full license text alongside the font files at
-    // `assets/fonts/OFL.txt`.
+    // open a terminal at all. Full license text at `assets/fonts/OFL.txt`
+    // ships in both bundles as `/assets/OFL.txt`, declared below.
     #[used]
     static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
         "/assets/fonts/JetBrainsMonoNerdFont-Regular.woff2",
@@ -1175,6 +1183,13 @@ declare_assets! {
     #[used]
     static FONT_JETBRAINS_MONO_BOLD: Asset = asset!(
         "/assets/fonts/JetBrainsMonoNerdFont-Bold.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    // The OFL requires its full text with distributed fonts. Retain it at a
+    // stable path for the same distribution reason WEB_LINKS_LICENSES gives.
+    #[used]
+    static FONT_LICENSE: Asset = asset!(
+        "/assets/fonts/OFL.txt",
         AssetOptions::builder().with_hash_suffix(false)
     );
     const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");

@@ -22,8 +22,6 @@ triage.
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
 - `snapshot-root.md` — Writable snapshot may pass replacement checkout ownership.
-- `installer-directory-target.md` — An update can report false success or redirect file writes into an external
-  directory.
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the
   host.
 
@@ -44,8 +42,6 @@ triage.
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
   open dialogs.
-- `incomplete-latest-response-select-wrong-release.md` — A truncated latest-version response could install an unintended
-  older release.
 - `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
   against argument expansion.
 - `archive-rename-move-replacement-directory.md` — Checkout archiving could move a foreign replacement directory.
@@ -158,7 +154,6 @@ triage.
 - `clearing-notifications-leaves-cleared-bell-entries-visible.md` — Cleared notifications reappear under build mismatch.
 - `manual-read-unread-toggles-cannot-visibly-toggle.md` — A manual read toggle cannot visibly reverse under build
   mismatch.
-- `ship-font-license-embedded-ui.md` — Release bundles could omit the license required with embedded fonts.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported

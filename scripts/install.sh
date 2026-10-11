@@ -859,7 +859,11 @@ PLIST_EOF
       # final HTTP status on a line of its own (curl prints it even when `-f`
       # failed the request, and "000" when nothing answered), so a release
       # that is not published yet can be told apart from a network failure.
-      latest_reply=$(curl_get -fsS --max-filesize 256 -w "$NEWLINE%{http_code}" "$ORIGIN/latest" 2>/dev/null || true)
+      # HTTP 200 can accompany a failed transfer. A shortened tag can still
+      # name a real older release, so accepting its grammar is not enough:
+      # curl must have received the complete answer before we select it.
+      latest_rc=0
+      latest_reply=$(curl_get -fsS --max-filesize 256 -w "$NEWLINE%{http_code}" "$ORIGIN/latest" 2>/dev/null) || latest_rc=$?
       latest_status=${latest_reply##*"$NEWLINE"}
       # The body, without the status line. Command substitution dropped the
       # body's own trailing newline only if it was the last thing printed, so
@@ -874,6 +878,9 @@ PLIST_EOF
       fi
       if [ "$latest_status" != 200 ]; then
         candidate=""
+      elif [ "$latest_rc" -ne 0 ]; then
+        candidate=""
+        version_error="the latest-release answer from $ORIGIN/latest did not complete (HTTP 200); set FARHELM_VERSION=vX.Y.Z to pick one"
       fi
       # One line, exactly: normalize_version greps line by line, so a body
       # with a second line could pass on its first and carry the rest along.
@@ -1212,6 +1219,19 @@ EOF
 
     previous_installed=""
     if [ "$install_mode" = update ]; then
+      # mv treats a directory destination, including a link to one, as a
+      # place to put the new file rather than a file to replace. Check all
+      # destinations before the first app mutation: a refusal inside replace_file
+      # would come after earlier update steps had already changed the app.
+      for destination in "$contents/MacOS/farhelm-desktop" "$forwarder" \
+        "$contents/Resources/Farhelm.icns" "$contents/Info.plist" \
+        "$contents/Versions/installed" "$contents/.farhelm-installation"; do
+        if [ -d "$destination" ]; then
+          error '%s is a folder, and this installer only replaces files at this path; nothing was changed.\n' "$destination"
+          printf 'Move it out of the way, or move Farhelm.app aside, and re-run.\n' >&2
+          exit 1
+        fi
+      done
       # In place, while an older Farhelm may be running from this very
       # bundle. Each step renames one complete, signed file (or a complete
       # version folder) into place, in an order where stopping after any of
