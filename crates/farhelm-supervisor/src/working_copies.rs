@@ -4125,9 +4125,21 @@ mod tests {
         allocate(&conn, &row.id, None).expect("allocate");
         let destination = format!("bar-{}", utc_compact(now_unix()));
         persist_journal(&conn, &row.id, &destination, AllocationState::Allocated).expect("journal");
+        // The stranger is created BEFORE the source is removed, then moved
+        // into place. Created after the removal, it could take the source's
+        // freed inode, and Linux stamps birth times from a clock that ticks
+        // only every few milliseconds, so it could also carry the source's
+        // birth time and pass as the source itself; that is the suspected
+        // cause of this test failing the v0.26.0 release gate (FLAKES.md).
+        let stranger = dir.path().join("stranger");
+        fs::create_dir(&stranger).expect("coexisting stranger");
+        fs::create_dir_all(dir.path().join(ARCHIVE_DIR_NAME)).expect("archive folder");
         fs::remove_dir(dir.path().join("bar")).expect("source gone");
-        fs::create_dir_all(dir.path().join(ARCHIVE_DIR_NAME).join(&destination))
-            .expect("stranger at destination");
+        fs::rename(
+            &stranger,
+            dir.path().join(ARCHIVE_DIR_NAME).join(&destination),
+        )
+        .expect("stranger at destination");
 
         assert!(matches!(
             reconcile_archive(&conn, &row.id),
