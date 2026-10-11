@@ -10,7 +10,7 @@
 // The supervisor's recording and the helm's marks have their own Rust tests.
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page, Route } from "@playwright/test";
-import { cleanupSession, createSession, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, forceBuildSkew, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
 
 interface StubNotification { seq: number; at: number; text: string; resolved?: boolean }
 
@@ -82,9 +82,63 @@ test.describe("session notifications", () => {
   // The compact choice and the auto-selected row are helm-wide preferences
   // that outlive the page, so a test that changes them must not hand them to
   // the next spec.
-  test.afterEach(async ({ request }) => {
+  test.afterEach(async ({ page, request }) => {
+    // A successful read or clear now requests a fresh listing, so a test can
+    // end while that read is still inside a listing stub; its response is
+    // disposed with the page and would fail the finished test.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     while (created.length) await cleanupSession(request, created.pop()!);
     await resetPreferences(request);
+  });
+
+  /** Closing the list must reconcile its bell even when automatic reads stop.
+   * A quiet stub feed prevents an unrelated fleet notice from repairing the
+   * stale listing; the successful write alone must request the new state. */
+  test("closing notifications quiets the bell under a build mismatch", async ({ page, request }) => {
+    const session = await createSession(request, { title: `read-skew-${Date.now()}` });
+    created.push(session.id);
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: "read under the reload notice" }]);
+    // Route order is the mechanism: the newer notification handlers must
+    // win over the broad skew route, while other API replies latch skew.
+    await forceBuildSkew(page, "9.9.9-notification-read");
+    await serveNotifications(page, session.id, stub);
+    await stubFeed(page);
+    await page.goto("/");
+    await expect(page.locator(".build-skew")).toBeVisible();
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await expect(bell).toHaveClass(/\bloud\b/);
+    await bell.click();
+    await expect(page.locator(".session-bell-entry")).toHaveCount(1);
+    await bell.click();
+    await expect.poll(() => stub.writes).toEqual([{ session: session.id, route: "read", through: 1 }]);
+    await expect(bell).not.toHaveClass(/\bloud\b/);
+  });
+
+  /** Clear must remove a quiet bell without borrowing read-on-close's refresh.
+   * Every entry starts read, so closing sends no read mark. This isolates
+   * Clear's own success path while the reload notice withdraws automatic reads. */
+  test("clearing notifications removes the bell under a build mismatch", async ({ page, request }) => {
+    const session = await createSession(request, { title: `clear-skew-${Date.now()}` });
+    created.push(session.id);
+    const stub = new NotificationStub([{ seq: 1, at: NOW, text: "clear under the reload notice" }]);
+    stub.readThrough = 1;
+    // Register skew first so the newer notification routes can serve their
+    // marks; a different API reply latches the mismatch for the whole page.
+    await forceBuildSkew(page, "9.9.9-notification-clear");
+    await serveNotifications(page, session.id, stub);
+    await stubFeed(page);
+    await page.goto("/");
+    await expect(page.locator(".build-skew")).toBeVisible();
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await expect(bell).toBeVisible();
+    await expect(bell).not.toHaveClass(/\bloud\b/);
+    await bell.click();
+    await expect(page.locator(".session-bell-entry")).toHaveCount(1);
+    await page.getByRole("button", { name: "clear all", exact: true }).click();
+    await expect.poll(() => stub.writes).toEqual([{ session: session.id, route: "cleared", through: 1 }]);
+    await expect(page.locator(".session-bell-entry")).toHaveCount(0);
+    await expect(bell).toHaveCount(0);
+    expect(stub.writes.filter((write) => write.route === "read")).toEqual([]);
   });
 
   /** A failed best-effort read mark must be repairable on the next close.

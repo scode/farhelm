@@ -149,11 +149,6 @@ triage.
   from its retained bytes.
 - `stored-template-resume-commands-have-same-independent.md` — The template resume seed conceals bytes kept for later
   execution.
-- `successful-notification-reads-leave-bell-unread-under.md` — A successful notification read leaves the bell stale
-  under build mismatch.
-- `clearing-notifications-leaves-cleared-bell-entries-visible.md` — Cleared notifications reappear under build mismatch.
-- `manual-read-unread-toggles-cannot-visibly-toggle.md` — A manual read toggle cannot visibly reverse under build
-  mismatch.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported

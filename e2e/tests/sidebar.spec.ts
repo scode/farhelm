@@ -7841,6 +7841,49 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
   }
 });
 
+/** A manual toggle must visibly reverse while automatic listing reads are withdrawn.
+ * Keep selection elsewhere to exclude mark-on-open, and establish the real
+ * row's live/seen contract before skew freezes unattended classification reads. */
+test("a manual read toggle reverses under a build mismatch", async ({ page, request }) => {
+  const session = await createSession(request, { title: `seen-skew-${Date.now()}`, invocation: "sleep 300" });
+  try {
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await expect.poll(async () => {
+      const listing = await request.get("/api/sessions");
+      expect(listing.ok()).toBe(true);
+      const target = (await listing.json()).sessions.find((candidate: { id: string }) => candidate.id === session.id);
+      return target && ["idle", "running", "waiting"].includes(target.status.state) &&
+        Object.hasOwn(target, "seen_activity_at");
+    }, { timeout: 45_000 }).toBe(true);
+    await forceBuildSkew(page, "9.9.9-manual-seen");
+    await stubFeed(page);
+    await page.goto("/");
+    await expect(page.locator(".build-skew")).toBeVisible();
+    const target = row(page, session.id);
+    await expect(target).not.toHaveAttribute("data-session-selected", "true");
+    await openRowMenu(target);
+    const toggle = target.locator(".session-row-mark-seen");
+    await expect(toggle).toHaveText("mark read");
+    const read = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${session.id}/seen`) &&
+      reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at !== null);
+    await toggle.click();
+    expect((await read).ok()).toBe(true);
+    await expect(target.getByRole("menu")).toHaveCount(0);
+    await openRowMenu(target);
+    await expect(toggle).toHaveText("mark unread");
+    const unread = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${session.id}/seen`) &&
+      reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at === null);
+    await toggle.click();
+    expect((await unread).ok()).toBe(true);
+    await expect(target.getByRole("menu")).toHaveCount(0);
+    await openRowMenu(target);
+    await expect(toggle).toHaveText("mark read");
+    await expect(target).not.toHaveAttribute("data-session-selected", "true");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
 /**
  * `MarkSeen` is reachable and operable through the SAME role/keyboard path
  * every other menu command is.
@@ -7920,9 +7963,13 @@ test("the mark-seen item is reachable and operable by role and keyboard", async 
  * dismissing or reclaiming focus from a menu opened in the meantime.
  * Pinning selection elsewhere prevents automatic marks from entering the
  * held route; its receipt therefore proves acceptance of this menu choice.
+ * Title order puts the newer menu above the failed row: an error appearing
+ * above an open menu legitimately dismisses it because its anchor moved.
+ * This fixture excludes that layout rule to isolate completion handling.
  */
 test("a failed manual mark closes on acceptance and preserves a newer menu", async ({ page, request }) => {
   test.setTimeout(90_000);
+  const originalSort = (await readPreferences(request)).list_sort ?? null;
   const session = await createSession(request, {
     title: `seen-menu-failure-${Date.now()}`,
     invocation: "sleep 300",
@@ -7940,8 +7987,16 @@ test("a failed manual mark closes on acceptance and preserves a newer menu", asy
     const stamp = listing.headers()["x-farhelm-build"];
     expect(stamp).toBeTruthy();
     const otherId = await sharedSessionId(request);
+    await patchPreferences(request, { list_sort: "title" });
     await pinAutoSelect(page, otherId);
     await page.goto("/");
+    await waitForHostsListSettled(page);
+    await expect.poll(() => page.locator(".session-row").evaluateAll((rows, ids) => {
+      const shown = rows.map((node) => node.getAttribute("data-session-id"));
+      return shown.indexOf(ids.other) >= 0 && shown.indexOf(ids.other) < shown.indexOf(ids.failed);
+    }, { other: otherId, failed: session.id }), {
+      message: "the newer menu must sit above the row whose refusal changes its height",
+    }).toBe(true);
     const target = row(page, session.id);
     await openRowMenu(target);
     const markRead = target.getByRole("menuitem", { name: "mark read" });
@@ -7969,7 +8024,11 @@ test("a failed manual mark closes on acceptance and preserves a newer menu", asy
     await expect(rename).toBeFocused();
   } finally {
     releaseSeen();
-    await cleanupSession(request, session.id);
+    try {
+      await cleanupSession(request, session.id);
+    } finally {
+      await patchPreferences(request, { list_sort: originalSort });
+    }
   }
 });
 
