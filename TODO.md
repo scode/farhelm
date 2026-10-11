@@ -198,6 +198,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
   as a non-goal for v1, so this needs a SPEC change alongside it.
 
+- **Screenshot every dialog in the app for review.** Capture an image of every single dialog Farhelm can show, each in a
+  realistic state, so the maintainer can look through them and spot the ones that need fixing. The docs screenshot
+  machinery (`docs/docs-shots/SPEC.md`), which captures the web UI against a staged fleet, is a likely starting point.
+  The output is for review, not for publishing.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
