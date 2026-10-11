@@ -262,6 +262,29 @@ is missing (Notifications above), at the start of a flow, before any claim, whil
 there. Stopping and telling the maintainer something (a dirty working copy at the start, a drain's closing summary) is a
 report, not a question, and reads as statements.
 
+## Choosing what to plan: "todo planning flow"
+
+"Todo planning flow" lets the maintainer choose entries to plan by ticking boxes on a local page instead of naming them.
+It covers the Near term bucket unless the request names another one ("todo planning flow for maybe later"). The page
+lists every entry in that bucket that has no plan yet, each as a short label and a one-to-two sentence summary, and its
+"Copy code" button copies a line like `todo-plan near-term: pin-rust-toolchain, upgrade-epochs` for the maintainer to
+paste back. `scripts/todo-picker.py` renders and serves the page; its header covers the details.
+
+- Apply the clean-main boundary, then work from the latest `main@origin`, so the page shows TODO.md as it is now.
+- Run `python3 scripts/todo-picker.py skeleton --bucket "<bucket>"` and save its output in your scratch directory (root
+  `AGENTS.md`, Agent scratch space). It lists every entry without a plan, in file order, and reports the skipped ones on
+  stderr.
+- Fill in each entry's `label` (a few words, used for the entry's slug in the pasted code) and `tldr` (what it is and,
+  when the entry says so, why or the first step), in product terms per root `AGENTS.md` "Talking to the user". Leave the
+  keys and their order alone.
+- Start `python3 scripts/todo-picker.py serve --summaries <file>` as a background command and give the maintainer
+  `http://127.0.0.1:14003/`. The script refuses a summaries file that no longer matches the bucket's unplanned entries,
+  which catches TODO.md moving since the skeleton: rerun the skeleton and fill it in again. If something else holds the
+  port, say so and ask which port to use (`--port`); never stop a process you did not start.
+- When the maintainer pastes a `todo-plan` line, stop the server, map each slug back to its entry through the summaries
+  file, and run "plan to implement" below on exactly those entries. The pasted line is that request, so do not ask for
+  confirmation; anything the maintainer writes alongside it is what they said about the entries.
+
 ## Planning: "plan to implement <TODO items>"
 
 That request, or anything like it, starts the planning flow. Each named TODO entry gets its own plan, including when the
@@ -747,7 +770,8 @@ claim check or claim-holder verb finds the claim gone and it stops.
 ## Help: "plan help"
 
 "Plan help", "help on plans", or similar means: summarize each flow in this file in one to three lines, then stop.
-Change nothing. The flows: plan to implement TODO items; schedule triage outcomes through the planning system; pick a
-plan to execute (and the in-order and named variants); drain the plans; drain and keep monitoring; monitor for complete
-plans, and its one-round form, land the complete plans; review the plans, including show (or check for) blocked plans;
-release plan X; abandoning, which happens inside review; and how notifications reach the maintainer through ntfy.
+Change nothing. The flows: the todo planning flow; plan to implement TODO items; schedule triage outcomes through the
+planning system; pick a plan to execute (and the in-order and named variants); drain the plans; drain and keep
+monitoring; monitor for complete plans, and its one-round form, land the complete plans; review the plans, including
+show (or check for) blocked plans; release plan X; abandoning, which happens inside review; and how notifications reach
+the maintainer through ntfy.
