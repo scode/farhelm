@@ -77,6 +77,49 @@ async function applyTemplate(form: ReturnType<Page["locator"]>, name: string) {
   await form.getByRole("option", { name: `Template: ${name}`, exact: true }).click();
 }
 
+/** A failed catalog must explain missing search results and recover without losing the launch draft. */
+test("tl: search reports a failed template read and retries it", async ({ page, request }) => {
+  const name = `e2e-launcher-list-retry-${Date.now()}`;
+  await putTemplate(request, name, { kind: "agent", agent: "codex" });
+  // Keep the simulated outage on this helm's build; an absent header would
+  // also trigger the unrelated build-skew banner.
+  const templatesReply = await request.get("/api/templates");
+  expect(templatesReply.ok()).toBe(true);
+  const helmBuild = templatesReply.headers()["x-farhelm-build"];
+  expect(helmBuild).toBeTruthy();
+  let failReads = true;
+  let failedReads = 0;
+  await page.route("**/api/templates", async (route) => {
+    if (route.request().method() === "GET" && failReads) {
+      failedReads++;
+      await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "temporary template list failure" });
+    } else await route.continue();
+  });
+  try {
+    const form = await openNew(page);
+    await form.getByLabel("name (optional)").fill("preserved draft");
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("tl:");
+    const error = form.locator(".launch-composer-templates-error");
+    await expect(error).toContainText("couldn't load templates");
+    await expect(error).toContainText("temporary template list failure");
+    expect(failedReads).toBeGreaterThan(0);
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    failReads = false;
+    await error.getByRole("button", { name: "retry", exact: true }).click();
+    await expect(error).toHaveCount(0);
+    // Choice and Retry clicks dismiss the search list. Typing again opens
+    // it within the same draft, so this checks the refreshed catalog.
+    await search.fill(`tl:${name}`);
+    await expect(form.getByRole("option", { name: `Template: ${name}`, exact: true })).toBeVisible();
+    await expect(form.getByLabel("name (optional)")).toHaveValue("preserved draft");
+  } finally {
+    await page.unroute("**/api/templates");
+    await deleteTemplate(request, name);
+  }
+});
+
 /**
  * Open within the current app lifetime and establish the name-list premise.
  * Close/reopen tests need this path so navigation cannot erase the state whose

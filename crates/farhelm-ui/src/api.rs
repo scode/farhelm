@@ -3041,8 +3041,9 @@ pub(crate) async fn fetch_launch_catalog(base: &str) -> Result<Vec<LaunchCatalog
 
 /// Fetch the helm's launch templates, by name (SPEC.md, Launch templates).
 ///
-/// Read when the launcher or the Templates panel opens; a failure leaves the
-/// caller with no templates to offer rather than an error in the launcher.
+/// Read when the launcher or the Templates panel opens. Preserve read failures
+/// so callers can offer a retry and distinguish an unavailable catalog from
+/// a successful empty list or a deleted named template.
 pub(crate) async fn fetch_templates(
     base: &str,
 ) -> Result<Vec<farhelm_proto::launcher::LaunchTemplate>, String> {

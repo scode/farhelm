@@ -2153,20 +2153,21 @@ pub(super) fn CreateSessionForm(
         let base = launch_catalog_base.clone();
         async move { api::fetch_launch_catalog(&base).await }
     });
-    // The helm's launch templates, read once per dialog, for `tl:` search. A
-    // failed read offers none; nothing else in the launcher depends on them.
+    // Keep failure distinct from an empty catalog: `tl:` offers a retry,
+    // and an initial named template must not be reported as deleted when
+    // its catalog could not be read. Unrelated launch choices stay usable.
     let templates_base = base.clone();
     // Re-read whenever the Templates dialog closes (see `TemplatesRevision`);
     // absent outside the list view, where nothing can change them.
     let templates_revision = try_use_context::<super::templates::TemplatesRevision>();
-    let launch_templates = use_resource(move || {
+    let mut launch_templates = use_resource(move || {
         let base = templates_base.clone();
         let _revision = templates_revision.map(|revision| (revision.0)());
-        async move { api::fetch_templates(&base).await.unwrap_or_default() }
+        async move { api::fetch_templates(&base).await }
     });
     // Why the last template accepted from search was not applied, shown
     // under the search box until the next accepted result.
-    let template_error = use_signal(|| None::<String>);
+    let mut template_error = use_signal(|| None::<String>);
     // Prefilled rather than empty-with-a-placeholder, deliberately: what
     // gets sent is always exactly what the field shows, and the common
     // "just give me a session in my home directory" create needs no typing
@@ -3595,7 +3596,12 @@ pub(super) fn CreateSessionForm(
         &composer_search(),
         &composer_hosts,
     ));
-    let templates_now = launch_templates.read().clone().unwrap_or_default();
+    let templates_answer = launch_templates.read().clone();
+    let templates_read_error = templates_answer
+        .as_ref()
+        .and_then(|answer| answer.as_ref().err())
+        .cloned();
+    let templates_now = templates_answer.and_then(Result::ok).unwrap_or_default();
     let template_names: Vec<String> = templates_now
         .iter()
         .map(|template| template.name.clone())
@@ -3823,6 +3829,17 @@ pub(super) fn CreateSessionForm(
         {
             return;
         }
+        if matches!(
+            action,
+            crate::launch_composer::ComposerSearchResult::Template(_)
+        ) && let Some(Err(message)) = launch_templates.read().as_ref()
+        {
+            template_error.set(Some(format!(
+                "couldn't load templates: {message}; search tl: and retry"
+            )));
+            pending_initial_action.set(None);
+            return;
+        }
         if accept_search.call(action) {
             pending_initial_action.set(None);
         }
@@ -3843,12 +3860,19 @@ pub(super) fn CreateSessionForm(
                 permissions: structured_permissions(),
                 workspace_trust: structured_workspace_trust(),
             };
+            let previous_selection = selection.clone();
             let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
                 selection,
                 *custom_model_harness.peek(),
                 harness,
                 catalog.as_deref(),
             );
+            // Enter also applies the already-selected harness. Keep an
+            // ambiguous launch's retry key unless reconciliation changes
+            // the effective request; real edits still retire its YOLO question.
+            let changed = *structured_harness.peek() != Some(selection.harness)
+                || *launch_tab.peek() != LaunchTab::Agent
+                || selection != previous_selection;
             composer_reset_reason.set(draft_reconciliation_reason(
                 &LaunchSelection {
                     harness: structured_harness().unwrap_or(harness),
@@ -3869,7 +3893,9 @@ pub(super) fn CreateSessionForm(
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
             launch_tab.set(LaunchTab::Agent);
-            intent_key.set(None);
+            if changed {
+                intent_key.set(None);
+            }
             focus_composer_surface();
         }
     });
@@ -3878,8 +3904,10 @@ pub(super) fn CreateSessionForm(
             return;
         }
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+        if *launch_tab.peek() != tab {
+            intent_key.set(None);
+        }
         launch_tab.set(tab);
-        intent_key.set(None);
         focus_composer_surface();
     });
     let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
@@ -5330,6 +5358,22 @@ pub(super) fn CreateSessionForm(
                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
                 }
             }
+            if search_scope == crate::launch_composer::SearchScope::Template {
+                if let Some(message) = &templates_read_error {
+                    p { class: "create-catalog-error launch-composer-templates-error",
+                        span { role: "status", "couldn't load templates: {display_peer(message)} " }
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral",
+                            onclick: move |_| {
+                                launch_templates.clear();
+                                launch_templates.restart();
+                            },
+                            "retry"
+                        }
+                    }
+                }
+            }
             div { class: "launch-composer-columns",
                     div { class: "launch-composer-column-destination",
                         // A destination is a host and its folder or managed checkout.
@@ -5886,26 +5930,34 @@ pub(super) fn CreateSessionForm(
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
+                                    // Reapplying a choice with Enter is also a
+                                    // retry gesture. Only a real edit retires it.
+                                    if *structured_effort.peek() != effort {
+                                        intent_key.set(None);
+                                    }
                                     structured_effort.set(effort);
-                                    intent_key.set(None);
                                 },
                                 on_permissions: move |permission| {
                                     if !draft_transition_allowed(ops) { return; }
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
+                                    if *structured_permissions.peek() != permission {
+                                        intent_key.set(None);
+                                    }
                                     structured_permissions.set(permission);
                                     structured_permissions_is_explicit.set(true);
-                                    intent_key.set(None);
                                 },
                                 on_workspace_trust: move |choice| {
                                     if !draft_transition_allowed(ops) { return; }
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
+                                    if *structured_workspace_trust.peek() != choice {
+                                        intent_key.set(None);
+                                    }
                                     structured_workspace_trust.set(choice);
                                     structured_workspace_trust_is_explicit.set(true);
-                                    intent_key.set(None);
                                 },
                             }
                         }
