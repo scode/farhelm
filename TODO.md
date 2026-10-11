@@ -153,23 +153,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
   without taking the rest with it.
 
-- **Put the trash's "delete all" at the top right.** The global "delete all" sits in the trash dialog's footer, below
-  every host's list, so with more than a few archived checkouts you have to scroll to find it. Move it to the top right
-  of the dialog so it is visible without scrolling. Plan: `plans/queue/trash-and-host-settings-dialogs.md`.
-
-- **Give the trash and host settings dialogs some vertical margin.** Both dialogs take up almost the entire height of
-  the window, which makes them feel jammed in, as if they only barely fit. Leave visible space above and below them.
-  Plan: `plans/queue/trash-and-host-settings-dialogs.md`.
-
-- **Keep the host settings dialog's header and footer in view.** The footer's close button and its "changes save as you
-  make them" note should be pinned where they are and always visible, as should the header. Only the settings between
-  the header and the footer scroll. Plan: `plans/queue/trash-and-host-settings-dialogs.md`.
-
-- **Show that deleting from the trash is still working.** While a confirmed delete runs, the trash dialog only disables
-  its buttons (close included) until every host has answered, so a delete that takes a while feels like something is
-  broken. At minimum, make it obvious that the delete is in progress and still being waited on; ideally show progress.
-  Details to be worked out. Plan: `plans/queue/trash-and-host-settings-dialogs.md`.
-
 - **Fix the layout of the host setup confirmation.** When adding a host that Farhelm would set up, the dialog that shows
   the setup plan and asks "yes" / "yes, and don't ask in the future" / "cancel" looks broken. It has no heading, so it
   opens straight into the plan with nothing saying what is being asked. Plan lines that wrap continue at the left edge

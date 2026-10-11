@@ -7055,6 +7055,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .checkout-trash-header-actions { display: flex; flex-shrink: 0; gap: 10px; margin-left: auto; }
 .checkout-trash-total { flex: 1 1 12em; min-width: 0; color: var(--fg-1); }
+.checkout-trash-progress { flex-basis: 100%; color: var(--fg-1); }
+/* Idle, the status region stays in the accessibility tree but takes no row
+   in the wrapped header; `display: none` would remove it from that tree. */
+.checkout-trash-progress.idle { position: absolute; }
 .checkout-trash-body {
   min-height: 0;
   overflow: auto;

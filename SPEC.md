@@ -775,7 +775,10 @@ place, naming the confirmed hosts, checkout count and size, and warning that unc
 lost. The global action skips unreachable hosts and waits until every reachable host can be read. There is no restore
 action or automatic cleanup. The header keeps the title, total, global delete action and close control visible while the
 host list scrolls. Global confirmation appears first in that scroll region; its actions are brought into view when it
-opens, and cancelling returns focus to the global delete action. There is no footer.
+opens, and cancelling returns focus to the global delete action. There is no footer. While deletion runs, the header
+announces how many of the involved hosts are still deleting, such as "deleting on 2 of 3 hosts…". Each pending host also
+shows "deleting…" until its reply arrives, whether success or failure, then its cleanup result takes over. Close and
+Escape stay unavailable until every involved host has answered.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
