@@ -95,3 +95,65 @@ and wording reviewers were requested at the models and efforts stated above, but
 confirmation of which models actually ran or their usage. Some initial launch bookkeeping was also missing. These gaps
 limit model attribution and cost accounting; they do not replace the retained review findings or the separate recorded
 runtime evidence.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1886. The rebase met no conflicts; only documentation had landed since the plan ran.
+
+#### Fixes made while landing
+
+All in #1886, before it merged:
+
+- SPEC.md ("Local authority and trust between hosts") and SPEC_impl.md both still said an agent's retried create is a
+  new request the user is asked about again, so how long retry records are kept is not a security question. This plan
+  made a keyed retry of a managed-checkout create return, or finish, the attempt the user already approved, without a
+  new card. Both passages now state that exception and why it stays safe: the replay can only complete that exact
+  approved request, and only for the session that asked.
+- Every other agent action leaves a line in the helm log; an agent's managed-checkout create left none, though it is the
+  one that can run the post-clone command on a repository the agent chose. It now logs the asking session, host and
+  repository after approval.
+- A template write's approval card showed a managed-checkout destination as a bare `owner/repo`, unlike the launch
+  card's `GitHub: owner/repo`; it now matches.
+- A refused checkout told the agent to retry with a new idempotency key even when it had sent none; that advice now
+  appears only for keyed requests.
+- The `farhelm agent instructions` example for naming a checkout read garbled; it now reads
+  "`--gh acme/web --title 'Fix parser'` creates directory web-fix-parser".
+
+None of these has a new test; the specification edits are text.
+
+#### Review before merging
+
+No blockers. Approval gates every clone: the preview comes before the card, and dispatch re-checks the host, the
+installation and the checkout settings revision, so a change to the folder or post-clone command while the card waits
+refuses the create. The agent cannot choose the folder, the post-clone command or a per-host override; repository names
+go through the launcher's strict parser in the CLI, the supervisor preview and the helm; and YOLO and harness choices
+are checked as on the existing launch path. The browser test proves a denied request clones nothing. Notes left as they
+are:
+
+- Possible follow-up (a design call): the approval card does not say whether a post-clone command will run on the
+  repository the agent picked. The browser launcher does not show it either. A yes/no row on the card, without the
+  command text, would cover it.
+- A keyed retry is checked against today's resolved launch but may finish the originally approved one: if the host
+  starts asking before YOLO launches and the template is changed to non-YOLO between an interrupted approved attempt and
+  its retry, the retry finishes the original YOLO launch without a card. The specification accepts checking today's
+  launch; this edge is not documented.
+- Template writes do not re-validate the repository in the helm; a raw relay request can store one that is then refused
+  when the template is applied.
+- The website's "approve agent requests" page does not yet mention the repository row, or that on a host set to run
+  commands without asking, agents can now clone repositories and trigger the post-clone command unsupervised.
+- No UI unit test covers the repository row; the Rust end-to-end test turns on running commands without asking, so
+  approval gating is covered by the browser test only.
+
+#### Checks
+
+- Run now, after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the supervisor, helm, UI, protocol, fixtures and CLI unit tests with
+  the GitHub-checkout, agent-relay and agent-listing end-to-end tests, through the recorder with pinned tmux 3.7c, four
+  slots and no retries (run `d34c3309`, 2931 of 2931); the helm, protocol and CLI doctests (run `a7b18326`); the UI
+  JavaScript tests (238 of 238); the docs website build; and on Chromium and WebKit with one worker and no retries the
+  github-checkouts, agent-relay, approval-layout and github-checkout-composer specs (run `846d5569`, 80 passed).
+- An earlier start of the same checks was stopped during its Rust tests to take the fixes; it is not counted.
+- Between those runs and the merge, main changed only documentation.
+
+Nothing in the report above was made untrue by the landing.
