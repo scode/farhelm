@@ -390,8 +390,8 @@ With both settled, the process is:
   installs are unaffected. Then close the version-bump PR without merging it. The tag preserves the release commit; the
   PR does not need to stay open for the RC to remain available. Keep the tag and published release intact.
 - Then `cargo clean` again (see "Build outputs" below).
-- A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
-  the incomplete-release recovery below deletes only a GitHub release, and keeps the tag).
+- A failed tag build publishes nothing; fix forward ("Fixing forward" below) and cut `rc.N+1`. The stale tag stays (tags
+  are never deleted; the incomplete-release recovery below deletes only a GitHub release, and keeps the tag).
 - Close the version-bump PR without merging when its release attempt is permanently abandoned, including when a fix
   requires another RC and a new version-bump PR will supersede it. A temporary pause or a recoverable workflow rerun is
   not permanent abandonment; keep the PR open while that same release attempt remains active.
@@ -400,6 +400,24 @@ With both settled, the process is:
   rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
   "immutable commits are used to protect shared history" at exactly the moment a trial's feedback wants applying.
 
+## Fixing forward
+
+When an RC or dev attempt turns up a problem, whether its tag build failed or the maintainer hit it trying the release,
+the default is to fix forward without stopping to ask: fix it on a branch off the latest main, merge the fix to main,
+and cut `rc.N+1` from main's new tip. Whatever else landed on main in the meantime rides along. That is fine, and it is
+not a reason to cut from an older commit or to ask first. The follow-up attempt's base is therefore already settled
+(latest main) and so is its version (the next N), so neither choice above needs asking about again. The maintainer set
+this default on 2026-10-10: prereleases exist to flush out exactly this kind of problem and to smoke test the real
+release artifacts, so a fix that keeps the next attempt moving is the point, and waiting on the maintainer for one only
+stalls them.
+
+The release request is the authorization: open the fix as a PR, mark it ready and merge it as part of landing it, after
+the validation the fix itself calls for ("Finishing work" in the root `AGENTS.md`). This covers fixes that are
+reasonably straightforward and unambiguous. A fix that needs a design decision, changes product behavior in a way the
+specs do not already settle, or has more than one reasonable answer is still the maintainer's: describe it and ask. An
+explicit instruction otherwise (cut the next attempt from a stack, hold the fix for review, stop after a failure)
+overrides the default.
+
 # Cutting a dev release
 
 A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure above with
@@ -407,10 +425,10 @@ A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`,
 name is never reused, the workflow runs from the tag and marks the release a prerelease (any semver prerelease suffix
 does; get.farhelm.io's `latest` still names the last stable), and `scripts/install.sh` accepts
 `FARHELM_VERSION=vX.Y.Z-dev.N` the same way it accepts an `-rc.N`. Settle the same two choices first, base and version,
-and ask when the request does not state them; the RC version default above does not apply to dev releases. The `-dev.N`
-and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both exist. The name is the whole
-difference: it tells whoever reads the tag list later that the build was a trial of work in progress, not a claim that
-this is what will ship as `X.Y.Z`.
+and ask when the request does not state them (a follow-up attempt after fixing forward already has both); the RC version
+default above does not apply to dev releases. The `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and
+`0.3.0-rc.1` can both exist. The name is the whole difference: it tells whoever reads the tag list later that the build
+was a trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
 
 # The release risk report
 
