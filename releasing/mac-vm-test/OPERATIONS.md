@@ -119,6 +119,13 @@ accessibility tree describes the host window, not guest controls. Use screenshot
 submission. Bring-up proved guest clicks, keyboard input and screenshot export. Permissions needed by the guest screen
 agent and apps require the maintainer's approval; never transfer a guest approval to host permissions.
 
+If computer use returns `noWindowsAvailable` or `cgWindowNotFound`, inspect the coordinator status and live Tart state
+before doing anything to the guests. In one run, both owned guests were still running and command-ready even though
+binding by bundle ID, installed app path and display name, and a clean computer-use reset, could not recover the Mac
+window. Those errors alone do not prove a guest or Farhelm crash. Keep the foreground owner alive and ask the maintainer
+to restore access to the visible Mac clone window; its cause and a reliable recovery were not established. Do not
+restart guests, start duplicate Tart owners or substitute host Farhelm to get past the missing GUI prerequisite.
+
 Text delivery was inconsistent: `typeText` could display text without committing a reactive guest form value. Physical
 `pressKey` character events worked in the launcher, including its host search and command field. Verify complete text
 before submission. Native destination-menu selection and modifier shortcuts were unreliable; supported host search
