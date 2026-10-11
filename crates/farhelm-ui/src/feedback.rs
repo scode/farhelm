@@ -275,6 +275,12 @@ pub(crate) fn FeedbackDialog(
                         "message"
                         textarea {
                             class: "feedback-message",
+                            // Feedback can contain commands or paths too; the
+                            // app's no-correction policy includes this prose box.
+                            autocomplete: "off",
+                            autocorrect: "off",
+                            autocapitalize: "none",
+                            spellcheck: "false",
                             rows: "5",
                             required: true,
                             disabled: sending,
@@ -287,7 +293,12 @@ pub(crate) fn FeedbackDialog(
                         input {
                             r#type: "text",
                             class: "feedback-contact",
+                            // Offer the user's saved address without rewriting
+                            // an address or another contact they type.
                             autocomplete: "email",
+                            autocorrect: "off",
+                            autocapitalize: "none",
+                            spellcheck: "false",
                             disabled: sending,
                             value: "{contact}",
                             oninput: move |event| contact.set(event.value()),

@@ -52,6 +52,8 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                 input {
                     r#type: "text", value: "{draft}", readonly: locked,
                     aria_disabled: locked, autocomplete: "off", spellcheck: "false",
+                    // A path's spelling and case identify the target folder.
+                    autocorrect: "off", autocapitalize: "none",
                     oninput: move |event| {
                         if initialized() && !saving() { draft.set(event.value()); outcome.set(None); }
                     },
@@ -67,10 +69,15 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
             p { class: "launch-composer-repository-note", "{note}" }
             if let Some(error) = load_error {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
-                button { r#type: "button", onclick: move |_| root.restart(), "retry" }
+                button {
+                    r#type: "button",
+                    "data-tooltip": "load the saved checkout folder again",
+                    onclick: move |_| root.restart(), "retry"
+                }
             } else {
                 button {
                     r#type: "button", aria_disabled: locked,
+                    "data-tooltip": "save the checkout folder for all hosts",
                     onclick: move |_| {
                         if !initialized() || saving() { return; }
                         saving.set(true);

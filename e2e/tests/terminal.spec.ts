@@ -1783,45 +1783,6 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
   }
 });
 
-// macOS autocorrect mangles create-form input both via suggestion popups
-// and silent in-place substitution (observed directly: WKWebView silently
-// capitalizing "claude" to "Claude" with no visible popup to catch and
-// reject) — a corrupted command or path is not a cosmetic issue, since
-// these fields hold literal text that gets executed, not prose. All three
-// inputs opt out of every browser-level text-mangling feature; this test
-// pins that the opt-out attributes actually made it into the rendered DOM
-// (a Dioxus rsx typo or a dropped attribute would otherwise silently leave
-// autocorrect back on) rather than exercising an OS-level autocorrect
-// engine itself, which is not something Playwright's headless Chromium
-// runs at all.
-test("create form inputs opt out of autocomplete, autocorrect, autocapitalize, and spellcheck", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page.locator(".new-session-button").click();
-  const form = page.locator(".create-session-form");
-  await expect(form).toBeVisible();
-
-  // Pin the new composer fields by meaning, then inspect every text/search
-  // input, including the hidden legacy fields. Counting the former form's
-  // three inputs would test its layout rather than this policy.
-  await expect(form.getByLabel("folder", { exact: true })).toHaveCount(1);
-  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveCount(1);
-  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveCount(1);
-  // The search label names efforts too now that effort words are searchable (composer word search).
-  await expect(form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" })).toHaveCount(1);
-  const inputs = form.locator('input[type="text"], input[type="search"]');
-  const inputCount = await inputs.count();
-  expect(inputCount).toBeGreaterThanOrEqual(4);
-  for (let i = 0; i < inputCount; i++) {
-    const input = inputs.nth(i);
-    await expect(input).toHaveAttribute("autocomplete", "off");
-    await expect(input).toHaveAttribute("autocorrect", "off");
-    await expect(input).toHaveAttribute("autocapitalize", "none");
-    await expect(input).toHaveAttribute("spellcheck", "false");
-  }
-});
-
 // SPEC.md's precondition-failure split for creation: a bad working
 // directory must fail the create with the supervisor's OWN error text,
 // leave the form open with its values intact (so the user can fix the one

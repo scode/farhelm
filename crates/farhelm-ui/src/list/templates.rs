@@ -556,6 +556,8 @@ fn Choice(
 
 /// A present field's controls, independent of list navigation and save state.
 /// Changes only update the draft; they never clear another field to make it fit.
+/// Text fields keep literal commands, paths, model IDs and chosen names:
+/// browser correction and remembered form values must not rewrite them.
 #[component]
 fn FieldEditor(
     field: Field,
@@ -599,6 +601,7 @@ fn FieldEditor(
                 label { class: "templates-field",
                     span { "model" }
                     input { class: "templates-model", r#type: "text", value: "{value}", disabled, placeholder: "default, or type any model",
+                        autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         "data-tooltip": "model: type any model; suggestions follow the agent type this template sets",
                         oninput: move |event| draft.with_mut(|d| d.fields.model = Some((!event.value().is_empty()).then(|| event.value()))),
                     }
@@ -642,6 +645,7 @@ fn FieldEditor(
             label { class: "templates-field",
                 span { "command" }
                 input { class: "templates-command templates-code", value: current.command.unwrap_or_default(), disabled, placeholder: "agent-tool {{farhelm_args}}",
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| draft.with_mut(|d| d.fields.command = Some(e.value())),
                 }
             }
@@ -651,6 +655,7 @@ fn FieldEditor(
             label { class: "templates-field",
                 span { "resume command" }
                 input { class: "templates-resume templates-code", value: current.resume_command.flatten().unwrap_or_default(), disabled, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))),
                 }
             }
@@ -673,6 +678,7 @@ fn FieldEditor(
             label { class: "templates-field",
                 span { "session name" }
                 input { class: "templates-session-name", value: current.name.unwrap_or_default(), disabled, placeholder: "review",
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "session name: the name this template puts in the launcher", oninput: move |e| draft.with_mut(|d| d.fields.name = Some(e.value())),
                 }
             }
@@ -698,6 +704,7 @@ fn FieldEditor(
                     label {
                         span { if github { "repository" } else { "folder path" } }
                         input { class: "templates-destination", value, disabled, placeholder: if github { "owner/name" } else { "/path/to/project" },
+                            autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                             "data-tooltip": if github { "repository: each session gets a managed checkout" } else { "folder path: the working folder on the selected host" },
                             oninput: move |e| draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })),
                         }
@@ -1156,7 +1163,11 @@ pub(super) fn TemplatesDialog(
                             }
                             label { class: "templates-field",
                                 span { "name" }
-                                input { class: "templates-name", value: "{current.name}", disabled, placeholder: "my-claude", "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| draft.with_mut(|d| d.name=e.value()) }
+                                // The name is a literal tl: search key; browser
+                                // correction would change what the user chose.
+                                input { class: "templates-name", value: "{current.name}", disabled, placeholder: "my-claude",
+                                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                                    "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| draft.with_mut(|d| d.name=e.value()) }
                             }
                             div { class: "templates-field",
                                 span { "switches launcher to" }

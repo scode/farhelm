@@ -1,5 +1,6 @@
 /**
  * Every visible clickable control carries hover text.
+ * App text fields opt out of browser correction and remembered form values.
  *
  * The maintainer asked for hover help on every icon and every clickable
  * control, plain-word buttons included, because a user otherwise has to
@@ -30,6 +31,8 @@
  * host settings and add-host dialogs, and both tabs of the new-session form.
  * States it cannot reach (a host mid-update, an interrupted session, a
  * provisioning plan) are covered by review of the inventory instead.
+ * The same dialog walk checks text attributes separately. It verifies the
+ * rendered opt-outs in both engines, not an OS-level correction engine.
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
@@ -116,6 +119,59 @@ async function expectCovered(page: Page, state: string, root: string, minimum: n
   expect(await nativeTitles(page), `${state}: elements with a native title`).toEqual([]);
 }
 
+/**
+ * Include default-type inputs: several template fields and quick search have
+ * no explicit type, and selecting only input[type=text] would miss them.
+ * xterm owns its hidden helper textarea and its separate input policy.
+ */
+const TEXT_FIELDS =
+  "input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=password], textarea:not(.xterm-helper-textarea)";
+
+/**
+ * Check mounted fields, even when hidden or disabled, so dormant launcher
+ * fields retain their opt-outs. Only visible fields inside `root` count as
+ * proof that the visited surface actually rendered its text-entry state.
+ * Email autofill is allowed only on feedback's contact field; correction
+ * stays off there, and feedback's message box follows the ordinary policy.
+ */
+async function sweepTextFields(page: Page, root: string): Promise<{ checked: number; missing: string[] }> {
+  return page.evaluate(({ selector, root }) => {
+    const scope = document.querySelector(root);
+    const missing: string[] = [];
+    let checked = 0;
+    for (const field of document.querySelectorAll<HTMLElement>(selector)) {
+      const box = field.getBoundingClientRect();
+      if (scope?.contains(field) && box.width > 0 && box.height > 0 && getComputedStyle(field).visibility !== "hidden") {
+        checked += 1;
+      }
+      const attributes = {
+        autocomplete: field.matches(".feedback-dialog .feedback-contact") ? "email" : "off",
+        autocorrect: "off",
+        autocapitalize: "none",
+        spellcheck: "false",
+      };
+      for (const [name, value] of Object.entries(attributes)) {
+        const actual = field.getAttribute(name);
+        if (actual !== value) {
+          missing.push(`<${field.tagName.toLowerCase()} id="${field.id}" class="${field.className}"> ${name}=${JSON.stringify(actual)}, expected ${JSON.stringify(value)}`);
+        }
+      }
+    }
+    return { checked, missing };
+  }, { selector: TEXT_FIELDS, root });
+}
+
+/**
+ * A surface must expose its own fields before page-wide assertions can pass.
+ * Counting within its root prevents unrelated sidebar fields from masking a
+ * missing editor or a selector that no longer reaches the intended inputs.
+ */
+async function expectTextFieldsCovered(page: Page, state: string, root: string, minimum: number) {
+  const { checked, missing } = await sweepTextFields(page, root);
+  expect(checked, `${state}: premise: the sweep sees the state's text fields`).toBeGreaterThanOrEqual(minimum);
+  expect(missing, `${state}: text fields without correction opt-outs`).toEqual([]);
+}
+
 test.afterEach(async ({ request }) => {
   await resetPreferences(request);
 });
@@ -125,7 +181,8 @@ test.afterEach(async ({ request }) => {
  *
  * Why: these are the surfaces a user meets first and where most of the
  * terse icon-only controls live (the row and host menus, the gear, the help
- * button, the host icons).
+ * button, the host icons). The same walk reaches literal command, path and
+ * name fields whose browser correction attributes must survive rendering.
  */
 test("sidebar surfaces give every control hover text", async ({ page, request }) => {
   test.setTimeout(120_000);
@@ -143,6 +200,29 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   expect((await sweep(page, "body")).missing.some((entry) => entry.includes('"probe"')), "the sweep must report a bare button")
     .toBe(true);
   await page.evaluate(() => document.getElementById("tt-coverage-probe")?.remove());
+  // Prove both field shapes are selected and each missing attribute fails.
+  // A default-type input guards the selector trap in templates/quick search.
+  for (const tag of ["input", "textarea"]) {
+    await page.evaluate((tag) => {
+      const probe = document.createElement(tag);
+      probe.id = "text-entry-probe";
+      probe.setAttribute("style", "position:fixed;left:300px;top:300px;z-index:45;");
+      for (const [name, value] of Object.entries({ autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false" })) {
+        probe.setAttribute(name, value);
+      }
+      document.body.appendChild(probe);
+    }, tag);
+    expect((await sweepTextFields(page, "#text-entry-probe")).checked, `${tag}: the probe is visible and selected`).toBe(1);
+    for (const [name, value] of Object.entries({ autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false" })) {
+      await page.locator("#text-entry-probe").evaluate((probe, name) => probe.removeAttribute(name), name);
+      const failures = (await sweepTextFields(page, "#text-entry-probe")).missing.filter((entry) => entry.includes('id="text-entry-probe"'));
+      expect(failures, `${tag}: removing ${name} must be detected`).toEqual([
+        `<${tag} id="text-entry-probe" class=""> ${name}=null, expected ${JSON.stringify(value)}`,
+      ]);
+      await page.locator("#text-entry-probe").evaluate((probe, { name, value }) => probe.setAttribute(name, value), { name, value });
+    }
+    await page.locator("#text-entry-probe").evaluate((probe) => probe.remove());
+  }
   await expectCovered(page, "sidebar", ".app-sidebar", 8);
 
   await openRowMenu(row);
@@ -157,6 +237,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await page.locator(".session-row-rename").click();
   await expect(page.locator(".rename-dialog .rename-form")).toBeVisible();
   await expectCovered(page, "rename dialog", ".rename-dialog", 2);
+  await expectTextFieldsCovered(page, "rename dialog", ".rename-dialog", 1);
   await page.locator(".rename-cancel").click();
   await expect(page.locator(".rename-dialog")).toHaveCount(0);
 
@@ -169,12 +250,18 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   // visibility directly so the existing controls cannot satisfy its premise.
   await expect(page.locator(".host-settings-dismiss")).toBeVisible();
   await expectCovered(page, "host settings dialog", ".host-settings-dialog", 4);
+  await page.locator(".host-settings-dialog .host-alias").click();
+  await expect(page.locator(".host-settings-dialog .host-destination-input")).toBeVisible();
+  await expectTextFieldsCovered(page, "host alias editor", ".host-settings-dialog", 1);
+  await page.locator(".host-settings-dialog .host-cancel-edit").click();
+  await expect(page.locator(".host-settings-dialog .host-destination-input")).toHaveCount(0);
   await page.locator(".host-settings-close").first().click();
   await expect(page.locator(".host-settings-dialog")).toHaveCount(0);
 
   await page.locator(".add-host-button").click();
   await expect(page.locator(".add-host-submit")).toBeVisible();
   await expectCovered(page, "add host form", ".add-host-form", 1);
+  await expectTextFieldsCovered(page, "add host form", ".add-host-form", 1);
   await page.locator(".add-host-cancel").click();
   await expect(page.locator(".add-host-submit")).toHaveCount(0);
 
@@ -188,12 +275,14 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await feedback.locator(".feedback-contact").fill("contact@example.test");
   await expect(feedback.locator(".feedback-reuse")).toBeChecked();
   await expectCovered(page, "feedback dialog", ".feedback-dialog", 3);
+  await expectTextFieldsCovered(page, "feedback dialog", ".feedback-dialog", 2);
   await feedback.locator(".feedback-cancel").click();
   await expect(feedback).toHaveCount(0);
 
   await page.locator(".app-settings-toggle").click();
   await expect(page.locator(".app-settings-dialog")).toBeVisible();
   await expectCovered(page, "settings dialog", ".app-settings-dialog", 3);
+  await expectTextFieldsCovered(page, "settings dialog", ".app-settings-dialog", 1);
   await page.locator(".app-settings-close").click();
   await expect(page.locator(".app-settings-dialog")).toHaveCount(0);
 
@@ -202,6 +291,8 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(templates).toBeVisible();
   await expectCovered(page, "templates dialog", ".templates-dialog", 2);
   await templates.locator(".templates-new").click();
+  await expect(templates.locator(".templates-name")).toBeVisible();
+  await expectTextFieldsCovered(page, "new template name", ".templates-editor", 1);
   await templates.locator(".templates-add").click();
   await expect(templates.getByRole("group", { name: "add field", exact: true })).toBeVisible();
   await expectCovered(page, "templates add-field menu", ".templates-add-menu", 3);
@@ -212,16 +303,43 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
     await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
   }
   await expectCovered(page, "templates agent editor", ".templates-editor", 10);
+  await expectTextFieldsCovered(page, "templates agent editor", ".templates-editor", 2);
+  // Incompatible fields stay mounted on a kind switch; check them too, and
+  // reveal every command/path/name field absent from the original hover walk.
+  await templates.getByRole("group", { name: "switches launcher to", exact: true }).getByRole("button", { name: "command", exact: true }).click();
+  for (const name of ["command", "resume command", "session name", "destination"]) {
+    await templates.locator(".templates-add").click();
+    await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
+  }
+  for (const selector of [".templates-command", ".templates-resume", ".templates-session-name", ".templates-destination"]) {
+    await expect(templates.locator(selector)).toBeVisible();
+  }
+  await expectCovered(page, "templates command editor", ".templates-editor", 10);
+  await expectTextFieldsCovered(page, "templates command editor", ".templates-editor", 6);
   await templates.locator(".templates-close").click();
   await expect(templates.locator(".templates-departure")).toBeVisible();
   await expectCovered(page, "templates unsaved departure", ".templates-departure", 3);
   await templates.locator(".templates-discard").click();
   await expect(templates).toHaveCount(0);
 
+  await expect(page.locator(".quick-switcher-trigger")).toHaveCount(1);
+  const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+  await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
+  const switcher = page.getByRole("dialog", { name: "quick switcher", exact: true });
+  await expect(switcher).toBeVisible();
+  await expect(switcher.getByRole("combobox")).toBeFocused();
+  await expectTextFieldsCovered(page, "quick switcher", ".quick-switcher-dialog", 1);
+  await page.keyboard.press("Escape");
+  await expect(switcher).toHaveCount(0);
+
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await expectCovered(page, "new session form, agent tab", ".create-session-form", 8);
+  await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
+  await expect(form.getByLabel("name (optional)", { exact: true })).toBeVisible();
+  await expect(form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true })).toBeVisible();
+  await expectTextFieldsCovered(page, "new session form, agent tab", ".create-session-form", 3);
   // Picking an agent reveals the agent-dependent choices (model, effort,
   // permissions, workspace trust), and the search box offers results; both
   // carry hover text of their own. Codex is picked because it offers every
@@ -229,9 +347,12 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-trust-choice")).toBeVisible();
   await expectCovered(page, "new session form, Codex picked", ".create-session-form", 15);
+  await expect(form.getByRole("combobox", { name: "model", exact: true })).toBeVisible();
+  await expectTextFieldsCovered(page, "new session form, Codex picked", ".create-session-form", 4);
   await form.locator(".launch-composer-save-template").click();
   await expect(form.locator(".save-template-panel")).toBeVisible();
   await expectCovered(page, "launcher save-template checklist", ".save-template-panel", 3);
+  await expectTextFieldsCovered(page, "launcher save-template checklist", ".save-template-panel", 1);
   await form.locator(".save-template-cancel").click();
   await expect(form.locator(".save-template-panel")).toHaveCount(0);
   const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -244,6 +365,14 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
   await expectCovered(page, "new session form, command tab", ".create-session-form", 5);
+  await expectTextFieldsCovered(page, "new session form, command tab", ".create-session-form", 4);
+  // The command tab declares its own agent, independent of the agent tab;
+  // Resume does not exist until that declaration is made.
+  await form.locator(".launch-command-agent").selectOption("codex");
+  await expect(form.locator(".launch-command-resume-toggle")).toBeVisible();
+  await form.locator(".launch-command-resume-toggle").check();
+  await expect(form.locator(".launch-command-resume")).toBeVisible();
+  await expectTextFieldsCovered(page, "new session form, resume command", ".create-session-form", 5);
   await form.locator(".launch-composer-cancel").click();
   await expect(form).toHaveCount(0);
 
