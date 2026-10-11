@@ -794,6 +794,9 @@ pub(crate) fn ListView(
     // do on every write regardless of which session it was about. Keyed
     // by session id so each row renders only its own entry.
     let mut errors = use_signal(HashMap::<String, String>::new);
+    // The seen writer outlives this component. It reports success through
+    // this list-owned counter; the effect below owns the actual refresh task.
+    let seen_toggle_successes = use_signal(|| 0_u64);
     // Not a row error: the row is gone. See `DeleteNotice`.
     let delete_notice = use_context::<DeleteNotice>();
     // Each row's current phase, if any: an operation in flight
@@ -1612,12 +1615,29 @@ pub(crate) fn ListView(
     // must keep working for the person using it (SPEC_impl.md's withdrawal
     // rule is about unattended behavior).
     //
+    // Read-on-close, Clear and manual seen toggles wait for this refresh to
+    // update the row, rather than editing it optimistically. They need no
+    // rename overlay or mutation fence: the reader serializes its requests,
+    // and ReadGate rejects older generations (including a stop's direct
+    // refetch) after the refresh commits. An older reply can precede the
+    // refreshed row, but cannot bring its stale marks back afterwards.
+    //
     // Cloned per call site rather than made `Copy`: the read closures own
     // their copy of the API base, which is a `String`.
     let request_listing =
         move |trigger: Trigger| request_read(listing_surface, trigger, listing_read.clone());
     let request_hosts =
         move |trigger: Trigger| request_read(hosts_surface, trigger, hosts_read.clone());
+
+    // This effect runs in the list's scope, unlike the root-owned seen
+    // writer. Zero means no manual save has settled, so mount keeps its one
+    // initial read; every later success asks for an attended refresh.
+    let seen_toggle_refresh = request_listing.clone();
+    use_effect(move || {
+        if seen_toggle_successes() != 0 {
+            seen_toggle_refresh(Trigger::Explicit);
+        }
+    });
 
     // The page's first look at both surfaces. A `use_hook` rather than a
     // future, because the work of starting a read now belongs to the reader:
@@ -2938,7 +2958,10 @@ pub(crate) fn ListView(
     // Errors and diagnostics): a lost mark leaves the bell loud until the
     // list is next closed, which the user would only notice as a bell that
     // stayed loud.
+    // A successful mark refreshes explicitly: the bell must quiet even
+    // while a build mismatch withdraws feed and fallback reads.
     let read_base = base.clone();
+    let read_refresh = request_listing.clone();
     let previous_bell = use_hook(|| Rc::new(RefCell::new(None::<OpenBell>)));
     use_effect(move || {
         let now_open = bell_open.read().clone();
@@ -2955,6 +2978,7 @@ pub(crate) fn ListView(
         bell_read_sent.borrow_mut().insert(closed.clone(), through);
         let sent = bell_read_sent.clone();
         let base = read_base.clone();
+        let refresh = read_refresh.clone();
         spawn(async move {
             if let Err(error) = crate::api::mark_notifications(&base, &closed, through, false).await
             {
@@ -2969,6 +2993,8 @@ pub(crate) fn ListView(
                     error = error.as_str(),
                     "could not mark the session's notifications read"
                 );
+            } else {
+                refresh(Trigger::Explicit);
             }
         });
     });
@@ -2977,12 +3003,16 @@ pub(crate) fn ListView(
     // mark, a failed clear is something the user asked for directly, so it
     // surfaces on the row's error line like any other operation (SPEC.md,
     // Errors and diagnostics).
+    // Like read-on-close, success waits for the gated listing refresh to
+    // remove the bell; no optimistic edit needs a rename-style guard.
     let clear_base = base.clone();
+    let clear_refresh = request_listing.clone();
     let clear_bell = use_callback(move |(id, through): (String, u64)| {
         if bell_open.peek().as_ref().is_some_and(|open| open.id == id) {
             bell_open.set(None);
         }
         let base = clear_base.clone();
+        let refresh = clear_refresh.clone();
         spawn(async move {
             let result = crate::api::mark_notifications(&base, &id, through, true).await;
             let Ok(mut errors) = errors.try_write() else {
@@ -2991,6 +3021,8 @@ pub(crate) fn ListView(
             match result {
                 Ok(()) => {
                     errors.remove(&id);
+                    drop(errors);
+                    refresh(Trigger::Explicit);
                 }
                 Err(error) => {
                     errors.insert(id, format!("clear notifications: {error}"));
@@ -3017,6 +3049,10 @@ pub(crate) fn ListView(
     // above (SPEC.md, Errors and diagnostics) — the user asked for this one
     // directly, so losing it silently would be exactly the kind of
     // succeeded-when-it-failed illusion that section forbids.
+    // Its root-owned writer must not call the list's reader directly: it
+    // may finish after unmount, and any task it spawned would be root-owned
+    // too. Success bumps list state through try_write; the list's effect
+    // above turns that into the same explicit refresh as the bell actions.
     let on_mark_seen = move |(id, seen_activity_at): (String, Option<i64>)| {
         // The status dot shares this handler. Only dismiss this row's menu,
         // and do it at acceptance rather than when the queued write returns.
@@ -3027,7 +3063,7 @@ pub(crate) fn ListView(
             &mark_seen_base,
             &id,
             seen_activity_at,
-            seen_toggle_report(errors, id.clone()),
+            seen_toggle_report(errors, seen_toggle_successes, id.clone()),
         );
     };
     let on_mark_seen = use_callback(on_mark_seen);
@@ -3922,17 +3958,20 @@ struct OpenBell {
 }
 
 /// The manual read/unread toggle's report: the settled save's outcome on
-/// the row's error line, like every other row operation.
+/// the row's error line, and a list-owned refresh request on success.
 ///
 /// The report runs from a writer task that outlives this list (see
 /// `api::SeenWriteReport`), and the list may be gone by the time the helm
 /// answers, for example behind the browser's token prompt. Every access to
-/// `errors` therefore goes through `try_write`: the panicking accessors
+/// list state therefore goes through `try_write`: the panicking accessors
 /// (`write`, `set`, `read` and the rest) would take the window down with
 /// them on a dropped signal, and with no row left to show the result on,
-/// dropping it is all there is to do.
+/// dropping it is all there is to do. The counter lets the list's effect
+/// start its own refresh; calling its reader here would both access dropped
+/// state and give a refresh task the writer's root scope instead.
 fn seen_toggle_report(
     mut errors: Signal<HashMap<String, String>>,
+    mut successes: Signal<u64>,
     id: String,
 ) -> impl FnOnce(Result<(), String>) {
     move |result| {
@@ -3942,6 +3981,10 @@ fn seen_toggle_report(
         match result {
             Ok(()) => {
                 errors.remove(&id);
+                drop(errors);
+                if let Ok(mut successes) = successes.try_write() {
+                    *successes += 1;
+                }
             }
             Err(error) => {
                 errors.insert(id, format!("seen: {error}"));
@@ -3977,7 +4020,8 @@ mod tests {
     /// unmount the list while a save is in flight; a panicking report
     /// crashed the window (SPEC.md "Signing in again"). Spec: while the list
     /// is mounted, a failure lands on the row's error line and a success
-    /// clears it; once the list is gone, either outcome is dropped quietly.
+    /// clears it and increments the refresh counter. Failure never requests
+    /// a refresh; once the list is gone, either outcome is dropped quietly.
     #[farhelm_testtrace::test]
     fn seen_toggle_report_tolerates_an_unmounted_list() {
         use std::cell::Cell;
@@ -3985,15 +4029,21 @@ mod tests {
             static SHOW: Cell<bool> = const { Cell::new(true) };
             static ERRORS: Cell<Option<Signal<HashMap<String, String>>>> =
                 const { Cell::new(None) };
+            static SUCCESSES: Cell<Option<Signal<u64>>> = const { Cell::new(None) };
         }
 
+        /// Own both report destinations in a disposable child scope, so
+        /// unmount tests dropped signals rather than merely an absent row.
         #[component]
         fn List() -> Element {
             let errors = use_signal(HashMap::<String, String>::new);
+            let successes = use_signal(|| 0_u64);
             ERRORS.with(|slot| slot.set(Some(errors)));
+            SUCCESSES.with(|slot| slot.set(Some(successes)));
             rsx! {}
         }
 
+        /// Keep the runtime alive after dropping the list, as sign-in does.
         fn app() -> Element {
             let show = SHOW.with(Cell::get);
             rsx! {
@@ -4003,6 +4053,8 @@ mod tests {
             }
         }
 
+        // Render the parent explicitly because SHOW is an external test
+        // control, not a signal that schedules its own invalidation.
         let rerender = |dom: &mut VirtualDom| {
             dom.mark_dirty(dioxus::core::ScopeId::APP);
             dom.render_immediate(&mut dioxus::core::NoOpMutations);
@@ -4010,17 +4062,24 @@ mod tests {
         let mut dom = VirtualDom::new(app);
         dom.rebuild_in_place();
         let errors = ERRORS.with(Cell::get).expect("the list mounted");
+        let successes = SUCCESSES.with(Cell::get).expect("the list mounted");
 
-        dom.in_runtime(|| seen_toggle_report(errors, "s1".to_string())(Err("refused".into())));
+        dom.in_runtime(|| {
+            seen_toggle_report(errors, successes, "s1".to_string())(Err("refused".into()))
+        });
         dom.in_runtime(|| {
             assert_eq!(
                 errors.peek().get("s1").map(String::as_str),
                 Some("seen: refused"),
                 "a mounted list shows the failure on the row"
             );
+            assert_eq!(*successes.peek(), 0, "a failure requests no refresh");
         });
-        dom.in_runtime(|| seen_toggle_report(errors, "s1".to_string())(Ok(())));
-        dom.in_runtime(|| assert!(errors.peek().get("s1").is_none(), "a success clears it"));
+        dom.in_runtime(|| seen_toggle_report(errors, successes, "s1".to_string())(Ok(())));
+        dom.in_runtime(|| {
+            assert!(errors.peek().get("s1").is_none(), "a success clears it");
+            assert_eq!(*successes.peek(), 1, "a success requests one refresh");
+        });
 
         SHOW.with(|show| show.set(false));
         rerender(&mut dom);
@@ -4030,8 +4089,12 @@ mod tests {
                 errors.try_peek().is_err(),
                 "the list's signal is gone with it"
             );
-            seen_toggle_report(errors, "s1".to_string())(Err("refused".into()));
-            seen_toggle_report(errors, "s1".to_string())(Ok(()));
+            assert!(
+                successes.try_peek().is_err(),
+                "the refresh signal is gone too"
+            );
+            seen_toggle_report(errors, successes, "s1".to_string())(Err("refused".into()));
+            seen_toggle_report(errors, successes, "s1".to_string())(Ok(()));
         });
     }
 

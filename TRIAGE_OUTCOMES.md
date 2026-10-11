@@ -10454,7 +10454,9 @@
   shape and can share the change. If the fix turns out to need significant new complexity or a refactor, or otherwise
   stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
+- Execution: complete in jj change `xpltuklzksxkrqszxrrqnoqqtxlztxtz`, bookmark
+  `plan/bell-build-mismatch-fixes/01-bell-build-mismatch`; draft
+  [#1907](https://github.com/scode/farhelm/pull/1907/changes).
 
 ## clearing-notifications-leaves-cleared-bell-entries-visible.md
 
@@ -10474,7 +10476,9 @@
   close-marks-read path are unchanged. Check whether Clear needs the ordering guard rename uses against an older listing
   read already in flight. If the fix turns out to need significant new complexity or a refactor, or otherwise stops
   fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
+- Execution: complete in jj change `xpltuklzksxkrqszxrrqnoqqtxlztxtz`, bookmark
+  `plan/bell-build-mismatch-fixes/01-bell-build-mismatch`; draft
+  [#1907](https://github.com/scode/farhelm/pull/1907/changes).
 
 ## manual-read-unread-toggles-cannot-visibly-toggle.md
 
@@ -10496,7 +10500,9 @@
   `seen-toggle-report-panics-after-unmount.md` fix must still hold. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/bell-build-mismatch-fixes.md`.
+- Execution: complete in jj change `xpltuklzksxkrqszxrrqnoqqtxlztxtz`, bookmark
+  `plan/bell-build-mismatch-fixes/01-bell-build-mismatch`; draft
+  [#1907](https://github.com/scode/farhelm/pull/1907/changes).
 
 ## template-catalog-error.md
 
