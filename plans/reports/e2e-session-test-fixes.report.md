@@ -85,3 +85,40 @@ Private galaxy-brain evidence uses session UUID `a63f6b2c-45f7-4830-bf84-ea76de6
 `farhelm-plan-e2e-session-test-fixes-log.md` beside the checkouts. The requested native model and effort are recorded,
 but exact model attribution and usage were unavailable. Earlier estimated timestamps and one missing routing timestamp
 are retained as evidence gaps; no cost or savings claim is made.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1911. The rebase met no conflicts.
+
+#### Fix made while landing
+
+In #1911, before it merged: the orphan-client check treated a terminal client that had exited but not yet been reaped as
+inconclusive, since its process entry remains while its open files are gone. Its parent was killed, so on a loaded
+machine the reaping can lag and the test would fail now and then, against the outcome's own criterion that a process
+exiting during the scan still passes. Such a client now counts as gone, and a fabricated process tree covers it.
+
+#### Review before merging
+
+No blockers. The hook fixture now waits for the supervisor's real readiness, the replay test waits for the whole
+payload, the reparented-daemon test disables scopes so marker discovery is what it checks, the shutdown probe only
+matches the agent's own echo, and the backpressure test reads progress past the replay. Notes left as they are:
+
+- The pipe-holder scan now fails the test on any gap across the machine's processes of the same user; two tiny kernel
+  races can still produce one. If a failure ever shows "fd N unreadable (Permission denied)" for an unrelated process,
+  that is the likely cause; it is not a flake until reproduced.
+- The post-stop liveness poll is written out by hand, bounded at ten seconds with a reason for its delay.
+
+#### Checks
+
+These two plans, which change only tests, were landed together after the round's product plans: supervisor-lifecycle-
+test-fixes first, e2e-session-test-fixes on top.
+
+- Run now, on the two stacked after the fixes: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (288
+  delays, none without a reason) and `cargo clippy --all-targets -- -D warnings`; and the supervisor and CLI unit tests
+  with the hook-identity, session-lifecycle, supervisor-stop, terminal-backpressure and terminal-tabs end-to-end tests,
+  through the recorder with pinned tmux 3.7c, four slots and no retries (run `8d9839e7`, 1270 of 1270, no runtime skips
+  in its output).
+- Not run: macOS; the checks above are Linux only.
+- Between that run and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
