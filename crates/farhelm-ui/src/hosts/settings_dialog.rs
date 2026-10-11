@@ -711,9 +711,13 @@ pub(super) fn HostSettingsDialog(
     }
 }
 
-/// Ask before forgetting a host, keeping the explanation and the safe default
-/// in the same modal surface as host settings. The permanent answer names the
-/// app-wide gear so users can find how to restore this confirmation.
+/// Ask before forgetting a host, with its identity and answers always visible.
+///
+/// Removing the row leaves the supervisor and sessions running. The header
+/// and Cancel therefore share the same safe dismissal and row-focus return;
+/// both stay usable while another operation runs, though Escape retains this
+/// dialog's existing busy refusal. The permanent answer names the app-wide
+/// gear so users can find how to restore this confirmation.
 #[component]
 pub(super) fn HostRemoveDialog(
     host: Host,
@@ -725,7 +729,7 @@ pub(super) fn HostRemoveDialog(
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
-                class: "host-settings-dialog host-remove-dialog",
+                class: "host-settings-dialog host-remove-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "remove host · {shown_name}",
@@ -737,23 +741,37 @@ pub(super) fn HostRemoveDialog(
                         on_cancel.call(());
                     }
                 },
-                h2 { class: "host-settings-title",
-                    "remove host · "
-                    span { class: "peer-value", dir: "ltr", "{shown_name}" }
+                HostDialogHeader {
+                    host: Some(host.clone()),
+                    title: rsx! { "remove host · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
+                    dismiss_label: "cancel host removal",
+                    dismiss_tooltip: "cancel: keep this host",
+                    on_dismiss: move |_| {
+                        return_focus_to_row(host.id);
+                        on_cancel.call(());
+                    },
                 }
-                p { class: "host-remove-explanation",
-                    "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
-                }
-                div { class: "host-settings-actions host-remove-actions",
-                    button {
-                        r#type: "button",
-                        class: "btn btn-danger",
-                        "data-tooltip": "remove: forget this host; its supervisor and sessions keep running",
-                        disabled: busy,
-                        onclick: move |_| on_remove.call(false),
-                        "remove"
+                div { class: "host-settings-body",
+                    p { class: "host-remove-explanation",
+                        "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
                     }
-                    div { class: "host-permanent-answer",
+                }
+                div { class: "host-settings-footer host-dialog-footer",
+                    p { id: "host-remove-permanent-hint", class: "host-dialog-permanent-hint",
+                        "undo \"don't ask again\" with the gear at the top of the sidebar"
+                    }
+                    div { class: "host-dialog-answers host-remove-actions",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral host-settings-close",
+                            "data-tooltip": "cancel: keep this host",
+                            autofocus: true,
+                            onclick: move |_| {
+                                return_focus_to_row(host.id);
+                                on_cancel.call(())
+                            },
+                            "cancel"
+                        }
                         button {
                             r#type: "button",
                             class: "btn btn-danger btn-outline",
@@ -761,22 +779,16 @@ pub(super) fn HostRemoveDialog(
                             aria_describedby: "host-remove-permanent-hint",
                             disabled: busy,
                             onclick: move |_| on_remove.call(true),
-                            "remove, and don't ask again"
+                            "remove, don't ask again"
                         }
-                        p { id: "host-remove-permanent-hint", class: "host-settings-help",
-                            "You can turn this back on with the gear at the top of the sidebar."
+                        button {
+                            r#type: "button",
+                            class: "btn btn-danger",
+                            "data-tooltip": "remove: forget this host; its supervisor and sessions keep running",
+                            disabled: busy,
+                            onclick: move |_| on_remove.call(false),
+                            "remove"
                         }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral host-settings-close",
-                        "data-tooltip": "cancel: keep this host",
-                        autofocus: true,
-                        onclick: move |_| {
-                            return_focus_to_row(host.id);
-                            on_cancel.call(())
-                        },
-                        "cancel"
                     }
                 }
             }

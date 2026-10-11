@@ -211,6 +211,91 @@ async function apiHosts(request: APIRequestContext): Promise<any[]> {
 }
 
 /**
+ * Removal and uninstall must keep their safe answer beside the action on a
+ * desktop, and below full-width actions on a phone. Measure painted geometry
+ * and tiers: checking classes alone misses a rule that loses the baseline or
+ * accidentally fills the permanent destructive answer.
+ */
+async function expectManagementAnswers(dialog: Locator, labels: string[], phone: boolean): Promise<void> {
+  const answers = dialog.locator(".host-dialog-answers");
+  await expect(answers.getByRole("button")).toHaveText(labels);
+  const geometry = await answers.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    buttons: Array.from(element.querySelectorAll("button"), (button) => {
+      const rect = button.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, bottom: rect.bottom, height: rect.height, width: rect.width,
+        fill: getComputedStyle(button).backgroundColor };
+    }),
+  }));
+  const buttons = geometry.buttons;
+  expect(Math.max(...buttons.map((b) => b.height)) - Math.min(...buttons.map((b) => b.height))).toBeLessThan(1);
+  if (labels.length === 3) {
+    expect(buttons[1].fill, "the permanent destructive answer is outlined").toBe("rgba(0, 0, 0, 0)");
+  }
+  expect(buttons.at(-1)!.fill, "the one-off destructive action stays filled").not.toBe("rgba(0, 0, 0, 0)");
+  if (phone) {
+    for (const button of buttons) expect(Math.abs(button.width - geometry.width)).toBeLessThan(1);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].bottom).toBeLessThan(buttons[i - 1].top);
+  } else {
+    expect(Math.max(...buttons.map((b) => b.bottom)) - Math.min(...buttons.map((b) => b.bottom))).toBeLessThan(1);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThan(buttons[i - 1].left);
+  }
+  const hint = dialog.locator(".host-dialog-permanent-hint");
+  if (await hint.count()) {
+    const box = (await hint.boundingBox())!;
+    if (phone) expect(box.y).toBeGreaterThan(Math.max(...buttons.map((b) => b.bottom)));
+    else {
+      expect(box.y + box.height).toBeLessThan(Math.min(...buttons.map((b) => b.top)));
+      // A separate hint can still wrap above the row. Count painted lines
+      // to distinguish the required desktop sentence from that near miss.
+      const painted = await hint.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return { lines: new Set(Array.from(range.getClientRects(), (rect) => rect.top)).size,
+          fits: element.scrollWidth <= element.clientWidth };
+      });
+      expect(painted.lines, "the desktop permanent-answer hint is one line").toBe(1);
+      expect(painted.fits, "a single line must fit, rather than overflow").toBe(true);
+    }
+  }
+}
+
+/**
+ * Uninstall's retained-data line is part of the authorization text too. Native
+ * selection must preserve the real helm reply, including its final LF, while
+ * glyph measurements distinguish hanging action steps from flush Kept text.
+ */
+async function expectUninstallText(plan: Locator, confirmation: string): Promise<void> {
+  expect(confirmation.endsWith("\n"), "the real plan has a final LF").toBe(true);
+  expect(confirmation, "Kept follows the last step without a blank line").not.toContain("\n\nKept:");
+  const result = await plan.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = getSelection()!;
+    selection.removeAllRanges(); selection.addRange(range);
+    const copied = selection.toString(); selection.removeAllRanges();
+    const lines = Array.from(element.querySelectorAll(".peer-line"), (line) => {
+      const node = line.firstChild!;
+      const rows = new Map<number, number>();
+      for (let offset = 0; offset < (node.textContent?.length ?? 0); offset++) {
+        const glyph = document.createRange(); glyph.setStart(node, offset); glyph.setEnd(node, offset + 1);
+        const rect = glyph.getBoundingClientRect();
+        if (rect.width) rows.set(rect.top, Math.min(rows.get(rect.top) ?? Infinity, rect.left));
+      }
+      return { step: line.classList.contains("peer-plan-step"), kept: node.textContent?.startsWith("Kept:"), lefts: [...rows.values()] };
+    });
+    return { copied, lines };
+  });
+  expect(result.copied, "native selection equals the actual uninstall offer").toBe(confirmation);
+  const wrapped = result.lines.filter((line) => line.step && line.lefts.length > 1);
+  expect(wrapped.length, "fixture contains a visibly wrapped uninstall step").toBeGreaterThan(0);
+  for (const line of wrapped) for (const left of line.lefts.slice(1)) expect(left - line.lefts[0]).toBeGreaterThan(8);
+  const kept = result.lines.find((line) => line.kept)!;
+  expect(kept, "the real plan names the data it keeps").toBeDefined();
+  for (const left of kept.lefts.slice(1)) expect(Math.abs(left - kept.lefts[0])).toBeLessThan(1);
+}
+
+/**
  * The fleet's ssh row — the harness's second supervisor.
  *
  * Found by destination rather than by id, because its id changes whenever a
@@ -840,7 +925,10 @@ test.describe("multi-host", () => {
     await row.locator(".host-remove").click();
 
     const dialog = page.locator(".host-remove-dialog");
-    const confirm = dialog.locator("button.btn-danger").first();
+    // By name: the permanent answer is also a danger button and now comes
+    // first, and a test that clicks it leaves "don't ask again" set for every
+    // later test sharing this helm.
+    const confirm = dialog.getByRole("button", { name: "remove", exact: true });
     const cancel = dialog.locator(".host-settings-close");
     await expect(confirm).toBeVisible();
     await expect(cancel).toBeVisible();
@@ -891,7 +979,7 @@ test.describe("multi-host", () => {
     const row = hostRowByName(page, "user@remove-refusal");
     await openHostMenu(row);
     await row.locator(".host-remove").click();
-    await page.locator(".host-remove-dialog button.btn-danger").first().click();
+    await page.locator(".host-remove-dialog").getByRole("button", { name: "remove", exact: true }).click();
 
     await expect(row.locator(".host-error")).toContainText("the host is still required");
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -3135,7 +3223,7 @@ test.describe("multi-host", () => {
       await expect(page.locator(".host-remove-dialog")).toContainText(
         "supervisor and sessions keep running",
       );
-      await page.locator(".host-remove-dialog button.btn-danger").first().click();
+      await page.locator(".host-remove-dialog").getByRole("button", { name: "remove", exact: true }).click();
 
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, {
         timeout: 30_000,
@@ -3580,17 +3668,25 @@ test.describe("multi-host", () => {
     await expect(row).toBeVisible();
   });
 
-  // Cancelling a removal must leave the host exactly as it was — the safe
-  // half of the confirmation, and the one a focus-on-cancel default exists
-  // to make easy to reach by accident.
+  /**
+   * Cancel and the header dismiss both forget nothing and return to the same
+   * row. Desktop/phone measurements guard the new answer layout without
+   * replacing the real registry identity check with a visual look-alike.
+   */
   test("remove-cancel: backing out of the prompt forgets nothing", async ({
     page,
     request,
-  }) => {
+  }, testInfo) => {
     requireFleet();
     const info = stackInfo();
     const before = await apiRemoteHost(request);
+    const previous = await readPreferences(request);
+    const removals: string[] = [];
+    page.on("request", (candidate) => {
+      if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/hosts/${before.id}`) removals.push(candidate.url());
+    });
 
+    await page.setViewportSize({ width: 1100, height: 850 });
     await page.goto("/");
     await openHostsPanel(page);
     const row = hostRowByName(page, info.remote_ssh);
@@ -3601,7 +3697,28 @@ test.describe("multi-host", () => {
     // Focus lands on the way OUT of the destructive action, so a stray
     // Enter after the remove click backs out rather than in.
     await expect(dialog.locator(".host-settings-close")).toBeFocused();
+    await expect(dialog.getByRole("heading")).toHaveText(`remove host · ${info.remote_ssh}`);
+    for (const phone of [false, true]) {
+      await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
+      await page.mouse.move(0, 0);
+      await expect(dialog.locator(".host-settings-close")).toBeFocused();
+      await expectManagementAnswers(dialog, ["cancel", "remove, don't ask again", "remove"], phone);
+      await testInfo.attach(`host-remove-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+    }
     await dialog.locator(".host-settings-close").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row.locator(".host-row-menu")).toBeFocused();
+
+    // The new header has its own handler; a visual close is insufficient if
+    // it accidentally sends the destructive request or loses row focus.
+    await openHostMenu(row);
+    await row.locator(".host-remove").click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "cancel host removal", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row.locator(".host-row-menu")).toBeFocused();
+    expect(removals, "neither dismissal removes the host").toHaveLength(0);
+    expect((await readPreferences(request)).skip_host_remove_confirmation).toBe(previous.skip_host_remove_confirmation);
 
     // Back to the ordinary controls, same host, same id — a cancel that
     // "worked" by re-adding the host would look identical without this.
@@ -3696,7 +3813,7 @@ test.describe("multi-host", () => {
   test("uninstall-remote-host: the plan names the kept data, confirming removes the host", async ({
     page,
     request,
-  }) => {
+  }, testInfo) => {
     requireFleet();
     test.setTimeout(120_000);
     const info = stackInfo();
@@ -3711,12 +3828,21 @@ test.describe("multi-host", () => {
       configureDiscoveredProbe(info.remote_ssh, `${lib}/farhelm`, kept, remote.identity);
       // Earlier tests' host actions for this destination are the baseline.
       const actionsBefore = injectedHostActions(info.remote_ssh);
+      const submissions: string[] = [];
+      page.on("request", (candidate) => {
+        if (candidate.method() === "POST" && candidate.postData() && new URL(candidate.url()).pathname === `/api/hosts/${remote.id}/uninstall`) submissions.push(candidate.url());
+      });
 
+      await page.setViewportSize({ width: 1100, height: 850 });
       await page.goto("/");
       await openHostsPanel(page);
       const row = hostRowByName(page, info.remote_ssh);
       await openHostMenu(row);
+      const offered = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/hosts/${remote.id}/uninstall` && !response.request().postData());
       await row.locator(".provisioning-uninstall").click();
+      const reply = await offered;
+      expect(reply.ok(), "real helm uninstall plan succeeded").toBe(true);
+      const confirmation = (await reply.json()).confirmation as string;
       const dialog = page.locator(".host-uninstall-dialog");
       await expect(dialog).toContainText(`Farhelm will uninstall from ${info.remote_ssh}`, {
         timeout: 30_000,
@@ -3725,12 +3851,38 @@ test.describe("multi-host", () => {
       await expect(dialog).toContainText(`Kept: the host's Farhelm data in ${kept}`);
       // Cancel is where focus lands, so a stray Enter backs out.
       await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      await expect(dialog.getByRole("heading")).toHaveText(`uninstall Farhelm · ${info.remote_ssh}`);
+      for (const phone of [false, true]) {
+        await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
+        await page.mouse.move(0, 0);
+        await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+        await expectManagementAnswers(dialog, ["cancel", "uninstall"], phone);
+        await expectUninstallText(dialog.locator(".provisioning-plan"), confirmation);
+        await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+      }
+      await dialog.getByRole("button", { name: "cancel Farhelm uninstall", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(row.locator(".host-row-menu")).toBeFocused();
+      await openHostMenu(row);
+      await row.locator(".provisioning-uninstall").click();
+      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      await dialog.locator(".uninstall-cancel").click();
+      await expect(dialog).toHaveCount(0);
+      await expect(row.locator(".host-row-menu")).toBeFocused();
+      expect(submissions, "header and Cancel dismissals send no uninstall").toHaveLength(0);
       // Planning changed nothing: no host action reached the backend and the
       // row is the same one.
       expect(injectedHostActions(info.remote_ssh), "planning acted on the host").toEqual(
         actionsBefore,
       );
       expect((await apiRemoteHost(request))?.id, "planning kept the row").toBe(remote.id);
+
+      // Reopen for the original positive control; dismissing the earlier
+      // offers must not prevent a later genuine confirmation from working.
+      await page.setViewportSize({ width: 1100, height: 850 });
+      await openHostMenu(row);
+      await row.locator(".provisioning-uninstall").click();
+      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
 
       // Hold the confirmation's reply until the row has left the PAGE, and
       // require the notice while it is still held. The row, and the panel

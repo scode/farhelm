@@ -1612,10 +1612,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   line-height: 1.45;
 }
 
-.host-remove-actions {
-  flex-wrap: wrap;
-}
-
 .btn-primary:hover:not(:disabled),
 .btn-primary:focus-visible:not(:disabled) {
   background: var(--accent-fill-hover);
@@ -2829,20 +2825,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .checkout-root-error, .checkout-root-success { font-size: 12px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .checkout-root-error { color: var(--danger); }
 .checkout-root-success { color: var(--fg-1); }
-/* The hint belongs to the permanent answer, including when actions wrap. */
-.host-permanent-answer {
-  flex: 1 1 180px;
-  max-width: 260px;
-}
-.host-permanent-answer .host-settings-help {
-  margin: 6px 0 0;
-}
-.host-remove-actions,
-.add-host-confirm-actions {
-  align-items: flex-start;
-}
-
-.host-add-dialog {
+.host-add-dialog,
+.host-uninstall-dialog {
   width: min(560px, 100%);
 }
 .host-settings-title {
@@ -3063,6 +3047,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    this scoped: other primary surfaces deliberately have their own fills. */
 .host-dialog-answers .btn-primary.btn-outline { background: transparent; border-color: var(--accent); color: var(--accent); }
 .host-dialog-permanent-hint { color: var(--fg-1); font-size: 11px; margin: 0; }
+/* Removal keeps its narrower 480px card. Leave enough room for the full hint
+   even while the vendored face is loading and the engine uses a fallback. */
+@media (min-width: 561px) {
+  .host-remove-dialog .host-dialog-permanent-hint { font-size: 10px; }
+}
 .host-dialog-help { color: var(--fg-1); font-size: 12px; line-height: 1.5; margin: 0; }
 @media (max-width: 560px) {
   .host-dialog-answers { flex-direction: column-reverse; align-items: stretch; }

@@ -854,32 +854,47 @@ pub(crate) fn SetupPlanConfirmation(
 /// [`PlanConfirmation`] for why the UI never re-renders it), and it already
 /// names what goes and what stays. The confirm button is in the danger tier
 /// because the removal cannot be undone from Farhelm; cancel takes focus
-/// first so a stray Enter dismisses rather than removes.
+/// first so a stray Enter dismisses rather than removes. These frame siblings
+/// pin the actual host identity and answers around the scrollable plan. Header
+/// dismissal uses the caller's Cancel path, including its row-focus return.
 #[component]
 pub(crate) fn UninstallConfirmation(
     confirmation: String,
+    host: Host,
     busy: bool,
     on_confirm: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    let name = crate::hosts::gui_host_name(&host.name, host.kind == HostKind::Local);
     rsx! {
-        PeerBlock { class: "provisioning-plan", text: confirmation }
-        div { class: "provisioning-confirm-actions",
-            button {
-                r#type: "button",
-                class: "btn btn-danger provisioning-confirm uninstall-confirm",
-                "data-tooltip": "uninstall: remove Farhelm from this host as described above",
-                disabled: busy,
-                onclick: move |_| on_confirm.call(()),
-                "uninstall"
-            }
-            button {
-                r#type: "button",
-                class: "btn btn-neutral provisioning-cancel uninstall-cancel",
-                "data-tooltip": "cancel: leave Farhelm installed on this host",
-                autofocus: true,
-                onclick: move |_| on_cancel.call(()),
-                "cancel"
+        settings_dialog::HostDialogHeader {
+            host: Some(host),
+            title: rsx! { "uninstall Farhelm · " span { class: "peer-value", dir: "ltr", "{name}" } },
+            dismiss_label: "cancel Farhelm uninstall",
+            dismiss_tooltip: "cancel: leave Farhelm installed on this host",
+            on_dismiss: on_cancel,
+        }
+        div { class: "host-settings-body",
+            PeerBlock { class: "provisioning-plan", text: confirmation }
+        }
+        div { class: "host-settings-footer host-dialog-footer",
+            div { class: "host-dialog-answers",
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral provisioning-cancel uninstall-cancel",
+                    "data-tooltip": "cancel: leave Farhelm installed on this host",
+                    autofocus: true,
+                    onclick: move |_| on_cancel.call(()),
+                    "cancel"
+                }
+                button {
+                    r#type: "button",
+                    class: "btn btn-danger provisioning-confirm uninstall-confirm",
+                    "data-tooltip": "uninstall: remove Farhelm from this host as described above",
+                    disabled: busy,
+                    onclick: move |_| on_confirm.call(()),
+                    "uninstall"
+                }
             }
         }
     }
@@ -2810,7 +2825,7 @@ pub(crate) fn ProvisioningPanel(
                     // dialog's do.
                     div { class: "host-settings-backdrop", role: "presentation",
                         div {
-                            class: "host-settings-dialog host-uninstall-dialog",
+                            class: "host-settings-dialog host-uninstall-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
                             aria_label: "uninstall Farhelm from this host",
@@ -2826,6 +2841,7 @@ pub(crate) fn ProvisioningPanel(
                             },
                             UninstallConfirmation {
                                 confirmation: plan.confirmation,
+                                host: host.clone(),
                                 busy: page_busy,
                                 on_confirm: move |_| confirm.call(false),
                                 on_cancel: move |_| {

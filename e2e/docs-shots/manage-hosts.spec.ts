@@ -85,7 +85,7 @@ test("remove dialog", async ({ page, request }) => {
   const dialog = page.locator(".host-remove-dialog");
   await expect(dialog).toBeVisible();
   await director.callout(
-    dialog.locator(".host-permanent-answer .btn-outline"),
+    dialog.locator(".host-dialog-answers .btn-outline"),
     "Removes it, and removes later hosts without asking.",
     { side: "bottom", dy: 20 },
   );
