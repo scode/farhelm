@@ -175,6 +175,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fields already turn it off (the launcher, rename, and the host fields, among others); make that true of every text
   field in the app, the template dialog first.
 
+- **Show that deleting from the trash is still working.** While a confirmed delete runs, the trash dialog only disables
+  its buttons (close included) until every host has answered, so a delete that takes a while feels like something is
+  broken. At minimum, make it obvious that the delete is in progress and still being waited on; ideally show progress.
+  Details to be worked out.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
