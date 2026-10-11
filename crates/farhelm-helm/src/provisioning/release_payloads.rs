@@ -1211,7 +1211,22 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
     let mut file =
         std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher).with_context(|| format!("hashing {}", path.display()))?;
+    // An explicit read loop rather than `std::io::copy` into the hasher:
+    // sha2 0.11 no longer implements `io::Write`. The loop keeps what
+    // `io::copy` did for us: a read interrupted by a signal is retried, not
+    // reported as a hashing failure.
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = match std::io::Read::read(&mut file, &mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("hashing {}", path.display()));
+            }
+        };
+        hasher.update(&buffer[..read]);
+    }
     Ok(hex(&hasher.finalize()))
 }
 

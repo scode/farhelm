@@ -718,7 +718,7 @@ impl SystemBackend {
                         digest.update(&buffer[..read]);
                     }
                     Ok(Some(TargetMetadata {
-                        hash: format!("{:x}", digest.finalize()),
+                        hash: lower_hex(&digest.finalize()),
                         mode: metadata.permissions().mode() & 0o7777,
                     }))
                 }
@@ -1392,7 +1392,7 @@ pub(super) async fn stage_payload(source: &Path) -> Result<PreparedPayload, Back
     })?;
     Ok(PreparedPayload {
         file,
-        hash: format!("{:x}", digest.finalize()),
+        hash: lower_hex(&digest.finalize()),
     })
 }
 
@@ -2778,8 +2778,16 @@ fn bytes_path(bytes: &[u8]) -> anyhow::Result<PathBuf> {
 
 /// Lowercase digest spelling shared with `sha256sum` output.
 pub(super) fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(64);
+    lower_hex(&Sha256::digest(bytes))
+}
+
+/// Lowercase hex of a finished digest, the spelling `sha256sum` prints.
+///
+/// Written out by hand because sha2 0.11's digest output (a `hybrid_array`
+/// array) no longer implements `LowerHex`, so `format!("{:x}", ...)` stopped
+/// compiling.
+fn lower_hex(digest: &[u8]) -> String {
+    let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
         use std::fmt::Write;
         write!(&mut out, "{byte:02x}").expect("writing to String cannot fail");
