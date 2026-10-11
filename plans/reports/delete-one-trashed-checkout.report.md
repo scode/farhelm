@@ -75,3 +75,48 @@ not expose independent confirmation of the actual models or their usage, which l
 accounting; the written findings and recorded runtime results remain separate evidence. Private galaxy-brain session
 `5c9810ab-dcb4-4a62-9a79-bfb239f2d810` retains the routing and review records. The working log beside the checkouts
 records its exact location and the retained run directories.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1888. The rebase met no conflicts; agent-managed-checkout had landed just before it and
+edits the same specification, TODO and browser test files in other places.
+
+#### Fixes made while landing
+
+Both in #1888, before it merged:
+
+- The user docs' trash section described only the two confirmed deletes. The session list page now also says each
+  checkout has its own **delete** button, which deletes just that checkout at once, without asking.
+- The last assertion of the unit test for a single checkout's selection compared a copy taken before the listing
+  changed, so it could not fail, while its message claimed it proved later listings cannot widen a click. The message
+  now says what it checks. The real protection, the lookup at click time, has no unit test; the browser tests cover it.
+
+#### Review before merging
+
+No blockers. As decided, a single checkout's delete has no confirmation, so the review checked the click itself: each
+button carries its own checkout, looked up in the listing as it stands at the moment of the click, on the host's current
+connection; a refresh can only make the click do nothing, never send a different checkout. Single and bulk deletes share
+one run, so the header status, blocked Close and Escape, disabled controls and the final refresh behave the same.
+Failure and a lost reply keep the existing honest notices. Notes left as they are:
+
+- The browser test's stand-in for the helm replaces a host's set of removed checkouts on each delete rather than adding
+  to it; today's tests delete once per host, but a future test deleting two checkouts one at a time on one host would
+  see the first come back.
+- Each delete refreshes and re-measures every host, so deleting several checkouts one by one means waiting for a full
+  re-measure each time; that is as specified.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `cafc7c1f`, 449 of 449);
+  the UI JavaScript tests (238 of 238); the docs website build; and on Chromium and WebKit with one worker and no
+  retries the trash-dialog and github-checkouts specs (run `09a5d0c5`: 45 passed, 1 failed).
+- The failure was the existing WebKit test "trash deletion progress survives success at width 1000", added by
+  trash-and-host-settings-dialogs and not changed here: before any delete, the trash button still read 0 with "some
+  hosts unchecked" when its five-second wait for the count ran out, on a heavily loaded machine. Repeating the four
+  progress tests on WebKit five times each passed 20 of 20 (run `31af55ea`). One observation under load is not logged as
+  a flake.
+- Between those runs and the merge, main changed only release documentation.
+
+Nothing in the report above was made untrue by the landing.
