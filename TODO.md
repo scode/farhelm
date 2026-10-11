@@ -170,6 +170,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   make them" note should be pinned where they are and always visible, as should the header. Only the settings between
   the header and the footer scroll.
 
+- **Turn off spell checking and autocorrect in every text field.** The template create/edit dialog still underlines and
+  autocorrects what you type, which is super annoying in fields that hold commands, prompts, paths and names. Some
+  fields already turn it off (the launcher, rename, and the host fields, among others); make that true of every text
+  field in the app, the template dialog first.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
