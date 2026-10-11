@@ -16507,6 +16507,65 @@ pub(crate) mod tests {
             panic!("the tab pane must belong to its session");
         };
 
+        /// Clean up the unmarked, HUP-resistant fixture even before its
+        /// pidfile has been read. The pane shell leads its process group;
+        /// its non-interactive background job stays in that group. Once
+        /// discovered, the job also has an independent identity so cleanup
+        /// still reaches it after Delete has killed the shell.
+        ///
+        /// Re-check start time and non-zombie state immediately before every
+        /// signal. As in tmux's portable teardown, the remaining read/signal
+        /// window is accepted: pidfd would close it only on Linux. These
+        /// identities come solely from this fixture's owned pane and child.
+        struct UnmarkedFixture {
+            shell: (u32, u64),
+            job: Option<(u32, u64)>,
+        }
+
+        impl UnmarkedFixture {
+            /// A disappeared or recycled pid no longer belongs to us.
+            fn still_owned((pid, start): (u32, u64)) -> bool {
+                matches!(
+                    crate::procs::read_process(pid),
+                    Ok(Some((_, observed, state)))
+                        if observed == start && state != crate::procs::ProcessState::Zombie
+                )
+            }
+        }
+
+        impl Drop for UnmarkedFixture {
+            fn drop(&mut self) {
+                if let Some(job) = self.job
+                    && Self::still_owned(job)
+                {
+                    // SAFETY: kill has no memory preconditions; identity was
+                    // re-checked against this fixture immediately above.
+                    unsafe { libc::kill(job.0 as libc::pid_t, libc::SIGKILL) };
+                }
+                if Self::still_owned(self.shell) {
+                    // SAFETY: the fixture established this pane as the group
+                    // leader before starting its unmarked background job.
+                    unsafe { libc::killpg(self.shell.0 as libc::pid_t, libc::SIGKILL) };
+                }
+            }
+        }
+
+        let (_, shell_start, shell_state) = crate::procs::read_process(tab_shell.pid)
+            .expect("read the owned tab shell")
+            .expect("the owned tab shell exists");
+        let mut fixture = UnmarkedFixture {
+            shell: (tab_shell.pid, shell_start),
+            job: None,
+        };
+        assert!(!tab_shell.dead, "fixture premise: the tab shell is live");
+        assert_ne!(shell_state, crate::procs::ProcessState::Zombie);
+        // SAFETY: getpgid only queries the process identified by the pane.
+        assert_eq!(
+            unsafe { libc::getpgid(tab_shell.pid as libc::pid_t) },
+            tab_shell.pid as libc::pid_t,
+            "fixture premise: the tab shell leads the group holding its background job"
+        );
+
         // `exec env -i` turns the tab's pane process itself into a shell
         // with no session marker, and `trap "" HUP` (inherited by the job)
         // keeps the hangup tmux sends when Delete kills the session from
@@ -16538,13 +16597,16 @@ pub(crate) mod tests {
         let (ppid, job_start, _) = crate::procs::read_process(pid)
             .expect("read the job")
             .expect("the job is running");
+        // A malformed pidfile must not grant cleanup authority over an
+        // unrelated process. The group guard already covers our real job
+        // if this premise fails before an independent identity is admitted.
+        if ppid == tab_shell.pid {
+            fixture.job = Some((pid, job_start));
+        }
         assert_eq!(
             ppid, tab_shell.pid,
             "fixture premise: the job is a direct child of the tab's pane process"
         );
-        let (_, shell_start, _) = crate::procs::read_process(tab_shell.pid)
-            .expect("read the tab's pane process")
-            .expect("the tab's pane process is running");
         for (what, process) in [("tab shell", tab_shell.pid), ("job", pid)] {
             let environ = crate::procs::read_environ(process).unwrap_or_default();
             assert!(
@@ -16569,10 +16631,6 @@ pub(crate) mod tests {
         ] {
             match crate::procs::read_process(process).expect("read the fixture process") {
                 Some((_, still, crate::procs::ProcessState::Running)) if still == start => {
-                    // Do not leak the fixture into later tests.
-                    // SAFETY: `kill` has no memory-safety preconditions; the
-                    // pid was just confirmed to be this test's own process.
-                    unsafe { libc::kill(process as libc::pid_t, libc::SIGKILL) };
                     survivors.push(what);
                 }
                 _ => {}
@@ -18440,9 +18498,23 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn restart_reuses_live_agent_and_preserves_tabs() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
+        // A real long-lived stand-in reaches the live-agent branch. The
+        // nonexistent shim leaves only a transient shell, then a dead pane.
+        let shim = state.path().join("restart-shim");
+        std::fs::write(&shim, "#!/bin/sh\nexec sleep 300\n").expect("write restart stand-in");
+        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("make restart stand-in executable");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            shim,
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                launch_shell: Some("/bin/sh".into()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
         let tab = sup.open_tab(&created.id).await.expect("terminal tab");
         let entry = sup
@@ -18453,6 +18525,13 @@ pub(crate) mod tests {
             .cloned()
             .expect("session entry");
         let agent = entry.terminal.clone().expect("agent terminal");
+        assert!(
+            matches!(
+                sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
+                PaneProbe::Owned(process) if !process.dead
+            ),
+            "fixture premise: the agent pane must be live before Restart"
+        );
         let states = sup.tmux.pane_states().await.expect("pane states");
         let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
@@ -22988,21 +23067,15 @@ exit 0
         );
     }
 
-    /// SPEC.md surfaces every failure: a stop whose durable record cannot
-    /// be written must REPORT that, not quietly succeed.
-    ///
-    /// The intent is written before any signal is sent, so a failure there
-    /// means nothing was killed at all — and the reply says exactly that,
-    /// because a caller told "stopped" would otherwise stop asking about a
-    /// session whose agent is still running. (The other half, a failure
-    /// recording the outcome AFTER a successful kill, reports the opposite
-    /// nuance: the session really did stop, but may list as a plain exit.)
-    ///
-    /// The failure is injected by corrupting the row out of band, which is
-    /// how an unreadable row fails for real: inside the transaction,
-    /// before anything is written.
+    /// A terminal-less Stop reports a failed classification write instead
+    /// of claiming success. SPEC.md surfaces every failure: a caller told
+    /// "stopped" would stop asking about a session whose durable record never
+    /// changed. This covers the dead-or-absent branch, where
+    /// no live agent needs signalling, independently of the running-agent
+    /// intent-before-signal contract. Corrupting the durable row makes the
+    /// real classification transaction fail before it can write.
     #[farhelm_testtrace::test]
-    async fn a_stop_that_cannot_record_its_intent_reports_instead_of_killing() {
+    async fn a_dead_or_absent_stop_reports_a_failed_classification_write() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -23082,6 +23155,132 @@ exit 0
         assert!(
             message.contains("nothing was killed"),
             "the caller must be told the stop did not happen: {message}"
+        );
+    }
+
+    /// A live agent survives a Stop whose durable intent cannot be written.
+    /// The intent is recorded before any signal so that a crash in the middle
+    /// of a kill cannot turn the user's Stop into an ordinary exit; if that
+    /// record fails, nothing may be killed, and SPEC.md requires the failure
+    /// to be reported rather than a "stopped" that leaves the agent running.
+    /// A terminal-less fixture exercises classification instead, even though
+    /// both failures say "nothing was killed". This direct owned pane pins
+    /// the intent-before-signal transaction with an actual survivor identity.
+    #[farhelm_testtrace::test]
+    async fn a_live_stop_that_cannot_record_its_intent_leaves_the_agent_running() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let tmux_name = "fh-live-stop";
+        let pane = sup
+            .tmux
+            .create_session(
+                tmux_name,
+                "/tmp",
+                80,
+                24,
+                &[],
+                &["sleep".into(), "300".into()],
+            )
+            .await
+            .expect("create a live pane directly");
+        let PaneProbe::Owned(process) = sup
+            .tmux
+            .pane_process(tmux_name, &pane)
+            .await
+            .expect("probe the live pane")
+        else {
+            panic!("fixture premise: the pane belongs to this session");
+        };
+        assert!(!process.dead, "fixture premise: the agent pane is live");
+        let (_, start, process_state) = crate::procs::read_process(process.pid)
+            .expect("read the live agent identity")
+            .expect("the agent exists");
+        assert_ne!(process_state, crate::procs::ProcessState::Zombie);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    launch_hooked: false,
+                    launch_boot_ended: false,
+                    id: "s1".into(),
+                    parent: None,
+                    title: "t".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".into(),
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "agent".into(),
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        resume_template: None,
+                    },
+                    tmux_name: tmux_name.into(),
+                    pane: pane.clone(),
+                    outcome: LastOutcome::Running,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    generation: 0,
+                    launch_scoped: false,
+                },
+                None,
+            )
+            .await
+            .expect("insert the live agent row");
+        sup.sessions.lock().await.insert(
+            "s1".into(),
+            Arc::new(entry_with(
+                Some(Terminal {
+                    tmux_name: tmux_name.into(),
+                    pane,
+                }),
+                LastOutcome::Running,
+            )),
+        );
+        let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+            .expect("open the database directly");
+        conn.execute("UPDATE sessions SET outcome_state = 'teleported'", [])
+            .expect("corrupt the row before the intent transaction");
+        drop(conn);
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 4,
+                session_id: "s1".into(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("live Stop must reply inside the deadline")
+            .expect("reply channel closed");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).expect("decode Stop reply");
+        let ControlMsg::Error { message, kind, .. } = decoded else {
+            panic!("an unrecorded live Stop must not report success: {decoded:?}");
+        };
+        assert_eq!(kind, ErrorKind::Internal);
+        assert!(message.contains("nothing was killed"), "{message}");
+        assert!(
+            matches!(
+                crate::procs::read_process(process.pid).expect("read agent after refusal"),
+                Some((_, observed, state)) if observed == start && state != crate::procs::ProcessState::Zombie
+            ),
+            "the same live agent must survive the refused Stop"
         );
     }
 
@@ -23779,7 +23978,7 @@ exit 0
     /// observe. Driven through the REAL `create_session` call site (a
     /// genuine `EACCES` from an unwritable `launch/` directory, not a
     /// synthetic seam substitution), so this pins the actual ordering
-    /// `create_session` relies on (`?` on the spec write, strictly before
+    /// `spawn_agent` relies on (`?` on the spec write, strictly before
     /// `self.tmux.create_session`) rather than only the write helper's
     /// own atomicity in isolation.
     #[farhelm_testtrace::test]
@@ -23837,8 +24036,15 @@ exit 0
         );
         assert!(
             sup.sessions.lock().await.is_empty(),
-            "no session may be recorded — proving no tmux window was ever created for a spec \
-             that never made it to disk"
+            "no session may be recorded for a spec that never made it to disk"
+        );
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .expect("query tmux after refused create")
+                .is_empty(),
+            "a failed spec publication must never create a tmux pane"
         );
         // The DURABLE half, which the in-memory map cannot show: the
         // launching row this create committed before touching the disk
