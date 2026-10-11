@@ -107,3 +107,41 @@ claim, source and retained evidence. Implementation and investigation stayed loc
 Native model attribution and usage counters were not exposed; requested model routes are not attribution evidence.
 Private galaxy-brain records are retained under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf`, with their location
 in the plan working log beside the checkouts.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1910. The rebase met no conflicts.
+
+#### Fix made while landing
+
+In #1910, before it merged: the two rewritten Stop tests' docstrings had lost why the tests matter. They again say that
+SPEC.md requires a failed Stop to be reported rather than a "stopped" that leaves the session as it was, and why the
+intent is recorded before any signal.
+
+#### Review before merging
+
+No blockers; every code change is inside the test modules. Each of the seven repairs now observes what its finding said
+it missed, and the stopped-child, HUP-resistant and live-agent fixtures clean up on early failure without reaping or
+signalling processes they do not own. Notes left as they are:
+
+- The live-agent restart test checks the tab survives but not that the agent was actually replaced; comparing the agent
+  pane's process before and after would close that.
+- The new live-stop test uses the fixed session id `s1`; under the regression it guards against, a sweep would look for
+  processes marked `s1` machine-wide. Nothing spawns such processes today; a fresh UUID would remove the question.
+- The failed-spec test checks the end state only, so a create rolled back after making the window would still pass.
+- The new fixtures have not run on macOS.
+
+#### Checks
+
+These two plans, which change only tests, were landed together after the round's product plans: supervisor-lifecycle-
+test-fixes first, e2e-session-test-fixes on top.
+
+- Run now, on the two stacked after the fixes: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (288
+  delays, none without a reason) and `cargo clippy --all-targets -- -D warnings`; and the supervisor and CLI unit tests
+  with the hook-identity, session-lifecycle, supervisor-stop, terminal-backpressure and terminal-tabs end-to-end tests,
+  through the recorder with pinned tmux 3.7c, four slots and no retries (run `8d9839e7`, 1270 of 1270, no runtime skips
+  in its output).
+- Not run: macOS; the checks above are Linux only.
+- Between that run and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
