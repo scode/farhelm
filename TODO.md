@@ -173,7 +173,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   check it once per hover: a checking spinner, then the host, full path and size, or the reason it is refused. Hovering
   a path that could not be downloaded (the maintainer thinks it was a directory) instead made the hover flicker rapidly
   and keep flickering while the pointer stayed on it. The suspicion, not yet confirmed, is that a refused check starts
-  another check, so the hover loops between the spinner and the refusal for as long as it lasts.
+  another check, so the hover loops between the spinner and the refusal for as long as it lasts. Plan:
+  `plans/queue/flickering-path-hover.md`.
 
 ## Doc todo
 
