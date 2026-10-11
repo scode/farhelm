@@ -52,6 +52,9 @@
 // - A press or Escape keeps that element's tooltip down until the pointer
 //   leaves it or it loses focus, as the native tooltip does, so a click does
 //   not bring it straight back.
+// - Host confirmations use focusWithoutTooltip for their initial Cancel.
+//   That automatic focus keeps the keyboard ring without showing hover help;
+//   a later pointer entry or focus departure ends only this suppression.
 // - Touch input never shows it: a tap has no hover, and a tooltip left over
 //   from a tap would cover what the user is touching.
 //
@@ -191,8 +194,12 @@
    * listener set would show two tooltips' worth of timers for one hover.
    */
   function install(win) {
-    if (win.__farhelmTooltipInstalled) return;
-    win.__farhelmTooltipInstalled = true;
+    if (win.__farhelmTooltipInstalled) {
+      // Re-executing the asset replaces the public API object. Reuse the
+      // installed closure so its hook and dismissal state survive together.
+      win.farhelmTooltip.focusWithoutTooltip = win.__farhelmTooltipInstalled.focusWithoutTooltip;
+      return;
+    }
     const doc = win.document;
 
     let tip = null;
@@ -209,6 +216,24 @@
     let placedAt = { left: 0, top: 0, width: 0, height: 0 };
     // The element a press or Escape dismissed, kept down until the pointer leaves it.
     let suppressed = null;
+    // Automatic Cancel focus is quieter than a deliberate dismissal: the
+    // first later hover must work without requiring the pointer to leave first.
+    let suppressedByInitialFocus = false;
+
+    /**
+     * Focus a confirmation's safe answer without covering its neighbors.
+     * Suppress before focus dispatch, cancel pending help, and preserve the
+     * browser's focus-visible decision. Ordinary later focus and hover retain
+     * their normal help; press/Escape dismissal has its stronger lifetime.
+     */
+    win.farhelmTooltip.focusWithoutTooltip = (next) => {
+      hide();
+      lastHiddenAt = -Infinity;
+      suppressed = next;
+      suppressedByInitialFocus = true;
+      next.focus({ preventScroll: true });
+    };
+    win.__farhelmTooltipInstalled = { focusWithoutTooltip: win.farhelmTooltip.focusWithoutTooltip };
 
     function element() {
       if (!tip) {
@@ -331,6 +356,10 @@
           hide();
           return;
         }
+        if (suppressedByInitialFocus) {
+          suppressed = null;
+          suppressedByInitialFocus = false;
+        }
         if (suppressed && !suppressed.contains(event.target)) suppressed = null;
         const next = tooltipTarget(event.target);
         if (next === null) {
@@ -374,6 +403,7 @@
       (event) => {
         if (event.relatedTarget !== null) return;
         suppressed = null;
+        suppressedByInitialFocus = false;
         if (!viaFocus) hide(true);
       },
       true,
@@ -383,6 +413,7 @@
       "pointerdown",
       (event) => {
         suppressed = tooltipTarget(event.target);
+        suppressedByInitialFocus = false;
         hide();
       },
       true,
@@ -393,6 +424,7 @@
       (event) => {
         if (event.key !== "Escape" || target === null) return;
         suppressed = target;
+        suppressedByInitialFocus = false;
         hide();
       },
       true,
@@ -417,7 +449,10 @@
         // this, a keyboard user who pressed Escape on a control, tabbed away
         // and came back would never see its tooltip again, because only a
         // pointer leaving the element cleared it before.
-        if (suppressed !== null && suppressed.contains(event.target)) suppressed = null;
+        if (suppressed !== null && suppressed.contains(event.target)) {
+          suppressed = null;
+          suppressedByInitialFocus = false;
+        }
         // Focus moving on is the keyboard's version of the pointer moving
         // on, so it opens the same follow-on window: tabbing along a row of
         // controls shows each tooltip at once after the first.
