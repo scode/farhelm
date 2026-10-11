@@ -1911,3 +1911,36 @@ Timeout 15000ms exceeded while waiting on the predicate
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-10 — `heartbeat-stays-idle-under-output` (e2e/tests/terminal-reconnect.spec.ts)
+
+The full browser sweep failed this case in Chromium, counting one ping where it expected zero, in run
+`58927983-76d4-4669-8bc0-92ae16cfab01`; WebKit passed. The same run also failed the sidebar button-spacing and launcher
+Tab-order tests in both engines; those deterministic assertions have separate fixes. Three exact both-engine reruns on
+unchanged clean commit `3f0e21b39e841dde0e1f0ca325ccb8bad70b674f` passed (`62ae7a7d-bc34-4884-83e9-946b0731afea`),
+failed with the same one-ping assertion in both engines (`5336ef1f-951c-4209-94a1-93d76787321d`), then passed
+(`a1cc2246-ac82-46d5-a7bd-70a9fb3fc2b0`). Selection:
+`npx playwright test terminal-reconnect.spec.ts -g 'terminal\-reconnect\.spec\.ts .*heartbeat\-stays\-idle\-under\-output$'`,
+one browser worker, zero retries and one execution per engine per attempt; command durations were about 48s, 59s and
+32s. The failing attempts reached an assertion rather than a runner timeout. Linux x86_64, kernel 6.8, Node 26.11.1,
+Playwright 1.64.0, locale `C.UTF-8`, pinned tmux 3.7c with recorded executable SHA256
+`69a0ea45e5ce14139194884ca5ae2a8a8e071eda295de6a98cdfb783c75f97c0`. Ambient `FARHELM_*` was scrubbed; only
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied by the recorder. Browser build identity and
+machine-wide load at failure are unavailable. This session ran no competing validation during the classification
+attempts. No earlier entry was found for this case; the full reports and traces remain in private retained run records.
+The assertion counts pings from before terminal setup completes, and its echo loop does not establish a maximum gap
+below the 1.5-second idle threshold. A setup ping or a legitimate idle gap could therefore produce this observation;
+neither hypothesis is established, and a product defect has not been ruled out. The relevant test is unchanged on
+current main. Disposition: open in TODO.md, excluded from future deflake sweeps; per the maintainer's cutoff, record the
+flake rather than pursue an uncertain fix in this all-tests run.
+
+```
+Error: an active terminal must cost nothing: its own bytes are the liveness proof
+expect(received).toBe(expected) // Object.is equality
+Expected: 0
+Received: 1
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis
