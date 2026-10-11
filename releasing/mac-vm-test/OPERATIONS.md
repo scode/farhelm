@@ -125,6 +125,45 @@ before submission. Native destination-menu selection and modifier shortcuts were
 worked. Wheel scrolling did not move the guest dialog, while dragging its visible scrollbar did. These are measured
 input limitations; their cause was not isolated as a product defect.
 
+In a later release test, rapid physical key sequences also dropped characters. Per-character `pressKey` with
+`durationMs: 100` delivered the complete SSH alias. For replacing a field, triple-click with `durationMs: 100`, inspect
+the actual selection highlight in a separate screenshot, then type; a click attempt alone did not establish selection.
+Modifier chords were received without their modifier: `super+a` inserted `a`, and both a `colon` key name and explicit
+Shift-semicolon chords inserted `;`. Do not submit `tl;` as a template search or assume select-all worked. The tool
+refuses standalone modifier presses, so trying to hold Shift in a separate call is not a supported fallback.
+
+The verified workaround for exact text, including punctuation, is the guest's own clipboard and keyboard navigation of
+its native Edit menu. Prepare the text through the journaled controller, for example:
+
+```sh
+control exec mac -- /bin/sh -c 'printf %s "tl:example" | /usr/bin/pbcopy'
+```
+
+Focus the intended guest field; for replacement, verify its selection highlight first. Click the **guest** Edit menu
+through computer use, then use `Down` with `durationMs: 100` until **Paste** is visibly highlighted, and press Return
+with the same duration. In the exercised Farhelm menu, five Down presses from the newly opened menu selected Paste;
+inspect the actual menu rather than assuming that count applies elsewhere. Direct mouse clicks on native guest menu
+items, including a continuous drag, dismissed the menu and reached the underlying window instead. Arrow navigation and
+Return pasted the exact `tl:` query and produced the expected template match. `pbcopy` needed no sudo or bootstrap
+context change; such a change did not solve the mouse-menu issue. Keep the coordinator's `--no-clipboard` isolation and
+the host clipboard untouched. Verify the full text and reactive form result before submitting. Record newly verified
+workarounds here and in the release-test section of AGENTS.md as they are found.
+
+For terminal-file downloads, first clear any terminal selection with an explicit single click in blank terminal space.
+Click the path with `clickCount: 1`, inspect the hover's ready metadata, then click the ready link with `clickCount: 1`
+again (a different point within the same path worked). An earlier repeated click selected text instead; Farhelm
+correctly refused to download that selection gesture. Require both the actual saved-file message and an independent
+check of the resulting file's bytes, not just the hover tooltip.
+
+A frozen base's copied Codex login can become stale while the host continues using that login. `codex login status`
+still reported a ChatGPT login even when interactive startup required sign-in and the vendor log recorded
+`refresh_token_reused`. Treat this as a fixture-authentication problem; file presence and login status do not prove that
+a genuine conversation can run. Keep credential contents out of diagnostics and evidence. With the maintainer's explicit
+authorization for the credential and working guest, a stdin copy to the guest's auth file under `umask 077` and mode
+0600 restored startup after replacing the unauthenticated disposable session through Farhelm. Do not modify frozen
+bases, export authentication directories, or log out a clone to clean it up. Do not infer permission to copy a host
+credential from the brick-test request alone.
+
 Install `continuity.py` inside Linux before freezing the base or copy it into the owned working clone. Launch this as
 Farhelm's **plain command**, with agent type none:
 

@@ -23,6 +23,18 @@ inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOM
 the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
 removal checks in both cases.
 
+Read OPERATIONS.md's computer-use notes before entering guest text. Update those notes and this section when a new Tart
+input workaround is verified, so the next agent does not repeat the investigation. `typeText` and rapid physical key
+sequences can drop characters; per-character `pressKey` calls with `durationMs: 100` delivered unmodified text reliably
+in the release test. To replace a field, triple-click with `durationMs: 100`, then inspect a screenshot for the actual
+selection highlight before typing. Modifier chords can reach the guest without their modifier (`tl:` became `tl;`, and
+select-all became a literal `a`); verify punctuation and the resulting reactive form state before submitting. The
+verified workaround is guest-only clipboard preparation through the journaled controller
+(`printf %s <text> | /usr/bin/pbcopy` inside the Mac guest), followed by computer use on the guest's Edit menu. Click
+Edit, navigate with `Down` keys held for 100 ms until Paste is visibly highlighted, then press Return. Direct clicks on
+guest native menu items can dismiss the menu and reach the underlying window instead. Keep Tart's shared clipboard
+disabled and the host clipboard untouched; inspect both the pasted text and the form's response before proceeding.
+
 # Talking to the user
 
 Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
