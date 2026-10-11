@@ -2,6 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `trash-and-host-settings-dialogs.md` — trash and host settings dialogs: margins for every dialog, pinned headers and footers, "delete all" at the top, per-host delete progress
+- [landing a07450] `trash-and-host-settings-dialogs.md` — trash and host settings dialogs: margins for every dialog, pinned headers and footers, "delete all" at the top, per-host delete progress
 - [in-flight 79c576] `launcher-folder-shortcuts.md` — replace the launcher's folder links with a dropdown on the folder field
 - [pending] `host-dialogs-redesign.md` — redesign the add-host, setup confirmation, remove-host and uninstall dialogs to the approved mockup (after `trash-and-host-settings-dialogs.md`)
