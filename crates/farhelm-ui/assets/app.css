@@ -132,6 +132,10 @@
 :root {
   /* A fresh profile keeps the old geometry before the width asset loads. */
   --sidebar-width: 340px;
+  /* Modal backdrops and cards share this vertical budget. Dynamic viewport
+     units follow browser chrome; the minimum keeps short windows visibly
+     separated from their dialogs rather than shrinking the gap to nothing. */
+  --dialog-vertical-margin: max(24px, 5dvh);
   /* Host identity colors carry no state. They tint only a remote host's
      mark, away from status and accent hues, on chrome, menus and dialogs.
      Each clears 4.5:1 on the surfaces bound by the contrast harness. */
@@ -2497,13 +2501,19 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    point of the move was to show it whole), and its edit button. The field
    editor and a write's outcome line span the value and button columns, so
    they line up under the value they replace or explain. */
+/* Ordinary modals share their vertical margin even when they stack at phone
+   widths. The quick switcher keeps its separate, top-aligned geometry. */
+@media (max-width: 620px) {
+  :root { --dialog-vertical-margin: max(12px, 3dvh); }
+}
+
 .host-settings-backdrop {
   position: fixed;
   z-index: 40;
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--dialog-vertical-margin) 20px;
   overflow: auto;
   background: var(--scrim-dialog);
 }
@@ -2514,7 +2524,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 14px;
   width: min(480px, 100%);
   box-sizing: border-box;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   padding: 20px 24px;
   overflow: auto;
   background: var(--bg-2);
@@ -2585,7 +2595,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 14px;
   width: min(960px, 100%);
   box-sizing: border-box;
-  max-height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   padding: 20px 24px;
   overflow: auto;
   background: var(--bg-2);
@@ -2772,7 +2782,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    space. Keeping the desktop panes shrunk side by side would make the
    controls unusable; Back goes through the same unsaved-draft guard. */
 @media (max-width: 620px) {
-  .templates-dialog { padding: 16px; max-height: calc(100dvh - 24px); }
+  .templates-dialog { padding: 16px; }
   .templates-panes { grid-template-columns: minmax(0, 1fr); gap: 0; min-height: 240px; }
   .templates-sidebar { padding-right: 0; border-right: 0; }
   .templates-editor { display: none; }
@@ -3099,7 +3109,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--dialog-vertical-margin) 20px;
   overflow: auto;
   background: var(--scrim-dialog);
 }
@@ -3110,7 +3120,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 10px;
   width: min(480px, 100%);
   box-sizing: border-box;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   padding: 20px;
   overflow: auto;
   background: var(--bg-2);
@@ -3149,7 +3159,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--dialog-vertical-margin) 20px;
   overflow: auto;
   background: var(--scrim-dialog);
 }
@@ -3160,7 +3170,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 14px;
   width: min(560px, 100%);
   box-sizing: border-box;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   padding: 24px;
   overflow: auto;
   background: var(--bg-2);
@@ -4932,7 +4942,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: var(--dialog-vertical-margin) 20px;
   overflow: auto;
   background: var(--scrim-dialog);
 }
@@ -4946,11 +4956,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: flex;
   flex-direction: column;
   /* `100%` of the backdrop's content box, which already excludes the
-     backdrop's own 20px padding: subtracting a margin here again would
+     backdrop's own 20px side padding: subtracting a margin here again would
      shave the dialog to 920px at the very viewport the breakpoint targets. */
   width: min(960px, 100%);
   box-sizing: border-box;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   margin: 0;
   padding: 24px;
   overflow: auto;
@@ -5878,11 +5888,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 @media (max-width: 560px) {
   .launch-composer-backdrop {
-    padding: 8px;
+    padding-inline: 8px;
   }
 
   .launch-composer-backdrop .create-session-form {
-    max-height: calc(100vh - 16px);
     padding: 16px;
   }
 
@@ -6987,7 +6996,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    color; the surrounding dialog uses the shared chrome palette. */
 .checkout-trash-dialog {
   width: min(680px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
+  /* The height cap describes the painted card, including border and padding.
+     The backdrop's side padding still bounds it on a narrow window. */
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   overflow-y: auto;
   padding: 18px;
   border: 1px solid var(--border);
