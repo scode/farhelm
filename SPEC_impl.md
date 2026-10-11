@@ -324,8 +324,8 @@ the deleting row takes no tint or edge of its own, which would look exactly like
 Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal blue
 affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
 confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
-ask again on this host" and host removal's "remove, and don't ask again" keep the danger color, while host setup's "set
-up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The maintainer chose
+ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host setup's "set up,
+don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The maintainer chose
 (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's inline update
 action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red (`--danger-strong`) for
 a required one. Its outline signals urgency without presenting an update as a destructive confirmation. Being outlined,
