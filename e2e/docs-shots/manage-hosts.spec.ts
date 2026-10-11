@@ -97,9 +97,14 @@ test("app settings", async ({ page, request }) => {
   await page.locator(".app-settings-toggle").click();
   const dialog = page.locator(".app-settings-dialog");
   await expect(dialog).toBeVisible();
-  await director.callout(dialog, "Both questions Farhelm asks about hosts can be turned off, or back on, here.", {
-    side: "left",
-  });
+  // Aimed at the two host questions at the top of the dialog rather than at
+  // the dialog as a whole: Settings now holds more below them, and an arrow
+  // at the dialog's middle would point at one of those instead.
+  await director.callout(
+    dialog.locator(".app-settings-choice").first(),
+    "Both questions Farhelm asks about hosts can be turned off, or back on, here.",
+    { side: "left", dy: 60 },
+  );
   await shot(page, `${PAGE}/app-settings`, [dialog, page.locator(".app-settings-toggle")], { maxWidth: 930 });
 });
 

@@ -49,7 +49,7 @@ test("statuses", async ({ page, request }) => {
   });
   await director.callout(unread, "Idle and unread: it finished since you last looked. Opening it marks it read.", {
     side: "right",
-    dy: 30,
+    dy: 20,
   });
   await director.callout(exited, "Ended: the agent quit, here with exit code 0. Its terminal stays readable.", {
     side: "right",
