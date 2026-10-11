@@ -1911,3 +1911,39 @@ Timeout 15000ms exceeded while waiting on the predicate
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-10 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
+
+The x86_64 Linux release gate for the `v0.26.0` tag (release workflow run 38105057482,
+`build-local-artifacts (x86_64-unknown-linux-musl)`, tested commit `c57bee30` on a clean CI checkout) failed this test
+alone: 2887 of 2888 selected tests passed in recorded run `4ff3f9bf-3e63-436c-a13c-cc2cad787a37`, selection
+`workspace except farhelm and farhelm-desktop`,
+`cargo nextest run --workspace --exclude farhelm --exclude farhelm-desktop`, four nextest slots across binaries, zero
+retries. It failed fast on its assertion after 0.006 s, about a typical pass's duration. Hosted `ubuntu-24.04` runner
+image 20261004.327.1, kernel 6.17 (azure), locale `C.UTF-8`, pinned tmux 3.7c with recorded executable SHA256
+`bd692ebc340ddc1cab7d7de1514005ccb4ed4d42c3e3c1eb9e57402b1ca07815`; ambient `FARHELM_*` was scrubbed by the recorder,
+and other load on the runner is unavailable. The same test passed in the `v0.26.0-rc.2` gate a few hours earlier, and
+neither the test nor `reconcile_archive` changed in between (the test dates from #723). The test removes the checkout
+folder and then creates the "stranger" at the archive destination, so on ext4 the stranger can take the removed folder's
+inode, which this development host's ext4 reuses for an immediately recreated folder in 499 of 500 attempts. Inode reuse
+alone is not enough, because the ownership check also requires the recorded birth time to match; the suspected rest is
+that the kernel stamps a new inode's birth time from a coarse clock, so a folder recreated within the same tick also
+carries the old birth time and passes as the original. That part was not reproduced: the unfixed test passed 100 of 100
+attempts here alone on kernel 6.8 ext4 (hunt `09fa9875-887a-4a1d-b3c9-8bbd3b988872`), and a shell probe saw distinct
+nanosecond birth times, though it runs far slower than the test. The birth-time tests in the same failing run executed
+rather than skipping, ruling out a filesystem without birth times. Fixed in #1845 by creating the stranger while the
+source still exists and renaming it into place, the order its sibling `reconcile_fails_closed_on_an_identity_mismatch`
+already uses; the fixed test passed 50 of 50 attempts here (hunt `016e6648-5d49-49d0-ac2d-bff73e116d39`).
+`a_recreated_checkout_directory_is_a_different_object` removes and recreates a folder the same way and would be exposed
+to the same timing, but has not been seen failing. The hosted failure artifact `test-run-failure-38105057482-1-2`
+expires 2027-01-09.
+
+```
+thread 'working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone' panicked at crates/farhelm-supervisor/src/working_copies.rs:4132:9:
+assertion failed: matches!(reconcile_archive(&conn, &row.id),
+    Err(WorkingCopyError::IdentityMismatch { .. }))
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
