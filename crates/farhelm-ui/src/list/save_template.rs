@@ -202,6 +202,8 @@ pub(super) fn SaveTemplatePanel(
             },
             label { "template name"
                 input { class: "save-template-name", r#type: "text", value: "{name}",
+                    // Keep the chosen tl: search key, including its casing.
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     aria_label: "template name", "data-tooltip": "template name: choose a new name for this setup",
                     disabled: saving(), oninput: move |event| name.set(event.value()),
                     onkeydown: move |event| {

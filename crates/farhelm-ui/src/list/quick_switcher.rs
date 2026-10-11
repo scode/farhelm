@@ -274,6 +274,9 @@ pub(super) fn QuickSwitcher(
                     if !event.is_composing() && event.key() == Key::Escape { event.prevent_default(); on_close.call(()); }
                 },
                 input {
+                    // Queries include literal session names and tl: keys;
+                    // ARIA autocomplete below describes our own suggestions.
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     onkeydown: move |event: KeyboardEvent| {
                         if event.is_composing() { return; }
                         match event.key() {

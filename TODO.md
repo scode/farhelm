@@ -172,11 +172,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   make them" note should be pinned where they are and always visible, as should the header. Only the settings between
   the header and the footer scroll. Plan: `plans/queue/trash-and-host-settings-dialogs.md`.
 
-- **Turn off spell checking and autocorrect in every text field.** The template create/edit dialog still underlines and
-  autocorrects what you type, which is super annoying in fields that hold commands, prompts, paths and names. Some
-  fields already turn it off (the launcher, rename, and the host fields, among others); make that true of every text
-  field in the app, the template dialog first. Plan: `plans/queue/text-fields-no-spellcheck.md`.
-
 - **Show that deleting from the trash is still working.** While a confirmed delete runs, the trash dialog only disables
   its buttons (close included) until every host has answered, so a delete that takes a while feels like something is
   broken. At minimum, make it obvious that the delete is in progress and still being waited on; ideally show progress.
