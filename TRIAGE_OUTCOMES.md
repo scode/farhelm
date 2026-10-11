@@ -10680,7 +10680,9 @@
   response bound and the reason check are unchanged. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
+- Execution: complete in jj change `pkotqomkrpzoyutyynprupuyzwykznsv`, bookmark
+  `plan/helm-and-portability-test-fixes/01-helm-portability-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1912/changes).
 
 ## idle-flush-test-permits-deadline-extension-it-claims.md
 
@@ -10701,7 +10703,9 @@
   point in production code no longer fits. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
+- Execution: complete in jj change `pkotqomkrpzoyutyynprupuyzwykznsv`, bookmark
+  `plan/helm-and-portability-test-fixes/01-helm-portability-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1912/changes).
 
 ## shutdown-tests-prove-session-existence-more-strongly.md
 
@@ -10785,7 +10789,9 @@
   (`shared-silence-observers-have-same-premature-success-boundary.md`) and out of scope. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
+- Execution: complete in jj change `pkotqomkrpzoyutyynprupuyzwykznsv`, bookmark
+  `plan/helm-and-portability-test-fixes/01-helm-portability-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1912/changes).
 
 ## failed-spec-publication-test-observe-whether-tmux-started.md
 
@@ -10845,7 +10851,9 @@
   supervisor tests are, and still runs on Linux. If the fix turns out to need significant new complexity or a refactor,
   or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
+- Execution: complete in jj change `pkotqomkrpzoyutyynprupuyzwykznsv`, bookmark
+  `plan/helm-and-portability-test-fixes/01-helm-portability-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1912/changes).
 
 ## dead-tab-regression-cannot-pass-ordinary-macos.md
 
@@ -10865,7 +10873,9 @@
   scenario moves to a Linux-only test that keeps its liveness premise. Confirm both compile on macOS. If the fix turns
   out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
   back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-and-portability-test-fixes.md`.
+- Execution: complete in jj change `pkotqomkrpzoyutyynprupuyzwykznsv`, bookmark
+  `plan/helm-and-portability-test-fixes/01-helm-portability-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1912/changes).
 
 ## cgroup-cleanup-masks-marker-discovery-regression.md
 

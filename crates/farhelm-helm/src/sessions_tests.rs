@@ -6158,7 +6158,8 @@ async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
 /// Directory browse has the same target-host safety boundary as create: a
 /// remote path is only meaningful on the remote supervisor, and silently
 /// reading the helm's local filesystem would present a valid-looking but
-/// wrong destination to the person selecting it.
+/// wrong destination to the person selecting it. Check both peers' verdicts:
+/// the remote reply alone cannot prove that the local host stayed untouched.
 #[farhelm_testtrace::test]
 async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -6226,7 +6227,7 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
         serde_json::json!(["/remote/home/project/src"])
     );
 
-    local_task.abort();
+    local_task.await.expect("local browse peer stayed silent");
     remote_task.await.expect("remote browse peer");
 }
 

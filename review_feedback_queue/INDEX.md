@@ -79,15 +79,8 @@ triage.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
 - `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
   covering the operation.
-- `browse-routing-test-discards-wrong-host-assertion.md` — The browse test ignores an observed wrong-host request.
-- `idle-flush-test-permits-deadline-extension-it-claims.md` — The idle-flush test allows the renewed deadline it is
-  meant to reject.
-- `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
-  cannot measure RSS on native macOS.
 - `omp-child-report-fixtures-bypass-nested-runtime-check.md` — The child-report test rejects its fixture before checking
   nested-runtime ownership.
-- `dead-tab-regression-cannot-pass-ordinary-macos.md` — The dead-tab test fails on ordinary macOS before checking
-  cleanup.
 - `shutdown-race-test-releases-sink-shutdown-starts.md` — The shutdown race test starts after the critical transition is
   over.
 - `busy-pane-assertion-depends-another-panes-readiness.md` — A delayed producer could make the busy-pane test reject
@@ -181,8 +174,6 @@ triage.
   cleanup.
 - `wedged-browser-test-accepts-independent-cleanup-signal.md` — The cleanup signal in the wedged-browser test has
   independent producers.
-- `commit-race-test-exercise-only-pre-commit-abort-path.md` — The upload-abort test could finish before commit is
-  actually in flight.
 - `concurrent-first-use-barrier-guarantees-disputed-interleaving.md` — The first-use test could pass without exercising
   concurrent absent observations.
 - `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an

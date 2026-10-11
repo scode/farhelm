@@ -1499,10 +1499,9 @@ mod tests {
         let _peer = peer.await.unwrap();
     }
 
-    /// The same retention one step later: an `UploadAborted` racing the
-    /// commit must surface as ITS reason, not as whatever the commit
-    /// exchange would have collected for a channel the supervisor already
-    /// tore down.
+    /// An abort received after the peer admits the commit must surface its
+    /// reason while that commit is still unanswered. Waiting for CommitUpload
+    /// before aborting excludes the earlier, already-recorded abort path.
     ///
     /// The peer never answers the commit, deliberately. That leaves the
     /// abort as the only thing that can end this request, so an
@@ -1531,6 +1530,15 @@ mod tests {
                 .await;
             let frame = peer.recv_frame().await;
             assert_eq!(frame.body.len(), 4);
+            let commit = peer.recv().await;
+            let ControlMsg::CommitUpload {
+                channel: commit_channel,
+                ..
+            } = commit
+            else {
+                panic!("expected CommitUpload, got {commit:?}");
+            };
+            assert_eq!(commit_channel, channel);
             peer.send(&ControlMsg::UploadAborted {
                 channel,
                 reason: SENTINEL.to_string(),
@@ -1542,8 +1550,8 @@ mod tests {
         let harness = rest_harness::spliced_helm(client_side).await;
         let app = harness.router();
 
-        // The body ends normally, so the relay proceeds to commit — into
-        // a supervisor that has already given up and will never answer.
+        // Normal body completion admits the commit; only then does the peer
+        // abort, leaving the commit reply unresolved for the whole observation.
         let request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/sessions/sess-1/attachments")

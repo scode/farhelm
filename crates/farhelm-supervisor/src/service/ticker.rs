@@ -2221,6 +2221,7 @@ mod tests {
     /// The child writes this file after the parent pane can die, so this
     /// waits for the fixture's own evidence rather than treating the shell
     /// command having returned as proof that there is a process to reap.
+    #[cfg(target_os = "linux")]
     async fn wait_for_daemon_pid(path: &std::path::Path) -> u32 {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         loop {
@@ -2244,6 +2245,7 @@ mod tests {
     /// This observes the marker sweep's process result, after the pane has
     /// already disappeared, so the test distinguishes a real tab close from
     /// a bare tmux window kill.
+    #[cfg(target_os = "linux")]
     async fn wait_for_process_absence(pid: u32) {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         while std::path::Path::new(&format!("/proc/{pid}")).exists() {
@@ -2475,9 +2477,10 @@ mod tests {
     /// Pinned at the ticker because nothing else may do it: listings are
     /// side-effect-free reads. (The pane-death wakeup calls the same reap;
     /// `a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick` covers
-    /// that trigger.) Two
-    /// dead tabs in one session because a first-match-only reap would pass
-    /// a single-corpse test while leaving simultaneous exits behind.
+    /// that trigger.) Two dead tabs in one session because a first-match-only
+    /// reap would pass a single-corpse test while leaving simultaneous exits
+    /// behind. Plain exited commands keep this coverage portable; the Linux
+    /// daemon-sweep test below checks detached descendants separately.
     #[farhelm_testtrace::test]
     async fn dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive() {
         let state = StateDir::new();
@@ -2485,30 +2488,7 @@ mod tests {
         install_live_session(&sup, "reap-tab", "sleep 600").await;
         let tmux_name = "fh-reap-tab";
 
-        // dead_a daemonizes a child before exiting — the reap goes through
-        // the ordinary close, whose marker sweep must take the child with
-        // the window; a bare kill-window would leave it running.
-        let daemon_pid_file = state.path().join("reap-daemon.pid");
-        // The daemon writes its OWN pid (`$$` after setsid+exec), the same
-        // identity-safe shape `write_daemon_script` uses in the e2e suite:
-        // recording `$!` of a backgrounded `setsid` is wrong whenever
-        // setsid forks (it does when it starts as a group leader), and a
-        // dead recorded pid makes every later liveness assertion vacuous.
-        // The trailing wait-for-the-pid-file is the fixture's other
-        // survival condition: a pane whose shell exits before the child
-        // has called setsid takes the child down with its process group,
-        // so the pane holds until the daemon has provably detached.
-        let (dead_a, _tab_a) = dead_tab_running(
-            &sup,
-            tmux_name,
-            &format!(
-                "( setsid /bin/sh -c 'echo $$ > {pid}; exec sleep 300' \
-                 </dev/null >/dev/null 2>&1 & ); \
-                 while [ ! -s {pid} ]; do sleep 0.05; done",
-                pid = daemon_pid_file.display()
-            ),
-        )
-        .await;
+        let dead_a = dead_tab_in(&sup, tmux_name).await;
         let dead_b = dead_tab_in(&sup, tmux_name).await;
         let live_id = uuid::Uuid::new_v4().to_string();
         let (_window, live_pane) = sup
@@ -2561,17 +2541,6 @@ mod tests {
             "the teardown-facing listing must still name every dead tab's scope-bearing id"
         );
 
-        // The fixture's premise, proven BEFORE the reap: the daemon is a
-        // real, running process. Without this, a fixture whose spawn
-        // silently failed would let the swept-daemon assertion below pass
-        // vacuously. The pid file is written by the daemon itself, so it
-        // can trail the pane's death by a scheduler beat — hence the poll.
-        let daemon_pid = wait_for_daemon_pid(&daemon_pid_file).await;
-        assert!(
-            std::path::Path::new(&format!("/proc/{daemon_pid}")).exists(),
-            "the daemonized child must be alive before the reap for its death to mean anything"
-        );
-
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
@@ -2590,9 +2559,51 @@ mod tests {
             vec![live_id.as_str()],
             "the live sibling tab must survive the reap untouched"
         );
+    }
 
-        // The daemonized child went with its tab: the reap ran the real
-        // close (marker sweep included), not a bare window kill.
+    /// Reaping a dead tab must sweep its detached child as well as its window.
+    ///
+    /// This proof needs Linux's setsid and procfs. On macOS, platform binaries
+    /// withhold the environment markers the sweep needs; the portable test
+    /// above still proves dead-window cleanup and live-sibling preservation.
+    #[farhelm_testtrace::test]
+    #[cfg(target_os = "linux")]
+    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "reap-daemon", "sleep 600").await;
+        let tmux_name = "fh-reap-daemon";
+        let daemon_pid_file = state.path().join("reap-daemon.pid");
+        // The daemon publishes its own PID after detaching. A setsid launcher
+        // may fork, so $! need not name the surviving process; the pane also
+        // holds until publication so its exit cannot kill an undetached child.
+        let (dead, _tab_id) = dead_tab_running(
+            &sup,
+            tmux_name,
+            &format!(
+                "( setsid /bin/sh -c 'echo $$ > {pid}; exec sleep 300' \
+                 </dev/null >/dev/null 2>&1 & ); \
+                 while [ ! -s {pid} ]; do sleep 0.05; done",
+                pid = daemon_pid_file.display()
+            ),
+        )
+        .await;
+        let daemon_pid = wait_for_daemon_pid(&daemon_pid_file).await;
+        assert!(
+            std::path::Path::new(&format!("/proc/{daemon_pid}")).exists(),
+            "the daemonized child must be alive before the reap for its death to mean anything"
+        );
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            !states.contains_key(&dead),
+            "the dead tab's window must be gone after the tick"
+        );
+        // Pane removal alone would also pass for a bare kill-window. The live
+        // daemon must disappear to prove that the ordinary close swept it.
         wait_for_process_absence(daemon_pid).await;
     }
 
