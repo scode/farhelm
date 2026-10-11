@@ -367,13 +367,15 @@ async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
     // The session's cwd is a tempdir whose path may be a symlink (macOS
     // aside, `/tmp` is one on some Linux setups), so compare against what
     // the shell itself resolves rather than against the literal path.
+    // The closing marker is assembled at runtime, so the echoed command
+    // cannot satisfy the wait before the shell's whole result arrives.
     run_in_shell(
         &h.client,
         chan,
         &mut rx,
         &mut seen,
-        "printf 'CW%s[%s]\\n' D \"$PWD\"",
-        "CWD[",
+        "printf 'CW%s[%s]%s\\n' D \"$PWD\" DWC",
+        "]DWC",
         20,
     )
     .await;
@@ -381,7 +383,7 @@ async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
     let reported = transcript
         .split("CWD[")
         .nth(1)
-        .and_then(|rest| rest.split(']').next())
+        .and_then(|rest| rest.split_once("]DWC").map(|(value, _)| value))
         .expect("the tab shell must report its working directory")
         .trim()
         .to_string();
@@ -2762,15 +2764,25 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     // duplicate — the fd-leak bug this test originally hunted — not the
     // known drain stall, and the sweep must not be allowed to mask it.
     observe_protocol_cleanup_grace(&sock, stale_pids.len() + 1, &pre_kill_roster).await;
-    for pid in roster_pids(&control_client_roster(&sock).await) {
+    let roster = query_control_client_roster(&sock)
+        .await
+        .unwrap_or_else(|error| panic!("cannot check leaked writers: {error}"));
+    for pid in roster_pids(&roster) {
         if stale_pids.contains(&pid) {
             continue;
         }
-        let scan = stdin_pipe_holder_scan(pid);
+        let scan = inspect_stdin_pipe_at(std::path::Path::new("/proc"), pid);
         assert!(
-            !scan.contains(" mode WRITE:"),
+            scan.verdict.is_ok(),
+            "cannot rule out a leaked stdin writer: {:?}\n{}",
+            scan.verdict,
+            scan.report
+        );
+        assert!(
+            !scan.report.contains(" mode WRITE:"),
             "a surviving client of the DEAD supervisor still has a live stdin write-end \
-             holder — that is a leaked fd, not the known drain stall:\n{scan}"
+             holder — that is a leaked fd, not the known drain stall:\n{}",
+            scan.report
         );
     }
 
@@ -3019,6 +3031,15 @@ async fn count_control_clients(sock: &std::path::Path) -> usize {
 /// panic inside a panic's evidence-gathering — would trade the real
 /// report for a worse one.
 async fn control_client_roster(sock: &std::path::Path) -> String {
+    query_control_client_roster(sock)
+        .await
+        .unwrap_or_else(|error| error)
+}
+
+/// Query a single roster without treating a failed observation as an empty one.
+/// Diagnostic callers keep the text wrapper above; absence assertions must
+/// require this result's success before parsing pids.
+async fn query_control_client_roster(sock: &std::path::Path) -> Result<String, String> {
     // A dedicated command rather than `tmux_query`, for `kill_on_drop`:
     // when the timeout abandons the output future, the spawned tmux
     // process must die with it, not linger while the diagnostic loop
@@ -3037,16 +3058,16 @@ async fn control_client_roster(sock: &std::path::Path) -> String {
     let listed = tokio::time::timeout(Duration::from_secs(5), query.output()).await;
     match listed {
         Err(_) => {
-            "list-clients timed out after 5s; the tmux server itself may be wedged".to_string()
+            Err("list-clients timed out after 5s; the tmux server itself may be wedged".to_string())
         }
-        Ok(Err(e)) => format!("list-clients could not be spawned: {e}"),
-        Ok(Ok(listed)) if listed.status.success() => String::from_utf8_lossy(&listed.stdout)
+        Ok(Err(e)) => Err(format!("list-clients could not be spawned: {e}")),
+        Ok(Ok(listed)) if listed.status.success() => Ok(String::from_utf8_lossy(&listed.stdout)
             .trim_end()
-            .to_string(),
-        Ok(Ok(listed)) => format!(
+            .to_string()),
+        Ok(Ok(listed)) => Err(format!(
             "list-clients failed: {}",
             String::from_utf8_lossy(&listed.stderr).trim()
-        ),
+        )),
     }
 }
 
@@ -3124,6 +3145,22 @@ fn stdin_pipe_holder_scan(pid: u32) -> String {
 /// uid; the fabricated tree's entries are owned by the test user, so they
 /// pass it.
 fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
+    inspect_stdin_pipe_at(proc_root, pid).report
+}
+
+/// Keep diagnostic text separate from whether it supports an absence assertion.
+/// An error verdict means the scan has blind spots, even if no writer appears
+/// in the report; successful scans can still report a leaked writer.
+struct PipeHolderScan {
+    report: String,
+    verdict: Result<(), String>,
+}
+
+/// Inspect a client and its pipe holders, distinguishing exit from lost access.
+/// A missing client is conclusive only under a readable proc root. Missing
+/// descriptors in an extant client and unreadable trees leave the leak question
+/// open. Holders that disappear during traversal cannot keep a pipe alive.
+fn inspect_stdin_pipe_at(proc_root: &std::path::Path, pid: u32) -> PipeHolderScan {
     use std::fmt::Write as _;
     use std::os::unix::fs::MetadataExt as _;
     let mut out = String::new();
@@ -3140,12 +3177,34 @@ fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
         Ok(target) => target,
         Err(e) => {
             let _ = writeln!(out, "  stdin not inspectable (no /proc, or gone): {e}");
-            return out;
+            // An exited client that has not been reaped yet is a zombie: its
+            // proc directory remains but its file table is gone, so it can
+            // hold no pipe. Treating it as inconclusive would fail the test
+            // whenever the orphaned client's reaper lags under load.
+            let exited = status
+                .split(", ")
+                .any(|field| field.starts_with("State:\tZ") || field.starts_with("State:\tX"));
+            let gone = e.kind() == std::io::ErrorKind::NotFound
+                && std::fs::read_dir(proc_root).is_ok()
+                && (exited
+                    || std::fs::symlink_metadata(proc_root.join(pid.to_string()))
+                        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound));
+            return PipeHolderScan {
+                report: out,
+                verdict: if gone {
+                    Ok(())
+                } else {
+                    Err(format!("stdin not inspectable: {e}"))
+                },
+            };
         }
     };
     let _ = writeln!(out, "  stdin is {}", stdin.display());
     if !stdin.to_string_lossy().starts_with("pipe:") {
-        return out;
+        return PipeHolderScan {
+            report: out,
+            verdict: Ok(()),
+        };
     }
     let my_uid = std::fs::metadata(format!("/proc/{}", std::process::id()))
         .map(|m| m.uid())
@@ -3154,7 +3213,10 @@ fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
         Ok(entries) => entries,
         Err(e) => {
             let _ = writeln!(out, "  /proc scan unavailable: {e}");
-            return out;
+            return PipeHolderScan {
+                report: out,
+                verdict: Err(format!("proc scan unavailable: {e}")),
+            };
         }
     };
     let mut gaps: Vec<String> = Vec::new();
@@ -3239,6 +3301,7 @@ fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
                             "?"
                         }
                     },
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(e) => {
                         gaps.push(format!("pid {holder}: fdinfo/{fd} unreadable ({e})"));
                         "?"
@@ -3273,7 +3336,14 @@ fn stdin_pipe_holder_scan_at(proc_root: &std::path::Path, pid: u32) -> String {
             gaps.len()
         );
     }
-    out
+    PipeHolderScan {
+        report: out,
+        verdict: if gaps.is_empty() {
+            Ok(())
+        } else {
+            Err(gaps.join("; "))
+        },
+    }
 }
 
 /// The /proc pipe-holder scan executes only on a rare CI failure path, so
@@ -3408,12 +3478,17 @@ async fn the_pipe_holder_scan_reports_blind_spots_instead_of_swallowing_them() {
     )
     .expect("hostile perms");
 
-    let report = stdin_pipe_holder_scan_at(root_path, 1000001);
+    let scan = inspect_stdin_pipe_at(root_path, 1000001);
+    let report = scan.report;
 
     // Restore permissions so the tempdir can be deleted.
     let _ = std::fs::set_permissions(
         root_path.join("1000003/fd"),
         std::fs::Permissions::from_mode(0o700),
+    );
+    assert!(
+        scan.verdict.is_err(),
+        "an unreadable holder must make the scan inconclusive"
     );
     assert!(
         report
@@ -3432,6 +3507,79 @@ async fn the_pipe_holder_scan_reports_blind_spots_instead_of_swallowing_them() {
     assert!(
         report.contains("pid 1000003: fd dir unreadable"),
         "the gap note must name the process the scan could not inspect:\n{report}"
+    );
+}
+
+/// A vanished client or holder cannot keep a pipe alive, but a missing proc
+/// root or stdin in an extant client proves nothing. Fabricated trees pin
+/// those boundaries without relying on a real process exiting at one instant.
+#[farhelm_testtrace::test]
+async fn the_pipe_holder_scan_distinguishes_exit_from_incomplete_inspection() {
+    let root = tempfile::tempdir().expect("fake proc root");
+    let missing_root = inspect_stdin_pipe_at(&root.path().join("missing"), 1000001);
+    assert!(
+        missing_root.verdict.is_err(),
+        "a missing proc root is not a vanished client"
+    );
+    let missing_client = inspect_stdin_pipe_at(root.path(), 1000001);
+    assert!(
+        missing_client.verdict.is_ok(),
+        "a client absent from readable proc has exited"
+    );
+
+    std::fs::create_dir_all(root.path().join("1000001/fd")).expect("client dirs");
+    let missing_stdin = inspect_stdin_pipe_at(root.path(), 1000001);
+    assert!(
+        missing_stdin.verdict.is_err(),
+        "an extant client with unreadable stdin is inconclusive"
+    );
+    std::fs::write(
+        root.path().join("1000001/status"),
+        "State:\tZ (zombie)\nPPid:\t1\n",
+    )
+    .expect("zombie status");
+    assert!(
+        inspect_stdin_pipe_at(root.path(), 1000001).verdict.is_ok(),
+        "an exited, unreaped client has no file table and holds no pipe"
+    );
+    std::fs::remove_file(root.path().join("1000001/status")).expect("restore extant client");
+
+    std::os::unix::fs::symlink("/dev/null", root.path().join("1000001/fd/0"))
+        .expect("non-pipe stdin");
+    assert!(inspect_stdin_pipe_at(root.path(), 1000001).verdict.is_ok());
+    std::fs::remove_file(root.path().join("1000001/fd/0")).expect("replace stdin");
+    std::os::unix::fs::symlink("pipe:[4242]", root.path().join("1000001/fd/0"))
+        .expect("pipe stdin");
+    std::fs::create_dir_all(root.path().join("1000001/fdinfo")).expect("client fdinfo");
+    std::fs::write(root.path().join("1000001/fdinfo/0"), "flags:\t00\n").expect("client read end");
+    std::fs::create_dir_all(root.path().join("1000002/fd")).expect("vanishing holder dirs");
+    std::os::unix::fs::symlink("pipe:[4242]", root.path().join("1000002/fd/7"))
+        .expect("holder whose fdinfo vanished");
+    let scan = inspect_stdin_pipe_at(root.path(), 1000001);
+    assert!(
+        scan.verdict.is_ok(),
+        "NotFound fdinfo must tolerate exit: {}",
+        scan.report
+    );
+    assert!(!scan.report.contains("scan INCOMPLETE"));
+    assert!(!scan.report.contains("held by pid 1000002"));
+}
+
+/// A failed roster query must stay distinct from a successful empty roster.
+/// Otherwise a stopped or unreachable tmux server can exonerate every leaked
+/// writer simply because there were no pids to inspect.
+#[farhelm_testtrace::test]
+async fn the_client_roster_rejects_a_failed_query() {
+    let root = tempfile::tempdir().expect("private missing socket");
+    let socket = root.path().join("missing.sock");
+    let error = query_control_client_roster(&socket)
+        .await
+        .expect_err("a missing server must fail the observation");
+    assert!(error.starts_with("list-clients failed:"), "{error}");
+    assert!(
+        control_client_roster(&socket)
+            .await
+            .starts_with("list-clients failed:")
     );
 }
 
@@ -3591,6 +3739,8 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
     /// The live helper consumes replay completion before the readiness round
     /// trip. Keeping the snapshot matters because an interactive shell can
     /// have already printed rc-file output before that round trip starts.
+    /// The closing marker must arrive before parsing: opening markers alone
+    /// allow a split value to look truncated, or even like an unknown shell.
     async fn tab_marker_value(h: &Harness, session_id: &str, ready: &str) -> String {
         let tab = h.client.open_tab(session_id).await.expect("open a tab");
         let (chan, initial_replay, mut rx) = h
@@ -3611,8 +3761,8 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
             chan,
             &mut rx,
             &mut seen,
-            &format!("printf 'EN%s[%s]\\n' V \"${RC_MARKER_VAR}\""),
-            "ENV[",
+            &format!("printf 'EN%s[%s]%s\\n' V \"${RC_MARKER_VAR}\" VNE"),
+            "]VNE",
             20,
         )
         .await;
@@ -3620,7 +3770,7 @@ async fn an_rc_file_change_between_two_tab_opens_reaches_the_second_tab() {
         let text = String::from_utf8_lossy(&seen).into_owned();
         text.split("ENV[")
             .nth(1)
-            .and_then(|rest| rest.split(']').next())
+            .and_then(|rest| rest.split_once("]VNE").map(|(value, _)| value))
             .unwrap_or_default()
             .trim()
             .to_string()

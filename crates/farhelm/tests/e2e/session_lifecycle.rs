@@ -1927,6 +1927,8 @@ async fn resize_reaches_tmux() {
 /// geometry. A fresh agent echo is the replay-completion barrier: unlike
 /// bracketed-paste restoration, it is available on every supported tmux
 /// version, and it cannot arrive before the replay queued ahead of it.
+/// Before detaching, wait for the agent's colored echo rather than the
+/// terminal's input echo, so delayed live output cannot masquerade as bad replay.
 #[farhelm_testtrace::test]
 async fn attach_replay_uses_the_requested_geometry() {
     let h = harness().await;
@@ -1943,7 +1945,13 @@ async fn attach_replay_uses_the_requested_geometry() {
     h.client
         .send_input(channel, format!("{payload}\r").into_bytes())
         .await;
-    wait_for(&mut first, &mut initial, &payload, 10).await;
+    wait_for(
+        &mut first,
+        &mut initial,
+        &format!("echo:\x1b[36m{payload}"),
+        10,
+    )
+    .await;
     h.client.detach(channel).await;
 
     let (channel, second_replay, mut second) = h
@@ -5463,9 +5471,18 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
 /// launch (`launch.rs`'s `SESSION_ID_ENV_VAR`) or marker enumeration
 /// during the sweep (`environ_has_marker`/`enumerate_tree`) — a bare PPID
 /// closure from the pane root would never reach this pid at all.
+/// Scopes are disabled and the stored launch must confirm that: a scope
+/// kill would otherwise hide a missing marker-discovery path.
 #[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_marked_daemon() {
-    let h = harness().await;
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -5493,6 +5510,7 @@ async fn stop_kills_a_reparented_marked_daemon() {
         self_pid, daemon_pid,
         "the reparented daemon must be a genuinely different process"
     );
+    assert_eq!(launch_scope_of(&h, &session.id).await, None);
 
     h.client.stop_session(&session.id).await.expect("stop");
 
