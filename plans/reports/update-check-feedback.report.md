@@ -79,3 +79,43 @@ The `gpt-6.1-sol` medium wording reader accepted the commit message and PR title
 did not run tests or observe the Mac app. Actual native model attribution and usage counters were unavailable. Private
 galaxy-brain session `a63f6b2c-45f7-4830-bf84-ea76de63472d` retains routing and review events; the working log beside
 the checkouts records its location and private run paths.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1889. The rebase met no conflicts.
+
+#### Fix made while landing
+
+In #1889, before it merged: dismissing "check failed" removes the button that has focus, so a keyboard user who
+dismissed it lost their place to the page body. Focus now moves to the settings gear beside it. No test covers this; the
+desktop runtime tests run only in the release gate.
+
+#### Review before merging
+
+No blockers. The status says "up to date" only when the check really came back up to date; checking and installing
+always show as such; a stale outcome cannot linger into a new check; automatic checks stay invisible; the five-second
+expiry cannot hide a newer check; the timer dies with the status; and the live region starts empty, so nothing is
+announced at launch. Failure reasons are fixed sentences that name only the update server and a version. Notes left as
+they are:
+
+- A screen reader hears that a check failed but not why: the reason is only in the hover text. Hover-only reasons
+  predate this plan.
+- With a build mismatch, the failure button's hover shows the failure reason while the version readout's hover shows the
+  mismatch.
+- The pure status logic and the updater's bookkeeping have tests; the on-screen wiring (the timer and the keyed
+  announcement) has none.
+- The implementation spec's paragraph on this is dense, and the changelog fragment's "until dismissed" could say "until
+  you click it"; release curation can reword it.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests (run `42c0713d`, 454 of 454) and the desktop build's
+  UI tests (run `9d2e9449`, 567 of 567) through the recorder; the UI JavaScript tests (238 of 238); and on Chromium and
+  WebKit with one worker and no retries the settings and tooltip-coverage specs (run `a4ffcfe6`, 20 passed), which cover
+  the sidebar bar this changes in the web build.
+- Not run: the desktop smoke test, which runs in the release gate; the web build cannot show this status.
+- Between those runs and the merge, main changed only release notes.
+
+Nothing in the report above was made untrue by the landing.
