@@ -96,8 +96,8 @@ farhelm-testtrace.workspace = true
 # The two-host aggregation test drives a REAL `farhelm helm run` over real
 # loopback HTTP (merged_hosts.rs), because that is the only way to exercise
 # the shipped binary's own serving path; a hand-rolled HTTP client would be
-# a second, worse thing to maintain. Loopback only, so no TLS backend is
-# needed and the workspace's default-feature-less reqwest is enough.
+# a second, worse thing to maintain. Loopback only; the workspace's reqwest
+# serves as it is.
 reqwest.workspace = true
 # The e2e listing-poll tests run on Tokio's virtual clock. Their timeout
 # assertions must not depend on a loaded machine scheduling real sleeps, and

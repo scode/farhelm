@@ -1030,10 +1030,13 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 fn client() -> reqwest::Client {
     #[cfg(native_desktop)]
     {
+        // Building can fail only when reqwest's TLS setup finds no system
+        // certificate store, which happens on a Linux machine with no CA
+        // bundle, not on macOS, the only platform the desktop app ships for.
         reqwest::Client::builder()
             .no_proxy()
             .build()
-            .expect("proxy-free desktop HTTP client construction is infallible")
+            .expect("the desktop HTTP client needs a system certificate store")
     }
     #[cfg(not(native_desktop))]
     reqwest::Client::new()
