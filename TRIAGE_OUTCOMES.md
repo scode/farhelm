@@ -11328,3 +11328,32 @@
   handling the library upgrade separately.
 - Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
 - Execution: `complete`; removed the feedback file and index entry during triage.
+
+## rejected-permission-toggles-depend-observing-intermediate-busy.md
+
+- Outcome: `fix code`.
+- Assessment: Partly correct, by code reading on main at `54a50bbf` against Dioxus 0.7.10's scheduler, not runtime
+  reproduction. The mechanism is as described: in the host settings dialog, a refused change to either permission switch
+  (run without asking, commands without asking) puts the switch back only when the dialog's effect sees its busy state
+  go from true to false (`crates/farhelm-ui/src/hosts/settings_dialog.rs`). The trigger is not reachable for a refusal
+  from the helm. The click handler marks the host busy, so the dialog renders busy before the spawned request is first
+  polled. That request then needs a network round trip and is pending when the effect runs, so the effect sees busy. The
+  effect would miss the transition only if the request finished on its first poll. In the browser that cannot happen. On
+  desktop it might, for a local failure that never reaches the helm, such as an immediate connection error to the
+  embedded helm; that remains unverified. If it did happen, the switch would show the refused value rather than the one
+  in force (for a refused revocation, "off" while the permission stays on), but the error text stays visible, the help
+  text beside the switch shows the real setting, no permission is ever granted that the user did not already have, and
+  reopening the dialog or a host refresh corrects the display. The dependency on observing an intermediate render is
+  fragile against future changes, such as a local check in the request path that fails before its first await.
+- Decision: fix it, with a hard complexity gate. Recommended `discard` because the trigger is not reachable today; the
+  user chose `fix code` to harden it anyway: "fix code with hard cmplexity gate". The user also agreed to move it from
+  `highest` to `other`: the error stays visible and the help text shows the real setting, so the consequence is a
+  misleading switch, not a security or data-loss bug.
+- Completion criteria: When a write to either permission switch fails, both switches are put back to the host's actual
+  settings directly from the failure outcome, for example with the existing `settings_dialog::reset_checkboxes()` that
+  already handles a write that never started, so the reset no longer depends on the dialog observing busy go true then
+  false. Add a test if one fits without new machinery. Hard gate: if the fix needs more than a small, contained change
+  (new scheduling machinery, a refactor of the dialog or of the host mutation wrapper, or a test seam that cannot be
+  added simply), stop and bring it back to the user unfixed. Do not touch the vendored terminal library. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.

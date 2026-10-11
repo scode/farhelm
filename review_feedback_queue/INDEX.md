@@ -11,9 +11,6 @@ triage.
 
 - `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
 
-- `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
-  misleading unchecked checkbox.
-
 ## High priority: material UX degradation
 
 - `tab-cleanup-blocks-status-sampling.md` — Automatic cleanup of an exited terminal tab can leave every session on that
@@ -252,3 +249,5 @@ triage.
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
   repeated attempts.
+- `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
+  misleading unchecked checkbox.
