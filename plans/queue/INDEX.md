@@ -6,3 +6,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 35fa68] `text-fields-no-spellcheck.md` — turn off spell checking and autocorrect in every text field
 - [in-flight c1cbc1] `post-clone-in-settings.md` — the all-hosts post-clone command in Settings
 - [in-flight 79c576] `launcher-folder-shortcuts.md` — replace the launcher's folder links with a dropdown on the folder field
+- [pending] `host-dialogs-redesign.md` — redesign the add-host, setup confirmation, remove-host and uninstall dialogs to the approved mockup (after `trash-and-host-settings-dialogs.md`)
