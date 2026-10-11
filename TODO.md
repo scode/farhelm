@@ -186,8 +186,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with no hanging indent, so a wrapped step reads like a separate step. The three answers come out at three different
   sizes on no common baseline: "yes" is small, the middle answer is in larger type and wraps onto two lines, and cancel
   is larger again. The "You can turn this back on with the gear…" note sits under the middle button only, wraps, and
-  pushes cancel down off the row. Cancel is focused when the dialog opens, and its tooltip shows right away and covers
-  part of the middle button. Details of the redesign to be worked out.
+  pushes cancel down off the row. In the screenshot this came from, cancel's tooltip also covers part of the middle
+  button; cancel is focused when the dialog opens, but it is unclear whether the tooltip showed because of that focus or
+  because of a hover. Details of the redesign to be worked out.
 
 ## Doc todo
 
