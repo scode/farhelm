@@ -4,3 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [landing f6519d] `launcher-folder-shortcuts.md` — replace the launcher's folder links with a dropdown on the folder field
 - [in-flight 4a94b2] `flickering-path-hover.md` — keep a path hover steady while the terminal redraws under it
+- [pending] `agent-managed-checkout.md` — let `farhelm agent create` start a session in a fresh managed checkout (`--gh`/`--github`)
