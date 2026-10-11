@@ -330,6 +330,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             f.write("%s %s\n" % (self.address_string(), fmt % args))
 
     def do_GET(self):
+        # A valid tag prefix must not become a release selection when curl
+        # detects that the origin's successful answer stopped before its
+        # advertised length. HTTP/1.0 closes this connection after returning.
+        if self.path == "/latest-short/latest":
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(b"v1.2.12\n")))
+            self.end_headers()
+            self.wfile.write(b"v1.2.1")
+            return
         # A redirect to a host that does not exist (.invalid never
         # resolves): only reachable if the installer pins every connection
         # of its loopback test mode to this machine, which is the point.
@@ -1051,6 +1060,50 @@ for linked in app Contents MacOS Resources Versions version; do
   check "linked $linked: the Installed record is unchanged" \
     [ "$(cat "$app/Contents/Versions/installed")" = "$before_installed" ]
   check "linked $linked: the lock was released" [ ! -e "$home/Applications/.farhelm-app.lock" ]
+done
+
+# A directory at a file destination makes mv succeed by placing the new
+# program inside it. Refusal must happen before any app bytes or version
+# records change, including when the directory lives outside the app.
+for shape in directory symlink; do
+  home="$WORKDIR/home-program-$shape"
+  mkdir -p "$home"
+  run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
+  check "program $shape: setup install exits 0" [ "$RC" -eq 0 ]
+  app="$home/Applications/Farhelm.app"
+  path="$app/Contents/MacOS/farhelm-desktop"
+  check "program $shape: premise: the installed program is a regular file" [ -f "$path" ]
+  check "program $shape: premise: the Installed record names 1.2.3" \
+    [ "$(cat "$app/Contents/Versions/installed")" = 1.2.3 ]
+  rm -f "$path"
+  if [ "$shape" = symlink ]; then
+    elsewhere="$WORKDIR/elsewhere-program"
+    mkdir -p "$elsewhere"
+    ln -s "$elsewhere" "$path"
+  else
+    elsewhere="$path"
+    mkdir -p "$path"
+  fi
+  printf 'keep this sentinel\n' >"$elsewhere/sentinel"
+  check "program $shape: premise: the destination is a directory" [ -d "$path" ]
+  if [ "$shape" = symlink ]; then
+    check "program $shape: premise: the link points to the sentinel's folder" links_to_sentinel "$path"
+  else
+    check "program $shape: premise: the directory is not a link" [ ! -L "$path" ]
+  fi
+  before_elsewhere=$(content_snapshot "$elsewhere")
+  before_apps=$(content_snapshot "$home/Applications")
+  run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
+  check "program $shape: the update refuses" [ "$RC" -eq 1 ]
+  check "program $shape: the refusal names the destination" contains "$ERR" "$path is a folder"
+  check "program $shape: the sentinel survives" [ "$(cat "$elsewhere/sentinel")" = "keep this sentinel" ]
+  check "program $shape: destination contents are unchanged, bytes included" \
+    [ "$(content_snapshot "$elsewhere")" = "$before_elsewhere" ]
+  check "program $shape: nothing under Applications changed, bytes included" \
+    [ "$(content_snapshot "$home/Applications")" = "$before_apps" ]
+  check "program $shape: the Installed record still names 1.2.3" \
+    [ "$(cat "$app/Contents/Versions/installed")" = 1.2.3 ]
+  check "program $shape: the lock was released" [ ! -e "$home/Applications/.farhelm-app.lock" ]
 done
 
 # A regular file where the new version's folder belongs is refused the same
@@ -2470,6 +2523,16 @@ printf 'v1.2.3 extra\n' >"$WWW/latest-bad/latest"
 printf 'v1.2.3\nv1.2.4\n' >"$WWW/latest-twolines/latest"
 # latest-none has no `latest` file: the origin before any release.
 
+# The shortened tag has a compatible release, so accepting the failed
+# transfer would install successfully rather than fail for a different reason.
+build_good_release "$WWW/latest-short" 1.2.1
+short_rc=0
+short_status=$(curl -sS -o "$WORKDIR/latest-short-body" -w '%{http_code}' "$BASE/latest-short/latest" 2>/dev/null) || short_rc=$?
+check "short /latest: premise: the HTTP status is 200" [ "$short_status" = 200 ]
+check "short /latest: premise: curl detects the incomplete transfer" [ "$short_rc" -eq 18 ]
+check "short /latest: premise: the partial body is a valid version prefix" \
+  [ "$(cat "$WORKDIR/latest-short-body")" = v1.2.1 ]
+
 HOME_G1="$WORKDIR/home-g1"
 mkdir -p "$HOME_G1"
 run_install "$MAC_TOOLS" "$HOME_G1" "$BASE/latest-good" ""
@@ -2483,7 +2546,8 @@ check "G1: the installed version is the one /latest named" \
 # Each refused /latest: the request reached /latest, nothing else was
 # requested, nothing was created under HOME, and the refusal says why.
 for spec in "pre|a prerelease" "bad|could not determine the latest release" \
-  "twolines|could not determine the latest release" "none|no release is published"; do
+  "twolines|could not determine the latest release" "none|no release is published" \
+  "short|did not complete (HTTP 200)"; do
   case_name=${spec%%|*}
   says=${spec#*|}
   home="$WORKDIR/home-g-$case_name"

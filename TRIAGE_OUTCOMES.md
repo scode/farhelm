@@ -10356,7 +10356,9 @@
   shellcheck and the installer test pass. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
+- Execution: complete in jj change `uszzqzkrmolumlwypxvqtwnmuqrquxwp`, bookmark
+  `plan/installer-and-font-license-fixes/01-installer-font-license`,
+  [draft PR](https://github.com/scode/farhelm/pull/1906/changes).
 
 ## incomplete-latest-response-select-wrong-release.md
 
@@ -10378,7 +10380,9 @@
   `/latest` cases, including the 404 message, are unchanged; `sh -n` and shellcheck stay clean. If the fix turns out to
   need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
+- Execution: complete in jj change `uszzqzkrmolumlwypxvqtwnmuqrquxwp`, bookmark
+  `plan/installer-and-font-license-fixes/01-installer-font-license`,
+  [draft PR](https://github.com/scode/farhelm/pull/1906/changes).
 
 ## retrying-through-unchanged-permission-choice-launch-duplicate.md
 
@@ -10536,7 +10540,9 @@
   gap: include it if the same declaration fixes it, and otherwise report it back. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/installer-and-font-license-fixes.md`.
+- Execution: complete in jj change `uszzqzkrmolumlwypxvqtwnmuqrquxwp`, bookmark
+  `plan/installer-and-font-license-fixes/01-installer-font-license`,
+  [draft PR](https://github.com/scode/farhelm/pull/1906/changes).
 
 ## claiming-current-plan-refresh-plan-subsequently-executed.md
 
