@@ -185,43 +185,51 @@ const pillars = (p) => [
   },
   {
     title: "Every host, one screen",
-    lines: ["Your Mac plus any number of Linux boxes,", "all in one list, one helm."],
+    lines: ["Your Mac plus any number of Linux boxes,", "all in one list, in one window."],
     icon: `<rect x="3" y="6" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <rect x="23" y="6" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <rect x="13" y="26" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <path d="M10 16v5h20v-5M20 21v5" fill="none" stroke="${p.faint}" stroke-width="2"/>`,
   },
   {
-    title: "The real terminal",
+    title: "The real TUI",
     lines: [
-      "Not a chat wrapper. You drive the agent’s own",
-      "TUI, keystroke for keystroke. Paste in a",
-      "screenshot and the agent has the file.",
+      "You drive the agent itself, not a copy.",
+      "New agent features work the day they ship.",
+      "Paste a screenshot and the agent has it.",
     ],
     icon: `<rect x="3" y="6" width="34" height="28" rx="3" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <path d="M10 15l6 5-6 5" fill="none" stroke="${p.fg}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       <rect x="19" y="23" width="9" height="3" fill="${p.cursor}"/>`,
   },
   {
-    title: "SSH is the whole network",
-    lines: ["No open ports, no relay, no account.", "If you can ssh to it, you can add it."],
+    title: "Just ssh",
+    lines: [
+      "If you can ssh to it, you can add it, and",
+      "Farhelm installs itself there for you.",
+      "Nothing to open, host, or sign up for.",
+    ],
     icon: `<rect x="8" y="18" width="24" height="18" rx="3" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <path d="M13 18v-5a7 7 0 0 1 14 0v5" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <circle cx="20" cy="27" r="2.5" fill="${p.fg}"/>`,
   },
   {
-    title: "Status at a glance",
-    lines: ["Working, waiting on you, done, crashed.", "Every session, without opening any of them."],
+    title: "Blocked agents stand out",
+    lines: [
+      "An agent waiting on you turns red and",
+      "rings a bell, on whichever host it runs.",
+      "No more checking tab after tab.",
+    ],
     icon: `<circle cx="9" cy="10" r="4" fill="${p.ok}"/><rect x="17" y="8" width="20" height="4" rx="2" fill="${p.faint}"/>
       <circle cx="9" cy="20" r="4" fill="${p.warn}"/><rect x="17" y="18" width="14" height="4" rx="2" fill="${p.faint}"/>
       <circle cx="9" cy="30" r="4" fill="${p.danger}"/><rect x="17" y="28" width="17" height="4" rx="2" fill="${p.faint}"/>`,
   },
   {
-    title: "Any agent, any VCS",
+    title: "Any agent",
     lines: [
-      "Codex, Claude Code, Muse, Cursor, OMP, Pi",
-      "and more. Anything else still runs, with",
-      "fewer of the smarts.",
+      "Codex, Claude Code, Cursor, Pi and others",
+      "get built-in support, deeper for some.",
+      "Anything else runs as a plain command.",
     ],
     icon: `<rect x="4" y="4" width="14" height="14" rx="3" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <rect x="22" y="4" width="14" height="14" rx="3" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
@@ -251,7 +259,7 @@ function pillarsSvg(p) {
     })
     .join("\n  ");
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${cols * cw} ${rh * 3}" width="${cols * cw}" role="img"
-  aria-label="What Farhelm gives you: durable sessions, every host on one screen, the real terminal, SSH as the only network, status at a glance, any agent">
+  aria-label="What Farhelm gives you: durable sessions, every host on one screen, the agent's own TUI, nothing but ssh, blocked agents that stand out, any agent">
   ${cells}
 </svg>
 `;

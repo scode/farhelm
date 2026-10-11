@@ -372,3 +372,39 @@ header.header {
     font-size: 1.9rem;
   }
 }
+
+/* The landing page's "Why should I use it?" list: each reason a row with its
+   short claim in a monospace column on the left and the detail on the right,
+   hairlines between, so the claims scan down the page as one column. Below
+   about phone width the claim sits above its detail instead. */
+.farhelm-why {
+  border-top: 1px solid var(--sl-color-hairline);
+  margin: 1.2rem 0 1.6rem;
+}
+
+.farhelm-why > div {
+  border-bottom: 1px solid var(--sl-color-hairline);
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(10rem, 32%) 1fr;
+  margin: 0;
+  padding: 0.7rem 0;
+}
+
+.farhelm-why dt {
+  color: var(--sl-color-accent-high);
+  font-family: var(--sl-font-mono);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.farhelm-why dd {
+  margin: 0;
+}
+
+@media (max-width: 40rem) {
+  .farhelm-why > div {
+    gap: 0.2rem;
+    grid-template-columns: 1fr;
+  }
+}
