@@ -175,20 +175,21 @@ install. Removing a host from the registry merely forgets it — the supervisor 
 reappear on re-registration. Registry entries are editable: an SSH destination can be corrected without touching the
 host's identity or its sessions. Every host, the local one included, has a settings dialog in the GUI that holds its
 destination (SSH hosts), its alias, a chosen icon and color (remote hosts), whether it starts YOLO sessions without
-asking, and whether it runs `farhelm` commands from its sessions without asking (see Agent-spawned sessions). A remote
-host offers fifteen icons, with the cloud as the default, and the default foreground or one of six identity colors:
-lavender, orchid, teal, steel, sand and copper. The choice is kept by the helm and shared with every client. It tints
-only the icon, never a status or the host name. The local host keeps its fixed red laptop and offers no appearance
-choice. Every host asks before YOLO launches, and before carrying out an acting `farhelm` command from one of its
-sessions, until the user explicitly turns that off, including hosts that existed before the settings did. Adopting a new
-identity for a host, described next, resets both settings to asking: each is a judgment about the install the user knew,
-and a new identity, whether a reinstall or a different machine, is one they have not judged. If a destination turns out
-to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
-asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches a machine
-another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the user to
-remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to one
-machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
-removing the host from the registry.
+asking, and whether it runs `farhelm` commands from its sessions without asking (see Agent-spawned sessions). The header
+and footer, including the close controls and the note that changes save as you make them, stay visible while only the
+settings between them scroll. A remote host offers fifteen icons, with the cloud as the default, and the default
+foreground or one of six identity colors: lavender, orchid, teal, steel, sand and copper. The choice is kept by the helm
+and shared with every client. It tints only the icon, never a status or the host name. The local host keeps its fixed
+red laptop and offers no appearance choice. Every host asks before YOLO launches, and before carrying out an acting
+`farhelm` command from one of its sessions, until the user explicitly turns that off, including hosts that existed
+before the settings did. Adopting a new identity for a host, described next, resets both settings to asking: each is a
+judgment about the install the user knew, and a new identity, whether a reinstall or a different machine, is one they
+have not judged. If a destination turns out to present a different identity than recorded (a wiped and reinstalled host,
+a recycled address), the helm says so and asks whether to adopt the new host or fix the destination — it never silently
+merges. An entry that reaches a machine another entry already holds connects nothing: it says which entry holds the
+machine, by name, and asks the user to remove that entry or change this one's destination and then press Retry. Farhelm
+never connects two entries to one machine and never resolves this on its own. Last-known sessions of a host that is
+permanently gone are disposed of by removing the host from the registry.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;

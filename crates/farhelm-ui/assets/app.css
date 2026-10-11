@@ -2921,6 +2921,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-settings-refreshed {
   padding: 0;
   gap: 0;
+  overflow: hidden;
 }
 .host-settings-header {
   display: flex;
@@ -2942,6 +2943,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-settings-mark .host-kind-icon { width: 24px; height: 24px; }
 .host-settings-mark .host-kind-icon[data-glyph="local"] { color: var(--danger); }
 .host-settings-heading { flex: 1; min-width: 0; }
+/* Destinations and peer-reported versions are unbounded. The pinned heading
+   must not grow with them; the full destination remains in Connection and
+   the dialog's accessible name. */
+.host-settings-refreshed .host-settings-title,
+.host-settings-refreshed .host-settings-version {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
 .host-settings-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2964,7 +2975,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   cursor: pointer;
 }
 .host-settings-dismiss:hover { color: var(--fg-0); }
-.host-settings-body { display: grid; gap: 20px; padding: 20px 24px; }
+.host-settings-body {
+  display: grid;
+  gap: 20px;
+  padding: 20px 24px;
+}
 .host-settings-section { display: grid; gap: 14px; min-width: 0; }
 .host-settings-section + .host-settings-section { border-top: 1px solid var(--border-dim); padding-top: 20px; }
 .host-settings-section-title {
@@ -3022,9 +3037,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border-top: 1px solid var(--border-dim);
 }
 .host-settings-footer > span { color: var(--fg-1); font-size: 11px; }
-/* The dialog owns vertical scrolling; flex children must retain their full
-   height so a short window scrolls to the footer instead of overlapping it. */
-.host-settings-refreshed > * { flex-shrink: 0; }
+/* Only the body gives up height. Keeping the identifying header and closing
+   controls outside its scroll region also makes keyboard scrolling reveal
+   fields without moving the controls needed to leave the dialog. */
+.host-settings-refreshed > .host-settings-header,
+.host-settings-refreshed > .host-settings-footer { flex-shrink: 0; }
+.host-settings-refreshed > .host-settings-body {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow: auto;
+}
 
 /* ===== Rename editor ============================================== */
 
