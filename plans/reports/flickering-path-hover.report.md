@@ -68,3 +68,34 @@ the same reviewer's correction check found no remaining material issue. Commit/P
 fresh-context cold reader on GPT-6.1 Sol at medium effort. Galaxy evidence is session
 `a63f6b2c-45f7-4830-bf84-ea76de63472d` in the standard private state directory. Native actual-model and usage metadata
 were unavailable; four review event timestamps were estimated incorrectly and explicitly recorded as an evidence gap.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1879. The rebase met no conflicts.
+
+#### Review before merging
+
+No blockers. The review checked the fix against the bundled terminal library: a redraw under a hovered link ends the
+hover and starts it again in one call, and the old code restarted the path check and its spinner each time. The hover
+now survives only when the same path comes back on exactly the same cells within one task, which removes the restart
+rather than hiding it behind a delay. Cursor, scroll, resize, dispose, click, download and the drag-selection check from
+#1832 all hold, and the tests count every tooltip change rather than checking only the final state. Notes left as they
+are:
+
+- Possible follow-up: if the pointer really leaves a path, its check answers during that one-task window, and the
+  pointer returns to the same cells before the window ends, the answer is dropped and the tooltip stays on "checking…"
+  (refusing clicks) until the pointer moves off and back. It needs pointer jitter at the link's edge plus a late answer,
+  so it is rare and recoverable. The fix is to record the answer while leaving and skip only the cursor write.
+- Closing a terminal still briefly turns the hover cursor off before teardown, slightly at odds with the implementation
+  spec's "teardown never writes cursor decorations"; it is harmless.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `b2d4bcd0`, 448 of 448);
+  the UI JavaScript tests (238 of 238); and on Chromium and WebKit with one worker and no retries the terminal-files,
+  terminal-links, mouse-modes and terminal specs (run `0f11e7a0`, 172 passed).
+- Between that run and the merge, main changed only documentation and TODO entries.
+
+Nothing in the report above was made untrue by the landing.

@@ -7,3 +7,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`trash-and-host-settings-dialogs`](reports/trash-and-host-settings-dialogs.report.md) landed 2026-10-11 in #1860, #1862, #1863, #1864: trash and host settings dialogs: margins for every dialog, pinned headers and footers, "delete all" at the top, per-host delete progress
 - [`host-dialogs-redesign`](reports/host-dialogs-redesign.report.md) landed 2026-10-11 in #1865, #1866, #1867, #1868: redesign the add-host, setup confirmation, remove-host and uninstall dialogs to the approved mockup
 - [`launcher-folder-shortcuts`](reports/launcher-folder-shortcuts.report.md) landed 2026-10-11 in #1874: replace the launcher's folder links with a dropdown on the folder field
+- [`flickering-path-hover`](reports/flickering-path-hover.report.md) landed 2026-10-11 in #1879: keep a path hover steady while the terminal redraws under it
