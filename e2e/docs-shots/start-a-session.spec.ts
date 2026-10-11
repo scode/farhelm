@@ -56,6 +56,9 @@ test("destination", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   const destination = form.locator(".launch-composer-destination");
+  await destination.getByRole("combobox", { name: "folder", exact: true }).focus();
+  const folders = destination.getByRole("listbox", { name: "folders", exact: true });
+  await expect(folders).toBeVisible();
   // Four callouts stacked down the left margin, each nudged (dy) so the
   // boxes clear one another while the arrows stay level with their controls.
   await director.callout(
@@ -74,7 +77,7 @@ test("destination", async ({ page, request }) => {
     { side: "left", dy: 40 },
   );
   await director.callout(
-    destination.getByLabel("recent folders"),
+    folders,
     "Directories you launched in recently on this host, newest first. Local home is your home on the machine in front of you.",
     { side: "left", dy: 130 },
   );

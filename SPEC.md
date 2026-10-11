@@ -539,7 +539,9 @@ agent choice is independent of that destination:
   then launches through the ordinary Launch path, or shows its refusal beside Launch. Enter on the closed host picker or
   the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those
   native controls retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model
-  field, YOLO confirmation, and save-as-template panel keep their own Enter rules. A held Enter never launches.
+  field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter
+  chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held
+  Enter never launches.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
   and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
@@ -607,7 +609,13 @@ agent choice is independent of that destination:
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
   replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk; explicit
   browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the current
-  filter actually matches history; the dialog reserves no space for them when it does not.
+  filter actually matches history; the dialog reserves no space for them when it does not. The editable folder field
+  opens a grouped dropdown on focus or ArrowDown: up to eight remembered folders, newest first, under "recent", and
+  "home" (~ on this host) and "local home" (~ on this machine) under "reset". Untouched prefilled fields show the newest
+  eight; typing filters by case-insensitive substring. Long labels retain the path's end, with the whole path accessible
+  and available on hover. Only arrow navigation highlights an entry. Choosing fills the destination without launching;
+  local home also pins the local host. Escape closes an open dropdown first, then can close the launcher. Tab, blur and
+  choosing close the list; typing reopens it. Managed-checkout mode has no folder dropdown.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the

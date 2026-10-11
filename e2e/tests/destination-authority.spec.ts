@@ -1,4 +1,4 @@
-import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
+import { chooseLauncherHost } from "./helpers/host-picker";
 // Destination snapshots must survive sidebar projection changes without
 // letting a remembered path follow a registry row onto another installation.
 import { expect, test } from "./helpers/evidence";
@@ -150,7 +150,8 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
       await form.getByRole("combobox", { name: /search/i }).fill("codex");
       await form.getByRole("option", { name: /^Recent setup:.*\/tmp/ }).click();
     } else {
-      await form.locator(".launch-composer-folder-links").getByRole("button", { name: "/tmp", exact: true }).click();
+      await folder.focus();
+      await form.getByRole("listbox", { name: "folders" }).getByRole("option", { name: "/tmp", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ }).click();
     }
     await expect(form).toHaveAttribute("data-history-activation-attempts", "1");
@@ -195,14 +196,21 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
  * dispatching at a node already withdrawn from the document. */
 test("queued saved-folder activation cannot follow an explicit host change", async ({ page, request }) => {
   const { form, local } = await historyFixture(page, request);
-  const saved = form.locator(".launch-composer-folder-links").getByRole("button", { name: "/var/tmp", exact: true });
+  const folder = form.getByLabel("folder", { exact: true });
+  await folder.focus();
+  const saved = form.getByRole("listbox", { name: "folders" }).getByRole("option", { name: "/var/tmp", exact: true });
   await expect(saved).toBeVisible();
+  // A native pointer press blurs the folder and withdraws its options. Open
+  // the host picker with an unfocused key event instead: both callbacks stay
+  // mounted until the one event turn that changes host then picks old history.
   const attempts = Number(await form.getAttribute("data-history-activation-attempts"));
-  await launcherHostOptions(form.locator(".create-session-host"));
+  await form.locator(".create-session-host").evaluate((node) => node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
   await expect(form.locator(`.launcher-host-option[data-host-id="${local}"]`)).toBeVisible();
+  await expect(folder, "unfocused key setup must leave the folder callback mounted").toBeFocused();
+  await expect(saved).toBeVisible();
   await form.evaluate((node, local) => {
     const host = node.querySelector<HTMLButtonElement>(`.launcher-host-option[data-host-id="${local}"]`)!;
-    const saved = [...node.querySelectorAll<HTMLButtonElement>(".launch-composer-folder-links button")].find((button) => button.textContent?.includes("/var/tmp"))!;
+    const saved = node.querySelector<HTMLButtonElement>('.launch-composer-folder-options button[aria-label="/var/tmp"]')!;
     host.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     saved.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, local);

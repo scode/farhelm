@@ -5121,51 +5121,57 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 0 12px;
 }
 
-/* One path per cell, two cells across. Paths of different lengths line up
-   in two columns where an inline run wrapped raggedly. Two explicit columns
-   and not `auto-fill` over a `ch` minimum: the destination column is about
-   62ch wide, right at the edge of fitting two 30ch cells, and the engines
-   round `ch` differently, so the same rule gave two columns in Chromium and
-   one in WebKit. A path longer than its cell ellipsizes; the button's title
-   and accessible name carry it whole. The phone block drops to one column. */
-.launch-composer-folder-links {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 2ch;
-  color: var(--fg-1);
+/* Float like model/search suggestions. Closing on pointer blur must not
+   resize the centered dialog and move the pressed control before mouseup.
+   The modal scroll region and bounded list keep phone choices reachable. */
+.launch-composer-folder-picker { position: relative; min-width: 0; }
+.launch-composer-folder-picker > input { width: 100%; box-sizing: border-box; }
+.launch-composer-folder-options {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow: auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
   font-size: 12px;
 }
-
-/* The two resets ("home", "local home") are fixed destinations, not history,
-   so the first of them starts a row of its own. That row break replaces the
-   "·" that used to stand between the two kinds. With no history there is no
-   preceding sibling, the selector does not match, and the resets simply start
-   the grid. */
-.launch-composer-folder-links > :not(.launch-composer-folder-reset) + .launch-composer-folder-reset {
-  grid-column-start: 1;
-}
-
-.launch-composer-folder-links > button {
+.launch-composer-folder-heading,
+.launch-composer-folder-empty { padding: 6px 10px; color: var(--fg-1); }
+.launch-composer-folder-heading { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.launch-composer-folder-options > [role="group"] + [role="group"] { border-top: 1px solid var(--border-dim); }
+.launch-composer-folder-options button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
   min-width: 0;
-  overflow: hidden;
+  box-sizing: border-box;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 4px;
-  border: 1.5px solid transparent;
-  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  color: var(--fg-1);
+  color: var(--fg-0);
   cursor: pointer;
   font: inherit;
-  text-decoration: underline dotted;
 }
-
-/* Fill, bar, and text color come from the shared selection rule beside
-   `.launch-composer-segmented`. */
-.launch-composer-folder-links > button.selected {
-  text-decoration: underline solid;
+.launch-composer-folder-options button:hover { background: var(--control-hover-bg); }
+.launch-composer-folder-options button[aria-selected="true"] {
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
+/* The computed label already has a start ellipsis. If a narrower viewport
+   needs still less room, clip its leading edge, never the distinguishing tail.
+   Text stays LTR; reversing direction would reorder punctuation in paths. */
+.launch-composer-folder-path { display: flex; justify-content: flex-end; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.launch-composer-folder-path > span { flex-shrink: 0; }
+.launch-composer-folder-meaning { margin-left: auto; color: var(--fg-1); }
 
 .launch-composer-summary {
   color: var(--fg-1);
@@ -5515,7 +5521,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
    Which edge the bar takes follows the control's shape, the way it does
    outside the composer. A thing chosen from a HORIZONTAL set (a harness
-   chip, a segment, a folder link) carries it underneath, like a tab. A thing
+   chip or a segment) carries it underneath, like a tab. A thing
    chosen from a VERTICAL list (a model option, a search result) carries it
    on the leading edge, like a session row. The bar is an inset shadow for
    the reason `.session-row.selected` gives: it needs no element and moves
@@ -5524,8 +5530,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    These rules must stay ABOVE `.launch-composer-segment-danger`, which ties
    with them on specificity and has to win the text color. */
 .launch-composer-options > button.selected,
-.launch-composer-segmented > button.selected,
-.launch-composer-folder-links > button.selected {
+.launch-composer-segmented > button.selected {
   background: var(--accent-fill);
   color: var(--fg-bright);
   box-shadow: inset 0 -2px 0 var(--accent);
@@ -5924,10 +5929,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   .launch-composer-recent-host,
   .launch-composer-recent-hint {
     display: none;
-  }
-
-  .launch-composer-folder-links {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   /* Reset is secondary, so a narrow row lets it wrap to the trailing line
