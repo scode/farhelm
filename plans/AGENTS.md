@@ -227,6 +227,45 @@ Either reset leaves ignored files alone, since jj never sees them. That keeps th
 drafts, delegation records, saved authentication state) where their owners expect them. A monitor's baseline commit is
 not a reason to skip the reset.
 
+### Pruning build leftovers
+
+NOTE: This is not a `cargo clean`. The point is to keep the next plan's build incremental, so everything it would reuse
+stays: compiled third-party dependencies, build-script outputs, `.ci-tmux/`, `.ci-tmux-python/`, `.ci-nextest/`,
+`node_modules/`, and the dx web build.
+
+Because the resets leave ignored files alone, a checkout that runs plan after plan accumulates build output nobody will
+use again, and an executor checkout has been seen to reach well over a hundred gigabytes this way. Most of it is rustc's
+incremental cache. Rustc keeps one directory per crate and build configuration under `target/<profile>/incremental/`
+(and `target/<triple>/<profile>/incremental/`), and every change to features, flags or dependency versions starts a new
+one; rustc cleans up old sessions inside a directory, but never a directory whose configuration stopped being built.
+Next is the workspace's own crates in `target/<profile>/deps/`: every rebuild of a `farhelm*` crate or test binary under
+a new hash leaves the old one behind.
+
+So step 6 marks the start of the plan's builds with `mkdir -p target && touch target/.plan-start`, and after every close
+(step 12, or the reset for a released claim), once nothing the plan started is still building or testing in this
+checkout, the executor prunes relative to that mark:
+
+- every directory directly inside an `incremental/` directory anywhere under `target/` that is not newer than
+  `target/.plan-start`;
+- files under `target/**/deps/` that belong to a workspace target (names from
+  `cargo metadata --no-deps --format-version 1`, with `-` spelled `_`, matched as `[lib]<name>-<16 hex digits>[.ext]`)
+  and are not newer than the mark. Anything this removes that was still current is a workspace crate, which most plans
+  rebuild anyway once `main` has moved, and cargo rebuilds a target whose output is missing. Never prune third-party
+  artifacts by age: a dependency that has not changed is never rewritten, so an old file is usually a current one, and
+  losing them is the full rebuild this section exists to avoid;
+- separate cargo target directories the plan made for one check, whether inside `target/` (a subdirectory that holds its
+  own `CACHEDIR.TAG`, such as an isolated `CARGO_TARGET_DIR` for the desktop smoke or an asset check) or in the
+  executor's scratch space, removed whole;
+- one-off outputs the plan produced: `e2e/test-results/`, `e2e/playwright-report/`, `website/dist/`, `website/.astro/`,
+  `target/tmp/`, and capture outputs such as `target/readme-hero/`, `target/readme-video/` and `target/dist-desktop/`.
+  Leave any of these that the plan's working log cites as retained failure evidence (root `AGENTS.md`, Reproducing
+  failures).
+
+If `target/.plan-start` is missing (a plan claimed before this rule existed), skip the two age-based items and do the
+rest. Record in the plan's closing log entry roughly how much the prune freed. Nothing here touches the other ignored
+files the reset paragraph above names, the recorder's run records (which live outside the checkout), or anything in
+another checkout.
+
 ## Sub-agents this file requires
 
 Three checks below run as fresh-context, read-only native sub-agents of the executing harness, on the executing
@@ -425,10 +464,11 @@ its open PRs. Record the pick and its reasoning in the executor log.
 5. Read the plan file from `main@origin`, including any `## Decisions`.
 6. Set up the base from the clean `main@origin` working copy. If the plan has open `plan/<slug>/*` PRs (a resume), track
    those bookmarks, rebase that stack onto `main@origin` as a careful rebase (root `AGENTS.md`), and build on its tip;
-   otherwise start a new change on `main@origin`. Conflicts in the shared bookkeeping files listed under Picking are
-   mechanical: keep both sides. A conflict that needs a design decision is a block (step 10). A plan PR the maintainer
-   closed without merging is the maintainer rejecting it, unless a Decisions entry says otherwise: block with that as
-   the question rather than rebuilding it or carrying on above it.
+   otherwise start a new change on `main@origin`. Either way, mark the start of the plan's builds for the prune at close
+   (Pruning build leftovers). Conflicts in the shared bookkeeping files listed under Picking are mechanical: keep both
+   sides. A conflict that needs a design decision is a block (step 10). A plan PR the maintainer closed without merging
+   is the maintainer rejecting it, unless a Decisions entry says otherwise: block with that as the question rather than
+   rebuilding it or carrying on above it.
 7. Resume check, whenever the plan has a working log or open PRs. Read the whole working log, the open PRs, and the
    Decisions, then write a "where this stands" entry in the working log: what is built and pushed, what is half done,
    what the latest decision asks for, and what comes next. If the log names another checkout and its last recorded
@@ -457,20 +497,20 @@ its open PRs. Record the pick and its reasoning in the executor log.
     follow-up from it alone and whether it breaks public-repo hygiene. Revise until it passes, write `delivering` to the
     executor log, and run `queue deliver <slug> --claim <id> --report <file>`. The plan is now `[complete]`, and the
     monitor lands it from there.
-12. Close: return to clean `main` with the reset under Clean-main boundary, write a closing entry in the plan's working
-    log that names any paths the reset discarded, stop its resource watchdog, and clear the claim from the executor log.
-    Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next plan starts its
-    own.
+12. Close: return to clean `main` with the reset under Clean-main boundary, prune build leftovers (Pruning build
+    leftovers), write a closing entry in the plan's working log that names any paths the reset discarded, stop its
+    resource watchdog, and clear the claim from the executor log. Closing ends the plan's resume-log protocol and its
+    review demands, as an express stop; the next plan starts its own.
 
 `block` or `deliver` exiting 10 means the claim was released while you worked: push nothing more, record it in both
-logs, and run the reset for a released claim (Clean-main boundary). To give a claim back for any other reason (the
-maintainer stops the flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared), push what is
-consistent, write the working log, write `unclaiming` to the executor log, run `queue unclaim`, and close (step 12).
-Notify unless the maintainer asked for the stop: an expired login or a full disk stops every plan on the machine until
-someone fixes it, and a plan that could not be reconciled (step 7) will stop the next executor the same way. If pushing
-the consistent work failed (the expired login, say), close with the reset for a released claim instead of the full one,
-so that work stays in the checkout for the next claimer to find (step 7), and say so in the working log and the
-notification.
+logs, run the reset for a released claim (Clean-main boundary), and prune build leftovers. To give a claim back for any
+other reason (the maintainer stops the flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared),
+push what is consistent, write the working log, write `unclaiming` to the executor log, run `queue unclaim`, and close
+(step 12). Notify unless the maintainer asked for the stop: an expired login or a full disk stops every plan on the
+machine until someone fixes it, and a plan that could not be reconciled (step 7) will stop the next executor the same
+way. If pushing the consistent work failed (the expired login, say), close with the reset for a released claim instead
+of the full one, so that work stays in the checkout for the next claimer to find (step 7), and say so in the working log
+and the notification.
 
 To notify, follow Notifications above. Delivering does not notify: the monitor lands the plan, and its report reaches
 the maintainer through `REPORTS.md`. An executor that dies cannot notify at all; its claim shows up in `queue status` as
