@@ -192,6 +192,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   button; cancel is focused when the dialog opens, but it is unclear whether the tooltip showed because of that focus or
   because of a hover. Details of the redesign to be worked out.
 
+- **Send ntfy.sh notifications when an agent is blocked.** Today the only alert that a session needs the user (it starts
+  waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
+  when no Farhelm window is in front of them. Support sending a notification through ntfy.sh (a topic the user
+  configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
+  as a non-goal for v1, so this needs a SPEC change alongside it.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
