@@ -84,14 +84,8 @@ triage.
   meant to reject.
 - `upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md` — The upload-memory test
   cannot measure RSS on native macOS.
-- `hup-resistant-process-fixture-leaks-early-failure.md` — Early failure leaves HUP-resistant fixture processes behind.
-- `live-agent-restart-test-never-establishes-live-agent.md` — The live-agent restart test can run only the dead-agent
-  branch.
-- `stop-intent-test-exercises-different-failure-path.md` — The stop-intent test misses the live-agent transaction
-  ordering.
 - `omp-child-report-fixtures-bypass-nested-runtime-check.md` — The child-report test rejects its fixture before checking
   nested-runtime ownership.
-- `skip-tmux-test-passes-tmux-queried.md` — The skip-tmux test also passes when tmux is unnecessarily queried.
 - `dead-tab-regression-cannot-pass-ordinary-macos.md` — The dead-tab test fails on ordinary macOS before checking
   cleanup.
 - `shutdown-race-test-releases-sink-shutdown-starts.md` — The shutdown race test starts after the critical transition is
@@ -133,12 +127,6 @@ triage.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
 - `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.
-- `failed-spec-publication-test-observe-whether-tmux-started.md` — Failed-publication tests cannot prove that no
-  external window started.
-- `stop-test-leave-fixture-permanently-stopped-failure.md` — Failure after stopping the Stop fixture could leave its
-  child indefinitely suspended.
-- `restart-test-has-same-stopped-child-cleanup-gap.md` — The Restart fixture separately risks leaving a suspended child
-  behind.
 - `no-directory-created-assertion-requires-directory-exist.md` — The no-directory-creation test requires the directory
   to have been created.
 - `stored-template-commands-bypass-safe-display-seeding.md` — The launcher can display a template command differently

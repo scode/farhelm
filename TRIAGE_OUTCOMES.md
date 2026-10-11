@@ -10656,7 +10656,9 @@
   of the guard makes it fail. The stimulus must behave the same on the pinned tmux. If the fix turns out to need
   significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the
   user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## commit-race-test-exercise-only-pre-commit-abort-path.md
 
@@ -10737,7 +10739,9 @@
   `restart-test-has-same-stopped-child-cleanup-gap.md`, sharing one guard. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## restart-test-has-same-stopped-child-cleanup-gap.md
 
@@ -10756,7 +10760,9 @@
   spawn onward; the success-path assertions are unchanged. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## browse-routing-test-discards-wrong-host-assertion.md
 
@@ -10795,7 +10801,9 @@
   assertions; confirm once by temporarily swapping the order. If the fix turns out to need significant new complexity or
   a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## missing-workspaces-cleanup-diagnostic-recognized-despite-discarded.md
 
@@ -10970,7 +10978,9 @@
   success-path assertions and sweep-reaping coverage are kept. If the fix turns out to need significant new complexity
   or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## live-agent-restart-test-never-establishes-live-agent.md
 
@@ -10992,7 +11002,9 @@
   the same restart path no longer fits. If the fix turns out to need significant new complexity or a refactor, or
   otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## stop-intent-test-exercises-different-failure-path.md
 
@@ -11012,7 +11024,9 @@
   survives; the dead-or-absent coverage stays under an accurate name. If the fix turns out to need significant new
   complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lifecycle-test-fixes.md`.
+- Execution: complete in jj change `qpzwurruwzpmrwvxlzyvqrqklkumxlnm`, bookmark
+  `plan/supervisor-lifecycle-test-fixes/01-supervisor-lifecycle-tests`,
+  [draft PR](https://github.com/scode/farhelm/pull/1910/changes).
 
 ## dollar-escaping-changes-executable-path.md
 

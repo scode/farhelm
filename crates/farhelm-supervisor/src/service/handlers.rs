@@ -3438,6 +3438,72 @@ mod tests {
     use farhelm_proto::{ReportVendor, RestartOffer, SessionStatus};
     use std::sync::atomic::AtomicBool;
 
+    /// Own the stopped lifecycle fixture through both success and unwind.
+    /// A suspended sleeper cannot reach its normal lifetime limit. Keeping
+    /// the Child unreaped until our wait also prevents its pid from being
+    /// recycled before cleanup; Child::wait caches the success-path reap,
+    /// so Drop remains safe after that wait too.
+    struct LifecycleChild(std::process::Child);
+
+    impl LifecycleChild {
+        /// Establish suspension without releasing ownership on an early exit.
+        /// A raw waitpid can reap an unexpectedly dead fixture behind Child's
+        /// back, leaving Drop able to kill a recycled pid. WNOWAIT keeps both
+        /// stop and exit reports waitable until Child performs its own reap.
+        fn assert_stopped(&self) {
+            // SAFETY: waitid initializes the valid output buffer for our own
+            // child; WNOWAIT preserves the child's reserved process identity.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let waited = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    self.0.id() as libc::id_t,
+                    &mut info,
+                    libc::WSTOPPED | libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            assert_eq!(waited, 0, "the fixture must report stopped");
+            assert_eq!(
+                unsafe { info.si_pid() },
+                self.0.id() as libc::pid_t,
+                "the observation must belong to the owned fixture"
+            );
+            assert_eq!(
+                info.si_code,
+                libc::CLD_STOPPED,
+                "fixture premise must be stopped"
+            );
+        }
+    }
+
+    impl Drop for LifecycleChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// A failed suspension premise must leave the dead child reserved for
+    /// its owner's reap. Otherwise unwind cleanup can signal a reused pid.
+    #[test]
+    fn a_stopped_fixture_observation_leaves_exited_children_waitable() {
+        let mut child = LifecycleChild(crate::procs::sleeper::spawn(&[]));
+        child
+            .0
+            .kill()
+            .expect("kill the owned fixture before observation");
+        let observed = std::panic::catch_unwind(|| child.assert_stopped());
+        assert!(
+            observed.is_err(),
+            "an exited fixture cannot establish suspension"
+        );
+        let status = child
+            .0
+            .wait()
+            .expect("the failed premise must leave Child able to reap");
+        assert!(!status.success(), "the fixture was deliberately killed");
+    }
+
     /// Records cancellation of a synthetic browse future. The timeout test
     /// needs this observable because an error reply alone could come from a
     /// timeout implementation that leaves its stalled work alive.
@@ -4081,20 +4147,14 @@ mod tests {
         let state = StateDir::new();
         // Host-wide marker sweeps must distinguish simultaneous fixture runs.
         let session_id = uuid::Uuid::new_v4().to_string();
-        let mut child = crate::procs::sleeper::spawn(&[(
+        let mut child = LifecycleChild(crate::procs::sleeper::spawn(&[(
             crate::launch::SESSION_ID_ENV_VAR,
             session_id.as_str(),
-        )]);
-        let pid = child.id();
+        )]));
+        let pid = child.0.id();
         let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
         assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
-        let mut status = 0;
-        let waited = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WUNTRACED) };
-        assert_eq!(
-            waited, pid as libc::pid_t,
-            "the fixture must report stopped"
-        );
-        assert!(libc::WIFSTOPPED(status), "fixture premise must be stopped");
+        child.assert_stopped();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor construction must not touch the fixture process");
@@ -4196,7 +4256,7 @@ mod tests {
             // sleep-ok: poll for completion of the detached supervisor-owned sweep.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        child.wait().expect("the owned fixture must be reaped");
+        child.0.wait().expect("the owned fixture must be reaped");
     }
 
     /// A restart's stop phase is owned by the supervisor like Stop's: once it
@@ -4219,18 +4279,14 @@ mod tests {
         // concurrent run's) would let either sweep kill the other's child.
         let session_id_owned = uuid::Uuid::new_v4().to_string();
         let session_id = session_id_owned.as_str();
-        let mut child =
-            crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)]);
-        let pid = child.id();
+        let mut child = LifecycleChild(crate::procs::sleeper::spawn(&[(
+            crate::launch::SESSION_ID_ENV_VAR,
+            session_id,
+        )]));
+        let pid = child.0.id();
         let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
         assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
-        let mut status = 0;
-        let waited = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WUNTRACED) };
-        assert_eq!(
-            waited, pid as libc::pid_t,
-            "the fixture must report stopped"
-        );
-        assert!(libc::WIFSTOPPED(status), "fixture premise must be stopped");
+        child.assert_stopped();
         // No systemd scope manager: the fixture is terminal-less and
         // marker-only, and probing the host's real user manager can take up
         // to 15 seconds, which with the stop grace would crowd the deadline
@@ -4353,7 +4409,7 @@ mod tests {
             // sleep-ok: poll for completion of the detached restart's sweep.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        child.wait().expect("the owned fixture must be reaped");
+        child.0.wait().expect("the owned fixture must be reaped");
     }
     /// Dispatch one request exactly as a connection would, retaining its
     /// task set and reply queue so race tests can observe the in-flight
@@ -8316,11 +8372,10 @@ mod tests {
     /// must succeed even if tmux itself is completely unreachable, because
     /// those statuses are decidable without asking tmux anything
     /// (`session_status` returns `Exited` for a terminal-less entry
-    /// unconditionally). Proven by actually killing the supervisor's own
-    /// private tmux server (bypassing the supervisor entirely) rather than
-    /// just supplying terminal-less fixtures against a healthy one — if
-    /// `ListSessions` asked tmux anything here, this test would see an
-    /// `Error` reply instead of the expected `SessionList`.
+    /// unconditionally). Killing the private server alone produces a
+    /// tolerated empty answer. Removing its socket after shutdown supplies
+    /// a verified propagating query error, so an unconditional query would
+    /// yield an Error instead of the expected SessionList.
     #[farhelm_testtrace::test]
     async fn list_sessions_skips_pane_states_when_nothing_has_a_terminal() {
         let state = StateDir::new();
@@ -8339,6 +8394,15 @@ mod tests {
             killed.status.success(),
             "test setup: tmux kill-server must succeed, got: {}",
             String::from_utf8_lossy(&killed.stderr)
+        );
+        match std::fs::remove_file(&sock) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("remove the stopped server's socket: {error}"),
+        }
+        assert!(
+            sup.tmux.pane_states().await.is_err(),
+            "fixture premise: querying the missing socket must propagate an error"
         );
 
         sup.sessions.lock().await.insert(
