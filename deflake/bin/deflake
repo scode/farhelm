@@ -19,8 +19,8 @@ Subcommands:
   events                            list every event with its ack state
   stop                              terminate the daemon and its running phase
 
-State lives under `$XDG_STATE_HOME/farhelm-deflake` (default
-`~/.local/state/farhelm-deflake`), never in the checkout: `workspaces/<key>/`
+State lives under `<tmp>/farhelm-tmp/deflake` (`<tmp>` is an absolute
+`TMPDIR`, else `/tmp`), never in the checkout: `workspaces/<key>/`
 is the persistent worktree the sweep runs in for one checkout (its cargo
 `target/` is deleted when a daemon starts and again when it exits; see
 `Daemon.clean_build_outputs`), `workspaces/<key>.lock` beside it is held by
@@ -43,6 +43,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -73,10 +74,42 @@ WAIT_POLL_SECONDS = 5
 DEFAULT_MAX_WAIT = 540
 
 
-def state_root() -> pathlib.Path:
-    home = os.environ.get("XDG_STATE_HOME")
-    base = pathlib.Path(home) if home else pathlib.Path.home() / ".local" / "state"
-    return base / "farhelm-deflake"
+def state_root(environment: dict[str, str] | None = None) -> pathlib.Path:
+    """The driver's state tree, in the agent scratch tree AGENTS.md names.
+
+    It used to live under `~/.local/state/farhelm-deflake`, where nothing ever
+    reclaimed it: each checkout's sweep worktree keeps its node_modules,
+    pinned tools and source between runs, and every run's logs stay. Under the
+    machine's temporary directory it goes away with that directory's cleanup
+    instead. Losing it is harmless between runs: a missing worktree is
+    recreated (see `Daemon.prepare`), and the evidence a flake
+    record cites is the recorder's, not this tree's. `TMPDIR` is honored only
+    when absolute, matching scripts/record-test-run.py's evidence default.
+    `environment` defaults to the process's own and exists for tests.
+    """
+    temporary = (os.environ if environment is None else environment).get("TMPDIR")
+    base = pathlib.Path(temporary) if temporary and os.path.isabs(temporary) else pathlib.Path("/tmp")
+    return base / "farhelm-tmp" / "deflake"
+
+
+def prepare_state_root() -> pathlib.Path:
+    """Create the state root, refusing one that another account could control.
+
+    The root has a fixed name in a world-writable directory, and the daemon
+    runs commands from the worktree under it, so a tree another account
+    created first (or a `farhelm-tmp` it owns) would let that account choose
+    what the sweep executes. The root must be this user's and private; the
+    directory holding it must be this user's, root's, or sticky.
+    """
+    root = state_root()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    status = root.stat()
+    if status.st_uid != os.geteuid() or stat.S_IMODE(status.st_mode) & 0o077:
+        raise SystemExit(f"deflake: state root {root} must be owned by this user with no group or other access")
+    parent = root.parent.stat()
+    if parent.st_uid not in (os.geteuid(), 0) and not parent.st_mode & stat.S_ISVTX:
+        raise SystemExit(f"deflake: {root.parent} belongs to another user")
+    return root
 
 
 def find_checkout(start: pathlib.Path) -> pathlib.Path:
@@ -1323,8 +1356,7 @@ def resolve_run(checkout: pathlib.Path) -> RunDir:
 
 
 def cmd_start(args: argparse.Namespace, checkout: pathlib.Path) -> int:
-    root = state_root()
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root = prepare_state_root()
     lock_path = root / "daemon.lock"
     lock = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:

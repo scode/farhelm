@@ -756,21 +756,46 @@ track of it (after compaction, say), mint a new one rather than guessing which e
 that all agent scratch on this machine is in one place, so finding it never requires digging through `/tmp` or asking
 what some directory is.
 
+More broadly, anything bulky that agent work leaves behind belongs in one of two places: the checkout, where the
+standard tools reclaim it (`cargo clean` for `target/`, deleting `node_modules`), or `/tmp/farhelm-tmp/`, which can be
+deleted wholesale and which the machine's temporary-file cleanup reclaims anyway. Nothing bulky goes in `$HOME`
+(`~/.cache`, `~/.local`, the checkout's parent directory) or loose in `/tmp`. Before this was enforced, test evidence,
+deflake worktrees, tool environments and compiler caches had piled up to about 15 GB under `~/.local` and `~/.cache`,
+with nothing that would ever remove them. When a procedure needs a tool environment that its own documentation leaves
+the location of to you, the location is your scratch directory.
+
 That covers scratch clones and worktrees or jj workspaces made for a review or a reproduction, a separate
-`CARGO_TARGET_DIR`, downloaded or extracted archives, saved logs and diffs, draft commit messages, delegate prompt and
-result files, and experiment builds. Size does not matter: small files go there too. A `mktemp -d` that a skill asks for
-goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a subdirectory of yours
-and tell it to use that instead of minting its own.
+`CARGO_TARGET_DIR`, Python venvs and other tool installs needed only for the task (the test-sleep checker's, for
+example), a deflake eval clone, downloaded or extracted archives, saved logs and diffs, draft commit messages, delegate
+prompt and result files, and experiment builds. Size does not matter: small files go there too. A `mktemp -d` that a
+skill asks for goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a
+subdirectory of yours and tell it to use that instead of minting its own.
+
+When the task that needed something bulky is over, delete it: a scratch jj workspace's `target/` is routinely tens of
+gigabytes. Keep what the task still cites, such as a working log or a run you are about to record, until it no longer
+does. Never delete another agent's directory.
+
+Two harness-owned trees live beside the agents' directories: the test recorder's evidence in
+`/tmp/farhelm-tmp/test-runs/` (`docs/test-run-evidence.md`) and the deflake driver's state in
+`/tmp/farhelm-tmp/deflake/` (`deflake/bin/deflake`). Both follow an absolute `TMPDIR` instead of `/tmp`. They belong to
+their tools, not to any one agent, and like everything under `/tmp` they do not outlive the machine's temporary-file
+cleanup: record what a failure showed, in a fix PR or a FLAKES.md entry, while its run directory still exists.
+
+Docker cannot put images and containers anywhere but its own storage. Give anything you build or start an image tag or
+container name that contains your `<id>`, and remove it (`docker rm`, `docker rmi`) when the task is over. The CentOS
+gate's `farhelm-centos-ci` image is a cache that script maintains; leave it.
 
 Leave these where they already go:
 
 - The checkout's own build output (`target/`, `e2e/node_modules`, the dx output), which stays wherever the build puts
   it.
-- State created by the repo's harnesses and scripts: the `fh-it.*` and `fh-e2e.*` test directories, the desktop smoke,
-  CentOS, and installer-test directories, the recorder's run records, and deflake state. Supervisor and tmux sockets
-  live inside the test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks
-  directly under `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo
-  scripts: plain `tempfile::tempdir()` tests honor it, and some of them bind sockets.
+- Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, Playwright's browsers in
+  `~/.cache/ms-playwright`, dprint's plugins. Use them the way the tools do by default; do not redirect them.
+- State created by the repo's harnesses and scripts: the `fh-it.*` and `fh-e2e.*` test directories, and the desktop
+  smoke, CentOS, and installer-test directories. Supervisor and tmux sockets live inside the test directories, unix
+  socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under `/tmp`. For the same
+  reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
+  `tempfile::tempdir()` tests honor it, and some of them bind sockets.
 - Anything of your own that binds a unix socket, such as a hand-started supervisor or a `tmux -S` server. Put that
   directly under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
 - Anything another rule tells you to keep somewhere specific, such as goal files and working logs.

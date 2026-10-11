@@ -1558,7 +1558,15 @@ mod tests {
         if std::env::var(CHILD_MARKER).is_ok() {
             // We ARE the re-exec'd child: this process exists only to
             // stream one file, with nothing else running inside it.
-            let tmp = tempfile::tempdir().unwrap();
+            //
+            // The fixture comes from the swept test-state family, not a
+            // plain tempdir: a measurement killed mid-write (a run's
+            // timeout, a cancelled battery) never reaches the explicit
+            // close below, and a plain `.tmpXXXXXX` holding its 64 MiB file
+            // was then left in /tmp where no sweep would ever reclaim it.
+            // Leaked copies of exactly that file accumulated there across
+            // agent test runs.
+            let tmp = farhelm_teststate::tempdir().unwrap();
             let seam = RealFs;
             let chunk = vec![0x61u8; CHUNK];
             let mut stream =

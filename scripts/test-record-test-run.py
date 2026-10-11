@@ -1634,6 +1634,70 @@ class RecorderTest(unittest.TestCase):
             RECORDER.prepare_root(root, self.repo, self.environment())
         self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o755)
 
+    def test_default_root_lives_in_the_temporary_scratch_tree(self) -> None:
+        """Evidence defaults to `<tmp>/farhelm-tmp/test-runs`, never to home state.
+
+        This is the disk-space contract: agents run thousands of recorded
+        commands, and a default under `~/.local/state` grew without bound
+        because nothing there is ever cleaned. An absolute `TMPDIR` is
+        honored; a relative or missing one falls back to `/tmp`, and
+        `XDG_STATE_HOME` no longer has any say. The end-to-end leg runs the
+        CLI without `--output-root` so the default path is the one actually
+        written, chosen through the child's environment only.
+        """
+
+        tmp = pathlib.Path("/tmp/farhelm-tmp/test-runs")
+        self.assertEqual(RECORDER.default_output_root({}), tmp)
+        self.assertEqual(RECORDER.default_output_root({"TMPDIR": "relative"}), tmp)
+        self.assertEqual(RECORDER.default_output_root({"XDG_STATE_HOME": "/elsewhere"}), tmp)
+        self.assertEqual(
+            RECORDER.default_output_root({"TMPDIR": "/scratch"}),
+            pathlib.Path("/scratch/farhelm-tmp/test-runs"),
+        )
+
+        temporary = self.base / "tmpdir"
+        temporary.mkdir()
+        argv = self.cli([PYTHON, "-c", "pass"])
+        root_index = argv.index("--output-root")
+        del argv[root_index:root_index + 2]
+        result = subprocess.run(
+            argv, cwd=self.repo, env=self.environment(TMPDIR=os.fspath(temporary)),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        root = temporary / "farhelm-tmp" / "test-runs"
+        runs = list(root.iterdir())
+        self.assertEqual(len(runs), 1)
+        self.assertTrue((runs[0] / "manifest.json").is_file())
+        self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
+
+    def test_roots_owned_by_another_user_are_refused(self) -> None:
+        """A root, or the directory holding it, that another account controls is refused.
+
+        The default root has a fixed name in a world-writable directory, so
+        another account could create it, or its `farhelm-tmp` parent, first.
+        A private mode bit proves nothing about who owns the directory. The
+        other account is simulated by reporting a different effective uid,
+        because a test cannot create directories owned by someone else. Root
+        ownership and the sticky bit (as on `/tmp` itself) both make a parent
+        safe, since neither lets an ordinary account replace this user's
+        entries.
+        """
+
+        root = self.base / "owned-evidence"
+        RECORDER.prepare_root(root, self.repo, self.environment())
+        stranger = os.geteuid() + 1
+        with mock.patch.object(os, "geteuid", return_value=stranger):
+            with self.assertRaisesRegex(RECORDER.UsageRefusal, "belongs to another user"):
+                RECORDER.prepare_root(root, self.repo, self.environment())
+
+            parent = self.base / "shared-parent"
+            parent.mkdir()
+            self.assertFalse(RECORDER.safe_parent(parent))
+            parent.chmod(0o1777)
+            self.assertTrue(RECORDER.safe_parent(parent))
+        self.assertTrue(RECORDER.safe_parent(parent.parent))
+
     def test_cancellation_cleans_signal_ignoring_descendants_after_eof(self) -> None:
         """Both lifecycle loops owe group cleanup after the leader and its pipes end.
 

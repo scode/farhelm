@@ -41,7 +41,7 @@ mkdir -p "$out_dir"
 echo "== installing the pinned zig toolchain"
 rm -rf "$python_env"
 python3 -m venv "$python_env"
-"$python_env/bin/pip" install --quiet --require-hashes -r .github/release/ziglang-requirements.txt
+"$python_env/bin/pip" install --quiet --no-cache-dir --require-hashes -r .github/release/ziglang-requirements.txt
 ZIG=$("$python_env/bin/python" -c 'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).parent / "zig")')
 export ZIG
 test -x "$ZIG"

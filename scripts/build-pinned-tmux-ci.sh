@@ -28,7 +28,11 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 binary="$repo/.ci-tmux/tmux"
-python_env="$repo/.ci-tmux-python"
+
+# Earlier versions kept the zig venv at .ci-tmux-python in the checkout, about
+# 350 MB that nothing used after the build and that `cargo clean` does not
+# reach. Reclaim one an older build left behind.
+rm -rf "$repo/.ci-tmux-python"
 
 # Unset first so the guard below can only be satisfied by the pin file
 # itself, never by a TMUX_VERSION inherited from the caller's environment.
@@ -50,10 +54,16 @@ if ! test -x "$binary"; then
       exit 2
       ;;
   esac
+  # The venv exists only to deliver the pinned zig to this one build, so it
+  # lives in a temporary directory that goes away with the build, and pip's
+  # wheel cache is skipped for the same reason: nothing would ever read either
+  # again, since the finished binary is what the next run reuses.
+  python_env=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-tmux-python.XXXXXX")
+  trap 'rm -rf "$python_env"' EXIT
   # Build chatter goes to stderr so stdout stays the one-line contract above.
   {
     python3 -m venv "$python_env"
-    "$python_env/bin/pip" install --require-hashes \
+    "$python_env/bin/pip" install --no-cache-dir --require-hashes \
       -r "$repo/.github/release/ziglang-requirements.txt"
     zig=$("$python_env/bin/python" -c \
       'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).parent / "zig")')

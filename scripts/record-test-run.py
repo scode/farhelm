@@ -266,12 +266,40 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def default_output_root(environment: dict[str, str]) -> pathlib.Path:
-    """Choose a test-evidence state tree separate from Farhelm product state."""
+    """Place evidence in the shared agent scratch tree, `<tmp>/farhelm-tmp/test-runs`.
 
-    state_home = environment.get("XDG_STATE_HOME")
-    if state_home:
-        return pathlib.Path(state_home) / "farhelm-test-runs"
-    return pathlib.Path.home() / ".local" / "state" / "farhelm-test-runs"
+    `<tmp>` is the environment's `TMPDIR` when that is an absolute path, and
+    `/tmp` otherwise, so on an ordinary Linux machine this is the
+    `/tmp/farhelm-tmp` tree AGENTS.md's "Agent scratch space" names. Evidence
+    used to accumulate under `~/.local/state/farhelm-test-runs`, which nothing
+    pruned: thousands of runs from many concurrent agents, Playwright
+    artifacts and trace archives included, grew it to roughly ten gigabytes in
+    a month. A temporary tree is reclaimed by whatever cleans the machine's
+    temporary directory, at the price that raw evidence there does not
+    survive that cleanup. A failure worth keeping longer is recorded (FLAKES.md
+    or a fix PR) or copied out, or the run passes `--output-root`.
+
+    The environment is the recorder's ambient one, passed in so tests can
+    choose the location without touching their own process environment.
+    """
+
+    temporary = environment.get("TMPDIR")
+    base = pathlib.Path(temporary) if temporary and os.path.isabs(temporary) else pathlib.Path("/tmp")
+    return base / "farhelm-tmp" / "test-runs"
+
+
+def safe_parent(path: pathlib.Path) -> bool:
+    """Whether another ordinary user cannot replace or rename entries in `path`.
+
+    A directory owned by this user or by root is trusted, as is a sticky one
+    (`/tmp` itself), where only an entry's owner may rename or remove it. The
+    point is the default root's fixed name in a shared temporary directory:
+    another account could create `/tmp/farhelm-tmp` first and then swap this
+    user's evidence root for a directory of its own.
+    """
+
+    status = path.stat()
+    return status.st_uid in (os.geteuid(), 0) or bool(status.st_mode & stat.S_ISVTX)
 
 
 def resolved_future_path(path: pathlib.Path) -> pathlib.Path:
@@ -1531,6 +1559,13 @@ def prepare_root(
         os.chmod(root, 0o700)
     if not root.is_dir():
         raise UsageRefusal(f"output root is not a directory: {root}")
+    # Ownership matters now that the default sits in a shared temporary
+    # directory: a root, or a directory holding it, that another account owns
+    # could be swapped or read by that account however private its mode looks.
+    if root.stat().st_uid != os.geteuid():
+        raise UsageRefusal(f"existing output root belongs to another user: {root}")
+    if not safe_parent(root.parent):
+        raise UsageRefusal(f"output root's parent belongs to another user: {root.parent}")
     if not private_mode(root):
         raise UsageRefusal(f"existing output root has group or other permissions: {root}")
     return root

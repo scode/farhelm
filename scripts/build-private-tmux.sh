@@ -17,6 +17,15 @@ output=${2:?usage: build-private-tmux.sh TARGET OUTPUT}
 zig=${ZIG:-zig}
 work=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-tmux.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+# Keep zig's caches inside this build's own directory so they go away with it.
+# zig's default global cache (~/.cache/zig) never got a hit from these builds
+# and never shrank: the include paths below embed the random work directory,
+# so every build keyed about two thousand fresh objects, and a machine that
+# builds the pinned tmux in each new checkout had gathered several gigabytes
+# there within a month. The price is recompiling zig's own libc objects on
+# each build, which is small next to building libevent, ncurses and tmux.
+export ZIG_GLOBAL_CACHE_DIR="$work/zig-cache"
+export ZIG_LOCAL_CACHE_DIR="$work/zig-cache"
 
 # Fetch one pinned source archive from the first URL that answers, then
 # verify it against the pinned SHA-256 and unpack it.
