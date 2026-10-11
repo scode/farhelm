@@ -710,6 +710,28 @@ What is NOT isolated, and what follows from it:
   FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
   narrowly when the machine is quieter, and do not log it as a flake or a regression on one observation.
 
+# Claude Code shell commands: no globs, no expansions
+
+This section applies only to Claude Code sessions and their subagents; other harnesses do not have the problem it works
+around. If you are Claude Code, a shell command you compose and run (through your shell tool, or in a prompt to a Claude
+Code subagent that will run it) contains no glob and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no
+variables (`$HOME`, `$d`), no `$(...)` or backticks, no `${...}`, no `$((...))`. Anything that needs one of those is
+written as a Deno TypeScript script, in a file, and run as that file. Put it in your scratch directory (below) unless it
+belongs in the repository. Plain commands with literal arguments (`git status`, `gh pr view 123`,
+`cargo nextest run -p farhelm-helm`) and pipelines of them stay fine in the shell.
+
+The reason is that Claude Code can still ask for approval of a shell command when the session runs with every permission
+granted, and the maintainer attributes those prompts to shell constructs it treats as unsafe, of which globs and
+expansions are the usual ones. The exact rules are Claude Code's and are not documented here. A delegate cannot show
+that prompt to anyone, so it sits invisibly until someone happens to look. On 2026-10-11 the v0.27.0 release's
+screenshot subagent waited 70 minutes on one `montage $(cat $g)` contact-sheet command that way, and the release notes
+waited with it.
+
+The exception is a command this repository's instructions give word for word (the pinned nextest and tmux `PATH` setup,
+the release procedure's version checks, the plans flow's ntfy send): run it as written, with only its placeholders
+filled in. Those predate this rule and are converted to scripts as they get touched; do not use the exception to compose
+new commands in their style.
+
 # Agent scratch space
 
 Anything you create outside the checkout at your own discretion goes under `/tmp/farhelm-tmp/<id>/`, where `<id>` is the
