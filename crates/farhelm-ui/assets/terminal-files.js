@@ -147,7 +147,7 @@
             text: path,
             range,
             decorations: { underline: true, pointerCursor: false },
-            hover: (event) => this.hover(event, path, link),
+            hover: (event) => this.hover(event, path, link, range),
             leave: () => this.leave(),
             activate: () => this.download(path),
           };
@@ -183,20 +183,47 @@
       display.style.top = `${Math.max(4, event.clientY + 16 + box.height > window.innerHeight ? event.clientY - box.height - 8 : event.clientY + 16)}px`;
     }
 
-    /** A new hover immediately withdraws any old click admission. Leaving
-     * aborts the request; the identity check also rejects late raced replies.
+    /** Redraws synchronously leave and re-hover the same cells in xterm.
+     * Reclaim that one hover without restarting its lookup or disclosure.
+     * Changed displayed text, path/range or a completed departure checks
+     * afresh; no evidence survives across hovers. Unknown text/ranges cannot
+     * establish identity, including OSC labels independent of their target.
      */
-    async hover(event, path, link = null) {
-      this.leave();
-      const state = { path, link, controller: new AbortController(), info: null };
+    async hover(event, path, link = null, range = link?.range, text = path) {
+      const previous = this.hovered;
+      if (previous?.leaving && previous.path === path && text !== null && previous.text === text && range && previous.range &&
+          previous.range.start.x === range.start.x && previous.range.start.y === range.start.y &&
+          previous.range.end.x === range.end.x && previous.range.end.y === range.end.y) {
+        this.cancel(previous.leaveTimer);
+        previous.leaveTimer = null;
+        previous.leaving = false;
+        previous.link = link;
+        if (link) {
+          // xterm snapshots decorations before hover(), then replaces them
+          // with cursor setters after it returns. Wait for that installation;
+          // a retired link's setter would target whatever link is current.
+          await Promise.resolve();
+          if (this.hovered === previous && !previous.leaving && previous.link === link) {
+            link.decorations.pointerCursor = previous.info?.status === 'ready';
+          }
+        }
+        return;
+      }
+      this.clearHover();
+      const state = {
+        path, text, link, range: range ? { start: { ...range.start }, end: { ...range.end } } : null,
+        controller: new AbortController(), info: null, leaving: false, leaveTimer: null,
+      };
       this.hovered = state;
       this.show(event, ['checking…', path], true);
       try {
         const response = await this.request('stat', path, state.controller.signal);
         const info = await response.json();
-        if (this.hovered !== state) return;
+        if (this.hovered !== state || state.leaving) return;
         state.info = info;
-        if (link) link.decorations.pointerCursor = info.status === 'ready';
+        // Re-linkification may have replaced the original link while stat
+        // was pending. Its old cursor setter now targets a different link.
+        if (state.link) state.link.decorations.pointerCursor = info.status === 'ready';
         const status = {
           ready: `${info.size} bytes — click to download`,
           not_found: 'not found',
@@ -207,15 +234,33 @@
         }[info.status] || 'not downloadable';
         this.show(event, [info.host, info.path, status]);
       } catch (error) {
-        if (this.hovered === state && !state.controller.signal.aborted) this.show(event, [path, error.message]);
+        if (this.hovered === state && !state.leaving && !state.controller.signal.aborted) this.show(event, [path, error.message]);
       }
     }
 
-    /** Cancel lookup and remove pointer admission even when a queued reply lands. */
+    /** Withdraw click/cursor admission now, but allow xterm's synchronous
+     * redraw re-hover to reclaim the lookup before the next task tears it down.
+     * Cursor setters must run here: xterm redirects them to its current link,
+     * so a deferred write could switch off an unrelated link's hand cursor.
+     */
     leave() {
-      if (this.hovered) {
-        this.hovered.controller.abort();
-        if (this.hovered.link) this.hovered.link.decorations.pointerCursor = false;
+      const state = this.hovered;
+      if (!state || state.leaving) return;
+      if (state.link) state.link.decorations.pointerCursor = false;
+      state.leaving = true;
+      state.leaveTimer = this.schedule(() => {
+        if (this.hovered === state) this.clearHover();
+      }, 0);
+    }
+
+    /** End the current lookup immediately on replacement or disposal. This
+     * teardown owns timers, abort and disclosure only, never cursor setters.
+     */
+    clearHover() {
+      const state = this.hovered;
+      if (state) {
+        if (state.leaveTimer !== null) this.cancel(state.leaveTimer);
+        state.controller.abort();
       }
       this.hovered = null;
       const display = this.term?.element?.querySelector(':scope > .terminal-file-target');
@@ -287,7 +332,7 @@
      */
     async download(path) {
       const state = this.hovered;
-      if (!state || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
+      if (!state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');
@@ -327,6 +372,7 @@
     /** Disposing the terminal cancels owned work and releases completed Blobs. */
     dispose() {
       this.leave();
+      this.clearHover();
       this.hideMessage();
       this.term?.element?.removeEventListener('click', this.dismissFailure);
       this.provider?.dispose();

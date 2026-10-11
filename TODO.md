@@ -163,13 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
   to miss. Solution to be worked out.
 
-- **Fix the flickering hover on a path that cannot be downloaded.** Hovering a file path in terminal output is meant to
-  check it once per hover: a checking spinner, then the host, full path and size, or the reason it is refused. Hovering
-  a path that could not be downloaded (the maintainer thinks it was a directory) instead made the hover flicker rapidly
-  and keep flickering while the pointer stayed on it. The suspicion, not yet confirmed, is that a refused check starts
-  another check, so the hover loops between the spinner and the refusal for as long as it lasts. Plan:
-  `plans/queue/flickering-path-hover.md`.
-
 - **Let agents start sessions in a new managed checkout.** The goal is that this works when typed to an agent: "$farhelm
   for each of the TODO items above, start a session in a new managed checkout of acme/web, named after the item". Today
   it gets a refusal. `farhelm agent create` needs `--cwd` naming an existing directory and has no repository option, and

@@ -1646,12 +1646,17 @@ hover cache is introduced.
 
 The OSC handler enables `allowNonHttpProtocols` and owns the explicit scheme boundary: parsed http/https targets go
 unchanged to the existing opener, valid file targets go to file lookup/download, and every other scheme does nothing.
-Fresh hover evidence owns an AbortController and click admission; leaving cancels and invalidates it, including raced
-replies. Plain links underline before lookup but gain a pointer only when ready. Click reopens the disclosed canonical
-path independently. Browser bodies become a bounded Blob only after successful EOF; an object URL is released after the
-save click. The desktop handoff secret identifies native mode, which requests `save_to_downloads` and never falls back
-to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode format escapes. The
-addon is disposed with its terminal, cancelling pending work; retained reconnect terminals retain it.
+Fresh hover evidence owns an AbortController and click admission. xterm synchronously leaves and re-enters a link when
+its rows redraw, so leaving withdraws click/cursor admission immediately but defers abort and tooltip removal to the
+next task. A re-hover in that interval keeps the evidence only for the same displayed text, target path and snapshotted
+start/end cell range; a real departure or replacement invalidates it, including raced replies. A kept ready cursor is
+restored in a microtask, after xterm installs its decoration accessors, and only while that replacement link is still
+hovered. Teardown never writes cursor decorations: xterm's accessors target whichever link is current, which may already
+be unrelated. Plain links underline before lookup but gain a pointer only when ready. Click reopens the disclosed
+canonical path independently. Browser bodies become a bounded Blob only after successful EOF; an object URL is released
+after the save click. The desktop handoff secret identifies native mode, which requests `save_to_downloads` and never
+falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode format
+escapes. The addon is disposed with its terminal, cancelling pending work; retained reconnect terminals retain it.
 
 ## Supervisor internals
 

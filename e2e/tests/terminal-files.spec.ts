@@ -4,7 +4,7 @@ import { expect, test } from './helpers/evidence';
 import { type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createSession, cleanupSession } from './helpers/fleet';
+import { createSession, cleanupSession, listSessions } from './helpers/fleet';
 import { attachSession, waitForTermText } from './helpers/term';
 import { stackScratchDir } from './helpers/scratch';
 import { routeGate } from './helpers/route-gate';
@@ -52,6 +52,182 @@ async function connectedHost(request: any, kind: string): Promise<number> {
   }, { timeout: 20000, message: `${kind} fixture must be connected` }).toBe(true);
   return found.id;
 }
+
+/** Observe the actual rendered path row, rather than treating a running shell
+ * or elapsed delay as proof that xterm redrew beneath the resting pointer.
+ * Tooltip mutations retain only counters, including transient hide/restart
+ * changes that would already be gone by the next Playwright assertion.
+ */
+async function observePathRedraws(page: Page, needle: string) {
+  await page.evaluate((needle) => {
+    const term = (window as any).__farhelmTerm;
+    const row = Array.from({ length: term.rows }, (_, index) => index).find(index =>
+      term.buffer.active.getLine(term.buffer.active.viewportY + index)?.translateToString(true).includes(needle));
+    if (row === undefined) throw new Error('the live path row disappeared before observation');
+    const tooltip = term.element.querySelector('.terminal-file-target');
+    if (!tooltip || tooltip.hidden) throw new Error('hover must show checking before redraw observation');
+    const state = { renders: 0, ticks: 0, lastTick: -1, hides: 0, restarts: 0 };
+    const render = term.onRender(({ start, end }: { start: number; end: number }) => {
+      if (start > row || end < row) return;
+      const text = term.buffer.active.getLine(term.buffer.active.viewportY + row)?.translateToString(true) || '';
+      const tick = /TICK (\d+)/.exec(text);
+      if (!text.includes(needle) || !tick) return;
+      state.renders++;
+      if (Number(tick[1]) !== state.lastTick) {
+        state.lastTick = Number(tick[1]);
+        state.ticks++;
+      }
+    });
+    const mutations = new MutationObserver(records => {
+      for (const record of records) {
+        if (record.type === 'attributes' && record.attributeName === 'hidden' && record.oldValue === null) state.hides++;
+        if (record.type === 'childList' && [...record.addedNodes].some(node => node.textContent === 'checking…')) state.restarts++;
+      }
+    });
+    mutations.observe(tooltip, { attributes: true, attributeOldValue: true, childList: true });
+    (window as any).__pathRedraw = { state, dispose: () => { render.dispose(); mutations.disconnect(); } };
+  }, needle);
+}
+
+for (const linkKind of ['plain', 'OSC']) {
+  for (const targetKind of ['folder', 'file']) {
+    /** A resting hover is one lookup through real redraws, before and after
+     * its answer. Departure and return must still withdraw and refresh it.
+     * Both link providers and both stat outcomes exercise the same contract.
+     */
+    test(`resting ${linkKind} ${targetKind} hover survives live redraws`, async ({ page, request }, testInfo) => {
+      const directory = stackScratchDir('file-redraw-');
+      const basename = targetKind === 'folder' ? 'redraw.dir' : 'redraw.txt';
+      const filename = path.join(directory, basename);
+      if (targetKind === 'folder') fs.mkdirSync(filename);
+      else fs.writeFileSync(filename, 'redraw file bytes');
+      expect(fs.statSync(filename).isDirectory()).toBe(targetKind === 'folder');
+      const label = linkKind === 'plain' ? basename : 'OSC-REDRAW';
+      const printed = linkKind === 'plain' ? label : `\\033]8;;file://${filename}\\007${label}\\033]8;;\\007`;
+      // Echo is disabled so releasing a gate does not move the path to another
+      // row. Only the trailing tick changes; the path and its cell range stay put.
+      const session = await createSession(request, {
+        title: `file-redraw-${linkKind}-${targetKind}-${Date.now()}`, cwd: directory,
+        invocation: `sh -c 'stty -echo; read _gate; printf "TARGET ${printed} TICK 0000"; read _redraw; i=1; while [ "$i" -le 1000 ]; do printf "\\rTARGET ${printed} TICK %04d" "$i"; i=$((i+1)); sleep 0.08; done; sleep 300'`,
+      });
+      const gate = routeGate();
+      let statRequests = 0;
+      await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+        statRequests++;
+        const response = await route.fetch();
+        await gate.wait();
+        // The unfixed reproduction aborts these requests on every redraw.
+        // Late fulfillment is irrelevant; request counts are the independent oracle.
+        try { await route.fulfill({ response }); } catch { /* hover was cancelled */ }
+      });
+      try {
+        await page.goto('/');
+        await attachSession(page, session.id);
+        await page.keyboard.press('Enter');
+        await waitForTermText(page, `TARGET ${label} TICK 0000`);
+        await hoverPath(page, label);
+        const tooltip = page.locator('#terminal .terminal-file-target');
+        await expect(tooltip).toContainText('checking…');
+        await expect.poll(() => statRequests).toBe(1);
+        await observePathRedraws(page, label);
+        const peer = (await listSessions(request)).sessions.find(row => row.id === session.id);
+        expect(peer?.status?.state, 'the gated redraw peer must still be alive before input').toMatch(/running|idle/);
+        await page.keyboard.press('Enter');
+        const snapshot = () => page.evaluate(() => ({ ...(window as any).__pathRedraw.state }));
+        await expect.poll(async () => (await snapshot()).ticks, { message: 'live bytes must redraw the hovered row' }).toBeGreaterThanOrEqual(3);
+        const pendingStart = await snapshot();
+        // sleep-ok: observe repeated redraws under one held stat reply; rendered tick changes below prove the stimulus continued.
+        await page.waitForTimeout(250);
+        const pendingEnd = await snapshot();
+        expect(pendingEnd.ticks).toBeGreaterThan(pendingStart.ticks);
+        const pendingRequests = statRequests;
+        await testInfo.attach('pending-hover-redraws', { body: JSON.stringify({ pendingRequests, pendingStart, pendingEnd }), contentType: 'application/json' });
+        gate.release();
+        const result = targetKind === 'folder' ? 'folder: not downloadable' : 'click to download';
+        await expect(tooltip).toContainText(result);
+        const readyStart = await snapshot();
+        // sleep-ok: observe an answered hover through further real redraws; this is a no-restart window, not a readiness wait.
+        await page.waitForTimeout(300);
+        const readyEnd = await snapshot();
+        expect(readyEnd.ticks).toBeGreaterThan(readyStart.ticks);
+        const evidence = { linkKind, targetKind, pendingRequests, answeredRequests: statRequests, pendingStart, pendingEnd, readyStart, readyEnd };
+        await testInfo.attach('resting-hover-redraws', { body: JSON.stringify(evidence), contentType: 'application/json' });
+        expect(evidence, 'one resting hover must keep its lookup and tooltip through live redraws').toMatchObject({
+          pendingRequests: 1, answeredRequests: 1, readyEnd: { hides: 0, restarts: 0 },
+        });
+        await expect(tooltip).toContainText(result);
+        if (targetKind === 'file' || linkKind === 'OSC') await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
+        else await expect(page.locator('#terminal .xterm-screen')).not.toHaveClass(/xterm-cursor-pointer/);
+        const screen = (await page.locator('#terminal .xterm-screen').boundingBox())!;
+        await page.mouse.move(screen.x + screen.width - 2, screen.y - 2);
+        await expect(tooltip).toBeHidden();
+        await hoverPath(page, label);
+        await expect.poll(() => statRequests).toBe(2);
+        await expect(tooltip).toContainText(result);
+      } finally {
+        gate.release();
+        await page.evaluate(() => (window as any).__pathRedraw?.dispose()).catch(() => {});
+        await cleanupSession(request, session.id);
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+/** Changing only an OSC label is a new hover even when its target and cell
+ * range stay fixed. The held old reply proves cancellation, and a real second
+ * reply proves that unchanged URI/range alone cannot retain old evidence.
+ */
+test('changed OSC display text starts a fresh hover at the same cells', async ({ page, request }) => {
+  const directory = stackScratchDir('file-label-');
+  const filename = path.join(directory, 'report.txt');
+  fs.writeFileSync(filename, 'label replacement');
+  expect(fs.readFileSync(filename, 'utf8')).toBe('label replacement');
+  const span = (label: string) => `\\033]8;;file://${filename}\\007${label}\\033]8;;\\007`;
+  const session = await createSession(request, { title: `file-label-${Date.now()}`, cwd: directory,
+    invocation: `sh -c 'stty -echo; read _gate; printf "TARGET ${span('OLD-LABEL')}"; read _replace; printf "\\rTARGET ${span('NEW-LABEL')}"; sleep 300'` });
+  const gate = routeGate();
+  let arrived = false;
+  let routeDone = false;
+  let statRequests = 0;
+  page.on('request', req => { if (req.url().endsWith(`/sessions/${session.id}/files/stat`)) statRequests++; });
+  await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+    const response = await route.fetch();
+    arrived = true;
+    await gate.wait();
+    // The requestfailed event below establishes cancellation independently
+    // of whether Playwright accepts fulfillment after that cancellation.
+    try { await route.fulfill({ response }); } catch { /* old hover cancelled */ }
+    routeDone = true;
+  }, { times: 1 });
+  try {
+    await page.goto('/');
+    await attachSession(page, session.id);
+    const peer = async () => (await listSessions(request)).sessions.find(row => row.id === session.id);
+    expect((await peer())?.status?.state, 'initial gated peer must be alive before input').toMatch(/running|idle/);
+    await page.keyboard.press('Enter');
+    await waitForTermText(page, 'TARGET OLD-LABEL');
+    const cancelled = page.waitForEvent('requestfailed', req => req.url().endsWith(`/sessions/${session.id}/files/stat`));
+    await hoverPath(page, 'OLD-LABEL');
+    const tooltip = page.locator('#terminal .terminal-file-target');
+    await expect(tooltip).toContainText('checking…');
+    await expect.poll(() => arrived).toBe(true);
+    expect(statRequests).toBe(1);
+    expect((await peer())?.status?.state, 'replacement peer must still be alive before input').toMatch(/running|idle/);
+    await page.keyboard.press('Enter');
+    await waitForTermText(page, 'TARGET NEW-LABEL');
+    expect((await cancelled).failure()).not.toBeNull();
+    await expect.poll(() => statRequests).toBe(2);
+    await expect(tooltip).toContainText('17 bytes — click to download');
+    gate.release();
+    await expect.poll(() => routeDone).toBe(true);
+    await expect(tooltip).toContainText('17 bytes — click to download');
+  } finally {
+    gate.release();
+    await cleanupSession(request, session.id);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 for (const kind of ['local', 'ssh']) {
   /** A fresh hover must disclose the actual owning host before a real save.

@@ -3524,9 +3524,11 @@
             },
             hover(event, uri, range) {
               const target = window.farhelmTerminalFiles.oscTarget(uri);
-              if (target?.kind === 'file') fileLinks.hover(event, target.path);
+              const links = window.farhelmTerminalLinks;
+              // OSC labels can change without changing target or cell range.
+              // Keep evidence only while the same displayed text remains there.
+              if (target?.kind === 'file') fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
               else if (target?.kind === 'web') {
-                const links = window.farhelmTerminalLinks;
                 links.showLinkTarget(event, uri, term.element, links.linkRowText(term, range));
               }
             },
