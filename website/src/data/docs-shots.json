@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-11T13:37:46Z",
-  "captured_from": "baa90a5def58c3d4f11ced0767b605fb8c3f9ad6",
-  "commit": "a6460f7869abf4645deb8d69d1303a2ac19cb442",
+  "captured_at": "2026-10-11T19:52:16Z",
+  "captured_from": "99f88127bf872db8729ffde18f2ca45ca9828ac9",
+  "commit": "af6d22263ce42beaf9063539296422e7d3a565e9",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -109,6 +109,26 @@
       "height": 562,
       "width": 1528
     },
+    "release-notes/v0-27-0-folder-dropdown": {
+      "height": 606,
+      "width": 1560
+    },
+    "release-notes/v0-27-0-host-remove": {
+      "height": 894,
+      "width": 1642
+    },
+    "release-notes/v0-27-0-host-setup": {
+      "height": 1350,
+      "width": 1802
+    },
+    "release-notes/v0-27-0-post-clone-command": {
+      "height": 560,
+      "width": 1512
+    },
+    "release-notes/v0-27-0-trash-delete-one": {
+      "height": 1416,
+      "width": 1424
+    },
     "session-list/controls": {
       "height": 696,
       "width": 1392
@@ -130,15 +150,15 @@
       "width": 1080
     },
     "session-list/trash-dialog": {
-      "height": 1476,
+      "height": 1500,
       "width": 1424
     },
     "start-a-session/checkout-setup": {
-      "height": 1098,
+      "height": 1094,
       "width": 1562
     },
     "start-a-session/destination": {
-      "height": 1106,
+      "height": 1240,
       "width": 1562
     },
     "start-a-session/effort-permissions-trust": {

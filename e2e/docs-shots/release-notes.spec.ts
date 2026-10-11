@@ -275,3 +275,159 @@ test("v0.26.1 save as template", async ({ page, request }) => {
   );
   await shot(page, `${PAGE}/v0-26-1-save-template`, [button, panel], { maxWidth: 930 });
 });
+
+// v0.27.0. Two of the shots below photograph the host dialogs that one
+// changelog entry redesigned (#1866 and #1867), one dialog each, so a reader
+// sees both the setup and the removal question in their new layout.
+
+/** v0.27.0: the post-clone command, set for every host in Settings. */
+test("v0.27.0 post-clone command", async ({ page, request }) => {
+  const name = `${PAGE}/v0-27-0-post-clone-command`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const field = dialog.locator(".checkout-post-clone-field");
+  const command = field.locator("textarea");
+  // Typed to show what goes in the field. Nothing is saved: only the
+  // field's own save button would write it, so the fleet's command stays
+  // unset for every other shot.
+  await command.fill("npm ci");
+  // The field's own help says when the command runs, so the callout says
+  // what is new instead.
+  await director.callout(
+    command,
+    "One command for every host, now set here rather than from the command line on the helm's machine.",
+    { side: "left", dy: 20 },
+  );
+  // A narrow pad keeps the checkout folder's save button, just above the
+  // field, out of the crop.
+  await shot(page, name, [field], { pad: 8, maxWidth: 930 });
+});
+
+/**
+ * v0.27.0: one checkout deleted from the trash on its own. The trash is the
+ * scenario's (`checkoutTrash`), and the shot stops before any click: the
+ * button deletes without asking, and the staging refuses deletion anyway.
+ */
+test("v0.27.0 trash delete one", async ({ page, request }) => {
+  const name = `${PAGE}/v0-27-0-trash-delete-one`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 960, height: 1150 });
+  const { director } = await open(page, request, { checkoutTrash: true });
+  await page.locator(".checkout-trash-button").click();
+  const dialog = page.locator(".checkout-trash-dialog");
+  await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(3);
+  // The last checkout's button, the one nearest the dialog's bottom edge:
+  // a callout beside the button would widen the crop past the docs' text
+  // column, and one under the dialog reaches this button across nothing but
+  // the empty end of its "on disk" line.
+  const button = dialog.locator(".trash-entry-delete").last();
+  await expect(button).toBeEnabled();
+  await director.highlight(button, { pad: 3 });
+  await director.callout(
+    button,
+    "Deletes just this checkout, at once and without asking. The host's delete and delete all still ask first.",
+    { side: "bottom", dx: -120, dy: 60 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/** v0.27.0: the session launcher's folder field opens a dropdown. */
+test("v0.27.0 folder dropdown", async ({ page, request }) => {
+  const name = `${PAGE}/v0-27-0-folder-dropdown`;
+  skipFrozenReleaseShot(name);
+  // The default width, which leaves the left margin room for the callouts,
+  // and tall enough that the whole dropdown, which floats over the launcher's
+  // lower half, stays inside the viewport and so inside the crop.
+  await page.setViewportSize({ width: 1600, height: 1300 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const destination = form.locator(".launch-composer-destination");
+  // Focus opens the dropdown, the way clicking into the field does.
+  await destination.getByRole("combobox", { name: "folder", exact: true }).focus();
+  const folders = destination.getByRole("listbox", { name: "folders", exact: true });
+  await expect(folders).toBeVisible();
+  // The dropdown floats past the end of the launcher's scrolling body, which
+  // clips it; scrolling its last entry into view is what a person does to
+  // reach it, and shows the whole list.
+  await folders.getByRole("option", { name: "reset destination to local home" }).scrollIntoViewIfNeeded();
+  // Both in the left margin, each level with the group it explains.
+  await director.callout(
+    folders.getByRole("group", { name: "recent" }),
+    "Directories you launched in recently on this host, newest first. Typing in the field filters them.",
+    { side: "left" },
+  );
+  await director.callout(
+    folders.getByRole("group", { name: "reset" }),
+    "Your home directory on the host, or on the machine in front of you.",
+    { side: "left", dy: 20 },
+  );
+  await shot(page, name, [destination.getByRole("combobox", { name: "folder", exact: true }), folders], {
+    maxWidth: 930,
+  });
+});
+
+/**
+ * v0.27.0: the host setup question in the shared host dialog layout. The
+ * add-host check answers for the scenario's invented add_host (as on the Add
+ * a remote host page); no shot confirms the setup.
+ */
+test("v0.27.0 host setup dialog", async ({ page, request }) => {
+  const name = `${PAGE}/v0-27-0-host-setup`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1100 });
+  const { scenario, director } = await open(page, request);
+  if (!scenario.add_host) throw new Error("the docs scenario needs an add_host");
+  await page.locator(".add-host-button").click();
+  const dialog = page.locator(".host-add-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator(".add-host-ssh").fill(scenario.add_host.ssh);
+  await dialog.locator(".add-host-submit").click();
+  await expect(dialog.locator(".provisioning-plan")).toContainText(scenario.add_host.ssh);
+  await expect(dialog.locator(".provisioning-confirm")).toBeVisible();
+  // All in the left margin, level with the part of the dialog each explains.
+  await director.callout(dialog.locator(".host-settings-header"), "A heading names the host being set up.", {
+    side: "left",
+  });
+  await director.callout(
+    dialog.locator(".provisioning-plan"),
+    "A long plan scrolls on its own, while the heading and the answers stay in view.",
+    { side: "left" },
+  );
+  // Under the answers rather than beside them, so it covers none of them.
+  await director.callout(
+    dialog.locator(".host-setup-permanent"),
+    "The answers say what they do: set up, and set up, don't ask again. They were yes, and yes, and don't ask in the future.",
+    { side: "bottom", dx: -120, dy: 40 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/** v0.27.0: the remove host question in the shared host dialog layout. */
+test("v0.27.0 host remove dialog", async ({ page, request }) => {
+  const name = `${PAGE}/v0-27-0-host-remove`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1100 });
+  const { scenario, director } = await open(page, request);
+  const remote = scenario.hosts.find((host) => host.kind === "remote");
+  if (!remote) throw new Error("the docs scenario needs a remote host");
+  const row = hostRowByName(page, remote.alias);
+  await openHostMenu(row);
+  await row.locator(".host-remove").click();
+  const dialog = page.locator(".host-remove-dialog");
+  await expect(dialog).toBeVisible();
+  // One in the left margin, one under the answers, so neither covers the
+  // explanation or an answer.
+  await director.callout(
+    dialog.locator(".host-settings-header"),
+    "The host and whether it is connected head the dialog, as in host settings.",
+    { side: "left" },
+  );
+  await director.callout(
+    dialog.locator(".host-dialog-answers .btn-outline"),
+    "Renamed from remove, and don't ask again.",
+    { side: "bottom", dx: -60, dy: 40 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
