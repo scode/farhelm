@@ -108,3 +108,35 @@ gpt-6.1-sol/high; the plans readers inherit the executor's model. Native tools d
 or token usage; requested routes are not accounting proof. Private orchestration records remain in the plan's working
 log and the session evidence directory identified there; late records for the second wording reader and source
 continuation are explicitly marked as a recording gap.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1913. The rebase met the review queue index; both plans' removals were kept.
+
+#### Review before merging
+
+No blockers. The sign-in rotation test now restores the credential in an after-hook, and the long-folder-path test
+proves the path overflows and shows its tail. Notes left as they are:
+
+- Possible follow-up: the opt-in real-Claude spawn test restores its YOLO and run-without-asking settings in the test
+  body's cleanup, which a test timeout can skip; a slow vendor could then leave the shared helm launching local YOLO
+  sessions without asking for later specs in that run. Moving the restores into an after-hook, as the sign-in test now
+  does, would close it. It only runs when deliberately enabled.
+- In the same test, an early failure skips the later session cleanups and the jj workspace removal.
+- The missing-workspace message pattern never matches the pinned jj, which exits 0 with a warning; the exit status is
+  what tolerates it.
+
+#### Checks
+
+These two plans, which change only tests, were landed together: helm-and-portability-test-fixes first,
+browser-spec-fixes on top.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (288 delays, none
+  without a reason) and `cargo clippy --all-targets -- -D warnings`; the helm and supervisor unit tests through the
+  recorder with pinned tmux 3.7c, four slots and no retries (run `b6805a2b`, 2143 of 2143); and on Chromium and WebKit
+  with one worker and no retries the auth and spawn specs (run `c12ecee6`, 16 passed; the opt-in real-Claude spawn test
+  skipped on both engines as designed) and the sidebar's long-folder-path test (run `b8ed84e9`, 2 passed).
+- Not run: macOS; the real-Claude spawn test, which needs vendor credentials and is opt-in.
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
