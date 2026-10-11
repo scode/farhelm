@@ -85,3 +85,34 @@ delivery-report cold reads use fresh native readers on the executing session's i
 recorded; actual native model attribution and usage counters were unavailable. Private galaxy-brain records remain under
 session `5c9810ab-dcb4-4a62-9a79-bfb239f2d810` in the configured state directory; the working log beside the checkouts
 records its exact location.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1859. The rebase met no conflicts.
+
+#### Review before merging
+
+No findings. The review checked every text field in the UI: all 25 have browser corrections off, the feedback contact
+field keeps email autofill as the plan decided, and the terminal's hidden input is correctly left alone. The new browser
+sweep cannot pass vacuously: it requires a minimum number of fields on each surface it visits and catches each of the
+four settings being removed. One note left as is: the changelog fragment's second paragraph describes how the fix was
+found, which release curation will drop.
+
+post-clone-in-settings, which landed on top, adds a post-clone command field; it has corrections off too. Both plans
+added hover help to the checkout-folder field's Retry and Save buttons with different words; the landing kept
+post-clone-in-settings' wording, which matches its own field. No test checks the exact text.
+
+#### Checks
+
+These two plans were landed together, text-fields-no-spellcheck first with post-clone-in-settings on top.
+
+- Run now, on the two stacked, after the fixes listed in post-clone-in-settings' notes: `cargo fmt --all -- --check`,
+  `dprint check`, the changelog lint, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and `cargo check -p farhelm-ui --features desktop`; the supervisor,
+  helm, UI, protocol and CLI unit tests with the GitHub-checkout end-to-end tests, through the recorder with pinned tmux
+  3.7c, four slots and no retries (run `817f0fdc`, 2895 of 2895); the UI JavaScript tests (230 of 230); the docs website
+  build; and on Chromium and WebKit with one worker and no retries the settings, tooltip-coverage, terminal,
+  github-checkouts, github-checkout-composer, feedback, templates and quick-switcher specs (run `ccef1907`, 270 passed).
+- Between that run and the merges, main changed only release-testing documentation.
+
+Nothing in the report above was made untrue by the landing.
