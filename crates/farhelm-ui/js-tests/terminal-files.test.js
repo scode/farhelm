@@ -61,6 +61,228 @@ test('bounded Blob refuses excess bytes and mid-stream errors', async () => {
   await assert.rejects(boundedBlob(new Response(tooLarge)), /100 MB limit/);
 });
 
+/** Isolate the shipped hover state machine with a controllable fetch and task
+ * clock. The disclosure sink records every replacement, so preserving its
+ * final text alone cannot hide an intermediate spinner or blanking regression.
+ */
+function hoverFixture() {
+  const tasks = new Map();
+  const requests = [];
+  const shown = [];
+  const display = { hidden: true };
+  let timerId = 0;
+  const clock = {
+    setTimeout(callback) { const id = ++timerId; tasks.set(id, callback); return id; },
+    clearTimeout: id => tasks.delete(id),
+  };
+  const context = vm.createContext({
+    window: {}, AbortController,
+    fetch: (url, options) => new Promise(resolve => {
+      requests.push({ url, signal: options.signal, path: JSON.parse(options.body).path,
+        reply: info => resolve({ ok: true, json: async () => info }) });
+    }),
+  });
+  vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native: false, ...clock });
+  addon.activate({ element: { querySelector: selector => selector.endsWith('.terminal-file-target') ? display : null, removeEventListener() {} },
+    registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' });
+  addon.show = (_event, lines, checking = false) => { display.hidden = false; shown.push({ lines: [...lines], checking }); };
+  return { addon, requests, shown, display, tasks,
+    runTasks() { for (const [id, callback] of [...tasks]) { tasks.delete(id); callback(); } } };
+}
+
+/** Different objects with the same cell endpoints model xterm's re-linkification. */
+function hoverLink(startX = 2, startY = 3, endX = 11, endY = 3) {
+  return { range: { start: { x: startX, y: startY }, end: { x: endX, y: endY } }, decorations: { pointerCursor: false } };
+}
+
+/** A pending stat must survive every same-task redraw, and its answer must
+ * admit the replacement link rather than writing through the retired object.
+ */
+test('same-task redraw preserves a pending hover and updates its newest link', async () => {
+  const fixture = hoverFixture();
+  const first = hoverLink();
+  const pending = fixture.addon.hover({}, 'report.pdf', first);
+  const state = fixture.addon.hovered;
+  let current;
+  for (let redraw = 0; redraw < 3; redraw++) {
+    fixture.addon.leave();
+    assert.equal(first.decorations.pointerCursor, false);
+    current = hoverLink();
+    await fixture.addon.hover({}, 'report.pdf', current);
+    assert.equal(fixture.addon.hovered, state);
+    assert.equal(fixture.tasks.size, 0);
+    assert.equal(fixture.requests[0].signal.aborted, false);
+    assert.equal(fixture.requests.length, 1);
+    assert.equal(fixture.shown.length, 1);
+  }
+  fixture.requests[0].reply({ status: 'ready', host: 'this machine', path: '/output/report.pdf', size: 8 });
+  await pending;
+  assert.equal(current.decorations.pointerCursor, true);
+  assert.equal(first.decorations.pointerCursor, false);
+  assert.equal(fixture.shown.length, 2);
+  fixture.addon.dispose();
+});
+
+/** Ready and refused answers both belong to this hover; redraw must neither
+ * replace the disclosure nor carry a ready cursor onto a refused replacement.
+ */
+test('same-task redraw preserves answered ready and refused hovers', async () => {
+  for (const status of ['ready', 'folder']) {
+    const fixture = hoverFixture();
+    const first = hoverLink();
+    const pending = fixture.addon.hover({}, 'report.pdf', first);
+    fixture.requests[0].reply({ status, host: 'this machine', path: '/output/report.pdf', size: 8 });
+    await pending;
+    const state = fixture.addon.hovered;
+    fixture.addon.leave();
+    assert.equal(first.decorations.pointerCursor, false, 'leave must remove the old hand synchronously');
+    const next = hoverLink();
+    await fixture.addon.hover({}, 'report.pdf', next);
+    assert.equal(fixture.addon.hovered, state);
+    assert.equal(next.decorations.pointerCursor, status === 'ready');
+    assert.equal(fixture.requests.length, 1);
+    assert.equal(fixture.shown.length, 2);
+    assert.equal(fixture.display.hidden, false);
+    assert.equal(fixture.tasks.size, 0);
+    fixture.addon.dispose();
+  }
+});
+
+/** xterm installs decoration accessors after the synchronous hover callback.
+ * Restoration must reach those accessors, while a departure before the
+ * microtask runs must not write through them onto an unrelated current link.
+ */
+test('ready redraw cursor restoration waits for accessors and rejects retired links', async () => {
+  for (const depart of [false, true]) {
+    const fixture = hoverFixture();
+    const pending = fixture.addon.hover({}, 'report.pdf', hoverLink());
+    fixture.requests[0].reply({ status: 'ready', host: 'this machine', path: '/output/report.pdf', size: 8 });
+    await pending;
+    fixture.addon.leave();
+    const next = hoverLink();
+    const restoring = fixture.addon.hover({}, 'report.pdf', next);
+    let cursor = { pointer: false };
+    next.decorations = {};
+    Object.defineProperty(next.decorations, 'pointerCursor', { set: value => { cursor.pointer = value; } });
+    if (depart) {
+      fixture.addon.leave();
+      cursor = { pointer: true };
+    }
+    await restoring;
+    assert.equal(cursor.pointer, true, depart ? 'a retired link must not touch the now-current cursor' : 'restore through installed accessors');
+    assert.equal(fixture.requests.length, 1);
+    fixture.addon.dispose();
+  }
+});
+
+/** Text alone is not hover identity: each endpoint and path must agree, and
+ * no range means identity cannot be established. Replacement cancels old work.
+ */
+test('different paths, cell endpoints and unknown ranges start fresh checks', async () => {
+  for (const [path, next] of [['other.pdf', hoverLink()], ['report.pdf', hoverLink(1)],
+    ['report.pdf', hoverLink(2, 2)], ['report.pdf', hoverLink(2, 3, 12)],
+    ['report.pdf', hoverLink(2, 3, 11, 4)], ['report.pdf', null]]) {
+    const fixture = hoverFixture();
+    const pending = fixture.addon.hover({}, 'report.pdf', hoverLink());
+    fixture.addon.leave();
+    const replacement = fixture.addon.hover({}, path, next);
+    assert.equal(fixture.requests.length, 2);
+    assert.equal(fixture.requests[0].signal.aborted, true);
+    assert.equal(fixture.tasks.size, 0);
+    assert.equal(fixture.addon.hovered.path, path);
+    fixture.requests[0].reply({ status: 'ready' });
+    await pending;
+    assert.equal(fixture.shown.length, 2, 'retired evidence cannot overwrite the new spinner');
+    fixture.requests[1].reply({ status: 'folder' });
+    await replacement;
+    fixture.addon.dispose();
+  }
+});
+
+/** OSC labels are independent of their file target. A changed same-width
+ * label, or unavailable display text, ends evidence even at identical cells.
+ */
+test('changed and unknown OSC display text cancels old evidence at the same target and cells', async () => {
+  for (const text of ['new.txt', null]) {
+    const fixture = hoverFixture();
+    const range = hoverLink().range;
+    const pending = fixture.addon.hover({}, '/output/report.pdf', null, range, 'old.txt');
+    fixture.addon.leave();
+    const replacement = fixture.addon.hover({}, '/output/report.pdf', null, range, text);
+    assert.equal(fixture.requests.length, 2);
+    assert.equal(fixture.requests[0].signal.aborted, true);
+    assert.equal(fixture.tasks.size, 0);
+    fixture.requests[0].reply({ status: 'ready' });
+    await pending;
+    assert.equal(fixture.shown.length, 2, 'old evidence cannot overwrite the replacement spinner');
+    fixture.requests[1].reply({ status: 'folder' });
+    await replacement;
+    fixture.addon.dispose();
+  }
+});
+
+/** A genuine departure ends evidence at the next task; returning later must
+ * check again. Pending replies after that boundary cannot resurrect the tooltip.
+ */
+test('real departure aborts and hides, and a later same-path hover checks afresh', async () => {
+  const fixture = hoverFixture();
+  const pending = fixture.addon.hover({}, 'report.pdf', hoverLink());
+  fixture.addon.leave();
+  assert.equal(fixture.requests[0].signal.aborted, false);
+  assert.equal(fixture.tasks.size, 1);
+  fixture.runTasks();
+  assert.equal(fixture.requests[0].signal.aborted, true);
+  assert.equal(fixture.display.hidden, true);
+  assert.equal(fixture.addon.hovered, null);
+  fixture.requests[0].reply({ status: 'ready' });
+  await pending;
+  assert.equal(fixture.display.hidden, true);
+  const returning = fixture.addon.hover({}, 'report.pdf', hoverLink());
+  assert.equal(fixture.requests.length, 2);
+  fixture.requests[1].reply({ status: 'folder' });
+  await returning;
+  fixture.addon.dispose();
+});
+
+/** xterm cursor accessors write to its current link, not necessarily the
+ * object that carries them. A deferred teardown must never touch that setter.
+ */
+test('leave withdraws admission immediately and deferred teardown leaves another cursor alone', async () => {
+  const fixture = hoverFixture();
+  let cursor = { pointer: false };
+  const first = hoverLink();
+  Object.defineProperty(first.decorations, 'pointerCursor', { set: value => { cursor.pointer = value; } });
+  const pending = fixture.addon.hover({}, 'report.pdf', first);
+  fixture.requests[0].reply({ status: 'ready', path: '/output/report.pdf' });
+  await pending;
+  assert.equal(cursor.pointer, true);
+  fixture.addon.leave();
+  assert.equal(cursor.pointer, false);
+  await fixture.addon.download('report.pdf');
+  assert.equal(fixture.requests.length, 1, 'a leaving hover must already refuse a click');
+  cursor = { pointer: true };
+  fixture.runTasks();
+  assert.equal(cursor.pointer, true, 'the now-current unrelated link must keep its hand');
+  fixture.addon.dispose();
+});
+
+/** Terminal disposal is immediate even during the redraw grace task; it
+ * owns the task as well as the request and rejects later replies.
+ */
+test('disposal clears pending hover teardown and rejects late replies', async () => {
+  const fixture = hoverFixture();
+  const pending = fixture.addon.hover({}, 'report.pdf', hoverLink());
+  fixture.addon.leave();
+  fixture.addon.dispose();
+  assert.equal(fixture.requests[0].signal.aborted, true);
+  assert.equal(fixture.tasks.size, 0);
+  assert.equal(fixture.display.hidden, true);
+  fixture.requests[0].reply({ status: 'ready' });
+  await pending;
+  assert.equal(fixture.shown.length, 1);
+});
+
 /** Run the shipped addon with an owned DOM and clock, without changing globals.
  * Only notice, click and save primitives are modeled; xterm geometry and real
  * browser rendering remain the two-engine integration suite's responsibility.

@@ -1396,14 +1396,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   plain words, version numbers and plain scheme-bearing text do not. Diagnostic line/column suffixes and trailing
   punctuation are excluded. Relative paths use the session's directory, not a shell's later directory. Hover immediately
   underlines the path and shows a checking spinner, then the host, full resolved path and size or refusal. Each hover
-  checks afresh; leaving cancels it. Only a successful check admits a click (OSC hyperlinks may show a pointer earlier).
-  Files must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A
-  browser saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it
-  went, with no partial file after failure or interruption. Status appears at the top of that terminal: success fades
-  after a few seconds, while a failure stays until the next click or download there. Nothing is opened or executed. Any
-  file the session's account can read is in reach, within the existing shell authority; hover discloses the
-  agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink
-  schemes are explicitly limited to http, https and file; every other scheme is ignored.
+  checks afresh; a redraw beneath a pointer resting on the same path text and target at the same position is not a new
+  hover. Leaving cancels it. Only a successful check admits a click (OSC hyperlinks may show a pointer earlier). Files
+  must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A browser
+  saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it went,
+  with no partial file after failure or interruption. Status appears at the top of that terminal: success fades after a
+  few seconds, while a failure stays until the next click or download there. Nothing is opened or executed. Any file the
+  session's account can read is in reach, within the existing shell authority; hover discloses the agent-provided target
+  before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly
+  limited to http, https and file; every other scheme is ignored.
 
 ## Attachments
 
