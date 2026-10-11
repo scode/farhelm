@@ -8,6 +8,8 @@ set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 pins="$repo/.github/release/source-pins.env"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../.github/release/source-pins.env
 source "$pins"
 
 target=${1:?usage: build-private-tmux.sh TARGET OUTPUT}
@@ -56,11 +58,13 @@ download "tmux.tar.gz" "$TMUX_SHA256" \
   "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
 download "libevent.tar.gz" "$LIBEVENT_SHA256" \
   "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz"
-# ftpmirror.gnu.org redirects to a nearby GNU mirror; the canonical host is
-# still tried first so a mirror that lags a fresh ncurses release does not
-# become the reason a build fails while the origin is fine.
+# Keep a direct mirror between the origin and GNU's redirect service: the
+# redirect can send us back to the unavailable origin, as it did during the
+# October 2026 rehearsal. The checksum above remains the authority for every
+# source. Try the canonical host first so mirror lag does not block a fresh pin.
 download "ncurses.tar.gz" "$NCURSES_SHA256" \
   "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" \
+  "https://mirrors.kernel.org/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" \
   "https://ftpmirror.gnu.org/ncurses/ncurses-${NCURSES_VERSION}.tar.gz"
 
 prefix="$work/prefix"
