@@ -109,3 +109,48 @@ Fresh fetches before the final PR confirmed main still at `fc6bf5951d230d855173f
 reviewed base. No intervening upstream diff needed rebasing or additional runtime checks. The four draft heads are
 `d6ca5b8e300eba52a64403c979c5c30244bfa2f0`, `16d890320804dee8d3594f31853b231fef5f5bbb`,
 `3c136aaab2542f6d4dba1fc891b69a0faa19887b`, and `3b75281e2c9ddda4b36252b0aed29d4410241445`, in order.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1865, #1866, #1867 and #1868. The rebase met no conflicts; only plan bookkeeping had
+landed on main since the plan ran.
+
+#### Fixes made while landing
+
+- In #1867, three multi-host browser tests confirmed a host removal by clicking the dialog's first danger button. This
+  plan put **remove, don't ask again** first, so one of them saved "don't ask again" on the helm all browser tests
+  share. A later test's removal then skipped its dialog and removed the remote host outright, which failed four tests
+  and stopped 56 more from running (run `ccb06a1c`). The plan's own checks ran selected cases only, never these tests in
+  sequence. They now click **remove** by name. The product behaviour was correct.
+- The changelog fragments credited the wrong PRs with the renames: **remove** and **uninstall** were already the labels.
+  #1867's fragment now names only the removal answer it renamed, and the shared setup fragment names the setup answers
+  and describes the quieter confirmation in user terms.
+- The shared header's doc comment (#1865) said only the add flow supplies a summary; setup from a host row does too, and
+  a summary replaces the status line either way.
+
+#### Review before merging
+
+No blockers. #1865 is a true refactor. Focus, Escape and focus return hold for every setup, removal and uninstall path,
+and the add dialog cannot submit on Enter. The tooltip suppression lasts only for the focus made when a confirmation
+opens and leaks no state to other dialogs. Notes left as they are:
+
+- The docs pages' alt text describes the new buttons, but the published screenshots still show the old layout until the
+  docs screenshots are next refreshed; the setup-plan callouts were placed for the old layout and need checking then.
+- The removal dialog's "don't ask again" hint is 10px on desktop, the smallest text in the app, to keep it on one line
+  in the 480px card; widening removal to 560px like add and uninstall would allow 11px.
+- The add dialog is a `form` with `role="dialog"`, which ARIA does not strictly allow on a form; browsers expose it as a
+  dialog anyway.
+- Some `rsx!` blocks in the add and setup dialogs are indented inconsistently; formatting does not check them.
+
+#### Checks
+
+- Run now, on the stack after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `e42c2a99`, 446 of 446);
+  the UI JavaScript tests (230 of 230); the docs website build; and on Chromium and WebKit with one worker and no
+  retries the provisioning, settings, terminal-multihost, tooltip and modal-layout specs (run `f53d6ca9`, 264 passed).
+- The earlier run of the same selection before the test fix (run `ccb06a1c`) failed as described above and is not
+  counted as a pass.
+- Not run: the Rust tests outside the UI crate, since only UI code, styles, tests and documentation changed.
+
+Nothing in the report above was made untrue by the landing.
