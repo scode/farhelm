@@ -1,18 +1,18 @@
 ---
 title: Claude
-description: Launching and resuming Claude sessions from Farhelm.
+description: "What is specific to running Claude Code under Farhelm."
 sidebar:
   order: 10
-  badge:
-    text: Stub
-    variant: caution
 ---
 
-:::note[Stub]
+The [support matrix](/docs/agents/) is the main reference for what Farhelm does with Claude. This page only adds what is
+specific to Claude.
 
-This page is planned but not written yet. The text below says what it will cover.
+## Gotchas and quirks
 
-:::
-
-Running Claude under Farhelm: what to install first, which launch choices Farhelm offers for it, how status and resume
-work, and its known quirks. How it compares with the other agents is in [Supported agents](/docs/agents/).
+- Claude may ask whether you trust a directory the first time it starts there. Answer it in the session's terminal; the
+  session launcher has no way to answer it for you, and Claude remembers your answer for that directory.
+- If you start Claude through a script or wrapper of your own (a [custom command](/docs/agents/custom-commands/)),
+  Farhelm can follow its conversation, and so restart it, only when Claude is the program the session started or one
+  level below it. A deeper chain of wrappers still runs Claude normally, but **restart** stays greyed out.
+  [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps tracking working.

@@ -1,38 +1,19 @@
 ---
 title: Pi
-description: Model choice, the YOLO-only permission mode, and conversation reporting for Pi.
+description: "What is specific to running Pi under Farhelm."
 sidebar:
   order: 10
 ---
 
-## Model choice
+The [support matrix](/docs/agents/) is the main reference for what Farhelm does with Pi. This page only adds what is
+specific to Pi.
 
-You can leave the model unset in Farhelm. Pi then uses its configured provider and model; Farhelm does not add
-`--provider` or `--model`. Choosing a model explicitly keeps Farhelm's OpenRouter launch arguments for that choice.
+## Gotchas and quirks
 
-## YOLO is the only permission mode
-
-Pi does not ask for permission before running shell commands or editing files, so Farhelm shows YOLO as its only
-permission option. Pi's `--approve` flag instead controls whether Pi trusts settings and extensions supplied by the
-project you opened; it does not enable approval prompts for the agent's actions. This was verified against Pi 0.85.1.
-
-The session launcher offers workspace trust separately from YOLO. Choosing true adds `--approve` for that launch;
-choosing false adds `--no-approve`. The last explicit choice from a successful user launch becomes the next new dialog's
-default; that remembered choice is shared with Codex and Muse, which offer workspace trust too. Farhelm does not write
-Pi's persistent trust settings.
-
-## Restart needs a saved conversation
-
-Pi saves conversations automatically; there is no separate Save step. A new conversation's file is written after the
-first assistant message. Send a prompt and let Pi respond; **restart** becomes available once Pi reports the saved
-conversation.
-
-Typing `/new` in Pi starts a new conversation. Until that conversation is saved, a restart no longer resumes the old
-one: restarting should not take you back to a conversation you already left.
-
-Farhelm checks the saved file before resuming. If it is missing or belongs to a different conversation, Farhelm refuses
-to restart the session; replace it to start over instead. This matters because Pi itself can silently start a new
-conversation when given a missing session file.
-
-The helper Farhelm uses to track Pi's active conversation is supplied at launch and is not saved with the conversation.
-Reopening a Pi conversation outside Farhelm does not require Farhelm to be installed.
+- Pi never asks before running commands or changing files, which is why YOLO is its only permission choice. Its
+  workspace trust choice is about something else: whether Pi loads the settings and extensions the opened project
+  supplies (`--approve` or `--no-approve`), not whether it asks about the agent's actions.
+- **restart** becomes available once Pi has saved the conversation, after its first reply. After `/new`, restart no
+  longer resumes the old conversation, and resumes the new one once Pi has saved it.
+- Restart refuses, rather than starting fresh, when the conversation's file has gone missing or now holds a different
+  conversation. Replace the session to start over.

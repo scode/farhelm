@@ -20,10 +20,12 @@ again; after a stop its terminal stays readable too. Only deleting a session rem
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
 conversation it can resume, because the agent cannot report one or none was captured, **restart** is greyed out and
 hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex conversation once
-you submit your first prompt, a Pi or OMP conversation after the agent's first reply, and a Claude conversation a few
-seconds after it starts. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/)
-says which agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for
-it; see [Custom commands](/docs/agents/custom-commands/).
+you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
+seconds after it starts, a Goose conversation as soon as it starts, and a Grok conversation after your first prompt,
+once [its hooks](/docs/agents/grok/#setup) are installed; **restart** can take a couple of seconds more to become
+available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
+agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
+[Custom commands](/docs/agents/custom-commands/).
 
 **restart with** resumes the conversation the same way, with different settings: another model, effort, permission
 mode, or workspace trust. It is greyed out whenever **restart** is. Enter on one of its choices picks it and restarts

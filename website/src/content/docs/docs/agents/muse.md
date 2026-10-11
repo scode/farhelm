@@ -1,19 +1,14 @@
 ---
 title: Muse
-description: Launching and resuming Muse sessions from Farhelm.
+description: "What is specific to running Muse under Farhelm."
 sidebar:
   order: 10
-  badge:
-    text: Stub
-    variant: caution
 ---
 
-:::note[Stub]
+The [support matrix](/docs/agents/) is the main reference for what Farhelm does with Muse. This page only adds what is
+specific to Muse.
 
-This page is planned but not written yet. The text below says what it will cover.
+## Gotchas and quirks
 
-:::
-
-Running Muse under Farhelm: what to install first, which launch choices Farhelm offers for it, how its status is
-detected, why Farhelm cannot resume its conversations (so its sessions cannot be restarted, only replaced), and its
-known quirks. How it compares with the other agents is in [Supported agents](/docs/agents/).
+- YOLO also makes Muse trust the session's directory, so choosing **false** for workspace trust changes nothing on a
+  YOLO launch, or when Muse's own settings already trust the directory.

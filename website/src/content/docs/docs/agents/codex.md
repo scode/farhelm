@@ -1,80 +1,25 @@
 ---
 title: Codex
-description: Launching, tracking, and resuming Codex conversations, including workspace trust and launcher chains.
+description: "What is specific to running Codex under Farhelm."
 sidebar:
   order: 10
 ---
 
-Farhelm tracks the foreground Codex conversation, and a restart resumes it once its exact transcript verifies the
-reported identity. A launch credential alone does not authorize a child process to replace that identity. Codex capture
-requires both an attributable reporting process and matching root-conversation metadata in the reported transcript.
+The [support matrix](/docs/agents/) is the main reference for what Farhelm does with Codex. This page only adds what is
+specific to Codex.
 
-## Workspace trust
+## Gotchas and quirks
 
-Codex may ask whether to trust the working directory at startup. The session launcher offers an explicit workspace-trust
-choice for Codex: true sets that directory's project trust to `trusted` for this run, false sets it to `untrusted`, and
-the default adds no override. Codex 0.155.1 accepted this per-run
-[`projects.<path>.trust_level`](https://developers.openai.com/codex/config-reference/) override in a focused prompt
-reproduction. Farhelm fills the exact target directory after a managed checkout is prepared, so the choice also applies
-to that path. It does not write Codex's persistent trust state or change its approval and sandbox policies. The existing
-hook-trust bypass is separate and does not establish directory trust.
-
-## Launchers and wrappers
-
-The process chain from Farhelm's reporting hook back to the owned terminal pane must contain exactly one native
-executable named `codex`. The hook must use Farhelm's installed hook command. Apart from the hook, that Codex process,
-and the pane's root process, every surviving process in the chain must be a shell directly invoking the hook as one
-simple command. Interactive shells, shell scripts, Node launchers and other unexplained intermediaries are refused. This
-restriction applies above Codex as well as between Codex and its hook.
-
-For example, these chains can pass the process check; the transcript must still pass its separate check:
-
-```text
-pane: Codex
-└── Farhelm hook
-
-pane: launcher
-└── Codex
-    └── sh -c '<farhelm> internal hook …'
-        └── Farhelm hook
-```
-
-This chain is refused because the Node launcher is an additional surviving intermediary:
-
-```text
-pane: shell script
-└── Node launcher
-    └── Codex
-        └── Farhelm hook
-```
-
-Declaring Codex as a [custom command](/docs/agents/custom-commands/)'s agent turns on the integration but does not
-bypass these checks. For a restart, give such a command a resume command in the shape Farhelm's own Codex launch uses,
-`codex resume {conversation} {farhelm_args}`. Prefer launchers that forward the injected arguments and replace
-themselves with the next program using `exec`; replaced processes do not add ancestry links. A package-manager
-installation is not automatically supported or refused: the surviving process chain decides. Renaming the native Codex
-executable also prevents attribution. See [agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
-[hook injection](/docs/agents/agent-hook-injection/) for how the integration is turned on.
-
-A rejected report leaves the saved conversation unchanged. On a new session with no accepted report, **restart** stays
-greyed out. Farhelm does not scan for a different Codex conversation to compensate for an unsupported launcher.
-
-## Identity changes and resume
-
-A legitimate foreground `/clear` can withdraw the old resume target before its new transcript exists. Only that exact
-new transcript can make the replacement resumable, once Codex's end-of-turn `Stop` hook confirms it. Farhelm does not
-poll for the file between reports. Nested native Codex processes and reports from delegated shells are refused; root
-transcript metadata also separates conversations that share a process.
-
-Historical valid `codex:` locators remain subject to exact-record verification. Historical bare IDs are retained but
-cannot be resumed, so **restart** stays greyed out for those sessions and replace starts one over. Missing or changed
-evidence refuses the restart instead of silently starting fresh. Farhelm checks saved files when you choose **restart**,
-so the button can remain available after a file was deleted. A missing file withdraws Resume and adds a notification; a
-file holding a different conversation withdraws it without one. A passing read error leaves Resume available and asks
-you to try again.
-
-NOTE: Relaunch Codex sessions that were already running before this update if you want to resume a conversation begun
-with `/clear`. Those processes still have only the old session-start hook; they cannot confirm a pending new transcript.
-
-These checks prevent accidental reporting through inherited credentials. They are not a security boundary against
-another process controlled by the same Unix user that deliberately imitates the permitted process and record shapes.
+- Codex prints a warning about a hook at the start of every session Farhelm launches. That hook is how Farhelm learns
+  which conversation you are in, and the warning is harmless.
+- **restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be
+  restarted; replace it instead.
+- Workspace trust in the session launcher applies to that one launch only: **true** trusts the session's directory and
+  **false** marks it untrusted, without changing what Codex has saved about that directory.
+- After `/clear`, restart no longer resumes the old conversation, and it resumes the new one once Codex has finished its
+  next reply.
+- If you start Codex through a launcher of your own (a [custom command](/docs/agents/custom-commands/)), Farhelm can
+  follow its conversation only when that launcher replaces itself with `codex` (`exec codex …`) or is a plain shell
+  command. A Node launcher, a shell script that stays running, or a renamed `codex` binary still runs Codex normally,
+  but **restart** stays greyed out. Give such a command the resume command `codex resume {conversation} {farhelm_args}`.
+  [Agent wrappers](/docs/agents/agent-wrappers/) has the details.

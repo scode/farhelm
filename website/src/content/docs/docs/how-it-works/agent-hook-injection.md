@@ -2,8 +2,15 @@
 title: Agent hook injection
 description: How Farhelm's conversation reporters get into each agent's launch, and how to turn them off.
 sidebar:
-  order: 70
+  order: 4
 ---
+
+:::caution[Subject to change]
+
+How Farhelm hooks into agents is among the parts of Farhelm most likely to change from one release to the next: the
+details of how it works, and what is and is not supported, may change.
+
+:::
 
 Farhelm uses conversation reporters for Claude, Codex, Goose, Pi, OMP, and Grok so a restart resumes the conversation
 you were actually in after a `/clear` or `/new`, instead of the one you threw away. Claude, Codex, Goose, Pi, and OMP
@@ -82,8 +89,8 @@ Codex talking, not the reporter.
 ## Which launches get a reporter
 
 Codex has additional process-chain restrictions even when its flags are in place; see
-[Codex launchers and wrappers](/docs/agents/codex/#launchers-and-wrappers). Grok has its own native process and
-`--no-leader` requirements in [the Grok guide](/docs/agents/grok/#launching).
+[Codex's gotchas](/docs/agents/codex/#gotchas-and-quirks). Grok has its own native process and `--no-leader`
+requirements in [the Grok guide](/docs/agents/grok/#setup).
 
 - **Claude, Codex, Goose, Pi or OMP picked in the session launcher** always gets its reporter, unless
   [you turned it off](#turning-it-off): Farhelm builds that command itself and knows where the reporter goes. Cursor,
@@ -96,8 +103,8 @@ Codex has additional process-chain restrictions even when its flags are in place
   forward the arguments to the agent, as [Agent wrappers](/docs/agents/agent-wrappers/) describes.
 - **A custom command with no declared agent** gets no reporter at all, whatever its first word is: Farhelm never decides
   from a command line which agent it runs.
-- **Grok** reports through the three hooks you configure yourself in
-  [the Grok guide](/docs/agents/grok/#configure-the-three-hooks); Farhelm injects no Grok hook.
+- **Grok** reports through the three hooks you configure yourself in [the Grok guide](/docs/agents/grok/#setup); Farhelm
+  injects no Grok hook.
 
 A session started before Farhelm 0.22 from a typed command line or a profile (a feature since removed) keeps the rules
 it was created under: Farhelm still adds its arguments where it used to, at the end of the command, and still leaves

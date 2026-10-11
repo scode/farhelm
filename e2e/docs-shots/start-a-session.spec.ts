@@ -82,10 +82,11 @@ test("destination", async ({ page, request }) => {
   );
   await director.callout(
     folders,
-    "Directories you launched in recently on this host, newest first. Local home is your home on the machine in front of you.",
-    { side: "left", dy: 130 },
+    "Opens on a click or ↓: up to eight recent directories on this host, newest first; typing filters them. home is ~ on that host, local home ~ on the machine in front of you.",
+    { side: "left", dy: 100 },
   );
-  await shot(page, `${PAGE}/destination`, [destination]);
+  // The folder list hangs below the destination part, so it is cropped in on its own.
+  await shot(page, `${PAGE}/destination`, [destination, folders]);
 });
 
 /**

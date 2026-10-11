@@ -408,3 +408,173 @@ header.header {
     grid-template-columns: 1fr;
   }
 }
+
+/* The support matrix on the Supported agents page (src/content/docs/docs/agents/index.mdx): agents across
+   the top, features down the side in three groups, and the details of a feature or a cell in a bubble that opens
+   on hover or keyboard focus. The bubbles are CSS only, from each element's data-tip, so the page needs no script. */
+/* No scroll container on wide screens: one would clip the tooltips. */
+.agent-matrix-wrap {
+  margin-top: 1.2rem;
+}
+@media (max-width: 50rem) {
+  .agent-matrix-wrap {
+    overflow-x: auto;
+  }
+}
+
+.agent-matrix {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.86rem;
+  background: none !important;
+  border: none !important;
+}
+.agent-matrix th, .agent-matrix td {
+  border-bottom: 1px solid var(--sl-color-hairline);
+  padding: 0.4rem 0.35rem;
+  text-align: center;
+}
+.agent-matrix thead th {
+  font-family: var(--sl-font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--sl-color-gray-2);
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+.agent-matrix .agent-matrix-label {
+  text-align: left;
+  font-family: var(--sl-font);
+  font-size: 0.86rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--sl-color-gray-2);
+  white-space: nowrap;
+  padding-inline-start: 0.6rem;
+}
+.agent-matrix .agent-matrix-t0 {
+  background: color-mix(in srgb, var(--sl-color-accent) 12%, transparent);
+}
+.agent-matrix thead .agent-matrix-t0 {
+  color: var(--sl-color-white);
+}
+
+.agent-matrix .agent-matrix-group th {
+  text-align: left;
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-accent-high);
+  border-bottom: 2px solid var(--sl-color-accent);
+  padding-top: 1rem;
+}
+
+.agent-matrix td {
+  font-weight: 700;
+  font-size: 1rem;
+}
+.agent-matrix-y {
+  color: var(--farhelm-green, #3f9e58);
+}
+.agent-matrix-p {
+  color: #d9a43a;
+}
+.agent-matrix-n {
+  color: var(--sl-color-gray-4);
+}
+:root[data-theme="light"] .agent-matrix-y {
+  color: #2f8a46;
+}
+:root[data-theme="light"] .agent-matrix-p {
+  color: #a8721a;
+}
+
+/* Hover details: a dotted underline marks a cell that has them. The bubble
+   opens below the cell on hover or keyboard focus. */
+.agent-matrix-cell {
+  position: relative;
+  display: inline-block;
+  outline: none;
+}
+.agent-matrix-has {
+  cursor: help;
+  border-bottom: 1px dotted currentColor;
+}
+.agent-matrix-has::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 6px;
+  background: var(--sl-color-bg-nav, #18222e);
+  color: var(--sl-color-white);
+  font-family: var(--sl-font);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  z-index: 10;
+}
+.agent-matrix-has:hover::after, .agent-matrix-has:focus-visible::after {
+  opacity: 1;
+}
+/* The rightmost columns open their bubble leftward, so it stays on screen. */
+.agent-matrix td:nth-last-child(-n + 3) .agent-matrix-has::after, .agent-matrix th:nth-last-child(-n + 3) .agent-matrix-has::after {
+  left: auto;
+  right: -0.4rem;
+  transform: none;
+}
+
+.agent-matrix-legend {
+  font-size: 0.82rem;
+  color: var(--sl-color-gray-3);
+  margin-top: 0.5rem;
+}
+
+/* Feature names: an "i" badge after each says there is more on hover; their
+   bubble opens to the right, into the table, rather than centered. */
+.agent-matrix-lab {
+  border-bottom: none;
+}
+.agent-matrix-lab::after {
+  left: 0;
+  transform: none;
+  width: 19rem;
+}
+.agent-matrix-i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin-inline-start: 0.35rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--sl-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-style: normal;
+  color: var(--sl-color-gray-3);
+  vertical-align: 0.1em;
+}
+.agent-matrix-lab:hover, .agent-matrix-lab:focus-visible {
+  color: var(--sl-color-white);
+}
+.agent-matrix-lab:hover .agent-matrix-i, .agent-matrix-lab:focus-visible .agent-matrix-i {
+  color: var(--sl-color-accent-high);
+}
+.agent-matrix-i-inline {
+  margin-inline-start: 0;
+}

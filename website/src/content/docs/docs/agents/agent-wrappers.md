@@ -72,8 +72,8 @@ cannot be restarted at all, only replaced.
 
 Farhelm puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes none it stands
 for nothing. They are what turns the agent's conversation reporting on, as
-[Agent hook injection](/docs/agents/agent-hook-injection/) describes. A resume is no exception: the resume command is a
-complete command line in its own right — Farhelm fills in its `{conversation}` and `{farhelm_args}` and runs THAT
+[Agent hook injection](/docs/how-it-works/agent-hook-injection/) describes. A resume is no exception: the resume command
+is a complete command line in its own right — Farhelm fills in its `{conversation}` and `{farhelm_args}` and runs THAT
 instead of the start command, which is why the wrapper has to appear in it too.
 
 So Farhelm's arguments are what a wrapper must forward, and one that treats everything after its own arguments as the

@@ -67,7 +67,8 @@ The template keeps the current **agent** or **command** tab and only the choices
 
 Choose a template's row to open its editor. **duplicate** opens an unsaved copy with a new name. Changes are saved only
 when you choose **save**; leaving an edited template asks whether to save, discard, or keep editing. At phone width, **‹
-templates** returns to the list.
+templates** returns to the list. A template whose command contains hidden or control characters still launches, but
+Farhelm refuses to save changes to it until you remove them.
 
 Changing **switches launcher to** or the **agent type** can make a field that is already set no longer fit. It stays
 visible with a message: change or remove it before saving. A stored template that sets agent or command choices

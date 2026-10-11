@@ -12,8 +12,8 @@ how to reach you. Then select **send**.
 Your feedback goes privately to the maintainer. It is not a public issue, and you need no account for it. If you would
 rather discuss something in the open, you can still [open an issue on GitHub](https://github.com/scode/farhelm/issues).
 
-Nothing is sent until you select **send**. Below your message, the dialog shows everything else that goes with it, and
-nothing else does:
+Nothing is sent until you select **send**, and once it has started, closing the window does not stop it. Below your
+message, the dialog shows everything else that goes with it, and nothing else does:
 
 - the Farhelm version shown at the top of the sidebar;
 - whether you are using the desktop app or the web UI;
