@@ -1574,14 +1574,13 @@ test.describe("multi-host", () => {
     await expect(dialog.locator(".host-settings-version")).toHaveText("Farhelm 0.1.0");
     await expect(dialog.locator(".host-settings-mark [data-glyph=cloud]")).toHaveCount(1);
     await test.info().attach("host-settings-remote", { body: await dialog.screenshot(), contentType: "image/png" });
-    // A short window must scroll the complete dialog to its footer rather
-    // than shrink the grouped sections into overlapping controls. The long
+    // The settings body owns short-window scrolling; the footer stays in
+    // view without bringing it into view through a scroll helper. The long
     // destination still fits without a horizontal scroll at narrow width.
     const originalViewport = page.viewportSize()!;
     await page.setViewportSize({ width: 360, height: 420 });
     expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
     const close = dialog.locator(".host-settings-close");
-    await close.scrollIntoViewIfNeeded();
     const footerBox = (await close.boundingBox())!;
     expect(footerBox.y).toBeGreaterThanOrEqual(0);
     expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(420);
@@ -1616,6 +1615,90 @@ test.describe("multi-host", () => {
       "closing the dialog releases the page",
     ).toBe(false);
   });
+
+  for (const longDestination of [false, true]) {
+  /**
+   * Closing controls must remain usable while the settings themselves scroll.
+   * A short, narrow window and a remote's Appearance controls establish real
+   * overflow; hit testing catches a footer covered by compressed content even
+   * when its bounding box is still inside the viewport. Keyboard traversal
+   * must reveal a field below the fold through the same body scroll region.
+   */
+  test(`host-settings-pinned-controls: ${longDestination ? "unbounded destination" : "ordinary heading"} keeps controls exposed`, async ({ page }) => {
+    // SSH config aliases have no product length cap. A long accepted name
+    // must not consume the pinned header's entire height.
+    const destination = longDestination ? "settings-layout-" + "a".repeat(1024) : "settings-layout.example.invalid";
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9014, kind: "ssh", destination, name: destination,
+          identity: "settings-layout-identity", incarnation: 1,
+          remote_farhelm: null, remote_state_dir: null,
+          state: { phase: "connected", identity: "settings-layout-identity", build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 } },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.setViewportSize({ width: 360, height: 420 });
+    await page.goto("/");
+    const row = hostRowByName(page, destination);
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    const dialog = page.locator(".host-settings-refreshed");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute("aria-label", `host settings · ${destination}`);
+    await expect(dialog.locator('[data-setting="destination"] .host-settings-value')).toHaveText(destination);
+    await expect(dialog.locator(".host-settings-title")).toHaveText(destination);
+    const body = dialog.locator(".host-settings-body");
+    expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1),
+      "remote settings overflow the short body").toBe(true);
+    expect(await body.evaluate((node) => getComputedStyle(node).overflowY)).toBe("auto");
+    const dismiss = dialog.locator(".host-settings-dismiss");
+    const close = dialog.locator(".host-settings-close");
+    const note = dialog.locator(".host-settings-footer > span");
+    await expect(note).toHaveText("changes save as you make them");
+    await page.mouse.move(0, 0);
+
+    /** Full bounds and a center hit prove the visible control is not covered. */
+    async function expectExposed(control: Locator) {
+      await expect.poll(() => control.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight &&
+          box.left >= 0 && box.right <= innerWidth && hit !== null && node.contains(hit);
+      }), { message: "pinned control is wholly in the viewport and uncovered" }).toBe(true);
+    }
+
+    await body.evaluate((node) => { node.scrollTop = 0; });
+    for (const control of [dismiss, close, note]) await expectExposed(control);
+    const headerTop = (await dismiss.boundingBox())!.y;
+    const footerTop = (await close.boundingBox())!.y;
+    await test.info().attach("host-settings-pinned-top", { body: await page.screenshot(), contentType: "image/png" });
+    await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    expect(await body.evaluate((node) => node.scrollTop), "the body actually moved").toBeGreaterThan(0);
+    for (const control of [dismiss, close, note]) await expectExposed(control);
+    expect((await dismiss.boundingBox())!.y).toBe(headerTop);
+    expect((await close.boundingBox())!.y).toBe(footerTop);
+    expect(await dialog.evaluate((node) => node.scrollTop), "the card does not scroll").toBe(0);
+    await test.info().attach("host-settings-pinned-bottom", { body: await page.screenshot(), contentType: "image/png" });
+
+    // Shift-Tab from the fixed footer reaches the final permission checkbox.
+    // Reset the body first so its reveal cannot be inherited from the pointer test.
+    const lastSetting = body.getByRole("checkbox").last();
+    await close.focus();
+    await expect(close).toBeFocused();
+    await body.evaluate((node) => { node.scrollTop = 0; });
+    await page.keyboard.press("Shift+Tab");
+    await expect(lastSetting).toBeFocused();
+    await expectExposed(lastSetting);
+    expect(await body.evaluate((node) => node.scrollTop), "keyboard focus scrolls the body").toBeGreaterThan(0);
+    for (const control of [dismiss, close, note]) await expectExposed(control);
+  });
+  }
 
   // A refused save must not throw away what the user typed, and its reason
   // must show where the user is looking: in the dialog, under the field,
