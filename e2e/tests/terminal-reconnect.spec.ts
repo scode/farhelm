@@ -638,6 +638,7 @@ test("manual-reconnect-is-offered-during-the-first-rung", async ({ page, request
 // backoff rung; see that helper for the flake that taught us the
 // difference.
 test("takeover-during-backoff-does-not-steal-the-session", async ({
+  browserName,
   browser,
   timeline,
   page,
@@ -743,6 +744,32 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
         page.locator("#terminal"),
         "the screen the user had must still be on screen after the refusal",
       ).toContainText(`echo:${marker}`);
+      // This screen has no island: copy must come from the snapshot's own
+      // listeners, and selecting it must not reopen input or transport.
+      // WebKit cannot grant clipboard-read permission; record the actual
+      // writeText argument there instead of pretending to read it back.
+      if (browserName === "chromium") {
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      } else {
+        await page.evaluate(() => {
+          (window as any).__snapshotCopies = [];
+          navigator.clipboard.writeText = async (text) => { (window as any).__snapshotCopies.push(text); };
+        });
+      }
+      const row = page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:${marker}` }).last();
+      await expect(row).toBeVisible();
+      const box = await row.boundingBox();
+      expect(box, "the held marker row must be painted before selecting it").not.toBeNull();
+      await page.mouse.move(box!.x + 1, box!.y + box!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box!.x + box!.width - 1, box!.y + box!.height / 2, { steps: 15 });
+      await page.mouse.up();
+      if (browserName === "chromium") {
+        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(`echo:${marker}`);
+      } else {
+        await expect.poll(() => page.evaluate(() => (window as any).__snapshotCopies.join("\n"))).toContain(`echo:${marker}`);
+      }
+      expect(await page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {}))).toEqual([]);
   } finally {
     await second.close();
   }

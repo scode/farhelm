@@ -28,6 +28,44 @@ async function openSwitcher(page: Page, mac = false) {
 
 test.afterEach(async ({ request }) => { await resetPreferences(request); });
 
+/** A switcher-known template is unavailable, not deleted, if the launcher's separate catalog read fails. */
+test("opening a template reports the launcher's catalog read failure", async ({ page, request }) => {
+  const name = `switch-template-read-failure-${Date.now()}`;
+  const stored = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { kind: "agent", agent: "codex" } });
+  expect(stored.ok()).toBe(true);
+  // This fixture fails only the catalog read, not the helm's build identity.
+  const templatesReply = await request.get("/api/templates");
+  expect(templatesReply.ok()).toBe(true);
+  const helmBuild = templatesReply.headers()["x-farhelm-build"];
+  expect(helmBuild).toBeTruthy();
+  let reads = 0;
+  await page.route("**/api/templates", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    if (++reads === 1) await route.continue();
+    else await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "launcher template list unavailable" });
+  });
+  try {
+    await page.goto("/");
+    const dialog = await openSwitcher(page);
+    await dialog.getByRole("combobox").fill(`tl:${name}`);
+    const option = dialog.getByRole("option");
+    await expect(option).toHaveCount(1);
+    await expect(option).toContainText(name);
+    await expect(option).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Enter");
+    const form = page.locator(".create-session-form");
+    const error = form.locator(".launch-composer-template-error");
+    await expect(error).toContainText("couldn't load templates");
+    await expect(error).toContainText("launcher template list unavailable");
+    await expect(error).not.toContainText("deleted");
+    expect(reads).toBe(2);
+    await expect(form.getByLabel("name (optional)")).toBeEnabled();
+  } finally {
+    await page.unroute("**/api/templates");
+    expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+  }
+});
+
 for (const mac of [false, true]) {
   /**
    * Real binary input frames distinguish taking the chord from merely

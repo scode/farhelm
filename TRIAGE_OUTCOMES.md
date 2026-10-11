@@ -10405,7 +10405,9 @@
   lost-reply retry through Enter on the selected choice, asserting that both requests carry the same key and exactly one
   session exists. If the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting
   those criteria, stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
+- Execution: complete: change `xoumlpxsssqmxtkyuvnpznvsuxyrkyul`, bookmark
+  `plan/launcher-and-terminal-copy-fixes/01-launcher-terminal-copy`, PR
+  [#1908](https://github.com/scode/farhelm/pull/1908/changes).
 
 ## restored-terminal-snapshots-lose-select-to-copy.md
 
@@ -10430,7 +10432,9 @@
   duplicate more than a small policy, no longer fits. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
+- Execution: complete: change `xoumlpxsssqmxtkyuvnpznvsuxyrkyul`, bookmark
+  `plan/launcher-and-terminal-copy-fixes/01-launcher-terminal-copy`, PR
+  [#1908](https://github.com/scode/farhelm/pull/1908/changes).
 
 ## successful-notification-reads-leave-bell-unread-under.md
 
@@ -10525,7 +10529,9 @@
   surface the failure rather than silently do nothing. If the fix turns out to need significant new complexity or a
   refactor, or otherwise stops fitting those criteria, stop and bring it back to the user unfixed. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/launcher-and-terminal-copy-fixes.md`.
+- Execution: complete: change `xoumlpxsssqmxtkyuvnpznvsuxyrkyul`, bookmark
+  `plan/launcher-and-terminal-copy-fixes/01-launcher-terminal-copy`, PR
+  [#1908](https://github.com/scode/farhelm/pull/1908/changes).
 
 ## ship-font-license-embedded-ui.md
 

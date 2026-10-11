@@ -139,6 +139,47 @@ async function enterCreateChoice(form: Locator, control: Locator, bodies: Record
   return bodies[before];
 }
 
+/**
+ * Retrying unchanged choices retains one intent, but each real change
+ * retires it. Stamped refusals keep the form open without spawning agents,
+ * and identify each completed attempt before its key is compared.
+ */
+test("launcher choice retries preserve keys only for unchanged values", async ({ page, request }) => {
+  const { form, bodies } = await observeChoiceCreates(page, request);
+  const codex = form.getByRole("button", { name: "Codex", exact: true });
+  // Trust is remembered by the shared helm. Set and observe the starting
+  // value before minting a key, so choosing true below is always a real edit.
+  await codex.click();
+  const trust = form.locator(".launch-composer-trust-choice");
+  await trust.getByRole("button", { name: "false", exact: true }).click();
+  await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(trust.getByRole("button", { name: "true", exact: true })).toHaveAttribute("aria-pressed", "false");
+  let previous = await enterCreateChoice(form, codex, bodies);
+  expect(previous.intent_key).toBeTruthy();
+  const unchanged = [
+    codex,
+    form.getByRole("tab", { name: "agent", exact: true }),
+    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }),
+  ];
+  for (const control of unchanged) {
+    const retry = await enterCreateChoice(form, control, bodies);
+    expect(retry.intent_key).toBe(previous.intent_key);
+    previous = retry;
+  }
+  for (const control of [
+    form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }),
+    form.locator(".launch-composer-trust-choice").getByRole("button", { name: "true", exact: true }),
+    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }),
+  ]) {
+    const changed = await enterCreateChoice(form, control, bodies);
+    expect(changed.intent_key).toBeTruthy();
+    expect(changed.intent_key).not.toBe(previous.intent_key);
+    const retry = await enterCreateChoice(form, control, bodies);
+    expect(retry.intent_key).toBe(changed.intent_key);
+    previous = retry;
+  }
+});
+
 /** Choice buttons must apply their value before submission, including a tab's dormant draft. */
 test("launcher choice-button Enter applies then launches", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request);

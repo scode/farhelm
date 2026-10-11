@@ -36,8 +36,6 @@ triage.
 - `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
 - `automatic-updates-overwrite-newer-manual-installation.md` — A delayed automatic update can undo a newer manual
   installation.
-- `retrying-through-unchanged-permission-choice-launch-duplicate.md` — An unchanged permission choice can make a launch
-  retry create a duplicate.
 - `newer-completed-run-leaves-older-update-permanently.md` — An old update can remain busy after a newer run has
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
@@ -63,7 +61,6 @@ triage.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
 
-- `template-catalog-error.md` — Template discovery failure looks like an empty catalog.
 - `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
 - `publisher-copy-race.md` — Screenshot publication may certify pixels different from those it checked.
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
@@ -133,7 +130,6 @@ triage.
   proof of no writer leak.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
-- `restored-terminal-snapshots-lose-select-to-copy.md` — Restored terminal snapshots no longer copy selected text.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
 - `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.

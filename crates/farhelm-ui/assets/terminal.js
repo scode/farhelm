@@ -1254,7 +1254,50 @@
     if (!tomb) return;
     tombstones.delete(el);
     publishTombstones();
+    tomb.stopCopyOnSelect();
     tomb.term.dispose();
+  }
+
+  /**
+   * Restore only local selection copying on a frozen recovery snapshot.
+   *
+   * The old island's listeners are gone. This lifetime belongs to the
+   * tombstone instead, with no input, resize or transport callbacks. Keep
+   * the live terminal's press-time policy, but omit program-copy guidance
+   * and OSC 52 grace: there is no attached program to answer the gesture.
+   */
+  function installSnapshotCopyOnSelect(el, term) {
+    let pressed = null;
+    const mouseDown = (event) => {
+      pressed = {
+        trackingAtPress: !!(term.modes && term.modes.mouseTrackingMode !== "none"),
+        forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
+      };
+    };
+    const mouseUp = () => {
+      if (!pressed) return;
+      const press = pressed;
+      pressed = null;
+      // xterm finalizes selection after mouseup dispatch. Burial can happen
+      // before this callback, so never inspect a disposed or replaced screen.
+      setTimeout(() => {
+        if (tombstones.get(el)?.term !== term) return;
+        const hasSelection = term.hasSelection();
+        const selectionText = hasSelection ? term.getSelection() : "";
+        if (window.farhelmCopyOnSelect.copySelectionOnMouseUp({
+          hasSelection,
+          selectionText,
+          ...press,
+        })) enqueueClipboardWrite(selectionText);
+      }, 0);
+    };
+    term.element.addEventListener("mousedown", mouseDown);
+    document.addEventListener("mouseup", mouseUp);
+    return () => {
+      pressed = null;
+      term.element.removeEventListener("mousedown", mouseDown);
+      document.removeEventListener("mouseup", mouseUp);
+    };
   }
 
   // Test-only mirror of `tombstones`' keys (the e2e terminal spec family),
@@ -1739,6 +1782,7 @@
         term: held,
         path: controller.path,
         gen: controller.gen,
+        stopCopyOnSelect: installSnapshotCopyOnSelect(el, held),
       });
       publishTombstones();
     } else if (held) {

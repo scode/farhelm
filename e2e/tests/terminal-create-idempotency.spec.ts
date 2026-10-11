@@ -33,6 +33,53 @@ async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
 
 installTerminalSuiteHooks();
 
+/**
+ * Enter on an already-selected choice is a retry, not a new launch intent.
+ * Losing a successful reply distinguishes server deduplication from merely
+ * sending two requests that happened to fail before creating anything.
+ */
+test("Enter on an unchanged permission retries a lost reply with one key and one session", async ({ page, request }) => {
+  const title = `intent-choice-retry-${Date.now()}`;
+  const keys: string[] = [];
+  let firstStatus = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    keys.push(route.request().postDataJSON().intent_key);
+    if (keys.length === 1) {
+      firstStatus = (await route.fetch()).status();
+      await route.abort();
+    } else await route.continue();
+  });
+  try {
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("name (optional)").fill(title);
+    const choice = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true });
+    await choice.click();
+    await expect(choice).toHaveAttribute("aria-pressed", "true");
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".create-session-error")).toBeVisible();
+    expect(firstStatus, "the dropped reply must follow an actual successful create").toBe(200);
+    await expect(choice).toBeEnabled();
+    await choice.focus();
+    await expect(choice).toBeFocused();
+    await choice.press("Enter");
+    const id = await sessionIdFor(rowByTitle(page, title));
+    await waitForSessionRevealed(page, id);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    const listing = await (await request.get("/api/sessions")).json();
+    expect(listing.sessions.filter((session: any) => session.title === title)).toHaveLength(1);
+  } finally {
+    await cleanUpSessionsTitled(request, title);
+  }
+});
+
 test("a create whose reply is lost is retried with the same key and yields one session", async ({
   page,
   request,
