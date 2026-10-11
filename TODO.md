@@ -153,16 +153,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
   without taking the rest with it.
 
-- **Fix the layout of the host setup confirmation.** When adding a host that Farhelm would set up, the dialog that shows
-  the setup plan and asks "yes" / "yes, and don't ask in the future" / "cancel" looks broken. It has no heading, so it
-  opens straight into the plan with nothing saying what is being asked. Plan lines that wrap continue at the left edge
-  with no hanging indent, so a wrapped step reads like a separate step. The three answers come out at three different
-  sizes on no common baseline: "yes" is small, the middle answer is in larger type and wraps onto two lines, and cancel
-  is larger again. The "You can turn this back on with the gear…" note sits under the middle button only, wraps, and
-  pushes cancel down off the row. In the screenshot this came from, cancel's tooltip also covers part of the middle
-  button; cancel is focused when the dialog opens, but it is unclear whether the tooltip showed because of that focus or
-  because of a hover. Details of the redesign to be worked out. Plan: `plans/queue/host-dialogs-redesign.md`.
-
 - **Send ntfy.sh notifications when an agent is blocked.** Today the only alert that a session needs the user (it starts
   waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
   when no Farhelm window is in front of them. Support sending a notification through ntfy.sh (a topic the user

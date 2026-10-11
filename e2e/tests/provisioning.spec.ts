@@ -24,6 +24,7 @@ import {
   type FeedStub,
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { expectKeyboardTooltip, expectQuietInitialCancel, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -523,6 +524,8 @@ for (const phone of [false, true]) {
   /**
    * Keyboard submission must keep the same dialog width and land on Cancel,
    * while the plan remains readable and copyable at both supported layouts.
+   * Initial focus keeps its ring without a covering tooltip, but subsequent
+   * hover and keyboard navigation must still explain the answers.
    * Dismissing through the new header must retire the offer without a write.
    */
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
@@ -538,6 +541,7 @@ for (const phone of [false, true]) {
     await expectHostAnswers(dialog, ["cancel", "add"], phone);
     await testInfo.attach(`host-add-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     const before = (await dialog.boundingBox())!;
+    await expectKeyboardTooltip(page, dialog.getByRole("button", { name: "cancel", exact: true }));
     const reply = page.waitForResponse((response) => response.url().endsWith("/api/hosts/probe") && response.request().method() === "POST");
     await page.locator(".add-host-ssh").fill(remote);
     await expect(page.locator(".add-host-ssh")).toBeFocused();
@@ -548,10 +552,12 @@ for (const phone of [false, true]) {
     if (planned.result !== "provisionable") throw new Error("fixture did not offer setup");
     await expect(dialog.getByRole("heading")).toHaveText(`set up host · ${remote}`);
     await expect(dialog.getByRole("button", { name: "cancel", exact: true })).toBeFocused();
+    await expectQuietInitialCancel(page, dialog.getByRole("button", { name: "cancel", exact: true }));
     expect((await dialog.boundingBox())!.width).toBe(before.width);
     await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
     await expectPlanCopyAndIndent(dialog.locator(".provisioning-plan"), planned.confirmation);
     await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+    await expectCancelTooltipReturns(page, dialog.getByRole("button", { name: "cancel", exact: true }), dialog.getByRole("button", { name: "set up", exact: true }));
     await dialog.getByRole("button", { name: "cancel host setup", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
@@ -728,6 +734,8 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
  * every later host on an answer the user had just cancelled. Specifies: after
  * Cancel then the permanent answer in one burst, no setup request is sent and
  * the preference is unchanged; a genuine answer afterwards still runs setup.
+ * The separately mounted row question also keeps initial Cancel focus quiet
+ * without losing later keyboard or pointer help.
  */
 test("cancel and a permanent answer on a host row's setup question change no preference", async ({
   page,
@@ -779,12 +787,18 @@ test("cancel and a permanent answer on a host row's setup question change no pre
 
   // The row's header owns a separate dismissal handler from Add's. Prove
   // that it returns focus and retires the offer before the positive answer.
-  await openHostMenu(row);
-  await row.locator(".provisioning-rerun").click();
+  // Establish keyboard help on the persistent toggle before opening its
+  // menu: Tab from a menu item dismisses the menu and removes that item.
+  await expectKeyboardTooltip(page, row.locator(".host-row-menu"));
+  await row.locator(".host-row-menu").press("Enter");
+  await expect(row.locator(".host-row-menu-panel")).toBeVisible();
+  await row.locator(".provisioning-rerun").press("Enter");
   await expect(question).toBeVisible();
+  await expectQuietInitialCancel(page, question.getByRole("button", { name: "cancel", exact: true }));
   await expect(question.getByRole("heading")).toHaveText(`set up host · ${remote}`);
   await expectHostAnswers(question, ["cancel", "set up, don't ask again", "set up"], false);
   await testInfo.attach("host-row-setup", { body: await question.screenshot(), contentType: "image/png" });
+  await expectCancelTooltipReturns(page, question.getByRole("button", { name: "cancel", exact: true }), question.getByRole("button", { name: "set up", exact: true }));
   await question.getByRole("button", { name: "cancel host setup", exact: true }).click();
   await expect(question).toHaveCount(0);
   await expect(row.locator(".host-row-menu")).toBeFocused();

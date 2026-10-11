@@ -159,7 +159,12 @@ fn install_dialog() {
 /// first editor, but removal must start on Cancel so an accidental Enter
 /// cannot immediately forget the host.
 fn install_remove_dialog() {
-    install_dialog_with_initial_focus(".host-settings-close");
+    install_dialog_with_focus(
+        DIALOG_SELECTOR,
+        ".host-settings-close",
+        Some(".host-cancel-edit, .host-settings-close"),
+        true,
+    );
 }
 
 /// Focus and isolate the add-host dialog, whose first control is the SSH
@@ -176,10 +181,11 @@ pub(crate) fn install_add_dialog() {
 /// the removal dialog does: the confirm button removes Farhelm from a host,
 /// so a stray Enter must land on the safe answer.
 pub(crate) fn install_uninstall_dialog() {
-    install_dialog_with_selector(
+    install_dialog_with_focus(
         UNINSTALL_DIALOG_SELECTOR,
         ".uninstall-cancel",
         Some(".uninstall-cancel"),
+        true,
     );
 }
 
@@ -192,9 +198,20 @@ pub(crate) fn return_focus_to_add_button() {
     ));
 }
 
-/// Put the safe cancel action first when probing changes into a setup offer.
+/// Focus the setup offer's safe answer without opening its hover help.
+///
+/// Keyboard submission must retain Cancel's visible ring and safe Enter
+/// behavior. The tooltip hook suppresses only this automatic handoff, so
+/// later deliberate hover or keyboard navigation still explains the answer.
 pub(crate) fn focus_add_cancel() {
-    document::eval("document.querySelector('.add-host-cancel')?.focus({ preventScroll: true });");
+    document::eval(
+        r#"(() => {
+            const cancel = document.querySelector('.add-host-cancel');
+            if (!cancel) return;
+            if (window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(cancel);
+            else cancel.focus({ preventScroll: true });
+        })();"#,
+    );
 }
 
 /// Apply the shared modal setup and choose the first control explicitly.
@@ -216,6 +233,20 @@ pub(crate) fn install_dialog_with_selector(
     initial_focus: &str,
     escape_selector: Option<&str>,
 ) {
+    install_dialog_with_focus(dialog_selector, initial_focus, escape_selector, false);
+}
+
+/// Choose whether a host confirmation's automatic focus also opens help.
+///
+/// Ordinary settings and unrelated modals keep their existing focus behavior.
+/// Only removal and uninstall opt into quiet initial Cancel focus here; setup
+/// uses the same tooltip hook when its already-mounted form receives an offer.
+fn install_dialog_with_focus(
+    dialog_selector: &str,
+    initial_focus: &str,
+    escape_selector: Option<&str>,
+    quiet_initial_focus: bool,
+) {
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let initial_focus = serde_json::to_string(initial_focus).expect("a string always serializes");
     document::eval(&format!(
@@ -228,7 +259,11 @@ pub(crate) fn install_dialog_with_selector(
                     if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
                 }});
             }}
-            (dialog.querySelector({initial_focus}) ?? dialog).focus({{ preventScroll: true }});
+            const initial = dialog.querySelector({initial_focus}) ?? dialog;
+            // Focus safety does not depend on the tooltip asset finishing load.
+            // A later installation observes new events, not this past focus.
+            if ({quiet_initial_focus} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(initial);
+            else initial.focus({{ preventScroll: true }});
         }})(); {}"#,
         // The caller supplies the dialog's safe cancel action. Settings use
         // the field-cancel selector before their dialog close control; the

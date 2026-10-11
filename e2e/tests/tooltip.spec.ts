@@ -449,3 +449,39 @@ test("the page carries no native title tooltips", async ({ page }) => {
   await expect(page.locator(".session-row-menu-panel")).toBeVisible();
   expect(await titled()).toEqual([]);
 });
+
+/**
+ * Re-executing the shipped asset must retain quiet focus and its dismissal
+ * state without installing another listener set. AppBody can remount; a hook
+ * lost during that lifecycle would bring back the tooltip on later dialogs.
+ * The first hover arrives with no intervening pointer departure, distinguishing
+ * quiet automatic focus from press/Escape's deliberately stronger suppression.
+ */
+test("quiet focus survives asset reinstall and allows the first later hover", async ({ page }) => {
+  await loadRow(page);
+  await parkPointer(page);
+  const gear = page.locator(".app-settings-toggle");
+  await page.keyboard.press("Tab");
+  await gear.focus();
+  await expect(tooltip(page)).toBeVisible();
+  await expect(tooltip(page)).toHaveText(/^settings/);
+  const source = await page.locator('script[src*="tooltip"]').first().getAttribute("src");
+  expect(source, "premise: the installed shipped asset is present").toBeTruthy();
+  await page.addScriptTag({ url: source! });
+  // A new focus event is essential: refocusing the gear while it already
+  // owns focus would pass even if the hook suppressed help after focus().
+  const help = page.locator(".app-help-toggle");
+  await help.focus();
+  await expect(help).toBeFocused();
+  await expect(tooltip(page)).toHaveText(/^help/);
+  await gear.evaluate((element) => {
+    (window as unknown as { farhelmTooltip: { focusWithoutTooltip(element: Element): void } }).farhelmTooltip.focusWithoutTooltip(element);
+  });
+  await expect(gear).toBeFocused();
+  expect(await gear.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  await page.waitForTimeout(600); // sleep-ok: quiet-focus absence window exceeds the tooltip's 300 ms show delay
+  await expect(tooltip(page)).toBeHidden();
+  await gear.hover();
+  await expect(tooltip(page)).toBeVisible();
+  await expect(tooltip(page)).toHaveText(/^settings/);
+});
