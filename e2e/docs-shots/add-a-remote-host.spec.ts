@@ -63,7 +63,7 @@ test("setup plan", async ({ page, request }) => {
   );
   await director.callout(yes, "Sets the host up as listed.", { side: "left", dy: 30 });
   await director.callout(
-    dialog.locator(".host-permanent-answer .btn-outline"),
+    dialog.locator(".host-setup-permanent"),
     "Sets it up, and sets up later hosts without asking.",
     { side: "bottom", dy: 20 },
   );

@@ -3757,6 +3757,10 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// The add-host form: discover first, then either keep the answering
 /// supervisor or offer the exact setup plan retained by the helm.
 ///
+/// The dialog card is the form, with header, scrolling body and pinned
+/// answers as direct children. Confirmation and dismiss buttons are explicit
+/// non-submit controls: only Enter in the destination starts discovery.
+///
 /// The form asks only for the ssh destination. It used to offer a remote
 /// farhelm path and a remote state directory as optional fields, but nobody
 /// adding a host knew what to put in them: the probe finds a supervisor where
@@ -3871,8 +3875,8 @@ fn AddHostForm(
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
-                class: "host-settings-dialog host-add-dialog",
+            form {
+                class: "host-settings-dialog host-add-dialog host-dialog-framed add-host-form",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "add host",
@@ -3883,8 +3887,6 @@ fn AddHostForm(
                         close();
                     }
                 },
-        form {
-            class: "add-host-form",
             onsubmit: move |evt| {
                 evt.prevent_default();
                 // Discovery can register an answering supervisor, but it
@@ -3931,11 +3933,27 @@ fn AddHostForm(
             if let Some(planned) = offer.current_key() {
                 SetupPlanConfirmation {
                     confirmation: planned.confirmation.clone(),
+                    name: display_peer(&ssh()),
+                    local: false,
+                    error: error.read().clone().map(|err| rsx! {
+                        PeerLine {
+                            class: "create-session-error add-host-error",
+                            parts: probe_error_parts(err),
+                        }
+                    }),
                     busy: page_busy,
                     on_confirm: move |skip_future| confirm.call((planned.clone(), skip_future)),
                     on_cancel: move |_| close(),
                 }
             } else {
+                settings_dialog::HostDialogHeader {
+                    title: rsx! { "add host" },
+                    summary: "an ssh destination this helm can reach",
+                    dismiss_label: "cancel adding host",
+                    dismiss_tooltip: "cancel: close without adding a host",
+                    on_dismiss: move |_| close(),
+                }
+                div { class: "host-settings-body",
                 label {
                     "ssh destination"
                     // Same total opt-out of browser text mangling the create
@@ -3945,6 +3963,7 @@ fn AddHostForm(
                     input {
                         r#type: "text",
                         class: "add-host-ssh",
+                        aria_describedby: "add-host-destination-help",
                         required: true,
                         autocomplete: "off",
                         autocorrect: "off",
@@ -3955,23 +3974,19 @@ fn AddHostForm(
                         oninput: move |evt| ssh.set(evt.value()),
                     }
                 }
-                button {
-                    r#type: "submit",
-                    class: "btn btn-primary add-host-submit",
-                    "data-tooltip": "add: check the ssh destination, then add the host",
-                    disabled: busy,
-                    if *probing.read() { "probing…" } else { "add" }
+                p { id: "add-host-destination-help", class: "host-dialog-help",
+                    "user@host, or a Host alias from your ssh config. Farhelm checks that it can reach the destination before adding it."
                 }
-            }
-            if let Some(err) = error.read().clone() {
-                PeerLine {
-                    class: "create-session-error add-host-error",
-                    parts: probe_error_parts(err),
+                if let Some(err) = error.read().clone() {
+                    PeerLine {
+                        class: "create-session-error add-host-error",
+                        parts: probe_error_parts(err),
+                    }
                 }
-            }
-        }
-                if !offer.is_open() {
-                    // Never disabled: see this component's doc.
+                }
+                div { class: "host-settings-footer host-dialog-footer",
+                div { class: "host-dialog-answers",
+                    // Discovery never holds the user behind its request.
                     button {
                         r#type: "button",
                         class: "btn btn-neutral add-host-cancel",
@@ -3979,7 +3994,16 @@ fn AddHostForm(
                         onclick: move |_| close(),
                         "cancel"
                     }
+                button {
+                    r#type: "submit",
+                    class: "btn btn-primary add-host-submit",
+                    "data-tooltip": "add: check the ssh destination, then add the host",
+                    disabled: busy,
+                    if *probing.read() { "checking…" } else { "add" }
                 }
+                }
+                }
+            }
             }
         }
     }

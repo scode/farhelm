@@ -781,10 +781,10 @@ pub(crate) fn PlanConfirmation(
 
 /// Render the three answers for an initial or rerun host setup offer.
 ///
-/// The helm supplies the text; this component owns only the shared button
-/// wording and tiering so the initial add dialog and a failed-add rerun ask
-/// the same question. The permanent answer points back to the app-wide settings
-/// gear, where its preference can be reversed.
+/// Both callers place these header, body and footer siblings directly in the
+/// host dialog frame, so only the plan scrolls. The helm supplies the plan;
+/// this component owns presentation, never its actions or authorization. The
+/// caller supplies an already escaped display name and its cancel lifecycle.
 ///
 /// `busy` disables only the two answers that would submit. Cancel stays
 /// live: this renders inside a modal, and a modal must never hold the user
@@ -792,35 +792,32 @@ pub(crate) fn PlanConfirmation(
 #[component]
 pub(crate) fn SetupPlanConfirmation(
     confirmation: String,
+    name: String,
+    host: Option<Host>,
+    local: bool,
+    error: Option<Element>,
     busy: bool,
     on_confirm: EventHandler<bool>,
     on_cancel: EventHandler<()>,
 ) -> Element {
     rsx! {
-        PeerBlock { class: "provisioning-plan", text: confirmation }
-        div { class: "provisioning-confirm-actions add-host-confirm-actions",
-            button {
-                r#type: "button",
-                class: "btn btn-primary provisioning-confirm",
-                "data-tooltip": "yes: set up this host as the plan above describes",
-                disabled: busy,
-                onclick: move |_| on_confirm.call(false),
-                "yes"
+        settings_dialog::HostDialogHeader {
+            host,
+            title: rsx! { "set up host · " span { class: "peer-value", dir: "ltr", "{name}" } },
+            summary: if local { "Farhelm is not running here yet" } else { "Farhelm is not running there yet" },
+            dismiss_label: "cancel host setup",
+            dismiss_tooltip: "cancel: change nothing on this host",
+            on_dismiss: on_cancel,
+        }
+        div { class: "host-settings-body",
+            PeerBlock { class: "provisioning-plan", text: confirmation }
+            if let Some(error) = error { {error} }
+        }
+        div { class: "host-settings-footer host-dialog-footer",
+            p { id: "host-setup-permanent-hint", class: "host-dialog-permanent-hint",
+                "undo \"don't ask again\" with the gear at the top of the sidebar"
             }
-            div { class: "host-permanent-answer",
-                button {
-                    r#type: "button",
-                    class: "btn btn-primary btn-outline",
-                    "data-tooltip": "yes, and set up new hosts from now on without asking",
-                    aria_describedby: "host-setup-permanent-hint",
-                    disabled: busy,
-                    onclick: move |_| on_confirm.call(true),
-                    "yes, and don't ask in the future"
-                }
-                p { id: "host-setup-permanent-hint", class: "host-settings-help",
-                    "You can turn this back on with the gear at the top of the sidebar."
-                }
-            }
+            div { class: "host-dialog-answers add-host-confirm-actions",
             button {
                 r#type: "button",
                 class: "btn btn-neutral add-host-cancel",
@@ -828,6 +825,24 @@ pub(crate) fn SetupPlanConfirmation(
                 autofocus: true,
                 onclick: move |_| on_cancel.call(()),
                 "cancel"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-primary btn-outline host-setup-permanent",
+                "data-tooltip": "set up this host, and set up new hosts from now on without asking",
+                aria_describedby: "host-setup-permanent-hint",
+                disabled: busy,
+                onclick: move |_| on_confirm.call(true),
+                "set up, don't ask again"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-primary provisioning-confirm",
+                "data-tooltip": "set up: set up this host as the plan above describes",
+                disabled: busy,
+                onclick: move |_| on_confirm.call(false),
+                "set up"
+            }
             }
         }
     }
@@ -2741,7 +2756,7 @@ pub(crate) fn ProvisioningPanel(
                 if plan.operation == ProvisioningOperation::Add {
                     div { class: "host-settings-backdrop", role: "presentation",
                         div {
-                            class: "host-settings-dialog host-add-dialog",
+                            class: "host-settings-dialog host-add-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
                             aria_label: "host setup",
@@ -2768,6 +2783,9 @@ pub(crate) fn ProvisioningPanel(
                             },
                             SetupPlanConfirmation {
                                 confirmation: plan.confirmation,
+                                name: crate::hosts::gui_host_name(&host.name, host.kind == HostKind::Local),
+                                host: Some(host.clone()),
+                                local: host.kind == HostKind::Local,
                                 busy: page_busy,
                                 // The permanent answer is remembered inside
                                 // `confirm`, once it has consumed the plan.

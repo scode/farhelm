@@ -2915,10 +2915,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   justify-content: flex-end;
 }
 
-/* Only host settings gets the grouped refresh. The base dialog and row
-   classes also serve app settings, feedback, host removal and provisioning;
-   changing those shared rules would silently restyle unrelated workflows. */
-.host-settings-refreshed {
+/* Host frames opt into pinned chrome explicitly. The base dialog and row
+   classes also serve app settings and feedback; changing those shared rules
+   would silently restyle unrelated workflows. Settings-only editors remain
+   scoped to host-settings-refreshed below. */
+.host-settings-refreshed,
+.host-dialog-framed {
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -3041,11 +3043,31 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    controls outside its scroll region also makes keyboard scrolling reveal
    fields without moving the controls needed to leave the dialog. */
 .host-settings-refreshed > .host-settings-header,
-.host-settings-refreshed > .host-settings-footer { flex-shrink: 0; }
-.host-settings-refreshed > .host-settings-body {
+.host-settings-refreshed > .host-settings-footer,
+.host-dialog-framed > .host-settings-header,
+.host-dialog-framed > .host-settings-footer { flex-shrink: 0; }
+.host-settings-refreshed > .host-settings-body,
+.host-dialog-framed > .host-settings-body {
   flex-shrink: 1;
   min-height: 0;
   overflow: auto;
+}
+
+/* The hint describes a choice, but is outside the answer row so it cannot
+   push one answer off the common baseline. Only host confirmations use this
+   sizing; inline update answers keep their compact row treatment. */
+.host-dialog-footer { display: flex; flex-direction: column; align-items: stretch; }
+.host-dialog-answers { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; }
+.host-dialog-answers .btn { font-size: 12px; line-height: 1.4; padding: 7px 12px; margin: 0; }
+/* Setup's permanent answer is the primary tier's outlined choice. Keep
+   this scoped: other primary surfaces deliberately have their own fills. */
+.host-dialog-answers .btn-primary.btn-outline { background: transparent; border-color: var(--accent); color: var(--accent); }
+.host-dialog-permanent-hint { color: var(--fg-1); font-size: 11px; margin: 0; }
+.host-dialog-help { color: var(--fg-1); font-size: 12px; line-height: 1.5; margin: 0; }
+@media (max-width: 560px) {
+  .host-dialog-answers { flex-direction: column-reverse; align-items: stretch; }
+  .host-dialog-answers .btn { width: 100%; box-sizing: border-box; }
+  .host-dialog-permanent-hint { order: 1; }
 }
 
 /* ===== Rename editor ============================================== */
@@ -4618,32 +4640,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
 }
 
-/* The add-host form lives in the same modal card as host settings. Keeping
-   the fields and the setup offer in one surface means a probe never replaces
-   the dialog with an unexplained block in the sidebar. */
-.add-host-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 0 4px;
-}
-
-.add-host-confirm-actions {
-  flex-wrap: wrap;
-}
-
-.add-host-form .add-host-cancel {
-  align-self: flex-end;
-}
-
-.host-add-dialog > .add-host-cancel {
-  align-self: flex-end;
-}
-
-.add-host-form .provisioning-plan {
-  margin-top: 0;
-}
-
+/* The card is the form: direct header/body/footer children keep the pinned
+   controls while Enter in the destination remains a guarded native submit. */
 .add-host-form label {
   display: flex;
   flex-direction: column;
@@ -4653,6 +4651,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .add-host-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
   background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -4660,12 +4662,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font: inherit;
   font-size: 13px;
   padding: 4px 8px;
-}
-
-.add-host-submit {
-  align-self: flex-start;
-  font-size: 13px;
-  padding: 4px 10px;
 }
 
 /* ===== Host provisioning ========================================== */
@@ -4703,7 +4699,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 /* The helm rendered this text from the same plan the executor consumes.
    Preserve its line boundaries and whitespace; wrapping long paths is the
-   only layout intervention, and does not change the text copied or read. */
+   layout intervention. A step's continuation aligns after its literal `- `;
+   headings and Kept lines remain flush. Browser copy tests guard the line
+   boundaries, since block-level spans can otherwise add copied newlines. */
 .provisioning-plan {
   background: var(--well);
   border: 1px solid var(--border-dim);
@@ -4718,6 +4716,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 7px 9px;
   white-space: pre-wrap;
 }
+.provisioning-plan .peer-line { display: block; }
+.provisioning-plan .peer-plan-step { padding-left: 2ch; text-indent: -2ch; }
+/* Chromium omits a trailing LF from native selection when nothing has a
+   rendered box after it. This empty one-pixel box retains the helm's final
+   newline without inserting selectable text or a blank line of plan content. */
+.provisioning-plan .peer-block-end { display: block; height: 1px; }
 
 .provisioning-title {
   color: var(--fg-0);
