@@ -202,8 +202,6 @@ triage.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
 - `ambiguous-claim-orphaned-next-pick.md` — An uncertain plan claim could be stranded when the executor claims another.
-- `claiming-current-plan-refresh-plan-subsequently-executed.md` — Plan execution can use stale instructions after
-  claiming the current queue entry.
 - `retained-failed-tags-become-mandatory-upgrade-test-inputs.md` — Failed release tags could make standard upgrade
   validation impossible.
 - `cancelled-attach-retain-abandoned-terminal-channel.md` — Cancellation before attach transmission could retain local

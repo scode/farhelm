@@ -461,7 +461,9 @@ its open PRs. Record the pick and its reasoning in the executor log.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
    claim back (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the
    unclaim just moved.
-5. Read the plan file from `main@origin`, including any `## Decisions`.
+5. Run `jj git fetch`, then read the plan file from the freshly fetched `main@origin`, including any `## Decisions`. The
+   fetch in step 2 came before the pick and the claim, so the local `main@origin` can predate a revision or an answer to
+   this plan that landed in between; the claim itself goes through GitHub and does not update it.
 6. Set up the base from the clean `main@origin` working copy. If the plan has open `plan/<slug>/*` PRs (a resume), track
    those bookmarks, rebase that stack onto `main@origin` as a careful rebase (root `AGENTS.md`), and build on its tip;
    otherwise start a new change on `main@origin`. Either way, mark the start of the plan's builds for the prune at close
