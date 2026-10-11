@@ -527,27 +527,27 @@ agent choice is independent of that destination:
   only after the supervisor has resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and
   `--no-approve` respectively. Each setting applies to one launch and never writes vendor trust state; Muse false adds
   no flag and cannot revoke trust from YOLO or vendor settings. Without a choice, the harness retains its own trust
-  behavior; Codex, Muse, and Claude may still ask for directory trust. Farhelm does not silently answer their prompts.
-  Claude, Goose, OMP, and Cursor have no supported interactive workspace-trust switch. "reset choices" returns both
-  segments to their remembered values rather than to harness defaults, and a recent-setup row's own saved choice
-  overrides it when used. The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by
-  the chosen harness, effort words offered by that harness and model, `yolo` plus the `perms:yolo` and `perms:default`
-  permission actions, supported trust actions, host and name actions, folders, and recent setups. Permission actions are
-  offered only when the selected harness can represent them; `perms:default` is not offered when the harness's omitted
-  mode is YOLO. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and
-  `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
-  `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there. Enter on an empty
-  box launches only a complete, valid selection through the ordinary Launch path; an incomplete attempt says why beside
-  Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Request refusals
-  appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never launches, and
-  Escape closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
-  Enter on a choice button (launch-kind tab, harness, effort, permissions, or workspace trust) applies that choice and
-  then launches through the ordinary Launch path, or shows its refusal beside Launch. Enter on the closed host picker or
-  the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those
-  native controls retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model
-  field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter
-  chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held
-  Enter never launches.
+  behavior; Codex, Muse, Claude, and Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does
+  not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported interactive workspace-trust
+  switch. "reset choices" returns both segments to their remembered values rather than to harness defaults, and a
+  recent-setup row's own saved choice overrides it when used. The launch-composer search matches harnesses, launch
+  templates (`tl:name`), models scoped by the chosen harness, effort words offered by that harness and model, `yolo`
+  plus the `perms:yolo` and `perms:default` permission actions, supported trust actions, host and name actions, folders,
+  and recent setups. Permission actions are offered only when the selected harness can represent them; `perms:default`
+  is not offered when the harness's omitted mode is YOLO. `name:foo` applies the entire value as the session name.
+  `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias. The default
+  local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box while keeping
+  focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path; an
+  incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's hover names
+  what is missing. Request refusals appear there too, within the initial dialog viewport. Enter on a non-empty query
+  with no result never launches, and Escape closes the result list without clearing the query, so Enter after Escape
+  does nothing until the box is emptied. Enter on a choice button (launch-kind tab, harness, effort, permissions, or
+  workspace trust) applies that choice and then launches through the ordinary Launch path, or shows its refusal beside
+  Launch. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches with the
+  values shown, without changing them; those native controls retain their Space and arrow behavior. Action buttons keep
+  their normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter
+  rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no
+  highlighted entry it launches as before. A held Enter never launches.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
   and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it

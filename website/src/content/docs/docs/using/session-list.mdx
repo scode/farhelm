@@ -51,6 +51,9 @@ Farhelm archived it, it stays untouched and the dialog explains what was left be
 not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a directory before
 failing; the dialog tells you when that happened.
 
+While it deletes, the dialog says how many hosts are still working, and each host shows **deleting…** until its
+result, success or failure, replaces it.
+
 Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
 disappears; emptying the trash in another window can leave this count high until you open the dialog.
 
@@ -66,8 +69,8 @@ does nothing until you answer. Not every agent can tell Farhelm when it is waiti
 says which ones can.
 
 An agent can also be waiting on Farhelm itself, when it asks to start, stop, or change a session with the `farhelm`
-command. That request shows as a card in the corner of the window, not in the session list, and you answer it on the
-card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
+command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
+the card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
 
 A session that has ended says how in words under its name, instead of a coloured dot (with **compact** ticked, as an
 icon you can hover over):

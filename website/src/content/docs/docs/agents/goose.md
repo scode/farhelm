@@ -1,48 +1,21 @@
 ---
 title: Goose
-description: Model choice, the conversation-reporting helper, and resuming Goose outside Farhelm.
+description: "What is specific to running Goose under Farhelm."
 sidebar:
   order: 10
 ---
 
-## Running Goose from a custom command
+The [support matrix](/docs/agents/) is the main reference for what Farhelm does with Goose. This page only adds what is
+specific to Goose.
 
-A [custom command](/docs/agents/custom-commands/) that declares Goose must start an interactive session itself, the way
-Farhelm's own Goose launch does: `goose session {farhelm_args}`, with the resume command
-`goose session --resume --session-id {conversation} {farhelm_args}`. Farhelm no longer adds the `session` subcommand to
-a bare `goose`. Goose on its stock settings runs without approval prompts, so unless you have set Goose to ask, answer
-yes to the launcher's **runs without approval prompts** for such a command.
+## Gotchas and quirks
 
-## Model choice
-
-You can leave the model unset in Farhelm. Goose then uses its configured provider and model; Farhelm does not add
-`--provider` or `--model`. Choosing a model explicitly keeps Farhelm's OpenRouter launch arguments for that choice.
-
-## Session tracking limitation
-
-Farhelm's Goose reporter records the session Goose identifies as current. Farhelm checks that a Goose report came from
-this session's terminal under its current launch, but the basic integration does not prove that the Goose session is the
-foreground root. Goose native subagents can inherit the reporter and use their own session IDs, and a separately
-launched Goose can be given the same reporter. A child report can therefore replace the saved restart target.
-
-This is a known limitation of the basic integration. Ordinary foreground sessions and their `/new` transitions are
-supported; reliable isolation of native or shelled-out child sessions is deferred. Do not treat a captured Goose
-conversation as proof that no child session reported. The design research and the preserved stricter implementation are
-recorded in `lore/2026-09-23-goose-session-tracking.md`.
-
-## Resuming outside Farhelm still needs Farhelm installed
-
-Farhelm starts a small helper alongside Goose to learn which conversation you are in. When you type `/new` in Goose to
-start a new conversation, the helper tells Farhelm to resume that conversation instead of the old one. Goose treats the
-helper as an extension and saves its startup command with the conversation, so it starts again on later resumes.
-
-That means reopening the conversation directly in Goose, outside Farhelm, still requires the `farhelm` command to be
-available in your shell (`PATH`). If you uninstall Farhelm or move the conversation to a machine without it, Goose can
-report an extension-startup error. Resuming through Farhelm supplies the helper's location automatically.
-
-The saved command contains no Farhelm credentials or machine-specific executable paths. Outside Farhelm, the helper
-starts but does nothing: it sends no reports and gives the agent no tools or instructions. No global Goose settings are
-changed.
-
-Disabling [Farhelm's conversation reporting](/docs/agents/agent-hook-injection/#turning-it-off) prevents the helper from
-being added to new conversations but does not remove its startup command from conversations Goose has already saved.
+- Goose runs without approval prompts unless you have set it to ask, so a Goose launch with no permission choice counts
+  as YOLO, and Farhelm asks you to confirm it on hosts that ask before YOLO launches.
+- If Goose runs subagents, a subagent's conversation can replace yours as the one restart resumes.
+- Reopening a Goose conversation directly in Goose, outside Farhelm, needs the `farhelm` command on your `PATH`. Goose
+  saves the small helper Farhelm adds to each conversation and starts it again on every resume; without `farhelm` it
+  reports an extension error. Outside Farhelm the helper does nothing.
+- A [custom command](/docs/agents/custom-commands/) that runs Goose must start an interactive session itself, as
+  `goose session {farhelm_args}`, with the resume command
+  `goose session --resume --session-id {conversation} {farhelm_args}`.

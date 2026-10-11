@@ -17,9 +17,10 @@ Farhelm. Then run:
 
 It lists what it will remove and asks before removing anything. It removes the Farhelm app from `~/Applications`, with
 every version kept inside it, and the `farhelm` command from `~/.local/bin`. It keeps your data under
-`~/.local/state/farhelm`: your list of hosts, preferences, session history, and logs. Your projects, your agents, and
-tmux are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still open when you
-confirm, it refuses and asks you to quit it first, and nothing is removed.
+`~/.local/state/farhelm`: your list of hosts, preferences, session history, logs, and the repository caches for managed
+checkouts. Your projects, your agents, tmux, and your managed checkouts (including their trash) are not touched. To see
+the list without changing anything, add `--dry-run`. If Farhelm is still open when you confirm, it refuses and asks you
+to quit it first, and nothing is removed.
 
 To remove your data as well, delete `~/.local/state/farhelm` once the uninstall is done.
 

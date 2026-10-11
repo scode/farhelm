@@ -1,0 +1,101 @@
+---
+title: Supported agents
+description: What Farhelm does for each coding agent it knows, and what it does for anything else.
+sidebar:
+  order: 0
+---
+
+Farhelm runs any coding agent in a session, but how much it adds on top depends on the agent. The matrix below is the
+big picture: what Farhelm does for each agent it knows, and for anything else you run as a
+[custom command](/docs/agents/custom-commands/). Claude and Codex get the most; the others get less, in different
+ways. Each agent also has its own page, linked from its name in the matrix, with setup steps and gotchas specific to
+that agent when it has any.
+
+Some things work the same for every agent and every command, so they have no row: the session keeps running when you
+close the window, [clone and replace with](/docs/using/stop-restart-resume/) carry its setup over, pasting screenshots
+and files [works](/docs/using/work-in-a-session/#copy-paste-and-links), and so do downloads from the terminal.
+
+export const groups = [
+  { name: 'Launch choices', caps: [
+    { key: 'launch', label: 'Start from the launcher', desc: "Pick the agent on the launcher's agent tab, and Farhelm builds its command line. Anything else runs from the command tab." },
+    { key: 'model', label: 'Choose the model', desc: "Pick a model from the launcher's suggestions, or type any model name." },
+    { key: 'effort', label: 'Choose the effort', desc: 'Pick how much effort the model puts in, from the levels that agent offers.' },
+    { key: 'perms', label: 'Approval prompts or YOLO', desc: "Run with the agent's own approval prompts, or in YOLO mode with none. Some agents only run in YOLO mode." },
+    { key: 'trust', label: 'Workspace trust', desc: "Answer the agent’s “do you trust this directory?” question in the launcher, so the session starts working without stopping to ask it. An agent that never asks counts as supported." },
+  ] },
+  { name: 'Status', caps: [
+    { key: 'status', label: 'Shows working or idle', desc: 'The session list shows whether the agent is working right now or idle.' },
+    { key: 'waiting', label: 'Shows when it waits for you', desc: 'The session list shows when the agent has stopped to ask you something, and Farhelm can play a bell.' },
+  ] },
+  { name: 'Conversation', caps: [
+    { key: 'resume', label: 'Restart resumes the conversation', desc: 'Farhelm follows which conversation the agent is in, so restart and restart with pick it back up, even after a reboot.' },
+    { key: 'warn', label: 'Warns when it cannot resume', desc: "A bell on the session's row tells you when Farhelm has lost track of the conversation, so restart would not resume it." },
+    { key: 'farhelm', label: 'Understands $farhelm requests', desc: "Ask the agent inside a session, in plain words, to start, stop, or change sessions for you: include $farhelm in your message, such as “$farhelm start a Codex session on build-box for each TODO item above”." },
+  ] },
+];
+export const basic = 'Basic: Farhelm only sees whether the screen is changing, so it never shows waiting, and an agent redrawing while idle can look busy.';
+export const agents = [
+  { name: 'Codex', href: '/docs/agents/codex/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
+    tip: { effort: 'Low, medium, or high; some models take only high.', resume: 'Available once you submit your first prompt.' } },
+  { name: 'Claude', href: '/docs/agents/claude/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'n', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
+    tip: { trust: 'Claude may ask whether to trust a new directory, and the launcher cannot answer that for you.', effort: 'Low to max.', resume: 'Available a few seconds after it starts.' } },
+  { name: 'Goose', href: '/docs/agents/goose/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'y', farhelm: 'y' },
+    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; also approve, smart approve, and chat.', status: basic, resume: 'Available as soon as it starts.' } },
+  { name: 'OMP', href: '/docs/agents/omp/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
+    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default, or approve.', status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added or does not match, but not when it never reports.' } },
+  { name: 'Pi', href: '/docs/agents/pi/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'p', trust: 'p', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
+    tip: { perms: 'YOLO only: Pi has no approval prompts to turn on.', trust: "Approves the project's own settings and extensions, not the agent's actions.", status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added, but not when it never reports.' } },
+  { name: 'Muse', href: '/docs/agents/muse/', tier: 2, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'p', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
+    tip: { trust: 'Only true: false adds nothing, and cannot take back trust that YOLO already gives.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+  { name: 'Grok', href: '/docs/agents/grok/', tier: 1, v: { launch: 'y', model: 'n', effort: 'n', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
+    tip: { trust: 'Never asks, so there is nothing to answer.', model: "Grok uses the model in its own settings.", status: basic, resume: 'Only after you install its hooks yourself; then available after your first prompt.', warn: 'Only when its conversation file is missing at restart; nothing if its hooks were never installed.' } },
+  { name: 'Cursor', href: '/docs/agents/cursor/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'y', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
+    tip: { trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and the launcher cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+  { name: 'OpenCode', href: '/docs/agents/opencode/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'y', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
+    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO only.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+  { name: 'Command', href: '/docs/agents/custom-commands/', head: 'Any other program, run as a custom command.', tier: 3, v: { launch: 'p', model: 'n', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'n', farhelm: 'n' },
+    tip: { trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'You say whether the command runs without approval prompts.', status: "Basic, or Claude's or Codex's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
+];
+export const sym = { y: '✓', p: '◐', n: '–' };
+export const word = { y: 'Yes', p: 'Partly', n: 'No' };
+export const ncols = agents.length + 1;
+
+<div class="agent-matrix-wrap">
+<table class="agent-matrix">
+<thead>
+<tr>
+<th></th>
+{agents.map((a) => (
+  <th class={a.tier === 0 ? 'agent-matrix-t0' : ''}>
+    {a.head ? <a class="agent-matrix-cell agent-matrix-has" href={a.href} data-tip={a.head}>{a.name}</a> : <a href={a.href}>{a.name}</a>}
+  </th>
+))}
+</tr>
+</thead>
+<tbody>
+{groups.map((g) => [
+  <tr class="agent-matrix-group"><th colspan={ncols}>{g.name}</th></tr>,
+  ...g.caps.map((c) => (
+    <tr>
+      <th class="agent-matrix-label"><span class="agent-matrix-cell agent-matrix-has agent-matrix-lab" tabindex="0" data-tip={c.desc}>{c.label}<span class="agent-matrix-i" aria-hidden="true">i</span></span></th>
+      {agents.map((a) => {
+        const v = a.v[c.key];
+        const tip = a.tip?.[c.key];
+        return (
+          <td class={(a.tier === 0 ? 'agent-matrix-t0 ' : '') + 'agent-matrix-' + v}>
+            {tip
+              ? <span class="agent-matrix-cell agent-matrix-has" tabindex="0" data-tip={`${word[v]}. ${tip}`} aria-label={`${a.name}, ${c.label}: ${word[v]}. ${tip}`}>{sym[v]}</span>
+              : <span class="agent-matrix-cell" aria-label={`${a.name}, ${c.label}: ${word[v]}`}>{sym[v]}</span>}
+          </td>
+        );
+      })}
+    </tr>
+  )),
+])}
+</tbody>
+</table>
+</div>
+
+<p class="agent-matrix-legend"><span class="agent-matrix-y">✓</span> yes · <span class="agent-matrix-p">◐</span> partly · <span class="agent-matrix-n">–</span> no.
+Hover a feature name (marked <span class="agent-matrix-i agent-matrix-i-inline">i</span>) or an underlined cell, or tab to it, for the
+details.</p>

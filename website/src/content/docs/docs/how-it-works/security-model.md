@@ -21,4 +21,6 @@ It will also cover the connections that leave your machines: setting up or updat
 files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback
 service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
 get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
-([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). And downloading a file from a session's terminal:
+the helm can read any file the session's account can read on that host
+([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)).

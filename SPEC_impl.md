@@ -2136,8 +2136,8 @@ file is introduced.
   `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
   wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted report, a new
   session cannot be restarted; no nearby record can supply a substitute identity.
-  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
-  injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
+  `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
+  The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
   "What running sessions hold across versions").
 
   Codex's Stop hook carries no instructions announcement: only SessionStart adds that context. Sessions launched before

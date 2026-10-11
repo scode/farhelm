@@ -55,9 +55,9 @@ Updating a host does not interrupt its sessions: they keep running through the u
 
 **uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. It also names the directory that holds the host's Farhelm data,
-which it keeps. Nothing changes until you select **uninstall** in that dialog. Once it is done, the host is gone from
-the list, and a line above the list says where its data remains; delete that directory on the host yourself if you want
-the data gone too.
+which it keeps. It also stops the tmux Farhelm ran the host's sessions in. Nothing changes until you select
+**uninstall** in that dialog. Once it is done, the host is gone from the list, and a line above the list says where its
+data remains; delete that directory on the host yourself if you want the data gone too.
 
 Uninstall never stops a session for you. If any session on the host has not ended (it is running, waiting or idle, or
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
