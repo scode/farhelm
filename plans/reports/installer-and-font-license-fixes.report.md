@@ -57,3 +57,37 @@ passed the commit and PR wording cold read; the required native resume check pas
 selections; exact model attribution and usage were not exposed by the harness. Private galaxy-brain evidence is retained
 under session UUID `d0e361cc-2cf7-49dd-a656-7f0f6a284fbf`, with its location recorded in the plan working log beside the
 checkouts.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1906. The rebase met no conflicts.
+
+#### Review before merging
+
+No blocker or should-fix findings. The installer keeps curl's real exit status for the latest-version answer, so a cut
+answer after a 200 now refuses instead of installing the wrong release; the destination check covers all six files an
+update replaces, runs before anything in the app changes, refuses a directory or a link to one, and removes nothing
+outside the installer's own staging and lock. Both scripts pass `sh -n`, `dash -n`, `busybox sh -n` and `shellcheck`,
+and the new installer cases fail without the fix. The license texts are complete and declared alongside the existing
+web-links notice. Notes left as they are:
+
+- Possible follow-up worth a look: the bundled font is a Nerd Font, which patches in icon sets under other licenses (for
+  example Material Design Icons under Apache-2.0 and Codicons under CC-BY-4.0). Nothing ships those notices; the review
+  did not establish whether they are required.
+- Only one of the six destination files has a directory test; dropping another from the check would go unnoticed.
+- An answer sent with no length over a connection the server closes can still be cut short with curl exiting 0;
+  requiring the trailing newline the specification allows would need a specification change.
+- A comment beside the clipboard asset still points at the font's license file as its model.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, `sh -n scripts/install.sh`, `shellcheck` on
+  both installer scripts, the installer tests (549 checks), `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` and
+  `cargo check -p farhelm-desktop`; the UI and CLI unit tests through the recorder (run `c85c0865`, 622 of 622); the
+  release web UI build; and `scripts/check-desktop-assets.sh` (26 assets, requested set equals bundled set).
+- Not run: browser tests, since nothing the page renders changed (the stylesheet edit is a comment), and the macOS
+  uninstall acceptance, which runs on macOS only.
+- Between those runs and the merge, main changed only a development tool.
+
+Nothing in the report above was made untrue by the landing.
