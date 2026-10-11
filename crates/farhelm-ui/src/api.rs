@@ -406,8 +406,8 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
     resp.json::<Preferences>().await.map_err(|e| e.to_string())
 }
 
-/// Only the all-hosts folder crosses the browser edge; this type must never
-/// grow into the private checkout snapshot that also holds executable hooks.
+/// Only the all-hosts folder crosses this route; host overrides and the
+/// separately saved command must not expand its reply shape.
 #[derive(Deserialize, serde::Serialize)]
 struct CheckoutRootBody {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
@@ -437,6 +437,41 @@ pub(crate) async fn save_checkout_root(base: &str, root: Option<String>) -> Resu
     if !resp.status().is_success() {
         // A refusal can arrive without a body (an auth or origin guard, a
         // proxy); `refusal_text` keeps the field's alert from being blank.
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
+/// Keep the command route separate from the folder's independent explicit save.
+/// Null and an empty string retain their distinct storage meaning on reads.
+#[derive(Deserialize, serde::Serialize)]
+struct CheckoutPostCloneBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    command: Option<String>,
+}
+
+/// Read only the all-hosts command, without any effective per-host value.
+pub(crate) async fn fetch_checkout_post_clone(base: &str) -> Result<Option<String>, String> {
+    let url = format!("{base}/api/checkout-post-clone");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<CheckoutPostCloneBody>()
+        .await
+        .map(|body| body.command)
+        .map_err(|e| e.to_string())
+}
+
+/// Return the helm's refusal to the explicit-save field without losing its draft.
+/// This is configuration, not a best-effort preference write.
+pub(crate) async fn save_checkout_post_clone(
+    base: &str,
+    command: Option<String>,
+) -> Result<(), String> {
+    let url = format!("{base}/api/checkout-post-clone");
+    let resp = send(client().put(&url).json(&CheckoutPostCloneBody { command })).await?;
+    if !resp.status().is_success() {
         return Err(refusal_text("PUT", &url, resp).await);
     }
     Ok(())

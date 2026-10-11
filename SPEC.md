@@ -676,15 +676,17 @@ the source's actual directory; a managed checkout then requires an explicit repo
 setup, or a template that sets one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
-root. The all-hosts checkout folder can be set or cleared in Settings or with the command line; per-host overrides and
-the post-clone command remain command-line only. Settings explicitly saves the field, shows a refused value's reason,
-and clears it when an empty field is saved. Browser-readable configuration replies contain only the all-hosts folder,
-never hook text or host overrides. A missing root and its parents are created on the target host at the first checkout,
-using the ordinary umask; configuration, discovery and preview create nothing. Existing symlink ancestors resolve to
-their canonical directory, while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose
-resolution changed since preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an
-override restores inheritance; an empty hook override disables the inherited hook. Configuration changes affect new
-attempts, not an already accepted attempt or its retries.
+root. The all-hosts checkout folder and post-clone command can be set or cleared in Settings or with the command line;
+per-host overrides remain command-line only. Settings saves each field explicitly, shows a refused value's reason, and
+clears it when an all-whitespace field is saved. The command field preserves all other spacing and newlines. An
+explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored value.
+Browser-readable configuration replies may contain the all-hosts folder and command, never host overrides. A missing
+root and its parents are created on the target host at the first checkout, using the ordinary umask; configuration,
+discovery and preview create nothing. Existing symlink ancestors resolve to their canonical directory, while unresolved
+`..` in a missing suffix and dangling symlinks are refused. A root whose resolution changed since preview is still
+refused. `~` expands there, using the supervisor's captured home. Clearing an override restores inheritance; an empty
+hook override disables the inherited hook. Configuration changes affect new attempts, not an already accepted attempt or
+its retries.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
@@ -1000,20 +1002,22 @@ of the sidebar version opens a settings dialog with the host switches `set up ne
 confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
 immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
 points to the gear as the place to undo it. Sounds has three device switches (see Status). The dialog also holds the
-explicitly saved all-hosts checkout folder (see [Managed checkouts](#managed-checkouts)). Its help explains expansion on
-each host, first-use folder creation, and that command-line host overrides keep their folder. The installed desktop
-app's dialog also has a switch for installing updates automatically (see
-[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
-installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
-apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
-keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
-browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
-storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately per device; see
-Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
-No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
-the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
-it, while `farhelm agent create` and `clone` need not record the asking session.
+explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
+[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
+and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
+its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
+host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
+it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
+wanted for these shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately
+per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,

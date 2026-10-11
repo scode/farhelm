@@ -20,6 +20,201 @@ async function readCheckoutRoot(request: APIRequestContext): Promise<{ root: str
   return await reply.json() as { root: string | null };
 }
 
+/** Inspect the stored all-hosts command independently of the field's draft.
+ * Null and an explicit disable must stay distinct unless the user saves. */
+async function readPostClone(request: APIRequestContext): Promise<{ command: string | null }> {
+  const reply = await request.get("/api/checkout-post-clone");
+  expect(reply.ok(), await reply.text()).toBe(true);
+  return await reply.json() as { command: string | null };
+}
+
+/** Opening is read-only for all three stored states. Explicit Save preserves
+ * executable spacing and newlines, refusal keeps the draft and stored value,
+ * and an all-whitespace save clears rather than storing an explicit disable. */
+test("settings saves and clears the all-hosts post-clone command", async ({ page, request }, testInfo) => {
+  const previous = await readPostClone(request);
+  const read = () => readPostClone(request);
+  await page.goto("/");
+  const gear = page.getByRole("button", { name: "settings", exact: true });
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const field = dialog.locator(".checkout-post-clone-field");
+  const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
+  const save = field.getByRole("button", { name: "save", exact: true });
+  const chosen = "  printf 'first'\nprintf 'second'  ";
+  try {
+    for (const value of [null, "", "  existing command\nnext line  "]) {
+      const seeded = await request.put("/api/checkout-post-clone", { data: { command: value } });
+      expect(seeded.ok(), await seeded.text()).toBe(true);
+      expect(await read()).toEqual({ command: value });
+      await gear.click();
+      await expect(command).toBeEditable();
+      await expect(command).toHaveValue(value ?? "");
+      expect(await read()).toEqual({ command: value });
+      if (value === null) {
+        await field.scrollIntoViewIfNeeded();
+        await dialog.screenshot({ path: testInfo.outputPath("post-clone-empty.png") });
+      }
+      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      expect(await read()).toEqual({ command: value });
+    }
+    await gear.click();
+    await expect(command).toBeEditable();
+    const before = await read();
+    const refused = "x".repeat(16385);
+    await command.fill(refused);
+    await save.click();
+    await expect(field.getByRole("alert")).toHaveText("post-clone command is 16385 bytes; the limit is 16384 bytes");
+    await expect(command).toHaveValue(refused);
+    expect(await read()).toEqual(before);
+    await dialog.screenshot({ path: testInfo.outputPath("post-clone-refused.png") });
+
+    await command.fill("  printf 'first'");
+    await command.focus();
+    await expect(command).toBeFocused();
+    await command.press("End");
+    await command.press("Enter");
+    await command.pressSequentially("printf 'second'  ");
+    await expect(command).toHaveValue(chosen);
+    expect(await read()).toEqual(before);
+    const refetched = page.waitForResponse((response) =>
+      response.url().endsWith("/api/checkout-post-clone") && response.request().method() === "GET"
+    );
+    await save.click();
+    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    const refreshed = await refetched;
+    expect(refreshed.ok(), await refreshed.text()).toBe(true);
+    expect(await refreshed.json()).toEqual({ command: chosen });
+    expect(await read()).toEqual({ command: chosen });
+    await expect(field.getByRole("alert")).toHaveCount(0);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await field.scrollIntoViewIfNeeded();
+      await dialog.screenshot({ path: testInfo.outputPath(`post-clone-command-${width}.png`) });
+      const inputBounds = await command.boundingBox();
+      const fieldBounds = await field.boundingBox();
+      expect(inputBounds).not.toBeNull();
+      expect(fieldBounds).not.toBeNull();
+      expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
+    }
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await gear.click();
+    await expect(command).toBeEditable();
+    await expect(command).toHaveValue(chosen);
+    await command.fill(" \n\t ");
+    await save.click();
+    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    expect(await read()).toEqual({ command: null });
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await gear.click();
+    await expect(command).toBeEditable();
+    await expect(command).toHaveValue("");
+  } finally {
+    const restored = await request.put("/api/checkout-post-clone", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    expect(await read()).toEqual(previous);
+  }
+});
+
+/** A delayed initial read cannot turn the blank placeholder into a clear.
+ * Hold the GET at the network boundary and try Save while locked, then release
+ * it and require the stored command to seed the field without any PUT. */
+test("post-clone command stays locked until its initial read completes", async ({ page, request }) => {
+  const previous = await readPostClone(request);
+  let release!: () => void;
+  let signalReading!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const reading = new Promise<void>((resolve) => { signalReading = resolve; });
+  let writes = 0;
+  const intercept = async (route: Route) => {
+    if (route.request().method() === "GET") {
+      signalReading();
+      await held;
+    } else if (route.request().method() === "PUT") {
+      writes++;
+    }
+    await route.continue();
+  };
+  await page.route("**/api/checkout-post-clone", intercept);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await reading;
+    const field = page.locator(".checkout-post-clone-field");
+    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
+    const save = field.getByRole("button", { name: "save", exact: true });
+    await expect(command).not.toBeEditable();
+    await expect(command).toHaveValue("");
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    // aria-disabled retains focusability for tooltips and keyboard discovery;
+    // dispatch a real click to prove the handler refuses a locked Save.
+    await save.dispatchEvent("click");
+    release();
+    await expect(command).toBeEditable();
+    await expect(command).toHaveValue(previous.command ?? "");
+    expect(writes).toBe(0);
+    expect(await readPostClone(request)).toEqual(previous);
+  } finally {
+    release();
+    await page.unroute("**/api/checkout-post-clone", intercept);
+  }
+});
+
+/** The command field owns a separate save path from the folder field. Hold
+ * its real PUT before forwarding, prove it is pending and locked, then close
+ * Settings; persistent readback must still observe the submitted command. */
+test("a pending post-clone command save survives closing settings", async ({ page, request }) => {
+  const previous = await readPostClone(request);
+  let release!: () => void;
+  let signalSubmitted!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const submitted = new Promise<void>((resolve) => { signalSubmitted = resolve; });
+  let submittedRequest: Request | undefined;
+  const intercept = async (route: Route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    submittedRequest = route.request();
+    signalSubmitted();
+    await held;
+    await route.continue();
+  };
+  const chosen = "printf 'save survives close'";
+  await page.route("**/api/checkout-post-clone", intercept);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const field = dialog.locator(".checkout-post-clone-field");
+    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
+    await expect(command).toBeEditable();
+    await expect(command).toHaveValue(previous.command ?? "");
+    await command.fill(chosen);
+    await field.getByRole("button", { name: "save", exact: true }).click();
+    await submitted;
+    const pendingSave = field.getByRole("button", { name: "saving…", exact: true });
+    await expect(pendingSave).toBeFocused();
+    await expect(pendingSave).toHaveAttribute("aria-disabled", "true");
+    await expect(command).not.toBeEditable();
+    expect(submittedRequest!.postDataJSON()).toEqual({ command: chosen });
+    expect(await readPostClone(request)).toEqual(previous);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    release();
+    await expect.poll(() => readPostClone(request)).toEqual({ command: chosen });
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(command).toBeEditable();
+    await expect(command).toHaveValue(chosen);
+  } finally {
+    release();
+    // Settle the owned PUT before restoration even when an assertion fails,
+    // or a late forwarded request could overwrite the previous command.
+    const reply = await submittedRequest?.response();
+    if (reply) await reply.finished();
+    await page.unroute("**/api/checkout-post-clone", intercept);
+    const restored = await request.put("/api/checkout-post-clone", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    expect(await readPostClone(request)).toEqual(previous);
+  }
+});
+
 /** Editing a folder is an explicit configuration write, not a switch or a
  * local-only draft. Real route readback and reopening distinguish persisted
  * save/clear from appearance; refusal must preserve both draft and saved root.

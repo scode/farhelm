@@ -161,19 +161,22 @@ by hand at any time; existing checkouts stay independent, and the next managed c
 that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
 place so concurrent checkouts still take turns. A cache failure names its path in the terminal and stops the clone.
 
-Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Create that
-directory on each host you want to clone on, then run this on the machine that runs the helm (the program that serves
-the Farhelm app; see [The pieces](/docs/how-it-works/the-pieces/)):
+Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Save the all-hosts
+**checkout folder** in Settings, opened with the gear beside the sidebar version. Farhelm creates that directory on
+each host when you first use it. You can also run this on the machine that runs the helm (the program that serves the
+Farhelm app; see [The pieces](/docs/how-it-works/the-pieces/)):
 
 ```sh
 farhelm helm checkout-config set-root '~/work'
 ```
 
 Keep the quotes, so that `~` means the home directory on each host rather than on the machine you run the command on.
-Until this is set, the launcher says "no checkout root is configured" where it would show the directory. The same
-command can also give one host a different directory, or run a command of your choice in every new clone before the
-agent starts (setting up a different version control tool, say); `farhelm helm checkout-config --help` lists the
-options.
+Until a folder is set, the launcher offers a field to save one in its place, which sets it for every host.
+
+Settings also has a **post-clone command** field for a shell command to run in each new clone, on its host, before the
+agent starts (installing dependencies, say). Save it explicitly; empty the field and save to remove it. Changes affect
+future checkouts only. A host given its own directory or command from the command line keeps it;
+`farhelm helm checkout-config --help` lists those options.
 
 ## When a launch fails
 

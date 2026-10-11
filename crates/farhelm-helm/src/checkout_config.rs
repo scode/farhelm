@@ -8,8 +8,8 @@
 //! The running helm observes CLI writes and invalidates browser readers; this
 //! module deliberately touches no host, creates no directories, and never
 //! runs the configured hook.
-//! The authenticated browser route exposes only the all-hosts root: neither
-//! hook text nor per-host overrides belong in a browser-readable snapshot.
+//! Dedicated authenticated browser routes expose the all-hosts root and
+//! post-clone command. Per-host overrides remain outside these replies.
 //!
 //! ## Inheritance semantics (binding)
 //!
@@ -34,7 +34,7 @@ use anyhow::Context;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 
-/// The browser's complete configuration surface, deliberately narrower than
+/// The folder route's configuration surface, deliberately narrower than
 /// [`CheckoutConfigSnapshot`]. A missing field is not a request to clear it;
 /// callers must send `root: null` explicitly, and cannot supply hook/host keys.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -45,8 +45,8 @@ pub(crate) struct CheckoutRootBody {
 }
 
 /// Read only the all-hosts folder, never the effective configuration of a host.
-/// Keeping a dedicated reply shape prevents future snapshot fields, especially
-/// the executable post-clone command, from leaking through this browser edge.
+/// Keeping a dedicated reply shape prevents host overrides or other settings
+/// from silently becoming part of this route.
 pub(crate) async fn get_checkout_root(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
 ) -> axum::response::Response {
@@ -78,6 +78,56 @@ pub(crate) async fn put_checkout_root(
     let result = match body.root {
         Some(root) => state.store.set_checkout_root(None, &root).await,
         None => state.store.clear_checkout_root(None).await,
+    };
+    if let Err(error) = result {
+        return crate::http_error(error);
+    }
+    axum::http::StatusCode::NO_CONTENT.into_response()
+}
+
+/// Preserve unset and explicitly disabled commands as distinct stored states.
+/// A missing key is invalid rather than an implicit clear; this route never
+/// accepts or serializes a host override.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CheckoutPostCloneBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    command: Option<String>,
+}
+
+/// Read the all-hosts command verbatim without resolving host inheritance.
+/// Settings may display an empty command as an empty draft, but merely opening
+/// the dialog must not turn an explicit disable into an unset value.
+pub(crate) async fn get_checkout_post_clone(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.checkout_config_snapshot(None).await {
+        Ok(snapshot) => axum::Json(CheckoutPostCloneBody {
+            command: snapshot.global_post_clone,
+        })
+        .into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// Save only the global command, reporting a validation refusal before writing.
+/// The existing setter keeps revision changes transactional; its watcher
+/// publishes invalidation. Already accepted checkouts retain their frozen
+/// command, so this configuration write does not alter a running preparation.
+pub(crate) async fn put_checkout_post_clone(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::Json(body): axum::Json<CheckoutPostCloneBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(command) = &body.command
+        && let Err(error) = validate_post_clone(command)
+    {
+        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    }
+    let result = match body.command {
+        Some(command) => state.store.set_checkout_post_clone(None, &command).await,
+        None => state.store.clear_checkout_post_clone(None).await,
     };
     if let Err(error) = result {
         return crate::http_error(error);
@@ -243,19 +293,14 @@ impl HelmStore {
     /// Set the post-clone shell command for one scope. Stored verbatim; an
     /// empty string is a legitimate explicit disable on a host whose
     /// global hook it must override. The command is configuration the
-    /// operator typed on their own machine, so a cap refusal names the
+    /// operator configured explicitly, so a cap refusal names the
     /// limit but never quotes the body back.
     pub async fn set_checkout_post_clone(
         &self,
         host: Option<HostId>,
         command: &str,
     ) -> anyhow::Result<()> {
-        if command.len() > MAX_POST_CLONE_BYTES {
-            anyhow::bail!(
-                "post-clone command is {} bytes; the limit is {MAX_POST_CLONE_BYTES} bytes",
-                command.len()
-            );
-        }
+        validate_post_clone(command)?;
         self.write_setting(host, Field::PostClone, Some(command))
             .await
     }
@@ -512,6 +557,23 @@ fn validate_root(root: &str) -> anyhow::Result<()> {
         anyhow::bail!(
             "checkout root is {} bytes; the limit is {MAX_ROOT_BYTES} bytes",
             root.len()
+        );
+    }
+    Ok(())
+}
+
+/// Keep HTTP and CLI cap refusals identical without echoing executable text.
+/// An empty command is valid: disabling inheritance is a stored setting.
+/// A NUL byte is refused here because no process argument can carry one:
+/// saved, it would only surface after every later clone, as a failed hook.
+fn validate_post_clone(command: &str) -> anyhow::Result<()> {
+    if command.contains('\0') {
+        anyhow::bail!("post-clone command contains a NUL character, which no shell can run");
+    }
+    if command.len() > MAX_POST_CLONE_BYTES {
+        anyhow::bail!(
+            "post-clone command is {} bytes; the limit is {MAX_POST_CLONE_BYTES} bytes",
+            command.len()
         );
     }
     Ok(())
@@ -952,6 +1014,264 @@ mod root_route_tests {
             assert_eq!(
                 read(&harness).await,
                 serde_json::json!({"root": "/saved-checkouts"})
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod post_clone_route_tests {
+    use super::MAX_POST_CLONE_BYTES;
+    use crate::rest_harness;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    /// Drive the registered protected route, including authentication and the
+    /// required nullable body, instead of bypassing extraction in a handler call.
+    fn request(method: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri("/api/checkout-post-clone")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// Compare the exact public shape within a bound large enough for an
+    /// accepted command, so host configuration cannot leak unnoticed.
+    async fn read(harness: &rest_harness::Harness) -> serde_json::Value {
+        let response = harness
+            .router()
+            .oneshot(request("GET", serde_json::Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// Each saved state survives reads verbatim, while global command writes
+    /// leave folders and host commands alone. Changed-only revision publication
+    /// remains the watcher's responsibility, including after a no-op save.
+    #[farhelm_testtrace::test]
+    async fn states_round_trip_without_exposing_or_changing_host_overrides() {
+        let harness = rest_harness::idle_helm().await;
+        let host = harness
+            .store
+            .add_ssh_host("command-route.invalid", None, None)
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_root(None, "~/global-checkouts")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_root(Some(host), "/host-root-marker")
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_checkout_post_clone(Some(host), "host-command-marker")
+            .await
+            .unwrap();
+        let before = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(before.global_post_clone, None);
+        assert_eq!(
+            before.host_override.as_ref().unwrap().root.as_deref(),
+            Some("/host-root-marker")
+        );
+        assert_eq!(
+            before.host_override.as_ref().unwrap().post_clone.as_deref(),
+            Some("host-command-marker")
+        );
+        assert_eq!(read(&harness).await, serde_json::json!({"command": null}));
+        let mut observed = before.revision;
+        let mut feed = harness.manager.events().revision();
+        for (command, changed) in [
+            (Some("  first command\nsecond command  "), true),
+            (Some("changed command"), true),
+            (Some(""), true),
+            (Some(""), false),
+            (None, true),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", serde_json::json!({"command": command})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let snapshot = harness
+                .store
+                .checkout_config_snapshot(Some(host))
+                .await
+                .unwrap();
+            assert_eq!(snapshot.global_post_clone.as_deref(), command);
+            assert_eq!(snapshot.global_root, before.global_root);
+            assert_eq!(snapshot.host_override, before.host_override);
+            assert_eq!(snapshot.revision, observed + i64::from(changed));
+            assert_eq!(
+                read(&harness).await,
+                serde_json::json!({"command": command})
+            );
+            assert_eq!(
+                harness
+                    .store
+                    .checkout_config_snapshot(Some(host))
+                    .await
+                    .unwrap(),
+                snapshot,
+                "GET must not normalize a stored command"
+            );
+            assert_eq!(
+                harness.manager.events().revision(),
+                feed,
+                "HTTP leaves publication to the watcher"
+            );
+            assert_eq!(
+                super::publish_revision_change(
+                    &harness.store,
+                    harness.manager.events(),
+                    &mut observed
+                )
+                .await
+                .unwrap(),
+                changed
+            );
+            let after = harness.manager.events().revision();
+            assert_eq!(after > feed, changed);
+            assert!(
+                !super::publish_revision_change(
+                    &harness.store,
+                    harness.manager.events(),
+                    &mut observed
+                )
+                .await
+                .unwrap()
+            );
+            assert_eq!(harness.manager.events().revision(), after);
+            feed = after;
+        }
+    }
+
+    /// A NUL byte can be typed into the HTTP route but never reach a process
+    /// argument, so saving it would turn every later managed checkout into a
+    /// post-clone failure. It is refused at save time, without echoing the
+    /// command, and leaves the stored configuration as it was.
+    #[farhelm_testtrace::test]
+    async fn nul_refusal_preserves_configuration() {
+        let harness = rest_harness::idle_helm().await;
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        let reply = harness
+            .router()
+            .oneshot(request(
+                "PUT",
+                serde_json::json!({"command": "make\u{0}setup"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(reply.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            "post-clone command contains a NUL character, which no shell can run"
+        );
+        assert_eq!(
+            harness.store.checkout_config_snapshot(None).await.unwrap(),
+            before
+        );
+    }
+
+    /// The cap counts UTF-8 bytes, not characters, and refusal never echoes
+    /// executable text or changes configuration. The exact boundary still saves.
+    #[farhelm_testtrace::test]
+    async fn cap_refusal_preserves_configuration_revision_and_feed() {
+        let harness = rest_harness::idle_helm().await;
+        let accepted = "x".repeat(MAX_POST_CLONE_BYTES);
+        let reply = harness
+            .router()
+            .oneshot(request("PUT", serde_json::json!({"command": accepted})))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"command": accepted})
+        );
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        let feed = harness.manager.events().revision();
+        let refused = "é".repeat(MAX_POST_CLONE_BYTES / 2 + 1);
+        let reply = harness
+            .router()
+            .oneshot(request("PUT", serde_json::json!({"command": refused})))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(reply.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            "post-clone command is 16386 bytes; the limit is 16384 bytes"
+        );
+        assert_eq!(
+            harness.store.checkout_config_snapshot(None).await.unwrap(),
+            before
+        );
+        let mut observed = before.revision;
+        assert!(
+            !super::publish_revision_change(
+                &harness.store,
+                harness.manager.events(),
+                &mut observed
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(harness.manager.events().revision(), feed);
+    }
+
+    /// Unauthenticated access and malformed writes cannot read or mutate the
+    /// setting. Missing command is invalid; only an explicit null clears it.
+    #[farhelm_testtrace::test]
+    async fn authentication_and_exact_body_are_required() {
+        let harness = rest_harness::idle_helm().await;
+        harness
+            .store
+            .set_checkout_post_clone(None, "saved command")
+            .await
+            .unwrap();
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        for method in ["GET", "PUT"] {
+            let reply = harness
+                .unauthenticated_router()
+                .oneshot(request(method, serde_json::json!({"command": null})))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::UNAUTHORIZED);
+        }
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({"command": null, "host": 1}),
+            serde_json::json!({"command": null, "root": "/other"}),
+            serde_json::json!({"command": 3}),
+        ] {
+            let reply = harness
+                .router()
+                .oneshot(request("PUT", body))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(
+                harness.store.checkout_config_snapshot(None).await.unwrap(),
+                before
             );
         }
     }

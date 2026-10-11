@@ -481,12 +481,20 @@ the way to turn confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
-with a required nullable `root` and no host or hook fields. It calls the existing global setter/clearer; the revision
+with a required nullable `root` and no host or command fields. It calls the existing global setter/clearer; the revision
 watcher is the sole invalidation publisher for HTTP and CLI writes. The saving field refetches on success and invokes
 its caller's callback so dependent reads need not wait for the watcher. A submitted save is app-owned and survives
 dismissal; its outcome and callback touch component-owned state only while the field remains mounted. The browser reads
-only the global folder, so neither host overrides nor the executable post-clone command enter its reply. The field keeps
-its refused draft and reports success.
+only the global folder through that route. The field keeps its refused draft and reports success.
+
+The all-hosts post-clone command uses its own protected `GET`/`PUT /api/checkout-post-clone` route with a required
+nullable `command` and no other fields. Null is unset, an empty string is explicitly disabled, and nonempty text is
+stored verbatim; neither configuration route exposes host overrides. The handler checks the shared 16 KiB cap before
+calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or changing the
+revision. Its Settings-only multi-line field follows the folder field's draft, refusal, app-owned save and refetch
+contract; Enter inserts a newline. Only an explicit save maps an all-whitespace draft to null. Opening the dialog
+displays an explicit disable as an empty draft without writing it. Existing revision checks and frozen supervisor launch
+specs keep an accepted preparation and its retries on the command accepted with it.
 
 The repository-discovery REST reply carries `needs_checkout_root`, derived from the selected host's effective
 configuration, without changing the supervisor protocol. The launcher retains an accepted setup observation, including
@@ -3163,8 +3171,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm checkout-config show`, `set-root <path>`, `clear-root`, `set-post-clone <command>` and
   `clear-post-clone` — inspect/edit existing helm checkout settings. Each accepts `--state-dir`; `--host <id>` selects a
   registered host override instead of the global value. An empty post-clone command disables inheritance explicitly. The
-  command neither initializes missing state nor migrates an incompatible database, and never creates target directories
-  or runs the hook.
+  all-hosts folder and command can also be saved in Settings; per-host overrides remain CLI-only. The command neither
+  initializes missing state nor migrates an incompatible database, and never creates target directories or runs the
+  hook.
 - `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
   `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
   The last two select where "add host" provisioning payloads come from — an operator-staged directory (verified not at
