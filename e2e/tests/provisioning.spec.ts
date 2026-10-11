@@ -438,6 +438,128 @@ test.afterEach(async ({ request }) => {
   await removeHostsBeyondBaseline(request);
 });
 
+/**
+ * Compare painted answer geometry, rather than inferring layout from classes.
+ * The desktop row must share its baseline; on a phone every answer must span
+ * the footer and the permanent hint must follow the whole stack.
+ */
+async function expectHostAnswers(dialog: Locator, labels: string[], phone: boolean): Promise<void> {
+  const answers = dialog.locator(".host-dialog-answers");
+  await expect(answers.getByRole("button")).toHaveText(labels);
+  const measured = await answers.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      left: box.left,
+      width: box.width,
+      buttons: Array.from(element.querySelectorAll("button"), (button) => {
+        const rect = button.getBoundingClientRect();
+        return {
+          left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+          background: getComputedStyle(button).backgroundColor,
+        };
+      }),
+    };
+  });
+  const buttons = measured.buttons;
+  expect(Math.max(...buttons.map((b) => b.height)) - Math.min(...buttons.map((b) => b.height))).toBeLessThan(1);
+  if (labels.length === 3) {
+    expect(buttons[1].background, "permanent answer stays outlined rather than drawing the reflex click").toBe("rgba(0, 0, 0, 0)");
+    expect(buttons[2].background, "one-off action retains its fill").not.toBe("rgba(0, 0, 0, 0)");
+  }
+  if (phone) {
+    for (const button of buttons) {
+      expect(Math.abs(button.width - measured.width)).toBeLessThan(1);
+      expect(Math.abs(button.left - measured.left)).toBeLessThan(1);
+    }
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].bottom).toBeLessThan(buttons[i - 1].top);
+  } else {
+    expect(Math.max(...buttons.map((b) => b.bottom)) - Math.min(...buttons.map((b) => b.bottom))).toBeLessThan(1);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThan(buttons[i - 1].left);
+  }
+  const hint = dialog.locator(".host-dialog-permanent-hint");
+  if (await hint.count()) {
+    const hintBox = (await hint.boundingBox())!;
+    if (phone) expect(hintBox.y).toBeGreaterThan(Math.max(...buttons.map((b) => b.bottom)));
+    else expect(hintBox.y + hintBox.height).toBeLessThan(Math.min(...buttons.map((b) => b.top)));
+  }
+}
+
+/**
+ * A long real helm plan catches both lost terminating newlines and block
+ * styling that introduces extra ones. Measuring individual glyph ranges
+ * proves a wrapped continuation hangs after the step marker, not just that
+ * the stylesheet declares an indent.
+ */
+async function expectPlanCopyAndIndent(plan: Locator, confirmation: string): Promise<void> {
+  expect(confirmation.endsWith("\n"), "fixture plan retains the helm's terminator").toBe(true);
+  const result = await plan.evaluate((element) => {
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const copied = selection.toString();
+    selection.removeAllRanges();
+    const wrapped = Array.from(element.querySelectorAll(".peer-plan-step")).flatMap((line) => {
+      const node = line.firstChild!;
+      const rows = new Map<number, number>();
+      for (let offset = 0; offset < (node.textContent?.length ?? 0); offset++) {
+        const glyph = document.createRange();
+        glyph.setStart(node, offset);
+        glyph.setEnd(node, offset + 1);
+        const rect = glyph.getBoundingClientRect();
+        if (rect.width) rows.set(rect.top, Math.min(rows.get(rect.top) ?? Infinity, rect.left));
+      }
+      return rows.size > 1 ? [Array.from(rows.values())] : [];
+    });
+    return { copied, wrapped };
+  });
+  expect(result.copied, "native selected copy text must equal the real helm reply").toBe(confirmation);
+  expect(result.wrapped.length, "fixture needs at least one visibly wrapped step").toBeGreaterThan(0);
+  for (const rows of result.wrapped) for (const left of rows.slice(1)) expect(left - rows[0]).toBeGreaterThan(8);
+}
+
+for (const phone of [false, true]) {
+  /**
+   * Keyboard submission must keep the same dialog width and land on Cancel,
+   * while the plan remains readable and copyable at both supported layouts.
+   * Dismissing through the new header must retire the offer without a write.
+   */
+  test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
+    const remote = destination(testInfo, `layout-${phone ? "phone" : "desktop"}`);
+    await configureBackend({ targets: { [target(remote)]: { home: `/home/${"long-path-".repeat(8)}` } } });
+    await patchPreferences(request, { skip_host_setup_confirmation: null });
+    await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
+    await page.goto("/");
+    await openHostsPanel(page);
+    await page.getByRole("button", { name: "add host", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "add host", exact: true });
+    await expect(dialog.getByRole("heading", { name: "add host", exact: true })).toBeVisible();
+    await expectHostAnswers(dialog, ["cancel", "add"], phone);
+    await testInfo.attach(`host-add-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+    const before = (await dialog.boundingBox())!;
+    const reply = page.waitForResponse((response) => response.url().endsWith("/api/hosts/probe") && response.request().method() === "POST");
+    await page.locator(".add-host-ssh").fill(remote);
+    await expect(page.locator(".add-host-ssh")).toBeFocused();
+    await page.mouse.move(0, 0);
+    await page.locator(".add-host-ssh").press("Enter");
+    const planned = await (await reply).json() as ProbeReply;
+    expect(planned.result, "real discovery must produce the plan this test measures").toBe("provisionable");
+    if (planned.result !== "provisionable") throw new Error("fixture did not offer setup");
+    await expect(dialog.getByRole("heading")).toHaveText(`set up host · ${remote}`);
+    await expect(dialog.getByRole("button", { name: "cancel", exact: true })).toBeFocused();
+    expect((await dialog.boundingBox())!.width).toBe(before.width);
+    await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
+    await expectPlanCopyAndIndent(dialog.locator(".provisioning-plan"), planned.confirmation);
+    await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+    await dialog.getByRole("button", { name: "cancel host setup", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
+    expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
+    expect((await readPreferences(request)).skip_host_setup_confirmation).not.toBe(true);
+  });
+}
+
 test("real discovery offers one peer-safe concrete plan and mutates nothing before confirmation", async ({
   page,
   request,
@@ -453,7 +575,7 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   await expect(plan).toContainText(remote);
   await expect(plan).toContainText("<U+202E>");
   await expect(plan).toContainText("<U+200B>");
-  await expect(page.getByRole("button", { name: "yes", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "set up", exact: true })).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
 });
@@ -483,7 +605,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await page.locator(".add-host-ssh").fill(first);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "yes, and don't ask in the future", exact: true }).click();
+  await page.getByRole("button", { name: "set up, don't ask again", exact: true }).click();
   await expect(hostRowByName(page, first)).toBeVisible();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
 
@@ -491,7 +613,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await page.locator(".add-host-ssh").fill(second);
   await page.locator(".add-host-submit").click();
   await expect(hostRowByName(page, second)).toBeVisible();
-  await expect(page.getByRole("button", { name: "yes", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "set up", exact: true })).toHaveCount(0);
   await expect(page.locator(".add-host-form")).toHaveCount(0);
 
   await page.getByRole("button", { name: "settings", exact: true }).click();
@@ -504,7 +626,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await settings.getByRole("button", { name: "close", exact: true }).click();
   await probeRemote(page, third);
   await expect(page.locator(".provisioning-plan")).toBeVisible();
-  await expect(page.getByText("You can turn this back on with the gear at the top of the sidebar.")).toBeVisible();
+  await expect(page.getByText(`undo "don't ask again" with the gear at the top of the sidebar`)).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === third)).toBe(false);
   await page.getByRole("button", { name: "cancel", exact: true }).click();
   await page.getByRole("button", { name: "settings", exact: true }).click();
@@ -549,8 +671,8 @@ async function expectSetupStillAsks(page: Page): Promise<void> {
 /**
  * Cancel and an answer to the add dialog's setup question delivered in one
  * burst, before the render that removes the question, set nothing up. Why:
- * either answer installs Farhelm on the remote machine, and "yes, and don't
- * ask in the future" also turns the setup question off for every later
+ * either answer installs Farhelm on the remote machine, and "set up, don't
+ * ask again" also turns the setup question off for every later
  * host. Cancel only told the hosts panel to close the dialog, so the offer
  * stayed live until the next render and an answer queued behind Cancel still
  * submitted it; the permanent answer also saved its preference before
@@ -573,7 +695,7 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
   });
   await page.goto("/");
 
-  for (const answer of ["yes", "yes, and don't ask in the future"]) {
+  for (const answer of ["set up", "set up, don't ask again"]) {
     await probeRemote(page, remote);
     const form = page.locator(".add-host-form");
     await expect(form.locator(".provisioning-plan")).toBeVisible();
@@ -643,7 +765,7 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   const answerWasLive = await question.evaluate((node) => {
     const buttons = [...node.querySelectorAll<HTMLButtonElement>("button")];
     const cancel = buttons.find((button) => button.textContent?.trim() === "cancel")!;
-    const forever = buttons.find((button) => button.textContent?.trim() === "yes, and don't ask in the future")!;
+    const forever = buttons.find((button) => button.textContent?.trim() === "set up, don't ask again")!;
     cancel.click();
     const live = forever.isConnected && !forever.disabled;
     forever.click();
@@ -655,11 +777,25 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   await expectSetupStillAsks(page);
   expect(preferenceWrites, "no setup preference was written").toHaveLength(0);
 
+  // The row's header owns a separate dismissal handler from Add's. Prove
+  // that it returns focus and retires the offer before the positive answer.
+  await openHostMenu(row);
+  await row.locator(".provisioning-rerun").click();
+  await expect(question).toBeVisible();
+  await expect(question.getByRole("heading")).toHaveText(`set up host · ${remote}`);
+  await expectHostAnswers(question, ["cancel", "set up, don't ask again", "set up"], false);
+  await testInfo.attach("host-row-setup", { body: await question.screenshot(), contentType: "image/png" });
+  await question.getByRole("button", { name: "cancel host setup", exact: true }).click();
+  await expect(question).toHaveCount(0);
+  await expect(row.locator(".host-row-menu")).toBeFocused();
+  expect(provisions, "header dismissal sends no setup").toHaveLength(0);
+  expect(preferenceWrites, "header dismissal writes no permanent answer").toHaveLength(0);
+
   // Positive control: answering the question for real runs setup.
   await openHostMenu(row);
   await row.locator(".provisioning-rerun").click();
   await expect(question).toBeVisible();
-  await question.getByRole("button", { name: "yes", exact: true }).click();
+  await question.getByRole("button", { name: "set up", exact: true }).click();
   await expect.poll(() => provisions.length).toBe(1);
 });
 
@@ -758,7 +894,7 @@ test("discovery registers an answering supervisor through the real handler", asy
   await probeRemote(page, remote);
 
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
-  await expect(page.getByRole("button", { name: "yes", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "set up", exact: true })).toHaveCount(0);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe"]);
 });
 
@@ -842,7 +978,7 @@ test("the add dialog's cancel stays live while discovery is pending", async ({
   await page.goto("/");
   await probeRemote(page, remote);
   await arrived;
-  await expect(page.locator(".add-host-submit")).toHaveText("probing…");
+  await expect(page.locator(".add-host-submit")).toHaveText("checking…");
 
   const cancel = page.locator(".add-host-cancel");
   await expect(cancel).toBeEnabled();
@@ -872,7 +1008,7 @@ test("accepted ADD registers before execution and releases the page lock while r
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "yes", exact: true }).click();
+  await page.getByRole("button", { name: "set up", exact: true }).click();
 
   const registered = await hostFor(request, remote);
   await expect(page.locator(`[data-host-id="${registered.id}"]`)).toBeVisible();
@@ -922,7 +1058,7 @@ test("a refused ADD attempt consumes the displayed offer and refreshes committed
   const consumed = await request.post("/api/hosts/provision", { data: { probe_id: planned.probe_id } });
   expect(consumed.status()).toBe(202);
 
-  await page.getByRole("button", { name: "yes", exact: true }).click();
+  await page.getByRole("button", { name: "set up", exact: true }).click();
   // Confirming closed the dialog before the refusal arrived, so the refusal
   // is reported on the hosts panel rather than inside a dialog that is gone.
   await expect(page.locator(".add-host-error")).toContainText("already been used");
@@ -945,7 +1081,7 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "yes", exact: true }).click();
+  await page.getByRole("button", { name: "set up", exact: true }).click();
 
   await expect(page.locator(".add-host-form")).toHaveCount(0);
   await expect(page.locator(".add-host-warning")).toContainText("accepted");
@@ -1152,7 +1288,7 @@ test("an unvalidated automatic local probe reveals its feedback", async ({ page 
  * Releasing a held plan from the collapsed state must open Details through
  * the child-to-parent reveal bridge.
  */
-test("an automatic local plan reveals its confirmation", async ({ page }) => {
+test("an automatic local plan reveals its confirmation", async ({ page }, testInfo) => {
   const state = { down: true };
   await controlLocalState(page, state);
   let release!: () => void;
@@ -1181,6 +1317,10 @@ test("an automatic local plan reveals its confirmation", async ({ page }) => {
     "install the local supervisor",
   );
   await expect(page.locator(".host-details-toggle")).toBeChecked();
+  const question = page.getByRole("dialog", { name: "host setup", exact: true });
+  await expect(question.getByRole("heading")).toHaveText("set up host · local (this machine)");
+  await expect(question.locator(".host-settings-summary")).toHaveText("Farhelm is not running here yet");
+  await testInfo.attach("host-local-setup", { body: await question.screenshot(), contentType: "image/png" });
 });
 
 /**
@@ -1414,7 +1554,7 @@ async function holdLockWithAdd(
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".add-host-form .provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "yes", exact: true }).click();
+  await page.getByRole("button", { name: "set up", exact: true }).click();
   await confirmed;
   await expect(page.locator(".host-add-dialog")).toHaveCount(0);
   // The held confirm owns the page token: unrelated adds disable until

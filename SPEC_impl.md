@@ -324,22 +324,22 @@ the deleting row takes no tint or edge of its own, which would look exactly like
 Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal blue
 affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
 confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
-ask again on this host" and host removal's "remove, and don't ask again" keep the danger color, while host setup's "yes,
-and don't ask in the future" keeps the primary color. Each leaves its one-off action as the filled choice. The
-maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
-inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
-(`--danger-strong`) for a required one. Its outline signals urgency without presenting an update as a destructive
-confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
-`--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
-SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
-dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions use the
-neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or
-purpose-built styling. Destructive menu items remain red text, while their confirmation buttons use the danger tier.
-SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything else joining that list
-has to be a place where the accent means "this is where you are" — the same thing every entry but the delete wait says —
-because an accent spread across ordinary decoration would leave nothing to make the selection readable. Both constraints
-have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the
-brightest surface it lands on, which is what caps how light the selected row's fill may go.
+ask again on this host" and host removal's "remove, and don't ask again" keep the danger color, while host setup's "set
+up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The maintainer chose
+(2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's inline update
+action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red (`--danger-strong`) for
+a required one. Its outline signals urgency without presenting an update as a destructive confirmation. Being outlined,
+it preserves the sidebar's one-filled-control rule. Pressed disclosures use `--accent-fill-hover` so an open trigger is
+distinct from a resting primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting
+chrome carries exactly one filled control (`new session`), and each dialog or popup that floats over it may supply its
+own affirmative primary. The sidebar's secondary actions use the neutral tier; menu items, tabs, composer selections,
+relays, and other explicit exemptions retain their ghost or purpose-built styling. Destructive menu items remain red
+text, while their confirmation buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's
+row readably at a glance, so anything else joining that list has to be a place where the accent means "this is where you
+are" — the same thing every entry but the delete wait says — because an accent spread across ordinary decoration would
+leave nothing to make the selection readable. Both constraints have a contrast floor under them: the quiet foreground
+tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is what caps how light
+the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and

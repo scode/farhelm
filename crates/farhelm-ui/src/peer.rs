@@ -213,22 +213,41 @@ pub(crate) fn PeerLine(
 /// the action a user is about to authorize. Each line's contents are still a
 /// peer value, escaped and direction-isolated independently so one hostile
 /// path cannot reorder another line or the confirmation controls around it.
+/// Step classification recognizes only the helm's literal `- ` prefix; it
+/// never interprets actions. Newlines remain literal text inside each line,
+/// including the last terminator: block boundaries alone serialize differently
+/// across browser engines and cannot preserve the helm's exact copy text. An
+/// empty end marker lets plan CSS retain that terminator in native selection
+/// without adding any text to what the user authorizes or copies.
 #[component]
 pub(crate) fn PeerBlock(class: String, text: String) -> Element {
-    let lines = text.lines().collect::<Vec<_>>();
-    let last = lines.len().saturating_sub(1);
+    let lines = text
+        .split_inclusive('\n')
+        .map(|line| {
+            // Keep the existing CRLF normalization for peer command blocks;
+            // the helm's generated plans use LF separators.
+            let content = line
+                .strip_suffix("\r\n")
+                .or_else(|| line.strip_suffix('\n'))
+                .unwrap_or(line);
+            (content, line.ends_with('\n'))
+        })
+        .collect::<Vec<_>>();
     rsx! {
         pre { class: "{class}",
-            for (index, line) in lines.iter().enumerate() {
+            for (index, (line, newline)) in lines.iter().enumerate() {
                 span {
                     key: "{index}",
-                    class: "peer-value peer-line",
+                    class: if line.starts_with("- ") { "peer-value peer-line peer-plan-step" } else { "peer-value peer-line" },
                     dir: "ltr",
                     "{display_peer(line)}"
+                    if *newline {
+                        "\n"
+                    }
                 }
-                if index != last {
-                    br {}
-                }
+            }
+            if text.ends_with('\n') {
+                span { class: "peer-block-end", "aria-hidden": "true" }
             }
         }
     }
