@@ -54,6 +54,15 @@ struct Confirmation {
     targets: Vec<Target>,
 }
 
+/// A run keeps its original denominator until every host has answered.
+/// Presence means at least one pending host: success and failure both remove
+/// their host, and the final reply clears this state before releasing the gate.
+#[derive(Clone)]
+struct DeletionRun {
+    pending: HashSet<HostId>,
+    total: usize,
+}
+
 /// Only connected rows can contribute current archives or accept cleanup.
 fn connected(host: &Host) -> bool {
     matches!(host.state, HostPhase::Connected { .. }) && host.incarnation != 0
@@ -166,7 +175,10 @@ fn cancel_confirmation(mut confirmation: Signal<Option<Confirmation>>) {
     confirmation.set(None);
     if global {
         document::eval(
-            "requestAnimationFrame(() => document.querySelector('.trash-delete-all')?.focus({preventScroll:true}))",
+            // A re-list can disable "delete all" while the confirmation is
+            // open; focusing a disabled button does nothing and would drop
+            // focus out of the dialog, so fall back to Close.
+            "requestAnimationFrame(() => (document.querySelector('.trash-delete-all:enabled') ?? document.querySelector('.trash-close'))?.focus({preventScroll:true}))",
         );
     }
 }
@@ -244,7 +256,7 @@ pub(super) fn TrashControl(
     let mut refresh = use_signal(|| 0_u64);
     let mut confirmation = use_signal(|| None::<Confirmation>);
     let mut notices = use_signal(HashMap::<HostId, Vec<CheckoutTrashIssue>>::new);
-    let mut remaining = use_signal(|| 0_usize);
+    let mut deletion = use_signal(|| None::<DeletionRun>);
     // The claim outlives all host tasks and drops with this component on cancel.
     let mut claim = use_signal(|| None::<OpGuard>);
     let signature = use_memo(move || {
@@ -264,7 +276,7 @@ pub(super) fn TrashControl(
         let _ = revision();
         let _ = refresh();
         let measure = open();
-        if remaining() != 0 {
+        if deletion().is_some() {
             return;
         }
         let current = generation.peek().wrapping_add(1);
@@ -341,16 +353,21 @@ pub(super) fn TrashControl(
                         && matches!(&entry.reply, Some(Ok(listing)) if selection_size(listing) <= MAX_SELECTION)
                 })
             });
-    let busy = remaining() != 0;
+    let progress = deletion();
+    let busy = progress.is_some();
     let mut gate = gate;
     let delete_base = base;
     let submit = use_callback(move |_: ()| {
-        if *remaining.peek() != 0 {
+        if deletion.peek().is_some() {
             return;
         }
         let Some(confirm) = confirmation.peek().clone() else {
             return;
         };
+        // An empty selection has no reply that could retire a run or its gate.
+        if confirm.targets.is_empty() {
+            return;
+        }
         // Host changes invalidate a displayed confirmation before dispatch;
         // the helm repeats the incarnation fence for changes it sees first.
         let valid = {
@@ -373,7 +390,10 @@ pub(super) fn TrashControl(
             return;
         };
         claim.set(Some(guard));
-        remaining.set(confirm.targets.len());
+        deletion.set(Some(DeletionRun {
+            pending: confirm.targets.iter().map(|target| target.host).collect(),
+            total: confirm.targets.len(),
+        }));
         generation += 1; // supersede every pre-delete count and size reply
         confirmation.set(None);
         notices.write().clear();
@@ -413,8 +433,24 @@ pub(super) fn TrashControl(
                         }]);
                     }
                 }
-                remaining -= 1;
-                if *remaining.peek() == 0 {
+                // A failed reply still finishes this host's wait. Updating the
+                // pending set after either outcome keeps progress and admission
+                // tied to the same run, including an uncertain cleanup reply.
+                let finished = {
+                    let mut run = deletion.write();
+                    if let Some(active) = run.as_mut() {
+                        active.pending.remove(&target.host);
+                        if active.pending.is_empty() {
+                            *run = None;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if finished {
                     claim.set(None);
                     refresh += 1;
                     document::eval(
@@ -425,7 +461,7 @@ pub(super) fn TrashControl(
         }
     });
     let mut close = move |_| {
-        if *remaining.peek() != 0 {
+        if deletion.peek().is_some() {
             return;
         }
         if confirmation.peek().is_some() {
@@ -510,8 +546,18 @@ pub(super) fn TrashControl(
                         h2 { id: "checkout-trash-title", TrashIcon { full: count > 0 } "trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
-                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if *remaining.peek() == 0 { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
+                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
                             button { class: "btn btn-neutral trash-close", disabled: busy, onclick: move |_| close(()), "close" }
+                        }
+                        // The status region stays mounted while idle so that a
+                        // starting delete is a text change screen readers
+                        // announce; a region inserted with its text already in
+                        // place is announced unreliably, notably under WebKit.
+                        div { class: if progress.is_some() { "checkout-trash-progress" } else { "checkout-trash-progress idle" }, role: "status",
+                            if let Some(run) = &progress {
+                                if run.total == 1 { "deleting…" }
+                                else { "deleting on {run.pending.len()} of {run.total} hosts…" }
+                            }
                         }
                     }
                     div { class: "checkout-trash-body",
@@ -532,7 +578,8 @@ pub(super) fn TrashControl(
                             let pending = entry.is_none_or(|entry| entry.loading);
                             let host_target = if hosts_known { target(host, entry) } else { None };
                             let action_host = host.clone();
-                            let show = !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
+                            let deleting = progress.as_ref().is_some_and(|run| run.pending.contains(&host.id));
+                            let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
                             let name = display_peer(&host.name);
                             let host_count = listing.map_or_else(|| "count unknown".into(), |listing| format!("{} {}", listing.checkouts.len(), checkouts(listing.checkouts.len())));
                             let host_size = if connected(host) && hosts_known && pending { "measuring…".into() } else { listing.map_or_else(|| "size unknown".into(), |listing| space(listing.checkouts.iter().filter_map(|entry| entry.bytes).fold(0, u64::saturating_add), listing.checkouts.iter().any(|entry| entry.bytes.is_none()))) };
@@ -544,10 +591,12 @@ pub(super) fn TrashControl(
                                 if show {
                                     section { key: "{host.id}", class: if connected(host) { "checkout-trash-host" } else { "checkout-trash-host unreachable" }, "data-host-id": "{host.id}",
                                         div { class: "checkout-trash-host-header",
-                                            div { strong { class: "peer-value", dir: "ltr", "{name}" } div { "{host_count} · {host_size}" } }
+                                            div { strong { class: "peer-value", dir: "ltr", "{name}" } div { "{host_count} · {host_size}" }
+                                                if deleting { div { class: "trash-host-progress", "deleting…" } }
+                                            }
                                             button { class: "btn btn-danger btn-outline trash-host-delete", disabled: busy || host_target.is_none(),
                                                 onclick: move |_| {
-                                                    if *remaining.peek() == 0
+                                                    if deletion.peek().is_none()
                                                         && hosts.peek().refresh_error().is_none()
                                                         && let Some(target) = target(&action_host, state.peek().get(&action_host.id))
                                                     {
