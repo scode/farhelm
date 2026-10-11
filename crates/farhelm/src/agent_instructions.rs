@@ -123,7 +123,12 @@ fn render(agent: &Command) -> String {
          the target. Restart uses its stored configuration; you cannot supply another\n\
          command. Self-restart can lose its acknowledgement.\n\
          \n\
-         Create needs a launch, a cwd and a host. An agent launch is --agent TYPE with optional\n\
+         Create needs a launch, a destination and a host. Use --cwd DIR for an existing\n\
+         directory, or --gh OWNER/REPO (--github is an alias) for a new managed checkout;\n\
+         never both. --gh acme/web --title 'Fix parser' creates directory web-fix-parser. Without\n\
+         a title Farhelm picks the next free web-N. A taken or over-long name is refused,\n\
+         never suffixed. The checkout folder and post-clone command come from helm settings.\n\
+         An agent launch is --agent TYPE with optional\n\
          --model, --effort, --permissions and --trust; Farhelm composes its command. A command\n\
          launch is --command with the command line to run and --yolo or --no-yolo: your\n\
          statement of whether it runs without approval prompts. Farhelm believes it and never\n\
@@ -135,18 +140,20 @@ fn render(agent: &Command) -> String {
          unknown --agent value lists the agent types.\n\
          --template NAME applies a launch template by its exact name (templates lists them);\n\
          repeat it to apply several in order. Templates apply first and the other flags then\n\
-         change their result; a template may supply the cwd, host and title. A choice nothing\n\
+         change their result; a template may supply the destination, host and title, including\n\
+         a fresh managed checkout. A choice nothing\n\
          set is the agent type's default, never the user's remembered GUI choice; pass default\n\
          to reset one a template set.\n\
          template create NAME and template edit NAME write templates from create's flags plus\n\
-         --cwd, --title and --host (never --template); edit sets only the fields you give and\n\
+         --cwd or --gh/--github, --title and --host (never --template); edit sets only the fields you give and\n\
          cannot unset one or change a template between agent and command launches, so delete\n\
          and recreate a template to do either. --command always needs --yolo or --no-yolo. The\n\
          templates listing hides command text, so you cannot copy a template you did not write.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
          source's launch inherit. Spawn creates on this host only, from --inherit-agent (this\n\
          session's own launch) or from the same launch flags as create, never both; a template\n\
-         that sets a host is refused there. Clone and --inherit-agent refuse a session created\n\
+         that sets a host or managed checkout is refused there. Clone takes no repository\n\
+         option and copies the source's existing directory. Clone and --inherit-agent refuse a session created\n\
          before launch kinds; use create instead.\n\
          \n\
          The user approves every acting verb. spawn, create, clone, rename, stop, restart and\n\
@@ -184,7 +191,9 @@ fn render(agent: &Command) -> String {
          A lost or malformed mutation reply means the outcome may be unknown. List again before\n\
          retrying. For create, clone or spawn, retry with the SAME --idempotency-key and exactly\n\
          the same other flags and templates; do not mint a new key. Ordinary valid actions need\n\
-         no extra confirmation.\n\
+         no extra confirmation. An approved managed-checkout retry returns its session without\n\
+         another card or clone; one never approved still asks. A recorded checkout refusal\n\
+         requires a new idempotency key; a changed request under an old key is refused.\n\
          \n\
          Results come from the helm attached to this session and cover its fleet. If no helm is\n\
          attached, ask the user to open this session in the Farhelm UI, then retry.\n",
@@ -708,7 +717,7 @@ mod tests {
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
-            "farhelm agent create [--cwd <DIR>] [--host <NAME>] [--template <NAME>] \
+            "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] [--template <NAME>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
              [--trust <BOOL>] [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
              [--no-resume-command] [--title <TITLE>] [--idempotency-key <KEY>]  \

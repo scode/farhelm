@@ -371,8 +371,24 @@ pub(crate) async fn github_checkout_preview(
     if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(error);
     }
+    match preview_github_checkout(&state, &claim, &client, req.repo, req.title).await {
+        Ok(preview) => axum::Json(preview).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Bind a preview to the connection the caller will dispatch on. Agent
+/// approvals and the browser use the same configuration snapshot and target
+/// naming rules; neither may silently retarget an accepted directory.
+pub(crate) async fn preview_github_checkout(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    repo: String,
+    title: Option<String>,
+) -> anyhow::Result<GithubCheckoutPreviewBody> {
     let Some(installation_identity) = claim.identity.clone().filter(|id| !id.is_empty()) else {
-        return http_error(anyhow::Error::new(SupervisorError {
+        return Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "managed checkout preview requires a host with a stable installation identity"
@@ -381,12 +397,12 @@ pub(crate) async fn github_checkout_preview(
     };
     // One database snapshot: root + revision are resolved together so the
     // binding the create later presents is internally consistent.
-    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
-        Ok(config) => config,
-        Err(error) => return http_error(error),
-    };
+    let config = state
+        .store
+        .resolve_checkout_config(Some(claim.host))
+        .await?;
     let Some(root) = config.root.clone() else {
-        return http_error(anyhow::Error::new(SupervisorError {
+        return Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "no checkout folder is configured; set one in Settings".to_string(),
@@ -394,9 +410,9 @@ pub(crate) async fn github_checkout_preview(
     };
     let request = farhelm_proto::GithubPreviewRequest {
         host: Some(claim.host.to_string()),
-        expected_incarnation: req.expected_incarnation,
-        repo: req.repo,
-        title: req.title,
+        expected_incarnation: Some(claim.incarnation),
+        repo,
+        title,
         root: Some(root),
         config_revision: Some(config.config_revision),
     };
@@ -407,7 +423,7 @@ pub(crate) async fn github_checkout_preview(
             // bound against exactly this pair.
             preview.claim_context.host = claim.host.to_string();
             preview.claim_context.incarnation = claim.incarnation;
-            axum::Json(GithubCheckoutPreviewBody {
+            Ok(GithubCheckoutPreviewBody {
                 binding: farhelm_proto::CheckoutPreviewBinding {
                     canonical_root: preview.canonical_root,
                     basename: preview.basename,
@@ -418,9 +434,8 @@ pub(crate) async fn github_checkout_preview(
                 incarnation: preview.claim_context.incarnation,
                 installation_identity,
             })
-            .into_response()
         }
-        Err(error) => http_error(error),
+        Err(error) => Err(error),
     }
 }
 
@@ -1943,11 +1958,54 @@ async fn create_fresh_session(
     state: &AppState,
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
-    mut req: CreateReq,
+    req: CreateReq,
     intent_key: Option<String>,
     client_identity: String,
     accept_result: Option<CreatedSessionCheck>,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    create_fresh_session_resolved(
+        state,
+        claim,
+        client,
+        req,
+        FreshCreateContext {
+            intent_key,
+            client_identity,
+            accept_result,
+            origin: CreateOrigin::User,
+            resolved_mode: None,
+        },
+    )
+    .await
+}
+
+/// Authority and retry inputs beside a fresh request. A pre-resolved mode
+/// belongs to the agent path; the browser must compile only after lookup.
+struct FreshCreateContext {
+    intent_key: Option<String>,
+    client_identity: String,
+    accept_result: Option<CreatedSessionCheck>,
+    origin: CreateOrigin,
+    resolved_mode: Option<SessionLaunch>,
+}
+
+/// Fresh admission after either a browser choice or an approved agent
+/// request. Lookup precedes launch compilation; agents supply their already
+/// resolved launch and cannot record a GUI selection or override YOLO.
+async fn create_fresh_session_resolved(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    mut req: CreateReq,
+    context: FreshCreateContext,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let FreshCreateContext {
+        intent_key,
+        client_identity,
+        accept_result,
+        origin,
+        resolved_mode,
+    } = context;
     let checkout = req
         .github_checkout
         .as_ref()
@@ -1960,14 +2018,18 @@ async fn create_fresh_session(
         // The request's own structured choice, as the user submitted it, in
         // the same durable form an uninterrupted create records (this path
         // may accept a lost-reply retry without compiling anything).
-        explicit_selection: req.launch.clone().map(crate::launches::normalize_selection),
+        explicit_selection: if origin == CreateOrigin::User {
+            req.launch.clone().map(crate::launches::normalize_selection)
+        } else {
+            None
+        },
     };
     if let Some(key) = &intent_key
         && let Some(session) = client
             .reconcile_github_checkout(key.clone(), client_identity.clone(), req.cols, req.rows)
             .await?
     {
-        return accept_created_session(state, claim, session, acceptance).await;
+        return accept_fresh_reconciled(state, claim, session, acceptance, origin).await;
     }
 
     // The complete locally fallible preparation phase sits before dispatch.
@@ -1991,7 +2053,10 @@ async fn create_fresh_session(
             github_checkout_resolution(state, claim, &req, client_identity.clone())
                 .await
                 .expect("fresh request requires resolution")?;
-        let mode = create_mode(&mut req)?;
+        let mode = match resolved_mode {
+            Some(mode) => mode,
+            None => create_mode(&mut req)?,
+        };
         Ok((github_checkout, mode))
     }
     .await;
@@ -2004,7 +2069,7 @@ async fn create_fresh_session(
             return match client.reconcile_github_checkout_with_refusal(
                 key, client_identity, req.cols, req.rows, true,
             ).await {
-                Ok(Some(session)) => accept_created_session(state, claim, session, acceptance).await,
+                Ok(Some(session)) => accept_fresh_reconciled(state, claim, session, acceptance, origin).await,
                 // Older peers may ignore the flag. Unknown is still only an
                 // observation and must never authorize a fresh-key allocation.
                 Ok(None) => Err(local_error.context("the supervisor did not establish a durable refusal; retain this request for retry")),
@@ -2027,13 +2092,101 @@ async fn create_fresh_session(
             rows: req.rows,
             intent_key,
             github_checkout,
-            origin: CreateOrigin::User,
+            origin,
             accept_result: acceptance.accept_result,
             confirm_yolo: req.confirm_yolo,
             settings_from_source: false,
             parent: None,
             spawned: false,
             request_fingerprint: None,
+        },
+    )
+    .await
+}
+
+/// Reconcile an approved agent checkout before preview or another approval.
+/// Unknown means no approved dispatch was recorded, and must still pass the
+/// ordinary approval path. The digest is the frozen agent request identity,
+/// not a new identity built from today's template or preview.
+pub(crate) async fn reconcile_agent_checkout(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    key: &str,
+    identity: &str,
+) -> anyhow::Result<Option<farhelm_proto::SessionInfo>> {
+    let Some(session) = client
+        .reconcile_github_checkout(
+            key.to_string(),
+            identity.to_string(),
+            default_cols(),
+            default_rows(),
+        )
+        .await?
+    else {
+        return Ok(None);
+    };
+    record_session(state, claim, &session).await?;
+    Ok(Some(session))
+}
+
+/// Cache an agent replay without inventing original repository intent from
+/// today's mutable template. The digest identifies the raw request, whose
+/// resolved repository may since have changed; neither that new destination
+/// nor descriptive peer metadata may rewrite the first create's suggestions.
+/// Browser requests retain their original preview and keep full bookkeeping.
+async fn accept_fresh_reconciled(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    session: farhelm_proto::SessionInfo,
+    acceptance: CreateAcceptance,
+    origin: CreateOrigin,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    if origin == CreateOrigin::Agent {
+        record_session(state, claim, &session).await?;
+        Ok(session)
+    } else {
+        accept_created_session(state, claim, session, acceptance).await
+    }
+}
+
+/// Dispatch an agent's approved preview through fresh admission with agent
+/// authority. Configuration and incarnation are rechecked after the card;
+/// keyed local refusals use the same durable settlement as browser creates.
+pub(crate) async fn create_agent_checkout(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    checkout: farhelm_proto::GithubCheckoutRequest,
+    mode: SessionLaunch,
+    intent_key: Option<String>,
+    client_identity: String,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let req = CreateReq {
+        cwd: String::new(),
+        launch: None,
+        command: None,
+        retired: RetiredCreateFields::default(),
+        confirm_yolo: false,
+        title: checkout.title.clone(),
+        host: Some(claim.host),
+        cols: default_cols(),
+        rows: default_rows(),
+        intent_key: None,
+        expected_incarnation: Some(claim.incarnation),
+        github_checkout: Some(checkout),
+    };
+    create_fresh_session_resolved(
+        state,
+        claim,
+        client,
+        req,
+        FreshCreateContext {
+            intent_key,
+            client_identity,
+            accept_result: None,
+            origin: CreateOrigin::Agent,
+            resolved_mode: Some(mode),
         },
     )
     .await

@@ -36,6 +36,9 @@ use crate::hosts::{HostStateView, HostView};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Resolution {
     pub(crate) cwd: String,
+    /// A fresh checkout destination. Its exact cwd is previewed only after
+    /// keyed recovery, so an accepted retry does not propose another clone.
+    pub(crate) github_repo: Option<String>,
     pub(crate) launch: SessionLaunch,
     pub(crate) title: Option<String>,
     /// The install identity a template set as the host, if one did. The
@@ -169,17 +172,18 @@ pub(crate) fn resolve(
     };
     let state = apply_template(&state, &flags, &context).map_err(flag_refusal)?;
 
-    let cwd = match state.destination {
-        Some(TemplateDestination::Folder(folder)) if !folder.is_empty() => folder,
-        Some(TemplateDestination::Github(repo)) => {
+    let (cwd, github_repo) = match state.destination {
+        Some(TemplateDestination::Folder(folder)) if !folder.is_empty() => (folder, None),
+        Some(TemplateDestination::Github(repo)) if spawn => {
             return Err(invalid(format!(
-                "a template sets a managed checkout of {repo} as the destination, and the CLI \
-                 does not create checkouts; pass --cwd with an existing folder"
+                "farhelm spawn cannot create a managed checkout of {repo}; \
+                 use farhelm agent create --host with --gh, or pass --cwd with an existing folder"
             )));
         }
+        Some(TemplateDestination::Github(repo)) => (String::new(), Some(repo)),
         _ => {
             return Err(invalid(
-                "--cwd is required unless a template sets the folder".to_string(),
+                "--cwd or --gh is required unless a template sets the destination".to_string(),
             ));
         }
     };
@@ -231,6 +235,7 @@ pub(crate) fn resolve(
     let launch = crate::sessions::resolve_launch_request(request)?;
     Ok(Resolution {
         cwd,
+        github_repo,
         launch,
         title: state.name,
         template_host: state.host,
@@ -384,7 +389,7 @@ mod tests {
 
     /// Spec: an unknown template name is refused naming it; a template that
     /// does not apply is refused naming the template and the field; a flag
-    /// that does not apply is refused naming the flag; a template whose
+    /// that does not apply is refused naming the flag; a spawn whose
     /// destination is a fresh GitHub checkout is refused, as is a template
     /// that sets a host on a spawn.
     ///
@@ -454,7 +459,19 @@ mod tests {
             false,
             false,
         );
-        assert!(message(checkout.unwrap_err()).contains("does not create checkouts"));
+        assert_eq!(checkout.unwrap().github_repo.as_deref(), Some("o/r"));
+        let spawned_checkout = resolve(
+            &stored,
+            &["checkout".to_string()],
+            &TemplateFields::default(),
+            &[],
+            true,
+            false,
+        );
+        assert!(
+            message(spawned_checkout.unwrap_err())
+                .contains("spawn cannot create a managed checkout")
+        );
         let overridden = resolve(
             &stored,
             &["checkout".to_string()],
