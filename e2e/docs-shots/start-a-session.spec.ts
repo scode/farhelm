@@ -83,16 +83,17 @@ test("harness and model", async ({ page, request }) => {
   await expect(model).toBeVisible();
   // Both targets span the launcher's column, so callouts on their right line
   // up in the empty margin without covering anything; dx pushes them clear
-  // of the column so the arrows show.
+  // of the column so the arrows show, and dy keeps the two boxes, each
+  // taller than its target, from touching.
   await director.callout(
     harness,
     "Pick the agent first. Nothing is chosen when the launcher opens, and the choices below change to what that agent offers.",
-    { side: "right", dx: 60 },
+    { side: "right", dx: 60, dy: -15 },
   );
   await director.callout(
     model,
     "Which model. harness default leaves it to the agent's own setting; type a name to use one the list doesn't show.",
-    { side: "right", dx: 60 },
+    { side: "right", dx: 60, dy: 15 },
   );
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
@@ -251,11 +252,12 @@ test("host yolo setting", async ({ page, request }) => {
   await expect(dialog).toBeVisible();
   const toggle = dialog.locator(".host-yolo-without-asking-toggle");
   await director.highlight(toggle, { pad: 4 });
-  // Left of the dialog, so the setting's own explanation stays readable.
+  // Right of the dialog, beside the switch at its right edge, so the
+  // setting's own label and explanation stay readable.
   await director.callout(
     toggle,
     "Ticked: YOLO launches on this host start without asking. Unticked: Farhelm asks every time.",
-    { side: "left" },
+    { side: "right" },
   );
   await shot(page, `${PAGE}/host-yolo-setting`, [dialog]);
 });

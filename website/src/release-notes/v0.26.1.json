@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 1828,
+      "name": "release-notes/v0-26-1-checkout-folder",
+      "alt": "The checkout folder field in Settings with ~/checkouts typed, explained as where every host puts the GitHub checkouts Farhelm makes."
+    },
+    {
+      "entry": 1770,
+      "name": "release-notes/v0-26-1-host-appearance",
+      "alt": "The Appearance section of a remote host's settings: the icon choices, the color choices, and a preview of the host's mark in the session list, explained."
+    },
+    {
+      "entry": 1768,
+      "name": "release-notes/v0-26-1-sounds",
+      "alt": "The sounds section of Settings with switches for session waiting, approval request, and turn finished, explaining which sound each plays."
+    },
+    {
+      "entry": 1717,
+      "name": "release-notes/v0-26-1-save-template",
+      "alt": "The session launcher's save as template panel with a name typed and a checklist of the setup's choices, explained."
+    },
+    {
+      "entry": 1765,
+      "name": "release-notes/v0-26-1-host-settings",
+      "alt": "A remote host's redesigned settings, with its Connection, Appearance, and Permissions sections explained."
+    }
+  ]
+}
