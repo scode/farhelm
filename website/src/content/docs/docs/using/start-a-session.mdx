@@ -172,6 +172,9 @@ by hand at any time; existing checkouts stay independent, and the next managed c
 that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
 place so concurrent checkouts still take turns. A cache failure names its path in the terminal and stops the clone.
 
+An agent in one of your sessions can also start a session in a new managed checkout when you ask it to, with your
+approval ([Approve what agents do](/docs/using/approve-agent-requests/)).
+
 Managed checkouts need one setup step first: telling Farhelm which directory new checkouts go into. Until you have,
 choosing **managed checkout** asks for it.
 

@@ -7,10 +7,11 @@ sidebar:
 
 An agent running in a Farhelm session can do more than work in its own terminal. With the `farhelm` command, which it
 uses when you ask it to (with `$farhelm` in your message) but can also run on its own, it can look at your hosts and
-sessions, start new sessions on any host, copy a session to the same host or another, rename, stop, or restart sessions,
-and change your [launch templates](/docs/using/launch-templates/). Farhelm asks you before any of those changes happens,
-whoever typed the command; a command you type yourself in a session's terminal is asked about the same way. Looking
-never asks.
+sessions, start new sessions on any host, in an existing directory or a new
+[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), copy a session to the same host or
+another, rename, stop, or restart sessions, and change your [launch templates](/docs/using/launch-templates/). Farhelm
+asks you before any of those changes happens, whoever typed the command; a command you type yourself in a session's
+terminal is asked about the same way. Looking never asks.
 
 An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
 to open it.
@@ -24,8 +25,11 @@ that matter:
 - which session asked, and from which host;
 - the session it would act on, for a rename, stop, or restart, and the command a restart would run;
 - for a copy of a session, the session being copied;
-- for a new session, the host, the directory, the agent and its choices or the full command it would run, and whether it
-  would run in [YOLO mode](/docs/using/start-a-session/#confirm-a-yolo-launch) (no approval prompts);
+- for a new session, the host, the directory, the agent and its choices, the full command it would run and the command a
+  later restart would run, and whether it would run in [YOLO mode](/docs/using/start-a-session/#confirm-a-yolo-launch)
+  (no approval prompts). For a new [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the
+  card also names the repository it would clone, such as `GitHub: acme/web`, above the exact directory the clone would
+  go into;
 - for a template change, the whole template as it would be saved, including any command line.
 
 Most of what a card shows was written by the agent: session titles, directories, commands. Read those as the agent's

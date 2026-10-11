@@ -89,8 +89,8 @@
 
 Farhelm has two parts. The **helm** is what you look at, usually the Farhelm app on your Mac: it keeps your list of
 hosts and shows every session. A **supervisor** runs on each machine, your Mac included, and keeps that machine's agents
-and their terminals running. The helm reaches each supervisor over SSH. Nothing listens on a network port, nothing goes
-through a relay, and every box in the diagram can restart without losing a session.
+and their terminals running. The helm reaches each supervisor over SSH. Nothing listens beyond your own machine, nothing
+goes through a relay, and every box in the diagram can restart without losing a session.
 
 <details>
 <summary>More details (architecture diagram)</summary>
