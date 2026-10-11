@@ -73,6 +73,20 @@ function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
+/** Open the editable folder's own list without editing or promoting history.
+ * Focus alone preserves an untouched seed; options are never Tab stops. */
+async function folderOptions(form: Locator): Promise<Locator> {
+  const folder = form.getByRole("combobox", { name: "folder", exact: true });
+  await folder.focus();
+  if (await folder.getAttribute("aria-expanded") !== "true") {
+    await folder.blur();
+    await folder.focus();
+  }
+  const list = form.getByRole("listbox", { name: "folders", exact: true });
+  await expect(list).toBeVisible();
+  return list;
+}
+
 /**
  * Remove ANSI SGR escape sequences from a string.
  *
@@ -4984,7 +4998,7 @@ test("composer holds offered history steady until destination and search promoti
     await pickModel(form, "offered-old");
     await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/i }).click();
     await form.getByRole("button", { name: "yolo", exact: true }).click();
-    await form.getByRole("button", { name: "/offered-history/folder-a", exact: true }).click();
+    await (await folderOptions(form)).getByRole("option", { name: "/offered-history/folder-a", exact: true }).click();
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill("offered-history");
     const rows = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
@@ -4992,7 +5006,8 @@ test("composer holds offered history steady until destination and search promoti
     const initialRow = await rows.first().getAttribute("data-tooltip");
     const initialActive = await search.getAttribute("aria-activedescendant");
     const draft = await form.locator(".launch-composer-summary").innerText();
-    const initialFolders = await form.locator(".launch-composer-folder-links button").allTextContents();
+    const initialFolders = await (await folderOptions(form)).getByRole("option").allTextContents();
+    await search.focus();
     const initialFetchedRevision = Number(await form.getAttribute("data-history-fetched-revision"));
     const baselineFreshReads = historyReads;
 
@@ -5039,7 +5054,8 @@ test("composer holds offered history steady until destination and search promoti
     await expect(rows.first()).toHaveAttribute("data-tooltip", initialRow ?? "");
     await expect(search).toHaveAttribute("aria-activedescendant", initialActive ?? "");
     await expect(form.locator(".launch-composer-summary")).toHaveText(draft);
-    await expect(form.locator(".launch-composer-folder-links button")).toHaveText(initialFolders);
+    await expect((await folderOptions(form)).getByRole("option")).toHaveText(initialFolders);
+    await search.focus();
 
     const capturedSearchResult = form
       .locator(".launch-composer-search-recent-destination")
@@ -5048,8 +5064,9 @@ test("composer holds offered history steady until destination and search promoti
     await capturedSearchResult.click();
     await expect(form.getByLabel("folder", { exact: true }), "search activation must apply the captured old result, not replace it with fresh history").toHaveValue("/offered-history/old");
     const freshFolder = form
-      .locator(".launch-composer-folder-links")
-      .getByRole("button", { name: "/offered-history/folder-new", exact: true });
+      .getByRole("listbox", { name: "folders" })
+      .getByRole("option", { name: "/offered-history/folder-new", exact: true });
+    await folderOptions(form);
     await expect(freshFolder, "search activation must make the fresh destination suggestion available without another feed read").toBeVisible();
     await freshFolder.click();
     await expect(form.getByLabel("folder", { exact: true }), "the ordinary destination control must apply the fresh folder it made available").toHaveValue("/offered-history/folder-new");
@@ -5096,7 +5113,7 @@ test("composer path actions keep typing inert and browse the selected remote hos
   expect(remote, "the selected option must be the asserted remote fixture, not a positional row").toBe(String(remoteFixture.id));
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   const remotePath = remoteFixture.remote_state_dir;
-  await expect(form.locator(".launch-composer-folder-links").getByRole("button", { name: remotePath, exact: true }), "the remote path must be absent from selected-host history before Use or Browse").toHaveCount(0);
+  await expect((await folderOptions(form)).getByRole("option", { name: remotePath, exact: true }), "the remote path must be absent from selected-host history before Use or Browse").toHaveCount(0);
   await search.fill(remotePath);
   expect(browseBodies, "typing must not inspect either filesystem").toHaveLength(0);
   expect(createPosts, "typing must not start a session").toBe(0);
@@ -5298,10 +5315,10 @@ test("composer rejects held and queued stale browse activation after destination
   const remote = await host.getAttribute("data-host-id");
   expect(Number(remote), "the authority fixture needs a selected remote host").not.toBe(1);
   const folder = form.getByLabel("folder", { exact: true });
-  const saved = form.locator(".launch-composer-folder-links");
-  await expect(saved.getByRole("button", { name: "/authority/a", exact: true }), "A must be an actual seeded saved-folder control").toBeVisible();
-  await expect(saved.getByRole("button", { name: "/authority/b", exact: true }), "B must be an actual seeded saved-folder control").toBeVisible();
-  await saved.getByRole("button", { name: "/authority/a", exact: true }).click();
+  const saved = await folderOptions(form);
+  await expect(saved.getByRole("option", { name: "/authority/a", exact: true }), "A must be an actual seeded saved-folder control").toBeVisible();
+  await expect(saved.getByRole("option", { name: "/authority/b", exact: true }), "B must be an actual seeded saved-folder control").toBeVisible();
+  await saved.getByRole("option", { name: "/authority/a", exact: true }).click();
   await expect(folder).toHaveValue("/authority/a");
   await form.getByRole("button", { name: "browse this path", exact: true }).click();
   await expect.poll(() => bodies.length, { message: "the initial request must be dispatched before its rendered-listing premise is measured" }).toBe(1);
@@ -5331,9 +5348,11 @@ test("composer rejects held and queued stale browse activation after destination
   await form.getByRole("button", { name: "browse this path", exact: true }).click();
   await expect.poll(() => bodies.length).toBe(3);
   const secondCompletion = Number(await form.getAttribute("data-browse-reply-completions"));
-  await saved.getByRole("button", { name: "/authority/b", exact: true }).click();
+  await folderOptions(form);
+  await saved.getByRole("option", { name: "/authority/b", exact: true }).click();
   await expect(folder).toHaveValue("/authority/b");
-  await saved.getByRole("button", { name: "/authority/a", exact: true }).click();
+  await folderOptions(form);
+  await saved.getByRole("option", { name: "/authority/a", exact: true }).click();
   await expect(folder).toHaveValue("/authority/a");
   releases.shift()!();
   await expect.poll(async () => Number(await form.getAttribute("data-browse-reply-completions"))).toBeGreaterThan(secondCompletion);
@@ -5507,7 +5526,7 @@ test("composer local-home reset takes over a remote open destination", async ({ 
     await page.locator(".new-session-button").click(); const form = page.locator(".create-session-form");
     const hostSelect = form.locator(".create-session-host");
     await expect(hostSelect).toHaveAttribute("data-host-id", String(remote.id));
-    await form.getByRole("button", { name: "reset destination to local home" }).click();
+    await (await folderOptions(form)).getByRole("option", { name: "reset destination to local home" }).click();
     await expect(hostSelect).toHaveAttribute("data-host-id", String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
     const localName = hosts.hosts.find((host: { id: number }) => host.id === local).name;
@@ -5585,7 +5604,7 @@ test("composer local-home reset takes over a remote clone destination", async ({
     await expect(destinationPeers.nth(1)).toHaveText(cwd);
     const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
     await expect(codex, "the structured clone retains its inherited harness before reset").toHaveAttribute("aria-pressed", "true");
-    await form.getByRole("button", { name: "reset destination to local home" }).click();
+    await (await folderOptions(form)).getByRole("option", { name: "reset destination to local home" }).click();
     await expect(hostSelect).toHaveAttribute("data-host-id", String(local));
     await expect(folder).toHaveValue("~");
     await expect(destinationPeers.nth(0)).toHaveText(`local (${hosts.hosts.find((host: { id: number }) => host.id === local).name})`);
@@ -5755,14 +5774,14 @@ test("composer mounted clone generation replaces the prior draft and notice", as
 
 /**
  * The destination block keeps every input that determines where a structured
- * session launches together: host and browse, folder, the recent-folder
- * links with their two resets, then the optional name. This pins that DOM
+ * session launches together: host and browse, folder, grouped history and
+ * resets, then the optional name. This pins that DOM
  * order (the Tab-order test covers keyboard order), checks that the host and
  * Browse labels stay centered at desktop and phone widths, proves a seeded
- * folder renders as a pressed link once chosen, and proves the local-home
+ * folder can be chosen without launching, and proves the local-home
  * shortcut resets both parts of the destination.
  */
-test("composer destination block keeps host, browse, folder, and recent links together", async ({ page, request }) => {
+test("composer destination block keeps host, browse, folder, and grouped choices together", async ({ page, request }) => {
   const local = await localHostId(request);
   const folders = [{
     host: local, canonical_cwd: "/fixture/destination-link", canonical_proven: true,
@@ -5776,8 +5795,8 @@ test("composer destination block keeps host, browse, folder, and recent links to
   const host = destination.locator(".create-session-host");
   const browse = destination.getByRole("button", { name: "browse this path", exact: true });
   const folder = destination.getByLabel("folder", { exact: true });
-  const links = destination.locator(".launch-composer-folder-links");
-  const recentLink = links.getByRole("button", { name: "/fixture/destination-link", exact: true });
+  const links = destination.getByRole("listbox", { name: "folders" });
+  const recentLink = links.getByRole("option", { name: "/fixture/destination-link", exact: true });
   const name = destination.getByLabel("name (optional)", { exact: true });
   await expect(destination).toBeVisible();
   await expect(name).toBeVisible();
@@ -5804,8 +5823,9 @@ test("composer destination block keeps host, browse, folder, and recent links to
     expect(centers.buttonHeight).toBeGreaterThanOrEqual(36);
     expect(centers.labelOffset).toBeLessThanOrEqual(1);
   }
-  await expect(recentLink, "the seeded folder must render as a recent link").toBeVisible();
-  await expect(recentLink).toHaveAttribute("aria-pressed", "false");
+  await folderOptions(form);
+  await expect(recentLink, "the seeded folder must render in its recent group").toBeVisible();
+  await expect(recentLink).toHaveAttribute("aria-selected", "false");
   await expect(links.getByText("home", { exact: true })).toBeVisible();
   await expect(links.getByText("local home", { exact: true })).toBeVisible();
   expect(await destination.evaluate((node) => {
@@ -5813,9 +5833,9 @@ test("composer destination block keeps host, browse, folder, and recent links to
       node.querySelector(".create-session-host"),
       node.querySelector('button[aria-label="browse this path"]'),
       node.querySelector('input[aria-label="folder"]'),
-      node.querySelector(".launch-composer-folder-links button[aria-pressed]"),
-      node.querySelector('.launch-composer-folder-links button[aria-label="reset folder to home"]'),
-      node.querySelector('.launch-composer-folder-links button[aria-label="reset destination to local home"]'),
+      node.querySelector('.launch-composer-folder-options button[role="option"]'),
+      node.querySelector('.launch-composer-folder-options button[aria-label="reset folder to home"]'),
+      node.querySelector('.launch-composer-folder-options button[aria-label="reset destination to local home"]'),
       node.querySelector(".launch-composer-name"),
     ];
     return controls.every((control, index) =>
@@ -5824,17 +5844,29 @@ test("composer destination block keeps host, browse, folder, and recent links to
   }), "the destination controls must remain in their reading order").toBe(true);
   await recentLink.click();
   await expect(folder).toHaveValue("/fixture/destination-link");
-  await expect(recentLink).toHaveAttribute("aria-pressed", "true");
+  await expect(links).toHaveCount(0);
+  await folderOptions(form);
+  await expect(recentLink).toHaveAttribute("aria-selected", "false");
+  await expect(host, "the inherited host must already be local before local home is chosen").toHaveAttribute("data-host-id", String(local));
+  const templatePanel = form.getByRole("region", { name: "save as template", exact: true });
+  await form.getByRole("button", { name: "save as template", exact: true }).click();
+  await expect(templatePanel.getByRole("checkbox", { name: /^host/ }), "the inherited local host starts unpinned").not.toBeChecked();
+  await templatePanel.getByRole("button", { name: "cancel", exact: true }).click();
+  await folderOptions(form);
   await links.getByText("local home", { exact: true }).click();
   await expect(folder).toHaveValue("~");
-  await expect(recentLink).toHaveAttribute("aria-pressed", "false");
+  await expect(links).toHaveCount(0);
   await expect(host).toHaveAttribute("data-host-id", String(local));
+  // Template inclusion distinguishes an explicit local pin from a home reset
+  // whose visible host would coincidentally remain the same.
+  await form.getByRole("button", { name: "save as template", exact: true }).click();
+  await expect(templatePanel.getByRole("checkbox", { name: /^host/ })).toBeChecked();
 });
 
 /**
  * Folder suggestions are an alternate destination picker. This uses distinct
- * saved paths so an edited input can prove the selected affordance follows
- * the value that will be submitted, rather than an older raw seed.
+ * saved paths so an edited input proves filtering follows typed text rather
+ * than an older raw seed. Choosing resets filtering but never highlights a row.
  */
 test("composer folder history tracks edited destinations at narrow width", async ({ page, request }) => {
   const folders = ["/fixture/history-a", "/fixture/history-b"].map((display_cwd, index) => ({
@@ -5846,23 +5878,159 @@ test("composer folder history tracks edited destinations at narrow width", async
   await page.goto("/");
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
-  const choices = form.locator(".launch-composer-folder-links").getByRole("button", { name: /^\/fixture\/history-/ });
+  await folderOptions(form);
+  const choices = form.getByRole("listbox", { name: "folders" }).getByRole("option", { name: /^\/fixture\/history-/ });
   await expect(choices, "the controlled history must populate the narrow destination picker").toHaveCount(2);
   const folder = form.getByLabel("folder", { exact: true });
   await expect(folder).toBeVisible();
   await choices.first().click();
-  await expect(choices.first()).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("listbox", { name: "folders" })).toHaveCount(0);
   await folder.fill("/fixture/history-b");
-  await expect(choices.first()).toHaveAttribute("aria-pressed", "false");
-  await expect(choices.nth(1)).toHaveAttribute("aria-pressed", "true");
-  const links = form.locator(".launch-composer-folder-links");
-  await expect(links, "the compact links line keeps its saved destinations reachable").toBeVisible();
+  await expect(choices).toHaveCount(1);
+  await expect(choices.first()).toHaveAccessibleName("/fixture/history-b");
+  await expect(choices.first()).toHaveAttribute("aria-selected", "false");
+  await choices.first().click();
+  await expect(folder).toHaveValue("/fixture/history-b");
+  const links = await folderOptions(form);
+  await expect(choices).toHaveCount(2);
+  await expect(links, "the grouped dropdown keeps its saved destinations reachable").toBeVisible();
+  // A press inside the list that lands on no entry (here a group heading)
+  // must leave focus in the field, or its blur closes the list under the user.
+  await form.locator("#launcher-folder-recent").click();
+  await expect(links).toBeVisible();
+  await expect(folder).toBeFocused();
   for (const control of [folder, choices.first(), choices.nth(1), form.getByRole("button", { name: "browse this path" })]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();
     expect(box!.x, "each narrow Folder control starts inside the viewport").toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width, "each narrow Folder control remains reachable without horizontal clipping").toBeLessThanOrEqual(540);
   }
+});
+
+/** Opening folder history must not steal typed-path Enter. Only arrows give
+ * an option authority; choosing never launches. Real input, hover and focus
+ * transitions also prove the grouped list remains usable on a phone. */
+test("composer folder dropdown preserves keyboard launch and grouped history", async ({ page, request }, testInfo) => {
+  const local = await localHostId(request);
+  const prefix = "/fixture/" + "shared-prefix/".repeat(8);
+  const paths = [prefix + "sibling-alpha", prefix + "sibling-beta", ...Array.from({ length: 10 }, (_, index) => `/fixture/other-${index}`)];
+  const folders = paths.map((display_cwd, index) => ({
+    host: local, canonical_cwd: display_cwd, canonical_proven: true, display_cwd,
+    created_at: 20 - index, creation_seq: 20 - index,
+  }));
+  await installComposerChoices(page, request, [], [{ id: "dropdown-model", harness: "codex", efforts: ["high"] }], folders);
+  const posts: any[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts.push(route.request().postDataJSON());
+    await route.fulfill({ status: 500, body: "folder dropdown fixture refuses launch" });
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const folder = form.getByRole("combobox", { name: "folder", exact: true });
+  const list = await folderOptions(form);
+  const recent = list.getByRole("group", { name: "recent", exact: true }).getByRole("option");
+  const resets = list.getByRole("group", { name: "reset", exact: true });
+  await expect(recent).toHaveCount(8);
+  await expect(recent.first()).toHaveAccessibleName(paths[0]);
+  await expect(recent.nth(7)).toHaveAccessibleName(paths[7]);
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+  await expect(folder).not.toHaveAttribute("aria-activedescendant", /.+/);
+  await expect(resets).toContainText("~ on this host");
+  await expect(resets).toContainText("~ on this machine");
+  await form.screenshot({ path: testInfo.outputPath("folder-untouched.png") });
+  await folder.press("ArrowDown");
+  await expect(recent.first()).toHaveAttribute("aria-selected", "true");
+  await expect(folder).toHaveAttribute("aria-activedescendant", "launcher-folder-0");
+  await folder.press("Enter");
+  await expect(folder).toHaveValue(paths[0]);
+  await expect(list).toHaveCount(0);
+  expect(posts, "choosing a highlighted folder changes only the draft").toHaveLength(0);
+
+  await folder.fill("SiBlInG");
+  await expect(recent).toHaveCount(2);
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+  await expect(resets.getByRole("option")).toHaveCount(2);
+  await expect(recent.first()).toHaveText(/….*sibling-alpha$/);
+  await expect(recent.nth(1)).toHaveText(/….*sibling-beta$/);
+  await recent.first().hover();
+  await expect(page.locator('[role="tooltip"]')).toHaveText(paths[0]);
+  await form.screenshot({ path: testInfo.outputPath("folder-filtered-long-paths.png") });
+  await folder.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(form).toBeVisible();
+  await folder.press("Escape");
+  await expect(form).toHaveCount(0);
+
+  await page.locator(".new-session-button").click();
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await folder.fill("/tmp");
+  await expect(list).toBeVisible();
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+  await expect(form.locator(".create-session-submit")).toBeEnabled();
+  await folder.press("Enter");
+  await expect(form.locator(".create-session-error")).toContainText("folder dropdown fixture refuses launch");
+  expect(posts, "Enter without arrow navigation must submit the typed path").toHaveLength(1);
+  expect(posts[0]).toMatchObject({ host: local, cwd: "/tmp" });
+
+  // Command mode leaves enough room for the centered dialog to resize when
+  // history closes. A pointer press must still reach Launch across that blur.
+  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByLabel("agent command", { exact: true }).fill("sleep 1");
+  await form.getByRole("radio", { name: "no", exact: true }).check();
+  await folder.fill("/var/tmp");
+  await expect(list).toBeVisible();
+  const launch = form.locator(".create-session-submit");
+  await launch.hover();
+  const pressBox = await launch.boundingBox();
+  expect(pressBox, "the pressed action must have a box before blur").not.toBeNull();
+  await page.mouse.down();
+  await expect(list, "pointer focus leaving the folder closes its list").toHaveCount(0);
+  const releaseBox = await launch.boundingBox();
+  expect(releaseBox, "the action must remain under its original pointer press").toEqual(pressBox);
+  await page.mouse.up();
+  await expect.poll(() => posts.length).toBe(2);
+  expect(posts[1]).toMatchObject({ cwd: "/var/tmp", command: { command: "sleep 1" } });
+  await form.getByRole("tab", { name: "agent", exact: true }).click();
+
+  await folderOptions(form);
+  await resets.getByRole("option", { name: "reset folder to home" }).click();
+  await page.setViewportSize({ width: 390, height: 640 });
+  await folderOptions(form);
+  await expect(recent).toHaveCount(8);
+  // The phone dialog scrolls as well as the capped list. Show its path rows
+  // before capturing; an offscreen DOM box alone does not prove tail clipping.
+  await list.scrollIntoViewIfNeeded();
+  await expect(recent.first()).toBeInViewport();
+  await expect(recent.nth(1)).toBeInViewport();
+  await form.screenshot({ path: testInfo.outputPath("folder-phone-long-paths.png") });
+  for (const control of [folder, recent.first(), recent.nth(1), resets]) {
+    const box = await control.boundingBox();
+    expect(box, "phone choices must have rendered geometry").not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
+  await recent.first().click();
+  await expect(folder, "the floating phone row must accept a real pointer choice").toHaveValue(paths[0]);
+  await expect(list).toHaveCount(0);
+  expect(posts, "a phone folder choice must not create another session").toHaveLength(2);
+  await folderOptions(form);
+  await folder.press("ArrowUp");
+  const localHome = resets.getByRole("option", { name: "reset destination to local home" });
+  await expect(localHome).toHaveAttribute("aria-selected", "true");
+  await expect(localHome, "keyboard navigation must reveal a reset below the scroll cap").toBeInViewport();
+  await folder.press("Tab");
+  await expect(list).toHaveCount(0);
+  await expect(form.getByLabel("name (optional)", { exact: true })).toBeFocused();
+  await folder.focus();
+  await folder.press("Escape");
+  await folder.press("x");
+  await expect(list).toBeVisible();
+  await form.getByRole("button", { name: "managed checkout", exact: true }).click();
+  await expect(form.getByRole("combobox", { name: "folder", exact: true })).toHaveCount(0);
+  await form.getByLabel("folder", { exact: true }).focus();
+  await expect(list).toHaveCount(0);
 });
 
 /**
@@ -6615,6 +6783,10 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   const form = page.locator(".create-session-form");
   const launch = form.getByRole("button", { name: /^launch\b/ });
   await form.getByLabel("folder", { exact: true }).fill(long);
+  // Typing leaves the folder dropdown open, and at phone width it covers the
+  // harness choices below; close it first, as a user would.
+  await form.getByLabel("folder", { exact: true }).press("Escape");
+  await expect(form.getByRole("listbox", { name: "folders" })).toHaveCount(0);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-recent-slots > button"), "the controlled history must make the composer scrollable").toHaveCount(3);
 
@@ -6686,6 +6858,7 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   const form = page.locator(".create-session-form");
   const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
   await form.getByLabel("folder", { exact: true }).fill(folder);
+  await form.getByLabel("folder", { exact: true }).press("Escape");
   // Name the controls rather than indexing a generic list so this traversal
   // continues to document the destination's user-visible order.
   const recentSlot = form.locator(".launch-composer-recent-slots").getByRole("button", {
@@ -6701,9 +6874,6 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
     form.getByRole("combobox", { name: "host", exact: true }),
     browseButton,
     form.getByLabel("folder", { exact: true }),
-    form.getByRole("button", { name: folder, exact: true }),
-    form.getByRole("button", { name: "reset folder to home", exact: true }),
-    form.getByRole("button", { name: "reset destination to local home", exact: true }),
     form.getByLabel("name (optional)", { exact: true }),
     // The launch-kind tab strip is one tab stop, its selected tab.
     form.getByRole("tab", { name: "agent", exact: true }),

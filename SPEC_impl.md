@@ -2550,6 +2550,14 @@ projection or guessing aliases. Frequency sorts descending and the newest retain
 model, or effort remains the saved harness default and is part of the complete selection identity, not a wildcard that
 merges explicit choices. Permission identity uses the effective mode, including an omitted YOLO default.
 
+The editable folder field offers its bounded history as a grouped combobox. Its optional active index stays empty until
+arrow navigation, preserving ordinary form submission on a typed path. Pointer and keyboard choices share one guarded
+callback; each recent choice carries the installation that offered it. Labels escape peer text before retaining the last
+35 characters with a start ellipsis; narrower layout clips the leading edge while retaining LTR direction and the full
+accessible name and tooltip. The list floats below its input like model/search suggestions, with its own bounded scroll
+region and keyboard scrolling of the active row. Removing an in-flow list on pointer blur would resize and recenter the
+dialog between mousedown and mouseup, moving Launch or another pressed control away before its click.
+
 The composer retains the installation claim when a recent setup or saved folder is applied, not only while offering the
 suggestion. A replacement under the same registry row disables Launch and requires an explicit host or folder choice.
 The same installation reconnecting keeps the claim valid. Captured history callbacks check the current destination

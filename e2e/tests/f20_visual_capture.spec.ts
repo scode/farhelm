@@ -60,9 +60,8 @@ async function installVisualFixture(page: Page) {
  * Farhelm's own tooltip (`data-tooltip`), which Playwright's title lookup
  * cannot see, and its accessible name carries the same complete description.
  * Scoped to the recent rows on purpose. That description starts with the
- * row's folder, and the recent-folder links below name their folder too (a
- * grid cell ellipsizes a long path at its end, the part that tells these
- * fixtures apart). An unscoped lookup matches both and fails strict mode. */
+ * row's folder, and the folder dropdown names that folder too when open.
+ * An unscoped lookup can match both and fail strict mode. */
 function recentRow(form: Locator, ending: string): Locator {
   return form.locator(".launch-composer-recent-slots").getByRole("button", { name: new RegExp(ending) });
 }
@@ -74,6 +73,7 @@ async function openComposer(page: Page): Promise<Locator> {
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.getByLabel("folder", { exact: true }).fill(launches[0].cwd);
+  await form.getByLabel("folder", { exact: true }).press("Escape");
   await expect(form.locator(".launch-composer-recent-slots > button")).toHaveCount(3);
   return form;
 }

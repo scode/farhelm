@@ -101,6 +101,44 @@ impl CreateTarget {
     }
 }
 
+/// A recent folder choice carries the installation that offered it. A retained mouse
+/// callback must not apply old history to a newly selected or replaced host.
+#[derive(Clone)]
+enum FolderChoice {
+    Recent {
+        cwd: String,
+        target: Option<CreateTarget>,
+    },
+    Home,
+    LocalHome,
+}
+
+/// Keep the server's newest-first ordering, filtering only an edited field.
+/// Prefilled clone paths and `~` are seeds, not searches; they show eight recents.
+fn folder_suggestions<'a>(
+    folders: &'a [api::FolderHistoryEntry],
+    text: &str,
+    edited: bool,
+) -> Vec<&'a api::FolderHistoryEntry> {
+    let query = text.to_lowercase();
+    folders
+        .iter()
+        .filter(|folder| !edited || folder.display_cwd.to_lowercase().contains(&query))
+        .take(8)
+        .collect()
+}
+
+/// Preserve the distinguishing tail without splitting UTF-8. The full escaped
+/// path remains the option's accessible name and tooltip; this is only its label.
+fn folder_tail_label(path: &str) -> String {
+    let visible = display_peer(path);
+    let count = visible.chars().count();
+    if count <= 36 {
+        return visible;
+    }
+    format!("…{}", visible.chars().skip(count - 35).collect::<String>())
+}
+
 /// What a successful create hands to `on_created`: the session the helm
 /// returned, and the structured launch this form SUBMITTED, if any.
 ///
@@ -1348,6 +1386,14 @@ fn scroll_composer_search_result(index: usize) {
     ));
 }
 
+/// Keep the active folder row visible while focus remains on the combobox.
+/// Called by the post-render effect so a newly opened list is already mounted.
+fn scroll_folder_result(index: usize) {
+    document::eval(&format!(
+        r#"document.getElementById('launcher-folder-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
+    ));
+}
+
 /// What one "clone" click seeds a fresh create form with: everything about
 /// the clicked row that a NEW session can reuse.
 ///
@@ -2244,6 +2290,17 @@ pub(super) fn CreateSessionForm(
     let cwd_initial_raw_seed = initial_cwd.clone();
     let mut cwd_raw_seed = use_signal(move || cwd_initial_raw_seed);
     let mut cwd_edited = use_signal(|| false);
+    // Opening never selects: Enter still submits a typed path until an arrow
+    // deliberately gives an option keyboard authority. Blur discards that authority.
+    let mut folder_open = use_signal(|| false);
+    let mut folder_active = use_signal(|| None::<usize>);
+    use_effect(move || {
+        if folder_open()
+            && let Some(index) = folder_active()
+        {
+            scroll_folder_result(index);
+        }
+    });
     // Text ownership and deliberate placement are different: a picked path
     // keeps a raw seed, but is still pre-checked when saving a template.
     let mut folder_is_explicit = use_signal(|| false);
@@ -2886,6 +2943,20 @@ pub(super) fn CreateSessionForm(
         })
         .cloned()
         .unwrap_or_default();
+    let folder_recents = folder_suggestions(&recent_history.folders, &cwd(), cwd_edited())
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let folder_choices = folder_recents
+        .iter()
+        .map(|folder| FolderChoice::Recent {
+            cwd: folder.display_cwd.clone(),
+            target: current_history_target.clone(),
+        })
+        .chain([FolderChoice::Home, FolderChoice::LocalHome])
+        .collect::<Vec<_>>();
+    let folder_choices_for_keys = folder_choices.clone();
+    let folder_highlight = folder_active().filter(|index| *index < folder_choices.len());
     // Rank only combinations compatible with every explicit choice. Activating
     // one still replaces the whole draft; filtering decides which historical
     // combinations are offered, not which fields activation may write.
@@ -3887,59 +3958,56 @@ pub(super) fn CreateSessionForm(
             div { class: "create-session-host-note", "{note}" }
         }
     };
-    // The two destination resets, built once for the same reason as the host
-    // select: both surfaces need them (a clone from a remote host is what makes
-    // "local home" necessary, on the legacy surface as much as the structured
-    // one), and one Element keeps the two handlers from drifting apart.
-    // "home" reseeds only the folder; "local home" also moves the host to the
-    // local machine and takes the clone's host binding off automatic handling.
-    // The two resets share the recent-folder grid (see the folder links in the
-    // rsx below) and carry their own class so the stylesheet can start them on
-    // a row of their own: they are fixed destinations, not history, and the
-    // row break is what says so now that no "·" separates the two kinds.
-    let destination_resets = rsx! {
-        button { r#type: "button", disabled: busy,
-            class: "launch-composer-folder-reset",
-            aria_label: "reset folder to home",
-            "data-tooltip": "home: start in your home folder on this host",
-            onclick: move |_| {
-                if !draft_transition_allowed(ops) { return; }
-                remembered_destination.set(None);
-                promote_fetched_history_snapshot(
-                    offered_history, create_target, fetched_history,
-                );
-                invalidate_directory_browse(
-                    browse_generation, browse_request, browse_result, browse_error,
-                );
-                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, "~");
-                intent_key.set(None);
-            },
-            "home"
+    // Pointer and keyboard choices share admission, browse invalidation and raw
+    // reseeding. None submits. Local home is still a deliberate host pin even
+    // when that host is already selected; home changes only its folder.
+    let choose_folder = Callback::new(move |choice: FolderChoice| {
+        if !draft_transition_allowed(ops) || destination_draft.peek().is_managed() {
+            return;
         }
-        button { r#type: "button", disabled: busy,
-            class: "launch-composer-folder-reset",
-            aria_label: "reset destination to local home",
-            "data-tooltip": "local home: start in your home folder on this machine",
-            onclick: move |_| {
-                if !draft_transition_allowed(ops) { return; }
-                // This is an explicit local choice, unlike the ordinary
-                // default that may follow an open remote session.
+        let path = match choice {
+            FolderChoice::Recent { cwd, target } => {
+                if !admit_history_destination(
+                    target,
+                    live_destination,
+                    remembered_destination,
+                    history_activation_attempts,
+                ) {
+                    return;
+                }
+                cwd
+            }
+            FolderChoice::Home => {
+                remembered_destination.set(None);
+                "~".to_string()
+            }
+            FolderChoice::LocalHome => {
                 chosen_host.set(local_host_id);
                 live_destination.set(local_destination.clone());
                 remembered_destination.set(None);
-                promote_fetched_history_snapshot(
-                    offered_history, create_target, fetched_history,
-                );
                 clone_host_state.set(CloneHostState::UserTookOver);
-                invalidate_directory_browse(
-                    browse_generation, browse_request, browse_result, browse_error,
-                );
-                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, "~");
-                intent_key.set(None);
-            },
-            "local home"
-        }
-    };
+                "~".to_string()
+            }
+        };
+        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
+        invalidate_directory_browse(
+            browse_generation,
+            browse_request,
+            browse_result,
+            browse_error,
+        );
+        select_existing_directory(
+            &mut destination_draft,
+            &mut cwd,
+            &mut cwd_raw_seed,
+            &mut cwd_edited,
+            &mut folder_is_explicit,
+            &path,
+        );
+        intent_key.set(None);
+        folder_open.set(false);
+        folder_active.set(None);
+    });
     rsx! {
         div {
             class: "launch-composer-backdrop",
@@ -5420,10 +5488,16 @@ pub(super) fn CreateSessionForm(
                                     "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash."
                                 }
                             }
+                            div { class: "launch-composer-folder-picker",
                             input {
                                 r#type: "text",
                                 required: !checkout_mode,
                                 readonly: checkout_mode,
+                                role: (!checkout_mode).then_some("combobox"),
+                                aria_autocomplete: (!checkout_mode).then_some("list"),
+                                aria_expanded: (!checkout_mode).then_some(folder_open()),
+                                aria_controls: (!checkout_mode && folder_open()).then_some("launcher-folder-options"),
+                                aria_activedescendant: if !checkout_mode && folder_open() { folder_highlight.map(|index| format!("launcher-folder-{index}")) } else { None },
                                 autocomplete: "off",
                                 autocorrect: "off",
                                 autocapitalize: "none",
@@ -5433,6 +5507,48 @@ pub(super) fn CreateSessionForm(
                                 placeholder: "{folder_placeholder}",
                                 disabled: busy,
                                 aria_label: "folder",
+                                onfocus: move |_| {
+                                    if !destination_draft.peek().is_managed() {
+                                        folder_active.set(None);
+                                        folder_open.set(true);
+                                    }
+                                },
+                                onblur: move |_| {
+                                    folder_open.set(false);
+                                    folder_active.set(None);
+                                },
+                                onkeydown: move |evt: KeyboardEvent| {
+                                    if destination_draft.peek().is_managed() || evt.is_composing() { return; }
+                                    match evt.key() {
+                                        Key::Escape if folder_open() => {
+                                            evt.prevent_default(); evt.stop_propagation();
+                                            folder_open.set(false); folder_active.set(None);
+                                        }
+                                        Key::Tab => { folder_open.set(false); folder_active.set(None); }
+                                        Key::ArrowDown | Key::ArrowUp => {
+                                            evt.prevent_default(); evt.stop_propagation();
+                                            if !draft_transition_allowed(ops) { return; }
+                                            let count = folder_choices_for_keys.len();
+                                            let current = if folder_open() { folder_highlight } else { None };
+                                            let next = match (current, evt.key()) {
+                                                (Some(index), Key::ArrowDown) => (index + 1) % count,
+                                                (Some(index), _) => (index + count - 1) % count,
+                                                (None, Key::ArrowDown) => 0,
+                                                (None, _) => count - 1,
+                                            };
+                                            folder_active.set(Some(next));
+                                            folder_open.set(true);
+                                        }
+                                        Key::Enter if folder_open() && folder_highlight.is_some() => {
+                                            evt.prevent_default(); evt.stop_propagation();
+                                            if evt.is_auto_repeating() { return; }
+                                            if let Some(choice) = folder_highlight.and_then(|index| folder_choices_for_keys.get(index)) {
+                                                choose_folder.call(choice.clone());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                },
                                 oninput: move |evt| {
                                     if !draft_transition_allowed(ops) { return; }
                                     // A checkout path is evidence from the helm,
@@ -5445,6 +5561,8 @@ pub(super) fn CreateSessionForm(
                                     cwd.set(evt.value());
                                     destination_draft.set(DestinationDraft::Existing { cwd: evt.value() });
                                     cwd_edited.set(true);
+                                    folder_active.set(None);
+                                    folder_open.set(true);
                                     folder_is_explicit.set(true);
                                     remembered_destination.set(None);
                                     invalidate_directory_browse(
@@ -5453,53 +5571,48 @@ pub(super) fn CreateSessionForm(
                                     intent_key.set(None);
                                 },
                             }
-                            // Recent folders are destination shortcuts, rendered as
-                            // text links rather than chips so they read as history
-                            // beneath the field they fill, not as a second picker.
-                            // They sit in a grid, one path per cell. They used
-                            // to be a wrapping run of inline links behind a
-                            // "recent:" prefix with "·" between the two kinds,
-                            // and paths of different lengths wrapped raggedly
-                            // and left separators stranded at line ends. The
-                            // group's accessible name still says what it holds.
-                            if !checkout_mode {
-                                div { class: "launch-composer-folder-links", aria_label: "recent folders",
-                                    for folder in recent_history.folders.iter().take(3) {
-                                        button {
-                                            r#type: "button",
-                                            class: if submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd { "selected" } else { "" },
-                                            aria_pressed: submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd,
-                                            // A grid cell ellipsizes a long path at
-                                            // its END, which is the part that tells
-                                            // sibling checkouts apart, so the whole
-                                            // path has to be reachable without
-                                            // picking the link to find out.
-                                            "data-tooltip": "{display_peer(&folder.display_cwd)}",
-                                            disabled: busy,
-                                            onclick: {
-                                                let folder = folder.display_cwd.clone();
-                                                let history_target = current_history_target.clone();
-                                                move |_| {
-                                                    if !draft_transition_allowed(ops) { return; }
-                                                    if !admit_history_destination(
-                                                        history_target.clone(), live_destination,
-                                                        remembered_destination, history_activation_attempts,
-                                                    ) { return; }
-                                                    promote_fetched_history_snapshot(
-                                                        offered_history, create_target, fetched_history,
-                                                    );
-                                                    invalidate_directory_browse(
-                                                        browse_generation, browse_request, browse_result, browse_error,
-                                                    );
-                                                    select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &folder);
-                                                    intent_key.set(None);
-                                                }
-                                            },
-                                            "{display_peer(&folder.display_cwd)}"
+                            // Float like model/search suggestions. In-flow history
+                            // would resize and recenter this dialog when pointer blur
+                            // closes it, moving the pressed action before mouseup.
+                            if !checkout_mode && folder_open() {
+                                div { class: "launch-composer-folder-options", id: "launcher-folder-options", role: "listbox", aria_label: "folders",
+                                    // A press anywhere in the list (a heading, the empty
+                                    // row, a gap, its scrollbar) must not take focus
+                                    // from the field, whose blur would close the list.
+                                    onmousedown: move |evt| evt.prevent_default(),
+                                    div { role: "group", aria_labelledby: "launcher-folder-recent",
+                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-recent", "recent" }
+                                        if folder_recents.is_empty() {
+                                            div { class: "launch-composer-folder-empty", "no recent folders" }
+                                        }
+                                        for (index, folder) in folder_recents.iter().enumerate() {
+                                            button { r#type: "button", role: "option", id: "launcher-folder-{index}", tabindex: "-1",
+                                                aria_selected: folder_highlight == Some(index), disabled: busy,
+                                                aria_label: "{display_peer(&folder.display_cwd)}",
+                                                "data-tooltip": "{display_peer(&folder.display_cwd)}",
+                                                onmousedown: move |evt| evt.prevent_default(),
+                                                onclick: { let choice = folder_choices[index].clone(); move |_| choose_folder.call(choice.clone()) },
+                                                span { class: "launch-composer-folder-path", dir: "ltr", span { "{folder_tail_label(&folder.display_cwd)}" } }
+                                            }
                                         }
                                     }
-                                    {destination_resets.clone()}
+                                    div { role: "group", aria_labelledby: "launcher-folder-reset",
+                                        div { class: "launch-composer-folder-heading", id: "launcher-folder-reset", "reset" }
+                                        button { r#type: "button", role: "option", id: "launcher-folder-{folder_recents.len()}", tabindex: "-1",
+                                            aria_selected: folder_highlight == Some(folder_recents.len()), disabled: busy,
+                                            aria_label: "reset folder to home", "data-tooltip": "home: start in your home folder on this host",
+                                            onmousedown: move |evt| evt.prevent_default(), onclick: move |_| choose_folder.call(FolderChoice::Home),
+                                            span { "home" } span { class: "launch-composer-folder-meaning", "~ on this host" }
+                                        }
+                                        button { r#type: "button", role: "option", id: "launcher-folder-{folder_recents.len() + 1}", tabindex: "-1",
+                                            aria_selected: folder_highlight == Some(folder_recents.len() + 1), disabled: busy,
+                                            aria_label: "reset destination to local home", "data-tooltip": "local home: start in your home folder on this machine",
+                                            onmousedown: move |evt| evt.prevent_default(), onclick: move |_| choose_folder.call(FolderChoice::LocalHome),
+                                            span { "local home" } span { class: "launch-composer-folder-meaning", "~ on this machine" }
+                                        }
+                                    }
                                 }
+                            }
                             }
                             // The optional name belongs to the shared destination
                             // block. Keeping one mounted input gives assistive
@@ -6064,6 +6177,55 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// Seeds must show history rather than filtering by a clone path or `~`.
+    /// Typed text filters before the eight-row cap, preserving newest-first order.
+    #[test]
+    fn folder_dropdown_filters_only_typed_text_and_caps_matches() {
+        let folders = (0..12)
+            .map(|index| super::api::FolderHistoryEntry {
+                host: 1,
+                canonical_cwd: format!("/work/{index}"),
+                canonical_proven: true,
+                display_cwd: format!(
+                    "/work/{}-{index}",
+                    if index % 2 == 0 { "MATCH" } else { "other" }
+                ),
+                created_at: 12 - index,
+                creation_seq: Some((12 - index) as u64),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            super::folder_suggestions(&folders, "~", false),
+            folders[..8].iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            super::folder_suggestions(&folders, "/cloned/path", false).len(),
+            8
+        );
+        assert_eq!(super::folder_suggestions(&folders, "work", true).len(), 8);
+        assert_eq!(
+            super::folder_suggestions(&folders, "mAtCh", true),
+            folders.iter().step_by(2).collect::<Vec<_>>()
+        );
+        assert!(super::folder_suggestions(&folders, "missing", true).is_empty());
+    }
+
+    /// Shared-prefix siblings must remain distinguishable, including non-ASCII
+    /// names. Peer control characters still pass through the display escaping.
+    #[test]
+    fn folder_dropdown_labels_preserve_the_escaped_tail() {
+        assert_eq!(super::folder_tail_label("~/short"), "~/short");
+        let long = format!("/{}終わり", "界".repeat(40));
+        let label = super::folder_tail_label(&long);
+        assert_eq!(label.chars().count(), 36);
+        assert!(label.starts_with('…'));
+        assert!(label.ends_with("終わり"));
+        assert_eq!(
+            super::folder_tail_label("/tmp/\nname"),
+            super::display_peer("/tmp/\nname")
+        );
+    }
+
     /// A command launch with only its command, asserted not YOLO: the
     /// command-mode intent these tests vary.
     fn test_command(command: &str) -> super::CommandLaunch {
