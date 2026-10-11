@@ -44,6 +44,21 @@
 # the manifest conflict on it; resolve that by rebasing onto the newer one
 # and capturing and publishing again, never by editing the manifest.
 #
+# The one exception to "from the capture" is a published release shot: a
+# shot a release's screenshot list names (website/src/release-notes/*.json)
+# that the manifest lists as published. Release notes do not change once
+# published, so those images are frozen (docs/docs-shots/SPEC.md, "Release
+# shots are frozen"), and the capture skips them. Each one is taken byte for
+# byte from the snapshot this checkout's manifest pins, which the keeper
+# always retains; if that snapshot cannot be read or lacks the file, the
+# publish refuses before pushing anything. A capture record that holds a
+# published release shot anyway is refused unless it lists it under
+# recaptured_release_shots, which only `scripts/docs-screenshots.sh
+# --recapture-release-shot NAME` writes, for a deliberate correction; a
+# capture by tooling from before the freeze therefore cannot replace one.
+# A release shot that is not yet published (a new release's first
+# screenshot) comes from the capture like any other.
+#
 # --dry-run does every check and builds both commits, then prints what it
 # would push and write. --checkout publishes from another checkout (the
 # self-test's). --skip-raw-check skips confirming that GitHub serves the new
@@ -166,19 +181,42 @@ manifest_commit() {
   python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("commit") or "")' "$file" || die "cannot read $MANIFEST"
 }
 
-# The capture record of the shots on disk, as "captured_from captured_at",
-# after checking that every shot named (the referenced ones, as arguments 2
-# onward) is on disk exactly as that capture wrote it. Refuses anything else:
-# no record, an incomplete one, or a shot the run did not produce or that has
-# changed since.
+# The published release shots, one per line, sorted: every shot a release's
+# screenshot list names that the checkout's manifest lists under `shots`,
+# meaning the snapshot it pins holds it. Nothing before the first publish.
+# The same definition e2e/docs-shots/release-shots.ts and
+# scripts/docs-screenshots.sh apply.
+published_release_shots() {
+  python3 - "$1/$MANIFEST" "$1/$RELEASE_NOTES_DIR" <<'EOF' || die "cannot read which release shots are published"
+import json, pathlib, sys
+manifest, releases = (pathlib.Path(arg) for arg in sys.argv[1:])
+published = set(json.loads(manifest.read_text(encoding="utf-8")).get("shots", {})) if manifest.is_file() else set()
+listed = set()
+for listing in sorted(releases.glob("*.json")) if releases.is_dir() else []:
+    listed.update(shot.get("name") for shot in json.loads(listing.read_text(encoding="utf-8")).get("screenshots", []))
+print("\n".join(sorted(listed & published)))
+EOF
+}
+
+# Check the capture record against the shots to publish and say where each
+# comes from. Arguments: the checkout, the published release shots as one
+# newline-separated argument, then every referenced shot. Prints
+# "captured_from captured_at" on the first line, then each published release
+# shot the capture left alone, one per line, for the caller to carry over
+# from the pinned snapshot. Every other referenced shot must be on disk
+# exactly as the capture wrote it. Refuses anything else: no record, an
+# incomplete one, a shot the run did not produce or that has changed since,
+# or a published release shot the capture holds without listing it as
+# deliberately recaptured.
 read_capture() {
-  local repo="$1"
-  shift
+  local repo="$1" frozen="$2"
+  shift 2
   local file="$repo/$CAPTURE_RECORD"
   test -f "$file" || die "publishing needs one complete capture of every page; run scripts/docs-screenshots.sh without --only"
-  python3 - "$file" "$repo/$LOCAL_DIR" "$@" <<'EOF' || die "cannot publish these shots; run scripts/docs-screenshots.sh without --only, then publish"
+  python3 - "$file" "$repo/$LOCAL_DIR" "$frozen" "$@" <<'EOF' || die "cannot publish these shots; run scripts/docs-screenshots.sh without --only, then publish"
 import hashlib, json, re, sys
-record_path, local, *names = sys.argv[1:]
+record_path, local, frozen, *names = sys.argv[1:]
+frozen = set(frozen.split())
 record = json.load(open(record_path))
 if record.get("complete") is not True:
     raise SystemExit("the capture on disk is not complete")
@@ -186,7 +224,21 @@ sha, at = record.get("captured_from", ""), record.get("captured_at", "")
 if not re.fullmatch(r"[0-9a-f]{40}", sha) or not at:
     raise SystemExit("the capture record lacks its main commit or time")
 shots = record.get("shots") or {}
+recaptured = record.get("recaptured_release_shots", [])
+if not isinstance(recaptured, list):
+    raise SystemExit("the capture record's recaptured_release_shots is not a list")
+carried = []
 for name in names:
+    if name in frozen and name not in shots:
+        if name in recaptured:
+            raise SystemExit(f"the capture record says it recaptured {name} but holds no such shot")
+        carried.append(name)
+        continue
+    if name in frozen and name not in recaptured:
+        raise SystemExit(
+            f"the capture holds {name}, a published release shot, without marking it as deliberately recaptured; "
+            "published release shots stay as published unless scripts/docs-screenshots.sh --recapture-release-shot names them"
+        )
     if name not in shots:
         raise SystemExit(f"a page references the shot {name}, which the capture did not produce; add it to e2e/docs-shots/ and capture again")
     try:
@@ -196,6 +248,8 @@ for name in names:
     if hashlib.sha256(data).hexdigest() != shots[name]:
         raise SystemExit(f"the shot {name} changed after the capture that recorded it")
 print(sha, at)
+for name in carried:
+    print(name)
 EOF
 }
 
@@ -249,8 +303,9 @@ EOF
 publish() {
   local repo="$1" dry="$2" raw_check="$3"
   local remote base source tmp old_keep newest pinned main_pinned name file tree empty snapshot keep cutoff parent replaced url
-  local capture captured_from captured_at
-  local -a names parents
+  local capture captured_from captured_at frozen
+  local -a names parents carried
+  local -A carry=()
   local tool
   for tool in git file python3; do
     command -v "$tool" >/dev/null || die "needs $tool"
@@ -264,9 +319,13 @@ publish() {
   mapfile -t names < <(referenced_shots "$repo")
   test -n "${names[0]:-}" || die "no docs page references a screenshot; nothing to publish"
   pinned="$(manifest_commit "$repo")" || exit 1
-  capture="$(read_capture "$repo" "${names[@]}")" || exit 1
+  frozen="$(published_release_shots "$repo")" || exit 1
+  capture="$(read_capture "$repo" "$frozen" "${names[@]}")" || exit 1
+  mapfile -t carried < <(tail -n +2 <<<"$capture")
+  capture="${capture%%$'\n'*}"
   captured_from="${capture%% *}"
   captured_at="${capture#* }"
+  for name in "${carried[@]}"; do carry[$name]=1; done
 
   tmp="$(mktemp -d)" || die "mktemp failed"
   # shellcheck disable=SC2064 # expand now: the path is fixed for this run
@@ -295,11 +354,28 @@ publish() {
       ;;
   esac
 
+  # A published release shot the capture left alone comes from the snapshot
+  # this checkout's manifest pins, which the keeper always retains as a
+  # parent, so the fetch above brought it along. Checked here, before any
+  # push, so a missing source refuses the publish instead of dropping the
+  # shot from the release notes.
+  if [ "${#carried[@]}" -gt 0 ]; then
+    test -n "$old_keep" ||
+      die "the published release shots (${carried[*]}) must come from the pinned snapshot, but $remote has no $REF"
+    git -C "$tmp" cat-file -e "$pinned^{commit}" 2>/dev/null ||
+      die "the published release shots (${carried[*]}) must come from the pinned snapshot $pinned, which $REF no longer holds"
+  fi
   mkdir -p "$tmp/tree" || die "mkdir failed"
   for name in "${names[@]}"; do
     file="$tmp/tree/$name.png"
     mkdir -p "$(dirname "$file")" || die "mkdir failed"
-    cp "$repo/$LOCAL_DIR/$name.png" "$file" || die "cannot copy $name"
+    if [ -n "${carry[$name]:-}" ]; then
+      git -C "$tmp" cat-file -e "$pinned:$name.png" 2>/dev/null ||
+        die "the published release shot $name is missing from the pinned snapshot $pinned"
+      git -C "$tmp" cat-file blob "$pinned:$name.png" >"$file" || die "cannot read $name from $pinned"
+    else
+      cp "$repo/$LOCAL_DIR/$name.png" "$file" || die "cannot copy $name"
+    fi
     check_png "$file"
   done
 
@@ -377,7 +453,12 @@ publish() {
 # capture; snapshots older than the window drop out of the keeper while
 # younger ones stay, except those pinned by this checkout's manifest or by
 # main's on the remote; and an unreadable manifest on main refuses the
-# publish before anything is pushed. Each publish runs as a child process
+# publish before anything is pushed. For published release shots, which are
+# frozen: a later capture that lacks one carries it over byte for byte from
+# the pinned snapshot; a capture that holds one without the recapture
+# marker is refused and pushes nothing; a marked recapture replaces it; and
+# a pinned snapshot that is gone or lacks the file refuses the publish
+# before anything is pushed. Each publish runs as a child process
 # whose own environment points git at a test config that rewrites the
 # GitHub-shaped origin to the bare repository, so this process's environment
 # never changes.
@@ -392,26 +473,44 @@ self_test() {
   git init -q --bare "$bare" || die "bare init failed"
   printf '[url "%s"]\n\tinsteadOf = %s\n' "$bare" "$origin" >"$cfg" || die "cannot write the test gitconfig"
   run() { env GIT_CONFIG_GLOBAL="$cfg" "$script_path" --checkout "$checkout" --skip-raw-check "$@"; }
-  # What a complete capture leaves beside the shots, from the main commit $1.
+  # What a complete capture leaves beside the shots, from the main commit $1:
+  # every PNG on disk, complete unless $2 is false, and the published release
+  # shots named from $3 onward listed as deliberately recaptured, as
+  # scripts/docs-screenshots.sh --recapture-release-shot records them.
   captured() {
-    python3 - "$checkout/$LOCAL_DIR" "$1" "${2:-true}" >"$checkout/$CAPTURE_RECORD" <<'EOF' || die "cannot write a test capture record"
+    python3 - "$checkout/$LOCAL_DIR" "$1" "${2:-true}" "${@:3}" >"$checkout/$CAPTURE_RECORD" <<'EOF' || die "cannot write a test capture record"
 import hashlib, json, pathlib, sys
-local, sha, complete = sys.argv[1:]
+local, sha, complete, *recaptured = sys.argv[1:]
 root = pathlib.Path(local)
 shots = {str(p.relative_to(root))[: -len(".png")]: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob("*.png")}
-print(json.dumps({"complete": complete == "true", "captured_from": sha, "captured_at": "2026-10-03T12:00:00Z", "shots": shots}))
+print(json.dumps({"complete": complete == "true", "captured_from": sha, "captured_at": "2026-10-03T12:00:00Z", "shots": shots, "recaptured_release_shots": recaptured}))
 EOF
   }
+  # A publish that must be refused for the reason `pattern` names, and push
+  # nothing. Matching the message matters where a fixture could trip more
+  # than one refusal: frozen release shots add a refusal of their own, and a
+  # case meant to prove another must not pass because of it.
+  refused() {
+    local pattern="$1" label="$2" before out
+    before="$(remote_git rev-parse -q --verify "$REF" || echo none)"
+    out="$(run 2>&1)" && { echo "FAIL $label: it published"; fail=1; return; }
+    grep -q -- "$pattern" <<<"$out" || { echo "FAIL $label: refused for another reason: $out"; fail=1; }
+    test "$(remote_git rev-parse -q --verify "$REF" || echo none)" = "$before" || { echo "FAIL $label: the ref moved"; fail=1; }
+  }
+  # The git blob id of a file's bytes: equal ids mean byte-identical images.
+  blob_of() { git hash-object "$1"; }
   local main1=1111111111111111111111111111111111111111 main2=2222222222222222222222222222222222222222
   remote_git() { git -C "$bare" "$@"; }
 
   page="$checkout/$CONTENT_DIR/docs/page.mdx"
-  mkdir -p "$(dirname "$page")" "$checkout/$LOCAL_DIR/page" "$checkout/$RELEASE_NOTES_DIR" || die "mkdir failed"
+  mkdir -p "$(dirname "$page")" "$checkout/$LOCAL_DIR/page" "$checkout/$LOCAL_DIR/notes" "$checkout/$RELEASE_NOTES_DIR" || die "mkdir failed"
   printf -- '---\ntitle: t\n---\n\n<Screenshot name="page/one" alt="a" />\n<Screenshot\n  name="page/two"\n  alt="b"\n/>\n' >"$page"
-  # A release's screenshot list naming page/two too. Once the page below drops
-  # both of its references, this is what keeps page/two published, which is
-  # the check that the release notes' screenshot lists are read at all.
-  printf -- '{"screenshots": [{"entry": 1, "name": "page/two", "alt": "b"}]}\n' >"$checkout/$RELEASE_NOTES_DIR/v1.0.0.json"
+  # A release's screenshot list, naming a shot no page references, so the
+  # first snapshot holding notes/v1 is the check that the release notes'
+  # screenshot lists are read at all. Once published, notes/v1 is the frozen
+  # release shot the later cases carry over, refuse, and recapture.
+  printf -- '{"screenshots": [{"entry": 1, "name": "notes/v1", "alt": "c"}]}\n' >"$checkout/$RELEASE_NOTES_DIR/v1.0.0.json"
+  local release="notes/v1" release_png="$checkout/$LOCAL_DIR/notes/v1.png"
   git -C "$checkout" init -q || die "checkout init failed"
   git -C "$checkout" -c user.name=t -c user.email=t@invalid -c commit.gpgsign=false commit -q --allow-empty -m init || die "commit failed"
   git -C "$checkout" config user.name t
@@ -419,6 +518,7 @@ EOF
   git -C "$checkout" remote add origin "$origin" || die "remote add failed"
   # Noise, so the PNGs clear the size floor for the right reason.
   convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/one.png" || die "cannot synthesise a PNG"
+  convert -size 120x80 plasma:fractal "$release_png" || die "cannot synthesise a PNG"
 
   test "$(raw_base git@github.com:scode/farhelm.git)" = "https://raw.githubusercontent.com/scode/farhelm" || { echo "FAIL raw_base ssh"; fail=1; }
   raw_base "file:///elsewhere" >/dev/null && { echo "FAIL raw_base accepted a non-github remote"; fail=1; }
@@ -456,28 +556,41 @@ EOF
   snapshot="$(manifest_commit "$checkout")"
   test "$(remote_git rev-list --parents -n 1 "$keep" | wc -w)" -eq 2 || { echo "FAIL first keeper should have one parent"; fail=1; }
   test "$(remote_git rev-parse "$keep^1")" = "$snapshot" || { echo "FAIL the manifest does not pin the keeper's newest snapshot"; fail=1; }
-  test "$(remote_git ls-tree -r --name-only "$snapshot" | tr '\n' ' ')" = "page/one.png page/two.png " ||
+  test "$(remote_git ls-tree -r --name-only "$snapshot" | tr '\n' ' ')" = "notes/v1.png page/one.png page/two.png " ||
     { echo "FAIL the snapshot should hold exactly the referenced shots"; fail=1; }
   grep -q '"width": 120' "$checkout/$MANIFEST" || { echo "FAIL the manifest lacks the shot size"; fail=1; }
   test "$(manifest_captured_from "$checkout")" = "$main1" || { echo "FAIL the manifest lacks the capture's main commit"; fail=1; }
 
+  # From here on notes/v1 is a published release shot, so a capture leaves it
+  # alone, as the real one does: it is not on disk and not in the record.
+  local release_blob
+  release_blob="$(blob_of "$release_png")" || die "cannot hash a test PNG"
+  rm "$release_png" || die "cannot remove a test PNG"
+  captured "$main1"
+
   # Bulk only: a capture missing a referenced shot (what a one-page run
   # leaves) is refused, never filled in from an earlier snapshot, and so is a
-  # capture whose record says it is incomplete.
-  keep="$(remote_git rev-parse "$REF")"
+  # capture whose record says it is incomplete. The carry-over of frozen
+  # release shots is no exception to that: page/one is not one.
   mv "$checkout/$LOCAL_DIR/page/one.png" "$work/one.png" || die "cannot move a test PNG"
-  run >/dev/null 2>&1 && { echo "FAIL published a partial capture"; fail=1; }
+  refused "the shot page/one is missing" "a partial capture"
   mv "$work/one.png" "$checkout/$LOCAL_DIR/page/one.png" || die "cannot restore a test PNG"
   # Everything else about this record is valid, so only `complete` refuses it.
   captured "$main1" false
-  run >/dev/null 2>&1 && { echo "FAIL published an incomplete capture"; fail=1; }
-  test "$(remote_git rev-parse "$REF")" = "$keep" || { echo "FAIL a refused capture moved the ref"; fail=1; }
+  refused "not complete" "an incomplete capture"
 
-  # A full recapture with new pixels publishes a second snapshot.
+  # A full recapture with new pixels publishes a second snapshot, and the
+  # published release shot, absent from that capture, is carried over from
+  # the snapshot the manifest pins byte for byte.
+  local first="$snapshot"
   convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
   captured "$main1"
   run >/dev/null || { echo "FAIL second publish"; fail=1; }
   test "$(remote_git rev-list --parents -n 1 "$REF" | wc -w)" -eq 3 || { echo "FAIL the keeper should hold both snapshots"; fail=1; }
+  snapshot="$(manifest_commit "$checkout")"
+  test "$snapshot" != "$first" || { echo "FAIL the second publish did not pin a new snapshot"; fail=1; }
+  test "$(remote_git rev-parse "$snapshot:$release.png")" = "$release_blob" ||
+    { echo "FAIL a published release shot was not carried over byte for byte"; fail=1; }
 
   # A recapture from a newer main that changed no pixels pushes nothing but
   # records the newer commit, so the next refresh reads history from there.
@@ -487,11 +600,27 @@ EOF
   test "$(remote_git rev-parse "$REF")" = "$keep" || { echo "FAIL an unchanged set was pushed"; fail=1; }
   test "$(manifest_captured_from "$checkout")" = "$main2" || { echo "FAIL an unchanged recapture was not recorded"; fail=1; }
 
-  # A page that stops referencing its shots: page/one leaves the next
-  # snapshot, and page/two stays because the release's screenshot list names it.
-  printf -- '---\ntitle: t\n---\n\nNo shots here.\n' >"$page"
+  # A capture that holds the published release shot without the recapture
+  # marker, as tooling from before the freeze would write, is refused rather
+  # than replacing the frozen image. Marked as deliberately recaptured, the
+  # same capture replaces it.
+  convert -size 120x80 plasma:fractal "$release_png" || die "cannot synthesise a PNG"
+  captured "$main2"
+  refused "without marking it as deliberately recaptured" "an unmarked recapture of a published release shot"
+  captured "$main2" true "$release"
+  run >/dev/null || { echo "FAIL a marked recapture of a published release shot"; fail=1; }
+  snapshot="$(manifest_commit "$checkout")"
+  test "$(remote_git rev-parse "$snapshot:$release.png")" = "$(blob_of "$release_png")" ||
+    { echo "FAIL a marked recapture did not replace the published release shot"; fail=1; }
+  test "$(blob_of "$release_png")" != "$release_blob" || die "the recaptured test PNG has the old pixels"
+  rm "$release_png" || die "cannot remove a test PNG"
+  captured "$main2"
+
+  # A page that stops referencing a shot: page/one leaves the next snapshot,
+  # page/two stays, and the release's shot stays as the release list names it.
+  printf -- '---\ntitle: t\n---\n\n<Screenshot name="page/two" alt="b" />\n' >"$page"
   run >/dev/null || { echo "FAIL publish after dropping a reference"; fail=1; }
-  test "$(remote_git ls-tree -r --name-only "$(manifest_commit "$checkout")")" = "page/two.png" ||
+  test "$(remote_git ls-tree -r --name-only "$(manifest_commit "$checkout")" | tr '\n' ' ')" = "notes/v1.png page/two.png " ||
     { echo "FAIL an unreferenced shot was published"; fail=1; }
 
   # Test fixtures for the retention cases: snapshot commits with chosen
@@ -607,20 +736,36 @@ json.dump(manifest, open(sys.argv[1], "w"))' "$checkout/$MANIFEST" "$1" || die "
   main_manifest ""
   run >/dev/null 2>&1 || { echo "FAIL a main without a manifest blocked publishing"; fail=1; }
 
-  # A manifest pinning a snapshot the keeper no longer holds does not block
-  # publishing what is captured locally.
+  # A published release shot whose pinned snapshot lacks the file (the
+  # manifest still lists it) is refused rather than dropped from the release
+  # notes or taken from anywhere else.
+  local lacking
+  lacking="$(remote_git ls-tree "$snapshot^{tree}" | grep -v $'\tnotes$' | remote_git mktree)" || die "cannot build a test tree"
+  lacking="$(remote_git -c user.name=t -c user.email=t@invalid commit-tree "$lacking" -m lacking)" || die "cannot build a test snapshot"
+  remote_git update-ref "$REF" "$(keeper_of "$lacking")" || die "cannot install a test keeper"
+  pin "$lacking"
+  convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
+  captured "$main1"
+  refused "is missing from the pinned snapshot" "a published release shot missing from the pinned snapshot"
+
+  # A manifest pinning a snapshot the keeper no longer holds refuses a
+  # capture that leaves a published release shot to be carried over from
+  # it, but does not block publishing a full recapture, the release shot
+  # included.
   pin 0123456789abcdef0123456789abcdef01234567
   convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/one.png" || die "cannot synthesise a PNG"
   convert -size 120x80 plasma:fractal "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
   captured "$main1"
+  refused "which $REF no longer holds" "a published release shot whose pinned snapshot is gone"
+  convert -size 120x80 plasma:fractal "$release_png" || die "cannot synthesise a PNG"
+  captured "$main1" true "$release"
   run >/dev/null 2>&1 || { echo "FAIL a vanished pin blocked a full recapture"; fail=1; }
+  rm "$release_png" || die "cannot remove a test PNG"
 
   # A capture too small to be a picture of the UI is refused.
   convert -size 8x8 xc:red "$checkout/$LOCAL_DIR/page/two.png" || die "cannot synthesise a PNG"
   captured "$main1"
-  keep="$(remote_git rev-parse "$REF")"
-  run >/dev/null 2>&1 && { echo "FAIL published a tiny PNG"; fail=1; }
-  test "$(remote_git rev-parse "$REF")" = "$keep" || { echo "FAIL a refused publish moved the ref"; fail=1; }
+  refused "is only" "a tiny PNG"
 
   # A publish racing another (simulated by a pre-push hook that moves the
   # remote ref while this push is under way) must fail rather than overwrite
@@ -665,7 +810,7 @@ while [ $# -gt 0 ]; do
       checkout="$1"
       ;;
     -h | --help)
-      sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,61p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) die "unknown argument: $1" ;;

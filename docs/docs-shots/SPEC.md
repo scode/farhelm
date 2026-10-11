@@ -79,16 +79,32 @@ editing the manifest. An agent that finds itself typing a push to that ref has l
 ## Regenerated in bulk
 
 Every publish is a complete regeneration: all pages' shots from one run of `scripts/docs-screenshots.sh`, captured
-against one main commit. The capture writes a record of that run (`capture.json` beside the shots) naming the commit and
-the checksum of every PNG, and only a complete run that can vouch for showing main's UI writes it. `--only <page>`,
-which is for drafting a page, deletes it, and so does a full run whose app code (`crates/`, `Cargo.toml`, `Cargo.lock`)
-differs from main, one with `--no-build`, or one whose builds go to a `CARGO_TARGET_DIR` outside the checkout; such a
-full run still captures for the preview but exits 3, and says so before it starts. The publish script refuses shots
-without a complete record, a page referencing a shot the run did not produce, and a shot that changed after the run
-recorded it, so a published set never mixes captures from different versions of the UI.
+against one main commit. Published release shots are the one exception: they are carried over unchanged (see below). The
+capture writes a record of that run (`capture.json` beside the shots) naming the commit and the checksum of every PNG,
+and only a complete run that can vouch for showing main's UI writes it. `--only <page>`, which is for drafting a page,
+deletes it, and so does a full run whose app code (`crates/`, `Cargo.toml`, `Cargo.lock`) differs from main, one with
+`--no-build`, or one whose builds go to a `CARGO_TARGET_DIR` outside the checkout; such a full run still captures for
+the preview but exits 3, and says so before it starts. The publish script refuses shots without a complete record, a
+page referencing a shot the run did not produce, and a shot that changed after the run recorded it, so a published set
+never mixes captures from different versions of the UI.
 
 The maintainer asked for that so a refresh can be reasoned about: the manifest says exactly which version of the UI the
 published shots show, and the changes since then are a `git log` away.
+
+## Release shots are frozen
+
+The Release notes page shows screenshots under some releases' entries (`website/AGENTS.md`, "Release notes"). A release
+shot is a shot one of `website/src/release-notes/*.json` lists, and it is published once the manifest lists it. Release
+notes are stable once published, except for a deliberate correction, and a release's screenshot is part of its notes: a
+recapture from today's UI would show that release something it never had. So no capture takes a published release shot,
+whether full or `--only`; its test skips, and the publish copies the image byte for byte from the snapshot the manifest
+pins. `captured_from` therefore describes every published shot except these, which keep showing the UI of the release
+they belong to. A release shot not yet published, a new release's first screenshot, is captured like any other.
+
+A correction is the one way to change one: `scripts/docs-screenshots.sh --recapture-release-shot <name>` captures it
+from the current UI, and the capture record says it was recaptured on purpose. The publish refuses a record that holds a
+published release shot without saying so, so a capture by older tooling cannot replace one by accident, and it refuses
+when the pinned snapshot lacks a release shot it should carry over rather than dropping it from the notes.
 
 ## Adding or changing a shot
 
@@ -117,7 +133,9 @@ calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regi
    can make a page's prose wrong too.
 2. Update the shot specs for those changes and run `scripts/docs-screenshots.sh`. When a shot fails because the UI moved
    under it (a selector that no longer matches, a control now behind a menu), rewrite its steps so it shows the same
-   thing on the current UI; change its annotation wording only when what it explains changed.
+   thing on the current UI; change its annotation wording only when what it explains changed. Published release shots
+   are not part of a refresh: the capture skips them and the publish carries them over, so leave their tests, their
+   lists, and the release notes alone even when the UI they show has since changed.
 3. Look at every image, and fix any page whose text no longer matches what its shots show.
 4. Run `scripts/publish-docs-shots.sh`, and commit the manifest with any page or spec changes.
 

@@ -22,3 +22,15 @@ export const DOCS_OUTPUT_ENV = "FARHELM_DOCS_SHOTS_OUTPUT";
  * the publish script reads from.
  */
 export const DOCS_DEFAULT_OUTPUT = path.resolve(__dirname, "../../website/public/docs-shots-local");
+/**
+ * The published release shots a capture should take after all, comma
+ * separated. `scripts/docs-screenshots.sh --recapture-release-shot NAME` sets
+ * it on the Playwright command line only, for a deliberate correction of a
+ * past release's screenshot; unset, every published release shot is left
+ * alone (release-shots.ts says why).
+ */
+export const RECAPTURE_RELEASE_SHOTS_ENV = "FARHELM_DOCS_RECAPTURE_RELEASE_SHOTS";
+/** The published manifest: which snapshot the docs pin and which shots it holds. */
+export const DOCS_MANIFEST_PATH = path.resolve(__dirname, "../../website/src/data/docs-shots.json");
+/** Each release's screenshot list for the Release notes page, one `<version>.json` per release. */
+export const RELEASE_NOTES_DIR = path.resolve(__dirname, "../../website/src/release-notes");

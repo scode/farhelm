@@ -640,10 +640,13 @@ screenshots" means the procedure in the SPEC's "Refreshing" section: on the late
 `captured_from` and update the shot specs and pages they affect, then run `scripts/docs-screenshots.sh`, rewrite any
 shot that no longer works on the current UI so it shows the same thing, look at every image it prints and fix annotation
 placement until each points at the right thing and hides nothing the reader needs, then run
-`scripts/publish-docs-shots.sh` and commit the manifest change it leaves. The publish script is the only thing that
-pushes `refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a
-gate: nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its
-whole validation and needs no network.
+`scripts/publish-docs-shots.sh` and commit the manifest change it leaves. Release notes are the exception: published
+releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests are never
+touched by a refresh, a sweep, or a cleanup, only by a task that targets them, and the scripts carry published release
+shots over unchanged (`website/AGENTS.md`, "Release notes"). The publish script is the only thing that pushes
+`refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a gate:
+nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its whole
+validation and needs no network.
 
 # Agent screen fixtures
 
