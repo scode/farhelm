@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [landing 1467f1] `agent-managed-checkout.md` — let `farhelm agent create` start a session in a fresh managed checkout (`--gh`/`--github`)
 - [in-flight 220bf7] `delete-one-trashed-checkout.md` — a delete button on each checkout in the trash dialog, deleting it at once without a confirmation
-- [pending] `update-check-feedback.md` — show a user-started update check's progress and outcome inline on the desktop app's version readout
+- [in-flight 3951aa] `update-check-feedback.md` — show a user-started update check's progress and outcome inline on the desktop app's version readout
