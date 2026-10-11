@@ -1523,7 +1523,11 @@ mod tests {
     /// on the running test's environment — repo rule), takes the
     /// measurement alone, and exits with a bare status code the parent
     /// turns back into a legible failure.
+    ///
+    /// Linux-only: the RSS observation uses procfs. Other hosts still run the
+    /// content and ordering tests; this memory proof needs Linux's substrate.
     #[farhelm_testtrace::test]
+    #[cfg(target_os = "linux")]
     fn staged_stream_does_not_grow_memory_with_the_size_of_the_upload() {
         const CHILD_MARKER: &str = "FARHELM_FILES_TEST_STREAM_RSS_CHILD";
         const CHUNK: usize = 256 * 1024;

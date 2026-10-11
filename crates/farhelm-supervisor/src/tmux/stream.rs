@@ -2131,34 +2131,51 @@ mod tests {
 
     /// Shared-client chatter cannot extend a prefix's own-pane idle deadline.
     ///
-    /// This uses paused time so four unrelated notifications are deliberately
-    /// spaced inside the 50 ms window without making the regression wall-clock
-    /// sensitive. A deadline restarted by each line would remain pending at
-    /// the final advance; only the original own-pane deadline may govern it.
+    /// Buffer unrelated notifications and a foreign-pane payload at 40 ms,
+    /// then measure the flush against the original 50 ms deadline. Paused time
+    /// can advance to a renewed deadline too, so receiving the prefix alone
+    /// would admit the regression; its elapsed time must stay below 60 ms.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn unrelated_control_traffic_does_not_starve_the_idle_flush() {
+        use tokio::io::AsyncBufReadExt as _;
+
         let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
-        feed_own_payload(&mut writer, b"\x1b[").await;
-        let read = tokio::spawn(async move {
-            let event = stream.next_output().await.expect("reading idle flush");
-            (stream, event)
-        });
-        tokio::task::yield_now().await;
-        for _ in 0..4 {
-            tokio::time::advance(std::time::Duration::from_millis(10)).await;
-            writer
-                .write_all(b"%window-renamed @0 unrelated\n")
-                .await
-                .expect("writing unrelated control line");
-            writer
-                .flush()
-                .await
-                .expect("flushing unrelated control line");
-            tokio::task::yield_now().await;
-        }
-        tokio::time::advance(std::time::Duration::from_millis(10)).await;
-        let (stream, event) = read.await.expect("joining idle reader");
+        feed_own_payload(&mut writer, b"A\x1b[").await;
+        assert_eq!(
+            stream.next_output().await.expect("arming idle flush"),
+            Some(OutputEvent::Bytes(b"A".to_vec()))
+        );
+        let started = tokio::time::Instant::now();
+        assert_eq!(
+            stream.query_strip_deadline,
+            Some(started + QUERY_STRIP_IDLE_FLUSH),
+            "the own-pane prefix must establish the original deadline"
+        );
+        tokio::time::advance(std::time::Duration::from_millis(40)).await;
+        // No read timer is armed between next_output calls. Buffer the whole
+        // tail before the next call so pipe scheduling cannot move consumption
+        // past 40 ms and hide a deadline renewed by unrelated traffic.
+        writer
+            .write_all(
+                b"%window-renamed @0 unrelated\n%window-renamed @0 unrelated\n\
+                  %window-renamed @0 unrelated\n%window-renamed @0 unrelated\n\
+                  %output %7 foreign\n",
+            )
+            .await
+            .expect("writing unrelated traffic");
+        writer.flush().await.expect("flushing unrelated traffic");
+        let buffered = stream.reader.fill_buf().await.expect("buffering traffic");
+        assert!(
+            buffered.ends_with(b"%output %7 foreign\n"),
+            "test premise: the whole unrelated tail must be buffered: {buffered:?}"
+        );
+        let event = stream.next_output().await.expect("reading idle flush");
         assert_eq!(event, Some(OutputEvent::Bytes(b"\x1b[".to_vec())));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(60),
+            "unrelated traffic extended the original idle deadline: {elapsed:?}"
+        );
         drop(writer);
         shutdown_test_stream(stream).await;
     }
