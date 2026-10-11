@@ -179,6 +179,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Then switch the $farhelm example in the README and docs to the managed-checkout version, which was held back because
   it would promise something agents cannot do yet. Plan: `plans/queue/agent-managed-checkout.md`.
 
+- **Pin the app settings dialog's header and footer, and add an × close.** The settings dialog opened from the gear at
+  the top of the sidebar has grown (host choices, checkout folder, post-clone command, and more) until it runs past the
+  bottom of the window, and its close button only appears once you scroll down to it. Give it a header and footer that
+  stay in the same place and are always visible, with only the settings between them scrolling, and an × close button at
+  the top like the host settings dialog has.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
