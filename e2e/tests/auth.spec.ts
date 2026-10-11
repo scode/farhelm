@@ -4,7 +4,7 @@
 // natural persistence in a closed-and-reopened browser profile, and live
 // WebSocket teardown on rotation.
 import { expect, newObservedContext, observeContext, test } from "./helpers/evidence";
-import { chromium, Page, Route, webkit } from "@playwright/test";
+import { BrowserContext, chromium, Page, Route, webkit } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +18,66 @@ import {
 import { stackScratchDir } from "./helpers/scratch";
 
 const run = promisify(execFile);
+
+// Rotation invalidates the whole suite's credential. After-hooks have a
+// separate timeout budget even when Playwright abandons the test body's
+// pending await, so recovery belongs there rather than in a body finally.
+let rotationAttempted = false;
+let credentialPersisted = false;
+
+/** Store only the suite credential, in the same shape as global setup.
+ * Page storage can contain unrelated state; carrying it into later projects
+ * would make their starting conditions depend on this test's navigation. */
+async function persistCredential(
+  baseURL: string,
+  secret: string,
+  cookies: Awaited<ReturnType<BrowserContext["storageState"]>>["cookies"],
+) {
+  await writeFile(AUTH_STORAGE_STATE_PATH, JSON.stringify({
+    cookies,
+    origins: [{
+      origin: new URL(baseURL).origin,
+      localStorage: [{ name: DEVICE_SECRET_KEY, value: secret }],
+    }],
+  }), { mode: 0o600 });
+  await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
+  credentialPersisted = true;
+}
+
+test.beforeEach(() => {
+  rotationAttempted = false;
+  credentialPersisted = false;
+});
+
+/** A broken rotation assertion must not revoke every later project's login.
+ * Use a fresh unauthenticated client because the page and request fixture
+ * still hold revoked credentials. Recovery errors remain secondary evidence;
+ * throwing here would obscure the failure that made recovery necessary. */
+test.afterEach(async ({ playwright, baseURL }, testInfo) => {
+  if (!rotationAttempted || credentialPersisted) return;
+  try {
+    const recovery = await playwright.request.newContext({
+      baseURL,
+      extraHTTPHeaders: {},
+      storageState: { cookies: [], origins: [] },
+      timeout: 10_000,
+    });
+    try {
+      const response = await recovery.post("/api/auth/token", { data: { token: await token("show") } });
+      if (!response.ok()) throw new Error(`credential recovery exchange returned ${response.status()}`);
+      const body = await response.json() as { device_secret?: unknown };
+      if (typeof body.device_secret !== "string" || !body.device_secret) {
+        throw new Error("credential recovery exchange returned no device secret");
+      }
+      await persistCredential(baseURL!, body.device_secret, (await recovery.storageState()).cookies);
+    } finally {
+      await recovery.dispose();
+    }
+  } catch (error) {
+    console.error("rotation credential recovery failed:", error);
+    testInfo.annotations.push({ type: "credential-recovery-failed", description: "shared sign-in recovery failed; see stderr" });
+  }
+});
 
 interface StackInfo {
   farhelm: string;
@@ -277,6 +337,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
     (window as any).__rawAuthSockets = { feed, terminal };
   }, { id: sessionId, secretKey: DEVICE_SECRET_KEY });
 
+  rotationAttempted = true;
   const replacement = await token("rotate");
   await expect
     .poll(() =>
@@ -334,10 +395,12 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   // after the recovery assertions below: rotation already revoked the old
   // credential, so any failure past the exchange would otherwise leave
   // every later test unauthenticated and turn one failure into a large
-  // cascade. Playwright reloads this file for later contexts and workers,
+  // cascade. The after-hook covers failures before this write, including a
+  // timed-out body; this forward write keeps the normal exchange unchanged.
+  // Playwright reloads this file for later contexts and workers,
   // while the header refresh above advances request fixtures that remain in
   // this worker. The secret is pinned by the route handler above, which is
-  // also what makes the `!` safe.
+  // also what the premise below verifies before persisting it.
   //
   // The CREDENTIAL only, rebuilt in global-setup.ts's exact shape rather than
   // dumped from `page.context().storageState()`. This file is the baseline
@@ -357,18 +420,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
     throw new Error("the rotation exchange completed without pinning a replacement secret");
   }
   const { cookies } = await page.context().storageState();
-  await writeFile(
-    AUTH_STORAGE_STATE_PATH,
-    JSON.stringify({
-      cookies,
-      origins: [{
-        origin: new URL(baseURL!).origin,
-        localStorage: [{ name: DEVICE_SECRET_KEY, value: replacementSecret! }],
-      }],
-    }),
-    { mode: 0o600 },
-  );
-  await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
+  await persistCredential(baseURL!, replacementSecret, cookies);
   await detailRead;
   // The EXACT session, not whichever one auto-select would pick: the
   // titlebar shows its title and the live terminal socket carries its id.
