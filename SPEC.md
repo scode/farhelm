@@ -773,7 +773,9 @@ archive time, bounded disk usage and the directory to copy work out of before cl
 but cannot be checked or deleted. Unknown sizes make totals explicitly partial. Per-host and global delete ask once in
 place, naming the confirmed hosts, checkout count and size, and warning that uncommitted or unpushed work is permanently
 lost. The global action skips unreachable hosts and waits until every reachable host can be read. There is no restore
-action or automatic cleanup.
+action or automatic cleanup. The header keeps the title, total, global delete action and close control visible while the
+host list scrolls. Global confirmation appears first in that scroll region; its actions are brought into view when it
+opens, and cancelling returns focus to the global delete action. There is no footer.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.

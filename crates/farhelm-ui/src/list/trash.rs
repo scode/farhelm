@@ -47,7 +47,7 @@ struct Target {
     partial: bool,
 }
 
-/// One in-place confirmation, bound to the host band or the global footer.
+/// One in-place confirmation, bound to a host band or the top of the host list.
 #[derive(Clone, PartialEq)]
 struct Confirmation {
     host: Option<HostId>,
@@ -155,6 +155,22 @@ fn return_focus() {
     ));
 }
 
+/// Cancelling a global choice returns to its pinned trigger, including Escape.
+/// The band lives in the scrolling body, so clearing it alone would discard the
+/// focused Cancel button and leave keyboard users without a useful next action.
+fn cancel_confirmation(mut confirmation: Signal<Option<Confirmation>>) {
+    let global = confirmation
+        .peek()
+        .as_ref()
+        .is_some_and(|confirm| confirm.host.is_none());
+    confirmation.set(None);
+    if global {
+        document::eval(
+            "requestAnimationFrame(() => document.querySelector('.trash-delete-all')?.focus({preventScroll:true}))",
+        );
+    }
+}
+
 /// A host message stays escaped and direction-isolated, including a path that
 /// was preserved or partially cleaned. Removed IDs do not suppress diagnostics.
 #[component]
@@ -200,7 +216,10 @@ fn ConfirmBand(
         .fold(0, u64::saturating_add);
     let partial = confirm.targets.iter().any(|target| target.partial) || unchecked > 0;
     rsx! { div { class: "checkout-trash-confirm", role: "group", aria_label: "confirm permanent checkout deletion",
-        onmounted: move |_| { document::eval("requestAnimationFrame(() => document.querySelector('.checkout-trash-confirm .trash-confirm-cancel')?.focus({preventScroll:true}))"); },
+        // A confirmation can name more hosts than fit in the body. Reveal the
+        // safe action and its neighbouring submit button without moving the
+        // pinned header; the warning remains available by scrolling upwards.
+        onmounted: move |_| { document::eval("requestAnimationFrame(() => { const cancel = document.querySelector('.checkout-trash-confirm .trash-confirm-cancel'); cancel?.focus({preventScroll:true}); cancel?.closest('.checkout-trash-actions')?.scrollIntoView({block:'nearest'}); })"); },
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Folders Farhelm cannot verify stay in place; unusable entries may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
@@ -410,7 +429,7 @@ pub(super) fn TrashControl(
             return;
         }
         if confirmation.peek().is_some() {
-            confirmation.set(None);
+            cancel_confirmation(confirmation);
             return;
         }
         return_focus();
@@ -489,7 +508,15 @@ pub(super) fn TrashControl(
                     onkeydown: move |event| { if event.key() == Key::Escape && !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
                     div { class: "checkout-trash-header",
                         h2 { id: "checkout-trash-title", TrashIcon { full: count > 0 } "trash" }
-                        button { class: "btn btn-neutral trash-close", disabled: busy, onclick: move |_| close(()), "close" }
+                        span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
+                        div { class: "checkout-trash-header-actions",
+                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if *remaining.peek() == 0 { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
+                            button { class: "btn btn-neutral trash-close", disabled: busy, onclick: move |_| close(()), "close" }
+                        }
+                    }
+                    div { class: "checkout-trash-body",
+                    if let Some(confirm) = confirmation().filter(|confirm| confirm.host.is_none()) {
+                        ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| cancel_confirmation(confirmation), onsubmit: submit }
                     }
                     p { "Folders of managed checkouts whose last session was deleted. They stay here, untouched, until you delete them. To get something back, copy it out of the folder shown under its host." }
                     if let Some(error) = &host_error { p { class: "checkout-trash-issue", "Host reachability could not be refreshed. Cleanup is disabled until it can be checked: " span { class: "peer-value", dir: "ltr", "{display_peer(error)}" } } }
@@ -554,12 +581,6 @@ pub(super) fn TrashControl(
                             }
                         }
                     }
-                    if let Some(confirm) = confirmation().filter(|confirm| confirm.host.is_none()) {
-                        ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| { confirmation.set(None); }, onsubmit: submit }
-                    }
-                    div { class: "checkout-trash-footer",
-                        span { "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
-                        button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if *remaining.peek() == 0 { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
                     }
                 }
             }
