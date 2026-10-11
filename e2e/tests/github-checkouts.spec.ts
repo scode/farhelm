@@ -1175,6 +1175,49 @@ test("trash global confirmation freezes archives and reports preserved recovery 
   }
 });
 
+/** Immediate entry cleanup reaches the real supervisor and removes only the
+ * selected archive; a neighbouring archive's uncommitted bytes must survive. */
+test("single trash delete removes one real archive and preserves its neighbour", async ({page, request}) => {
+  test.setTimeout(90_000);
+  const fixture = await checkoutFixture("browser-trash-single");
+  const ids: string[] = [];
+  try {
+    const first = await contextlessTrashSession(request, fixture, ids, "selected");
+    const neighbour = await contextlessTrashSession(request, fixture, ids, "neighbour");
+    await fs.writeFile(path.join(neighbour, "uncommitted-work"), "retain this work\n");
+    expect(await fs.readFile(path.join(first, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
+    const before = await contents(neighbour);
+    const host = await localHostId(request);
+    const listed = await request.post("/api/checkout-trash/list", {data: {host, measure_sizes: false}});
+    expect(listed.ok(), await listed.text()).toBe(true);
+    const archives = (await listed.json()).checkouts.filter((entry: {path: string}) => [first, neighbour].includes(entry.path));
+    expect(archives).toHaveLength(2);
+    const selected = archives.find((entry: {path: string}) => entry.path === first);
+    expect(selected).toBeTruthy();
+    await page.goto("/");
+    await page.locator(".checkout-trash-button").click();
+    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const band = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
+    const button = band.getByRole("button", {name: `delete ${selected.name} permanently`, exact: true});
+    await expect(button).toBeEnabled();
+    const [response] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === "/api/checkout-trash/delete"),
+      button.click(),
+    ]);
+    expect(response.request().postDataJSON().ids).toEqual([selected.id]);
+    expect(response.ok(), await response.text()).toBe(true);
+    await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);
+    await expect(band.locator(".checkout-trash-entry")).toHaveCount(1);
+    await expect(dialog.locator(".trash-close")).toBeFocused();
+    await expect.poll(() => fs.stat(first).then(() => "present", (error: NodeJS.ErrnoException) => error.code)).toBe("ENOENT");
+    expect(await contents(neighbour)).toEqual(before);
+    expect(await fs.readFile(path.join(neighbour, "uncommitted-work"), "utf8")).toBe("retain this work\n");
+  } finally {
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close(request);
+  }
+});
+
 /** Archive new work from another client while the first client holds its
  * confirmation. The durable hook file establishes completed preparation;
  * no terminal liveness assumption is needed for this API-driven archive. */

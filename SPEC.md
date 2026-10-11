@@ -783,20 +783,23 @@ archive time, bounded disk usage and the directory to copy work out of before cl
 but cannot be checked or deleted. Unknown sizes make totals explicitly partial. Per-host and global delete ask once in
 place, naming the confirmed hosts, checkout count and size, and warning that uncommitted or unpushed work is permanently
 lost. The global action skips unreachable hosts and waits until every reachable host can be read. There is no restore
-action or automatic cleanup. The header keeps the title, total, global delete action and close control visible while the
-host list scrolls. Global confirmation appears first in that scroll region; its actions are brought into view when it
-opens, and cancelling returns focus to the global delete action. There is no footer. While deletion runs, the header
-announces how many of the involved hosts are still deleting, such as "deleting on 2 of 3 hosts…". Each pending host also
-shows "deleting…" until its reply arrives, whether success or failure, then its cleanup result takes over. Close and
-Escape stay unavailable until every involved host has answered.
+action or automatic cleanup. Each checkout also has a delete button that removes it immediately, without confirmation or
+a warning about uncommitted or unpushed work; it is unavailable under the same host-listing and operation guards as bulk
+cleanup. The header keeps the title, total, global delete action and close control visible while the host list scrolls.
+Global confirmation appears first in that scroll region; its actions are brought into view when it opens, and cancelling
+returns focus to the global delete action. There is no footer. While deletion runs, the header announces how many of the
+involved hosts are still deleting, such as "deleting on 2 of 3 hosts…". Each pending host also shows "deleting…" until
+its reply arrives, whether success or failure, then its cleanup result takes over. Close and Escape stay unavailable
+until every involved host has answered.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
 
-An explicitly confirmed trash delete is the permanent-cleanup exception: it removes only recorded archived checkouts
-whose opened root and directory still match their ownership evidence. It does not follow symlinks or cross mounts, and
-refuses an archive containing a retained session's working folder. Missing or mismatched records can be discarded
-without touching a replacement folder; other failures are reported and remain available for retry.
+A trash delete, whether an immediate single-checkout delete or a confirmed bulk delete, is the permanent-cleanup
+exception: it removes only recorded archived checkouts whose opened root and directory still match their ownership
+evidence. It does not follow symlinks or cross mounts, and refuses an archive containing a retained session's working
+folder. Missing or mismatched records can be discarded without touching a replacement folder; other failures are
+reported and remain available for retry.
 
 Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
 safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
