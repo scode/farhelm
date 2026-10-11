@@ -143,10 +143,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Delete one checkout from the trash.** The trash dialog (archived managed checkouts, listed per host) can only delete
-  everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
-  without taking the rest with it. Plan: `plans/queue/delete-one-trashed-checkout.md`.
-
 - **Send ntfy.sh notifications when an agent is blocked.** Today the only alert that a session needs the user (it starts
   waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
   when no Farhelm window is in front of them. Support sending a notification through ntfy.sh (a topic the user

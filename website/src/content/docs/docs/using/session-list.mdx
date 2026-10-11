@@ -44,7 +44,8 @@ Open it to see the checkouts grouped by host, newest first, with their repositor
 />
 
 **delete all** at the top deletes the trash on every reachable host, and **delete all on** a host only on that one.
-Each asks you to confirm, and work in the trash that was never committed or pushed is lost. An unreachable host stays
+Each asks you to confirm, and work in the trash that was never committed or pushed is lost. Each checkout also has its
+own **delete** button, which deletes just that checkout at once, without asking. An unreachable host stays
 greyed out and is skipped by **delete all**, which waits until every reachable host can be read. Sizes can be partial when some directories cannot be measured. If an archive directory was replaced or moved since
 Farhelm archived it, it stays untouched and the dialog explains what was left behind. Changing the files inside it does
 not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a directory before

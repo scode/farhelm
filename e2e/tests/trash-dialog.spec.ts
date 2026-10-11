@@ -5,22 +5,28 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { localHostId } from "./helpers/fleet";
+import { localHostId, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
 
 /**
  * Keep the real local identity and add only display-only connected remotes.
- * The returned empty-host set keeps refreshes consistent with mocked cleanup.
+ * Per-ID removal keeps refreshes consistent with both single and bulk cleanup;
+ * reachability and registry failures are controlled only at the API boundary.
  */
 async function stubArchives(page: Page, request: APIRequestContext, names: string[], count = 12) {
   const local = await localHostId(request);
   const ids = [local, ...names.slice(1).map((_, i) => 9020 + i)];
   // Successful deletion changes later listings too; final refresh must not
   // resurrect archives just because the route fixture forgot the mutation.
-  const emptied = new Set<number>();
+  const removed = new Map<number, Set<string>>();
+  const unavailable = new Set<number>();
+  const registry = { fail: false };
   await page.route("**/api/hosts", async (route) => {
+    if (registry.fail) {
+      return fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "fixture host refresh unavailable" });
+    }
     const response = await route.fetch();
     const body = await response.json();
     const original = body.hosts.find((host: any) => host.id === local);
@@ -31,19 +37,132 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
       state: { phase: "connected", identity: `trash-layout-${i}`, build_version: "0.1.0",
         refresh: { status: "ok", sessions: 0 } },
     }))];
+    for (const host of body.hosts) {
+      if (unavailable.has(host.id)) host.state = { phase: "connecting", attempt: 1, last_error: "fixture unreachable" };
+    }
     await route.fulfill({ response, json: body });
   });
   await page.route("**/api/checkout-trash/list", async (route) => {
     const { host } = route.request().postDataJSON();
     expect(ids, "only hosts supplied by the fixture are listed").toContain(host);
-    await fulfillAsHelm(route, { json: { issues: [], checkouts: Array.from({ length: emptied.has(host) ? 0 : count }, (_, i) => ({
+    expect(unavailable.has(host), "unreachable hosts must not be listed").toBe(false);
+    await fulfillAsHelm(route, { json: { issues: [], checkouts: Array.from({ length: count }, (_, i) => ({
       id: `archive-${host}-${i}`, name: `archived-checkout-${i}`, repository: "example/repository",
       path: `/work/checkouts/farhelm-archived-working-copies/archive-${i}`,
       archived_at: 1_700_000_000 + i, bytes: 1024,
-    })) } });
+    })).filter((entry) => !removed.get(host)?.has(entry.id)) } });
   });
-  return { ids, emptied };
+  return { ids, removed, unavailable, registry };
 }
+
+for (const fails of [false, true]) {
+  /** A held single reply proves immediate selection and busy admission; later
+   * listings must preserve neighbours on the same host and on another host. */
+  test(`one trash entry deletes immediately and preserves neighbours after ${fails ? "failure" : "success"}`, async ({page, request}) => {
+    const {ids, removed, unavailable} = await stubArchives(page, request, ["single-local", "single-remote", "single-down"], 2);
+    unavailable.add(ids[2]);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const calls: {host: number; ids: string[]; expected_incarnation: number}[] = [];
+    await page.route("**/api/checkout-trash/delete", async (route) => {
+      const selected = route.request().postDataJSON();
+      calls.push(selected);
+      await held;
+      if (fails) await fulfillAsHelm(route, {status: 503, contentType: "text/plain", body: "fixture single delete unavailable"});
+      else {
+        removed.set(selected.host, new Set(selected.ids));
+        await fulfillAsHelm(route, {json: {removed: selected.ids, issues: []}});
+      }
+    });
+    try {
+      await page.setViewportSize({width: 360, height: 500});
+      await page.goto("/");
+      const trigger = page.locator(".checkout-trash-button");
+      await expect(trigger).toHaveAttribute("data-count", "4");
+      await trigger.click();
+      const dialog = page.locator(".checkout-trash-dialog");
+      const local = dialog.locator(`.checkout-trash-host[data-host-id="${ids[0]}"]`);
+      const remote = dialog.locator(`.checkout-trash-host[data-host-id="${ids[1]}"]`);
+      const down = dialog.locator(`.checkout-trash-host[data-host-id="${ids[2]}"]`);
+      await expect(local.locator(".checkout-trash-entry")).toHaveCount(2);
+      await expect(remote.locator(".checkout-trash-entry")).toHaveCount(2);
+      await expect(down).toContainText("not reachable");
+      await expect(down.locator(".trash-entry-delete")).toHaveCount(0);
+      const selected = local.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true});
+      await expect(selected).toBeEnabled();
+      await selected.scrollIntoViewIfNeeded();
+      await expectExposed(selected, dialog.locator(".checkout-trash-body"));
+      await selected.click();
+      await expect.poll(() => calls.length, {message: "single request reaches held reply"}).toBe(1);
+      expect(calls[0].host).toBe(ids[0]);
+      expect(calls[0].ids).toEqual([`archive-${ids[0]}-0`]);
+      expect(calls[0].expected_incarnation).toBeGreaterThan(0);
+      await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);
+      await expect(local.locator(".trash-host-progress")).toHaveText("deleting…");
+      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("deleting…");
+      for (const control of await dialog.locator(".trash-entry-delete, .trash-host-delete, .trash-delete-all, .trash-close").all()) {
+        await expect(control).toBeDisabled();
+      }
+      // Disabling the clicked button can release focus. Put Escape inside the
+      // dialog explicitly so this proves its deletion guard, not a missed event.
+      await dialog.focus();
+      await expect(dialog).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await expect(local.locator(".trash-host-progress")).toHaveText("deleting…");
+      release();
+      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("");
+      await expect(dialog.locator(".trash-close")).toBeFocused();
+      await expect(local.locator(".checkout-trash-entry")).toHaveCount(fails ? 2 : 1);
+      await expect(local.locator(".checkout-trash-entry").filter({hasText: "archived-checkout-1"})).toHaveCount(1);
+      await expect(remote.locator(".checkout-trash-entry")).toHaveCount(2);
+      await expect(trigger).toHaveAttribute("data-count", fails ? "4" : "3");
+      await expect(local.locator(".trash-entry-delete").last()).toBeEnabled();
+      if (fails) await expect(local.locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
+      expect(calls).toHaveLength(1);
+    } finally {
+      release();
+      await page.unrouteAll({behavior: "wait"});
+    }
+  });
+}
+
+/** Retained archives are display evidence, not deletion authority, while a
+ * measurement is pending or a later registry read cannot confirm reachability. */
+test("single trash delete requires settled listings and a healthy host refresh", async ({page, request}) => {
+  const {registry} = await stubArchives(page, request, ["eligibility-local"], 2);
+  const feed = await stubFeed(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let measured = false;
+  await page.route("**/api/checkout-trash/list", async (route) => {
+    if (route.request().postDataJSON().measure_sizes) {
+      measured = true;
+      await held;
+    }
+    await route.fallback();
+  });
+  try {
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "2");
+    await page.locator(".checkout-trash-button").click();
+    await expect.poll(() => measured, {message: "dialog measurement is held"}).toBe(true);
+    const dialog = page.locator(".checkout-trash-dialog");
+    const buttons = dialog.locator(".trash-entry-delete");
+    await expect(buttons).toHaveCount(2);
+    for (const button of await buttons.all()) await expect(button).toBeDisabled();
+    release();
+    await expect(buttons.first()).toBeEnabled();
+    registry.fail = true;
+    feed.notify(1);
+    await expect(dialog.locator(".checkout-trash-issue").filter({hasText: "Host reachability could not be refreshed"})).toBeVisible();
+    for (const button of await buttons.all()) await expect(button).toBeDisabled();
+  } finally {
+    release();
+    await page.unrouteAll({behavior: "wait"});
+  }
+});
 
 for (const width of [1000, 360]) {
   for (const firstFails of [false, true]) {
@@ -53,7 +172,7 @@ for (const width of [1000, 360]) {
      * a later one-host retry must begin a fresh denominator.
      */
     test(`trash deletion progress survives ${firstFails ? "failure" : "success"} at width ${width}`, async ({ page, request }) => {
-      const { ids, emptied } = await stubArchives(page, request, ["progress-local", "progress-remote"], 1);
+      const { ids, removed } = await stubArchives(page, request, ["progress-local", "progress-remote"], 1);
       const held = ids.map(() => {
         let release!: () => void;
         const ready = new Promise<void>((resolve) => { release = resolve; });
@@ -74,7 +193,7 @@ for (const width of [1000, 360]) {
         if (index === 0 && firstFails && attempt === 1) {
           await fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "fixture cleanup unavailable" });
         } else {
-          emptied.add(host);
+          removed.set(host, new Set(selected));
           await fulfillAsHelm(route, { json: { removed: selected, issues: [] } });
         }
       });

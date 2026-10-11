@@ -7112,6 +7112,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border-top: 1px solid var(--border);
 }
 
+/* Keep the immediate action reachable beside long checkout names; metadata
+   retains its own line, and a narrow heading may wrap without clipping it. */
+.checkout-trash-entry-heading { flex-wrap: wrap; }
+.checkout-trash-entry-heading > strong { flex: 1 1 10em; }
+.trash-entry-delete { flex-shrink: 0; }
+
 .checkout-trash-entry-meta {
   display: flex;
   align-items: center;

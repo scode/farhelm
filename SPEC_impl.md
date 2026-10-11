@@ -1759,7 +1759,7 @@ replies retain their existing JSON shapes.
 under the recorded root, opens the root and archive without following their final symlinks, and applies the
 allocation-time inode/birth-time rules to those opened objects. Parent and leaf traversal stays relative to those
 handles. A passive read prunes only missing archives under a verified root; other failures remain recorded and return a
-path and diagnostic on every read. A confirmed Delete drops unusable identity records without touching the folder, while
+path and diagnostic on every read. A trash Delete drops unusable identity records without touching the folder, while
 uncertain I/O failures keep the record for retry. Recursive deletion lives in this module, preserving `working_copies`'
 no-recursive-removal rule. Recursive cleanup removes objects reachable from the verified archive at the time each
 directory is read, without crossing symlinks or mounts. Linux uses `openat2` with `RESOLVE_NO_XDEV` (including
@@ -1798,12 +1798,14 @@ every reachable host, and refuses a host above the protocol's 10,000-ID batch li
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
-connection identity and takes the existing shared operation guard. Separate host requests run concurrently; the guard
-lasts until all replies arrive. Successful record removals are folded into the displayed listing, all issues retained,
-and every completion refetches. A lost cleanup reply warns that some contents may already be deleted and refetches; it
-never claims that a folder is intact. The archive cue stores row geometry on the persistent trash button, consumes it on
-the local Delete reply, and uses finite Web Animations with reduced-motion refusal. No global geometry cache or new
-asset file is introduced.
+connection identity and takes the existing shared operation guard. An immediate single-entry delete freezes only that
+checkout's ID and its host incarnation at click time, requires the full host listing to be eligible, and uses the same
+dispatch and completion path without a confirmation. Separate host requests run concurrently; the guard lasts until all
+replies arrive. Successful record removals are folded into the displayed listing, all issues retained, and every
+completion refetches. A lost cleanup reply warns that some contents may already be deleted and refetches; it never
+claims that a folder is intact. The archive cue stores row geometry on the persistent trash button, consumes it on the
+local Delete reply, and uses finite Web Animations with reduced-motion refusal. No global geometry cache or new asset
+file is introduced.
 
 ### Runtime state
 

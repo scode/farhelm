@@ -1,7 +1,7 @@
 //! Show host-owned archives without treating a stale listing as deletion authority.
 //!
 //! Counts are event-driven. Opening the dialog asks for bounded disk usage;
-//! confirmations freeze IDs and connection incarnations, while the supervisor
+//! confirmations and immediate single deletes freeze IDs and connection incarnations, while the supervisor
 //! rechecks ownership before any mutation. Read generations prevent an earlier
 //! count/measurement from restoring entries removed by this client's cleanup.
 
@@ -33,8 +33,9 @@ struct HostTrash {
     loading: bool,
 }
 
-/// A confirmed set never grows with a subsequent listing or a new archive.
-/// Diagnostic IDs are included too, so unusable ownership can be forgotten.
+/// A deletion set never grows with a subsequent listing or a new archive.
+/// Bulk selections include diagnostic IDs so unusable ownership can be forgotten;
+/// immediate entry deletion selects only a displayed checkout.
 #[derive(Clone, PartialEq)]
 struct Target {
     host: HostId,
@@ -117,6 +118,21 @@ fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
             .fold(0, u64::saturating_add),
         partial: listing.checkouts.iter().any(|entry| entry.bytes.is_none()),
     })
+}
+
+/// Narrow a settled host selection to a displayed checkout without bypassing
+/// the host's cleanup limit or connection fence. Issue-only records deliberately
+/// remain available only through the bulk actions, which explain their cleanup.
+fn entry_target(host: &Host, state: Option<&HostTrash>, id: &str) -> Option<Target> {
+    let mut selected = target(host, state)?;
+    let listing = state?.reply.as_ref()?.as_ref().ok()?;
+    let checkout = listing.checkouts.iter().find(|entry| entry.id == id)?;
+    selected.ids = vec![checkout.id.clone()];
+    selected.count = 1;
+    selected.unchecked = 0;
+    selected.bytes = checkout.bytes.unwrap_or_default();
+    selected.partial = checkout.bytes.is_none();
+    Some(selected)
 }
 
 /// Human-readable allocated space, with units that do not imply byte precision
@@ -357,23 +373,22 @@ pub(super) fn TrashControl(
     let busy = progress.is_some();
     let mut gate = gate;
     let delete_base = base;
-    let submit = use_callback(move |_: ()| {
+    // Both entry clicks and confirmed bulk choices cross the same authority,
+    // operation-guard and completion boundary. Only selection/confirmation differ.
+    let dispatch = use_callback(move |targets: Vec<Target>| {
         if deletion.peek().is_some() {
             return;
         }
-        let Some(confirm) = confirmation.peek().clone() else {
-            return;
-        };
         // An empty selection has no reply that could retire a run or its gate.
-        if confirm.targets.is_empty() {
+        if targets.is_empty() {
             return;
         }
-        // Host changes invalidate a displayed confirmation before dispatch;
+        // Host changes invalidate a frozen selection before dispatch;
         // the helm repeats the incarnation fence for changes it sees first.
         let valid = {
             let hosts = hosts.peek();
             hosts.refresh_error().is_none()
-                && confirm.targets.iter().all(|target| {
+                && targets.iter().all(|target| {
                     hosts.hosts().unwrap_or_default().iter().any(|host| {
                         host.id == target.host
                             && connected(host)
@@ -391,13 +406,13 @@ pub(super) fn TrashControl(
         };
         claim.set(Some(guard));
         deletion.set(Some(DeletionRun {
-            pending: confirm.targets.iter().map(|target| target.host).collect(),
-            total: confirm.targets.len(),
+            pending: targets.iter().map(|target| target.host).collect(),
+            total: targets.len(),
         }));
         generation += 1; // supersede every pre-delete count and size reply
         confirmation.set(None);
         notices.write().clear();
-        for target in confirm.targets {
+        for target in targets {
             let base = delete_base.clone();
             spawn(async move {
                 let result = crate::api::empty_checkout_trash(
@@ -458,6 +473,12 @@ pub(super) fn TrashControl(
                     );
                 }
             });
+        }
+    });
+    let submit = use_callback(move |_: ()| {
+        let confirmed = confirmation.peek().clone();
+        if let Some(confirm) = confirmed {
+            dispatch.call(confirm.targets);
         }
     });
     let mut close = move |_| {
@@ -614,11 +635,33 @@ pub(super) fn TrashControl(
                                         if let Some(listing) = listing {
                                             if selection_size(listing) > MAX_SELECTION { p { "This host exceeds the 10,000-entry cleanup limit. Cleanup is unavailable for this listing." } }
                                             for checkout in listing.checkouts.iter() {
+                                                {
+                                                let entry_host = host.id;
+                                                let entry_id = checkout.id.clone();
+                                                let delete_label = format!("delete {} permanently", display_peer(&checkout.name));
+                                                rsx! {
                                                 div { key: "{checkout.id}", class: "checkout-trash-entry",
                                                     div { class: "checkout-trash-entry-heading", strong { class: "peer-value", dir: "ltr", "{display_peer(&checkout.name)}" }
                                                         if !pending { if let Some(bytes) = checkout.bytes { span { "{space(bytes, false)}" } } }
+                                                        button { class: "btn btn-danger btn-outline trash-entry-delete", aria_label: delete_label,
+                                                            disabled: busy || gate.busy() || host_target.is_none(),
+                                                            onclick: move |_| {
+                                                                // Read the click-time host instead of granting a stale
+                                                                // rendered row authority after a reconnect or refresh error.
+                                                                let selected = {
+                                                                    let hosts = hosts.peek();
+                                                                    if hosts.refresh_error().is_some() { None }
+                                                                    else { hosts.hosts().unwrap_or_default().iter()
+                                                                        .find(|host| host.id == entry_host)
+                                                                        .and_then(|host| entry_target(host, state.peek().get(&entry_host), &entry_id)) }
+                                                                };
+                                                                if let Some(selected) = selected { dispatch.call(vec![selected]); }
+                                                            }, "delete"
+                                                        }
                                                     }
                                                     div { class: "checkout-trash-entry-meta", BranchIcon {} span { class: "peer-value", dir: "ltr", "{display_peer(&checkout.repository)}" } span { "{archived_when(checkout.archived_at)}" } }
+                                                }
+                                                }
                                                 }
                                             }
                                             for (index, issue) in listing.issues.iter().enumerate() { Issue { key: "listed-{index}", issue: issue.clone() } }
@@ -697,6 +740,61 @@ mod tests {
                 "build_version": "0.0.0", "refresh": { "status": "ok", "sessions": 0 } },
         }))
         .expect("connected host fixture")
+    }
+
+    /// A row click must select only its checkout, never a neighbouring archive
+    /// or diagnostic. Requiring the complete host's eligibility prevents a
+    /// single-ID request from bypassing stale evidence or the batch-size limit.
+    #[farhelm_testtrace::test]
+    fn entry_cleanup_selects_one_checkout_with_current_host_authority() {
+        let host = host();
+        assert!(connected(&host));
+        let checkout = |id: &str| ArchivedCheckout {
+            id: id.into(),
+            name: id.into(),
+            repository: "fixture/repo".into(),
+            path: format!("/work/trash/{id}"),
+            archived_at: None,
+            bytes: None,
+        };
+        let mut state = HostTrash {
+            incarnation: host.incarnation,
+            loading: false,
+            reply: Some(Ok(CheckoutTrashListing {
+                checkouts: vec![checkout("selected"), checkout("neighbour")],
+                issues: vec![CheckoutTrashIssue {
+                    id: "issue".into(),
+                    path: String::new(),
+                    message: "unverified".into(),
+                }],
+            })),
+        };
+        assert_eq!(target(&host, Some(&state)).unwrap().ids.len(), 3);
+        let selected = entry_target(&host, Some(&state), "selected").expect("eligible checkout");
+        assert_eq!(selected.ids, ["selected"]);
+        assert_eq!(
+            (selected.host, selected.incarnation),
+            (host.id, host.incarnation)
+        );
+        assert!(entry_target(&host, Some(&state), "issue").is_none());
+        assert!(entry_target(&host, Some(&state), "absent").is_none());
+        state.loading = true;
+        assert!(entry_target(&host, Some(&state), "selected").is_none());
+        state.loading = false;
+        state.incarnation += 1;
+        assert!(entry_target(&host, Some(&state), "selected").is_none());
+        state.incarnation = host.incarnation;
+        let listing = state.reply.as_mut().unwrap().as_mut().unwrap();
+        listing
+            .checkouts
+            .extend((0..MAX_SELECTION).map(|i| checkout(&format!("extra-{i}"))));
+        assert!(selection_size(listing) > MAX_SELECTION);
+        assert!(entry_target(&host, Some(&state), "selected").is_none());
+        assert_eq!(
+            selected.ids,
+            ["selected"],
+            "the selection is a value copy, so later listings leave it as clicked"
+        );
     }
 
     /// Duplicate messages must not widen a destructive selection, and a
