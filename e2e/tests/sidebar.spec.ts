@@ -1289,19 +1289,26 @@ test("a long cwd shows its tail with characters in logical order", async ({
   page,
   request,
 }) => {
-  const session = await createSession(request, {
-    title: `cwd-order-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
+  const scratch = stackScratchDir("farhelm-long-cwd-");
+  const cwd = path.join(scratch, "front-".repeat(30), "middle-".repeat(25), "distinct-visible-tail");
+  fs.mkdirSync(cwd, { recursive: true });
+  let session: Awaited<ReturnType<typeof createSession>> | undefined;
   try {
+    session = await createSession(request, {
+      title: `cwd-order-${Date.now()}`,
+      cwd,
+      invocation: "sleep 300",
+    });
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
 
     const inner = target.locator(".session-cwd-text");
+    const clipper = target.locator(".session-cwd");
+    // Establish real overflow before checking its paint and clipping policy.
+    expect(await clipper.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     // The DOM text is the logical path regardless of rendering...
-    await expect(inner).toHaveText("/tmp");
+    await expect(inner).toHaveText(cwd);
     // ...and the rendered glyph run is not mirrored: the isolate's
     // computed direction must be ltr even though its clipping parent is
     // rtl. This is the cheap deterministic stand-in for pixel inspection
@@ -1315,8 +1322,27 @@ test("a long cwd shows its tail with characters in logical order", async ({
         .locator(".session-cwd")
         .evaluate((el) => getComputedStyle(el).direction),
     ).toBe("rtl");
+    const geometry = await clipper.evaluate((el) => {
+      const clip = el.getBoundingClientRect();
+      const text = el.querySelector(".session-cwd-text")!.getBoundingClientRect();
+      return { front: text.left - clip.left, tail: text.right - clip.right };
+    });
+    // Direction alone does not prove which end remains visible. A block
+    // inner span can keep both directions while clipping the path's tail.
+    expect(geometry.front, "the front of the long path must lie outside the clipper").toBeLessThan(0);
+    expect(Math.abs(geometry.tail), "the tail must align with the clipper's visible right edge").toBeLessThan(1);
+    // Ellipsis is paint, not a layout box: these computed styles plus the
+    // overflow premise establish the condition under which it is drawn.
+    expect(await clipper.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { ellipsis: style.textOverflow, overflow: style.overflowX, wrap: style.whiteSpace };
+    })).toEqual({ ellipsis: "ellipsis", overflow: "hidden", wrap: "nowrap" });
   } finally {
-    await cleanupSession(request, session.id);
+    try {
+      if (session) await cleanupSession(request, session.id);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   }
 });
 

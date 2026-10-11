@@ -135,8 +135,6 @@ triage.
   executable.
 - `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
   outside cleanup.
-- `failed-rotation-assertion-invalidates-subsequent-tests-credentials.md` — Failure after credential rotation could
-  break later tests' authentication.
 - `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks
   refer to the wrong session.
 - `stop-recovery-test-fail-wrong-listing-request.md` — The Stop recovery test could inject failure into an earlier
@@ -204,15 +202,12 @@ triage.
 - `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
   template.
 - `concurrent-starts-bypass-sweep-serialization.md` — Concurrent sweep starts could publish the losing run as current.
-- `long-cwd-test-never-supplies-long-path.md` — The long-folder test could pass after ellipsis styling is removed.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
   Stop for later.
 - `cleanup-leaves-orphan-tmux-processes-kill-failure.md` — Failed or skipped tmux shutdown could leave an orphan without
   its socket path.
-- `missing-workspaces-cleanup-diagnostic-recognized-despite-discarded.md` — Discarded workspace errors could prevent
-  restoring test preferences.
 - `release-smoke-mistake-another-listener-child.md` — Release smoke could validate another listener instead of its
   launched helm.
 - `process-death-falsely-inferred-proc-read-errors.md` — A later process-read error could be mistaken for confirmed

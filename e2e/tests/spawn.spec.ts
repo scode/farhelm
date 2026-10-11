@@ -209,11 +209,15 @@ test("denying a spawn's card creates nothing and tells the agent", async ({ page
   }
 });
 
+/** The live vendor must actually create and spawn, beyond the fake-agent proof.
+ * Cleanup also owns shared launch policy: even incomplete setup or a failed
+ * session/workspace cleanup must reach scratch removal and both restores,
+ * while secondary cleanup diagnostics preserve the body's original failure. */
 test("a real Claude creates a jj workspace and spawns into it without refreshing the observer", async ({
   page,
   context,
   request,
-}) => {
+}, testInfo) => {
   if (process.env.FARHELM_REAL_AGENT !== "1") {
     console.log(
       "SKIPPED: real-agent spawn leg — FARHELM_REAL_AGENT!=1 (needs vendor credentials and " +
@@ -237,6 +241,7 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
   let parent: SessionRow | undefined;
   let child: SessionRow | undefined;
   let driver: Page | undefined;
+  let bodyFailed = false;
   const probe = `farhelmspawncomplete${stamp}`;
   const marker = [...probe].reverse().join("");
 
@@ -287,28 +292,55 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
     expect(page.url(), "the observer must discover the real-agent child in place").toBe(
       observerUrl,
     );
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    if (driver) await driver.close();
-    if (child) await cleanupSession(request, child.id);
-    if (parent) await cleanupSession(request, parent.id);
-    if (workspace) {
+    try {
       try {
-        execFileSync("jj", ["workspace", "forget", path.basename(workspace)], {
-          cwd: repository,
-          stdio: "ignore",
-        });
-      } catch (error) {
-        const detail = error instanceof Error
-          ? `${error.message}\n${"stderr" in error ? String(error.stderr) : ""}`
-          : String(error);
-        const workspaceNeverExisted = /No such workspace|workspace .*does not exist/i.test(detail);
-        if (!workspaceNeverExisted) throw error;
-        // The body reports creation failures. This one cleanup refusal is
-        // expected when Claude never reached the first command.
+        if (driver) await driver.close();
+        if (child) await cleanupSession(request, child.id);
+        if (parent) await cleanupSession(request, parent.id);
+        if (workspace) {
+          try {
+            execFileSync("jj", ["workspace", "forget", path.basename(workspace)], {
+              cwd: repository,
+              stdio: ["ignore", "ignore", "pipe"],
+              encoding: "utf8",
+            });
+          } catch (error) {
+            const detail = error instanceof Error
+              ? `${error.message}\n${"stderr" in error ? String(error.stderr) : ""}`
+              : String(error);
+            const workspaceNeverExisted = /No such workspace|workspace .*does not exist/i.test(detail);
+            if (!workspaceNeverExisted) {
+              // Later independent restores can fail too. Record this refusal
+              // before their finally blocks can replace the pending exception.
+              console.error("real-agent workspace forget failed:", error);
+              testInfo.annotations.push({ type: "workspace-forget-failed", description: "unexpected workspace cleanup refusal; see stderr" });
+              throw error;
+            }
+            // The body reports creation failures. This one cleanup refusal is
+            // expected when Claude never reached the first command.
+          }
+        }
+      } finally {
+        // Shared policy must be restored even if an earlier cleanup fails.
+        // Each nested finally also protects the next independent restore.
+        try {
+          if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+        } finally {
+          try {
+            await setLocalCommandsWithoutAsking(request, false);
+          } finally {
+            await setLocalYoloWithoutAsking(request, false);
+          }
+        }
       }
+    } catch (error) {
+      if (!bodyFailed) throw error;
+      console.error("real-agent spawn cleanup failed:", error);
+      testInfo.annotations.push({ type: "cleanup-failed", description: "secondary cleanup failure; see stderr" });
     }
-    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
-    await setLocalCommandsWithoutAsking(request, false);
-    await setLocalYoloWithoutAsking(request, false);
   }
 });

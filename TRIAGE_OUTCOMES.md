@@ -10617,7 +10617,8 @@
   failure after rotation. If the recovery exchange itself fails, it must not hide the original error. If the fix turns
   out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it
   back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-spec-fixes.md`.
+- Execution: complete in jj change `ooszylmqztwvztokpmnzxksyrrpynmrl`, bookmark
+  `plan/browser-spec-fixes/01-browser-specs`; draft [PR #1913](https://github.com/scode/farhelm/pull/1913/changes).
 
 ## replay-geometry-test-rejects-valid-live-output.md
 
@@ -10832,7 +10833,8 @@
   matcher checked against the pinned jj's real message. Preference restoration and scratch removal run on every path. If
   the fix turns out to need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop
   and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-spec-fixes.md`.
+- Execution: complete in jj change `ooszylmqztwvztokpmnzxksyrrpynmrl`, bookmark
+  `plan/browser-spec-fixes/01-browser-specs`; draft [PR #1913](https://github.com/scode/farhelm/pull/1913/changes).
 
 ## upload-memory-probe-assumes-linux-kib-pages-rss-rss-procfs-observation-macos-portability.md
 
@@ -10913,7 +10915,8 @@
   clipping is removed, keeping its logical-order and direction checks, on Chromium and WebKit. If the fix turns out to
   need significant new complexity or a refactor, or otherwise stops fitting those criteria, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-spec-fixes.md`.
+- Execution: complete in jj change `ooszylmqztwvztokpmnzxksyrrpynmrl`, bookmark
+  `plan/browser-spec-fixes/01-browser-specs`; draft [PR #1913](https://github.com/scode/farhelm/pull/1913/changes).
 
 ## hook-test-startup-delete-newly-created-launch-specification.md
 
