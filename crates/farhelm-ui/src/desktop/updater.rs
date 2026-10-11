@@ -90,29 +90,7 @@ const SUMS_FILE_ENV: &str = "FARHELM_INSTALL_SUMS_FILE";
 
 // ===== What the updater publishes ==========================================
 
-/// What the updater is doing, as the app bar may show it.
-///
-/// Only a run the user asked for (or an automatic run a user's request
-/// joined) is ever published as anything but [`Activity::Idle`]: an automatic
-/// run changes nothing on screen until the Installed record does, and its
-/// failures go to the log only.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Activity {
-    Idle,
-    Checking,
-    /// The installer is running for this version.
-    Installing(String),
-    /// The check finished and this version, the latest stable release, is
-    /// not newer than what is installed.
-    UpToDate(String),
-    /// The check or the install failed, for this reason (one plain
-    /// sentence for the readout's hover).
-    Failed(String),
-    /// Restart to update could not start the helper that reopens the app,
-    /// so the app stayed open. Not a check outcome, so it has words of its
-    /// own.
-    RestartFailed,
-}
+use crate::app_updater::Activity;
 
 /// The updater's whole published state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +101,12 @@ pub(crate) struct UpdaterState {
     /// read.
     pub(crate) installed: Option<String>,
     pub(crate) activity: Activity,
+    /// Identity of the last user-visible check, retained across watch coalescing.
+    /// Record refreshes and automatic work cannot make an old outcome new again.
+    pub(crate) user_check_id: u64,
+    /// A successful user-visible check ended with an update waiting. This is
+    /// announcement provenance, not the source of truth for the red readout.
+    pub(crate) user_update_ready: bool,
     /// A release this app tried to install failed verification (no key in
     /// its ring verified the signature, the signature was for another
     /// version, or the installer did not match its signed checksum), so the
@@ -435,8 +419,8 @@ pub(super) struct Deps {
 ///
 /// Pure, so every state's look and words are tested without a component
 /// tree. `update_ready` turns the readout red with an up-arrow (SPEC.md
-/// "Installation and updates"); the hover text is where a check the user
-/// started ends visibly, and otherwise says what a restart would do.
+/// "Installation and updates"). Activity also drives the inline progress and
+/// outcome, whose expiry belongs to the component; the hover wording persists.
 pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
     let readout = activity_readout(state);
     if !state.needs_reinstall {
@@ -496,6 +480,9 @@ fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
         update_ready: ready,
         needs_reinstall: false,
         tooltip,
+        activity: state.activity.clone(),
+        user_check_id: state.user_check_id,
+        user_update_ready: state.user_update_ready,
     }
 }
 
@@ -521,6 +508,9 @@ struct Status {
     /// A user asked for a check and has not yet been shown its outcome. The
     /// run in progress (or the next one) is then visible.
     user_waiting: bool,
+    /// See the published presentation bookkeeping on [`UpdaterState`].
+    user_check_id: u64,
+    user_update_ready: bool,
     /// A user's request has not been picked up by the worker yet.
     requested: bool,
     /// See [`UpdaterState::needs_reinstall`].
@@ -537,8 +527,14 @@ impl Status {
     /// says. Automatic checks stop while an update waits, so otherwise the
     /// notice would keep asking for a reinstall that already happened.
     fn record_installed(&mut self, installed: Option<String>) {
-        if installed != self.installed && newer_installed(installed.as_deref(), &self.running) {
-            self.needs_reinstall = false;
+        if installed != self.installed {
+            // The completion referred to the previous record. Retaining it
+            // through loss/recovery would announce an external install as if
+            // the user had just finished another check. Expiry identity stays.
+            self.user_update_ready = false;
+            if newer_installed(installed.as_deref(), &self.running) {
+                self.needs_reinstall = false;
+            }
         }
         self.installed = installed;
     }
@@ -550,6 +546,8 @@ impl Shared {
             running: running.to_string(),
             installed: None,
             activity: Activity::Idle,
+            user_check_id: 0,
+            user_update_ready: false,
             needs_reinstall: false,
         });
         Self {
@@ -559,6 +557,8 @@ impl Shared {
                 current: Activity::Idle,
                 shown_outcome: None,
                 user_waiting: false,
+                user_check_id: 0,
+                user_update_ready: false,
                 requested: false,
                 needs_reinstall: false,
             }),
@@ -571,9 +571,15 @@ impl Shared {
     ///
     /// When a run is already in progress the request joins it: from here on
     /// that run is shown (its current step at once), and its outcome is the
-    /// answer. Otherwise the worker starts one.
+    /// answer. Otherwise the worker starts one. A new user-visible request gets
+    /// a persistent presentation identity so subscribers can distinguish equal
+    /// final answers even when watch delivery coalesces their intermediate steps.
     pub(super) fn check_now(&self) {
         let mut status = self.status.lock().expect("updater status poisoned");
+        if !status.user_waiting {
+            status.user_check_id = status.user_check_id.wrapping_add(1);
+            status.user_update_ready = false;
+        }
         status.user_waiting = true;
         if status.current == Activity::Idle {
             status.requested = true;
@@ -592,6 +598,7 @@ impl Shared {
     fn show_outcome(&self, outcome: Activity) {
         let mut status = self.status.lock().expect("updater status poisoned");
         status.shown_outcome = Some(outcome);
+        status.user_update_ready = false;
         self.publish(&status);
     }
 
@@ -606,6 +613,8 @@ impl Shared {
             running: status.running.clone(),
             installed: status.installed.clone(),
             activity,
+            user_check_id: status.user_check_id,
+            user_update_ready: status.user_update_ready,
             needs_reinstall: status.needs_reinstall,
         };
         self.published.send_if_modified(|state| {
@@ -711,6 +720,7 @@ impl Engine {
             let mut status = self.shared.status.lock().expect("updater status poisoned");
             status.requested = false;
             status.shown_outcome = None;
+            status.user_update_ready = false;
             status.current = Activity::Checking;
             self.shared.publish(&status);
         }
@@ -721,6 +731,11 @@ impl Engine {
         status.current = Activity::Idle;
         if status.user_waiting {
             status.user_waiting = false;
+            // Readiness alone can come from an automatic or external install.
+            // Capture it only with a successful check the user saw through.
+            status.user_update_ready =
+                matches!(outcome, Some(Activity::Idle | Activity::UpToDate(_)))
+                    && newer_installed(status.installed.as_deref(), &status.running);
             // A finished install needs no words of its own: the update
             // marker shows it.
             status.shown_outcome = outcome.filter(|outcome| *outcome != Activity::Idle);
@@ -2277,6 +2292,143 @@ mod tests {
         assert_eq!(rig.published().activity, Activity::Idle);
     }
 
+    /// An identical final answer must still notify a watch consumer that missed
+    /// checking. Repeated requests joining one visible run keep its identity;
+    /// only a later request after completion starts a fresh presentation lifetime.
+    #[farhelm_testtrace::test]
+    fn user_check_identity_survives_coalesced_identical_answers() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
+        let mut receiver = rig.shared.subscribe();
+        assert_eq!(receiver.borrow_and_update().user_check_id, 0);
+        rig.shared.check_now();
+        let first_id = rig.published().user_check_id;
+        assert_eq!(first_id, 1);
+        rig.shared.check_now();
+        assert_eq!(rig.published().user_check_id, first_id);
+        rig.engine.wake_once();
+        let first = receiver.borrow_and_update().clone();
+        assert_eq!(first.activity, Activity::UpToDate("1.0.0".into()));
+
+        rig.shared.check_now();
+        rig.engine.wake_once();
+        assert!(receiver.has_changed().unwrap());
+        let second = receiver.borrow_and_update().clone();
+        assert_eq!(second.activity, first.activity);
+        assert_eq!(second.user_check_id, first.user_check_id + 1);
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(rig.published().user_check_id, second.user_check_id);
+    }
+
+    /// Readiness can predate a check, so only a successful user-visible outcome
+    /// may announce it. New checks, failures and restart failures supersede the
+    /// captured answer without changing the red readout's independent readiness.
+    #[farhelm_testtrace::test]
+    fn ready_completion_is_captured_only_for_successful_user_checks() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.shared.check_now();
+        assert!(!rig.published().user_update_ready);
+        rig.engine.wake_once();
+        let installed = rig.published();
+        assert_eq!(installed.activity, Activity::Idle);
+        assert!(installed.update_ready());
+        assert!(installed.user_update_ready);
+        assert!(crate::app_updater::announce_update_ready(&readout(
+            &installed
+        )));
+
+        rig.shared.check_now();
+        assert!(!rig.published().user_update_ready);
+        rig.engine.wake_once();
+        assert_eq!(rig.published().activity, Activity::UpToDate("1.1.0".into()));
+        assert!(rig.published().user_update_ready);
+        rig.shared.show_outcome(Activity::RestartFailed);
+        assert!(!rig.published().user_update_ready);
+
+        *rig.latest.lock().unwrap() = None;
+        rig.shared.check_now();
+        rig.engine.wake_once();
+        let failed = rig.published();
+        assert!(failed.update_ready());
+        assert!(matches!(failed.activity, Activity::Failed(_)));
+        assert!(!failed.user_update_ready);
+        assert!(!crate::app_updater::announce_update_ready(&readout(
+            &failed
+        )));
+    }
+
+    /// An automatic or terminal installation can make the readout red without
+    /// completing a user request. Neither may acquire the completion announcement;
+    /// a later automatic run also clears an earlier captured user outcome.
+    #[farhelm_testtrace::test]
+    fn background_readiness_never_becomes_user_completion() {
+        let mut automatic = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        automatic.engine.wake_once();
+        assert!(automatic.published().update_ready());
+        assert_eq!(automatic.published().user_check_id, 0);
+        assert!(!automatic.published().user_update_ready);
+
+        let mut external = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
+        external.engine.wake_once();
+        *external.installed.lock().unwrap() = Some("1.1.0".into());
+        external.engine.wake_once();
+        assert!(external.published().update_ready());
+        assert_eq!(external.published().user_check_id, 0);
+        assert!(!external.published().user_update_ready);
+
+        external.shared.check_now();
+        external.engine.wake_once();
+        assert!(external.published().user_update_ready);
+        *external.installed.lock().unwrap() = Some("1.0.0".into());
+        external.advance(CHECK_INTERVAL);
+        external.engine.wake_once();
+        assert!(!external.published().user_update_ready);
+        assert_eq!(external.published().activity, Activity::Idle);
+    }
+
+    /// Record-only loss and recovery cannot replay an old user completion.
+    /// Disable automatic checks so a new run cannot accidentally supply the
+    /// invalidation this regression specifically requires from record refresh.
+    #[farhelm_testtrace::test]
+    fn record_changes_invalidate_old_completion_without_starting_a_check() {
+        for missing in [Some("1.0.0".to_owned()), None] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+            *rig.automatic.lock().unwrap() = false;
+            assert!(!*rig.automatic.lock().unwrap());
+            rig.shared.check_now();
+            rig.engine.wake_once();
+            let completed = rig.published();
+            assert!(completed.update_ready());
+            assert!(completed.user_update_ready);
+            assert_eq!(rig.probes.load(Ordering::SeqCst), 1);
+            rig.engine.wake_once();
+            assert!(
+                rig.published().user_update_ready,
+                "unchanged record preserves provenance"
+            );
+
+            *rig.installed.lock().unwrap() = missing;
+            rig.engine.wake_once();
+            assert!(!rig.published().update_ready());
+            assert!(!rig.published().user_update_ready);
+            *rig.installed.lock().unwrap() = Some("1.1.0".into());
+            rig.engine.wake_once();
+            let recovered = rig.published();
+            assert!(recovered.update_ready());
+            assert!(!recovered.user_update_ready);
+            assert!(!crate::app_updater::announce_update_ready(&readout(
+                &recovered
+            )));
+            assert_eq!(recovered.user_check_id, completed.user_check_id);
+            assert_eq!(recovered.activity, completed.activity);
+            assert_eq!(
+                rig.probes.load(Ordering::SeqCst),
+                1,
+                "record refreshes did not probe"
+            );
+        }
+    }
+
     // ---- the readout ----
 
     /// An installed release with a controlled activity and Installed record.
@@ -2287,6 +2439,8 @@ mod tests {
             running: "1.0.0".to_string(),
             installed: installed.map(str::to_string),
             activity,
+            user_check_id: 0,
+            user_update_ready: false,
             needs_reinstall: false,
         }
     }
@@ -2377,6 +2531,51 @@ mod tests {
             failed_with_update.tooltip,
             "The update check failed: offline. Farhelm 1.1.0 is installed. Restart Farhelm to finish the update. Select this to open the menu for Restart to update or What's new."
         );
+    }
+
+    /// Every published activity reaches the pure inline selector unchanged.
+    /// Installation readiness owns a successful answer, and the independent
+    /// reinstall warning must not erase progress, failure, or either glyph.
+    #[farhelm_testtrace::test]
+    fn inline_activity_survives_the_readouts_warning_and_update_markers() {
+        use crate::app_updater::{InlineStatus, inline_status};
+
+        for ready in [false, true] {
+            for warning in [false, true] {
+                for (activity, expected) in [
+                    (Activity::Idle, None),
+                    (Activity::Checking, Some(InlineStatus::Checking)),
+                    (
+                        Activity::Installing("1.2.0".into()),
+                        Some(InlineStatus::Installing),
+                    ),
+                    (
+                        Activity::UpToDate("1.2.0".into()),
+                        (!ready).then_some(InlineStatus::UpToDate),
+                    ),
+                    (
+                        Activity::Failed("offline".into()),
+                        Some(InlineStatus::Failed),
+                    ),
+                    (Activity::RestartFailed, None),
+                ] {
+                    let mut published = state(
+                        Some(if ready { "1.1.0" } else { "1.0.0" }),
+                        activity.clone(),
+                    );
+                    published.needs_reinstall = warning;
+                    let shown = readout(&published);
+                    assert_eq!(shown.activity, activity);
+                    assert_eq!(shown.update_ready, ready);
+                    assert_eq!(shown.needs_reinstall, warning);
+                    assert_eq!(
+                        inline_status(&shown.activity, shown.update_ready, None),
+                        expected,
+                        "{activity:?}, ready={ready}, warning={warning}"
+                    );
+                }
+            }
+        }
     }
 
     /// Verification failure must remain actionable during every update activity.
