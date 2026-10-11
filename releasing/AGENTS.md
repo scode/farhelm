@@ -307,19 +307,18 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    could not run, as a pass.
    - Pass: the maintainer moves `/latest`, which no agent does. Once they say it has moved, check that
      `https://get.farhelm.io/latest` names `vX.Y.Z`, and go on.
-   - Fail: `/latest` stays on the previous release and the release is never promoted. Handle it like a failed tag build
-     (below): fix on main and cut the next patch version. Whether to take the staged version off get.farhelm.io is the
-     maintainer's call.
+   - Fail: `/latest` stays on the previous release and the release is never promoted. Fix forward ("Fixing forward"
+     below) and cut the next patch version. Whether to take the staged version off get.farhelm.io is the maintainer's
+     call.
    - Could not run: ask the maintainer whether to fix the test environment and run it again, or to promote without it.
      Only the maintainer decides to skip the test.
 9. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 10. `cargo clean` again (see "Build outputs" below).
 
-A failed tag build publishes nothing; fix on main and cut again with the next patch version, since a tag name is never
-reused. A release that failed its brick test is the same case: it was signed and staged but never promoted, and the next
-attempt is the next patch version. That means another changelog PR before the new branch: retitle the `## vX.Y.Z`
-section to the new version (a stable `announce` fails unless the newest section names the tag exactly) and fold in the
-fix commits' fragments. The abandoned release branch is left as it is, like the earlier ones.
+A failure anywhere in this procedure, from the pre-tag checks through the brick test, is fixed forward without asking
+("Fixing forward" below). A failed tag build publishes nothing, and a release that failed its brick test was signed and
+staged but never promoted; either way its tag name is spent and the next attempt is the next patch version. The
+abandoned release branch is left as it is, like the earlier ones.
 
 # Cutting an RC release
 
@@ -409,24 +408,6 @@ With both settled, the process is:
   rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
   "immutable commits are used to protect shared history" at exactly the moment a trial's feedback wants applying.
 
-## Fixing forward
-
-When an RC or dev attempt turns up a problem, whether its tag build failed or the maintainer hit it trying the release,
-the default is to fix forward without stopping to ask: fix it on a branch off the latest main, merge the fix to main,
-and cut `rc.N+1` from main's new tip. Whatever else landed on main in the meantime rides along. That is fine, and it is
-not a reason to cut from an older commit or to ask first. The follow-up attempt's base is therefore already settled
-(latest main) and so is its version (the next N), so neither choice above needs asking about again. The maintainer set
-this default on 2026-10-10: prereleases exist to flush out exactly this kind of problem and to smoke test the real
-release artifacts, so a fix that keeps the next attempt moving is the point, and waiting on the maintainer for one only
-stalls them.
-
-The release request is the authorization: open the fix as a PR, mark it ready and merge it as part of landing it, after
-the validation the fix itself calls for ("Finishing work" in the root `AGENTS.md`). This covers fixes that are
-reasonably straightforward and unambiguous. A fix that needs a design decision, changes product behavior in a way the
-specs do not already settle, or has more than one reasonable answer is still the maintainer's: describe it and ask. An
-explicit instruction otherwise (cut the next attempt from a stack, hold the fix for review, stop after a failure)
-overrides the default.
-
 # Cutting a dev release
 
 A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure above with
@@ -438,6 +419,51 @@ and ask when the request does not state them (a follow-up attempt after fixing f
 default above does not apply to dev releases. The `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and
 `0.3.0-rc.1` can both exist. The name is the whole difference: it tells whoever reads the tag list later that the build
 was a trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
+
+# Fixing forward
+
+When a release attempt of any kind, stable, RC or dev, turns up a problem, the default is to fix forward without
+stopping to ask: fix it on a branch off the latest main, land the fix on main, and cut the next attempt from main's new
+tip. That covers every way an attempt fails: a pre-tag check (the version-parity tests, `dist plan`, the changelog
+checks), the tag build's gate, the brick test, or a problem the maintainer hits trying an RC or dev release. Whatever
+else landed on main in the meantime rides along. That is fine, and it is not a reason to cut from an older commit or to
+ask first. The maintainer set this default for prereleases on 2026-10-10 and extended it to stable releases on
+2026-10-11: release attempts exist to flush out exactly this kind of problem and to smoke test the real release
+artifacts, so a fix that keeps the next attempt moving is the point, and waiting on the maintainer for one only stalls
+them.
+
+The release request is the authorization: open the fix as a PR, mark it ready and merge it as part of landing it, after
+the validation the fix itself calls for ("Finishing work" in the root `AGENTS.md`). This covers fixes that are
+reasonably straightforward and unambiguous. A fix that needs a design decision or a redesign, grows in scope beyond the
+failure it fixes, changes product behavior in a way the specs do not already settle, or has more than one reasonable
+answer is still the maintainer's: describe it and ask. An explicit instruction otherwise (cut the next attempt from a
+stack, hold the fix for review, stop after a failure) overrides the default.
+
+The next attempt's base is therefore settled (latest main), and so is its version, so neither needs asking about again:
+
+- Once a tag has been pushed its name is spent, whether or not its build succeeded. An RC or dev release cuts `rc.N+1`
+  or `dev.N+1`, and a stable release cuts the next patch version. The stale tag stays (tags are never deleted).
+- A failure before any tag was pushed spends nothing, and the next attempt keeps the version.
+
+Every attempt gets its own risk report ("The release risk report" below). For a stable re-cut it still reaches the
+maintainer before the tag is pushed, but the agent does not wait for a reply to it.
+
+## Re-cutting a stable release
+
+A stable re-cut cannot reuse the old release branch: its notes have to cover what now rides along. Re-run step 1's sweep
+and protocol check against the new base, then make another changelog PR as in step 4. It renames the `## vX.Y.Z` section
+when the version changed (a stable `announce` fails unless the newest section names the tag exactly), adds entries for
+the fix and for every required commit that landed since, and deletes the fragments. Entries the maintainer already
+approved stay word for word. The new ones are not held for the maintainer's approval: draft them from the fragments (or,
+for a `MISSING` commit, from the commit and its PR) following `releasing/EDITORIAL_GUIDANCE.md`, sort them into
+categories as step 2 does, and add the fixed remote-hosts entry if the protocol version changed in the new commits.
+Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on
+2026-10-11, over stopping for wording review and over cutting from the old base with only the fix cherry-picked.
+
+Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
+pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. The maintainer reviews
+the unapproved text at step 7 instead: when telling them the release is ready to sign, list every entry added without
+their review and every fragment left out, so they can stop before signing or have the wording corrected.
 
 # The release risk report
 
