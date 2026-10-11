@@ -5,6 +5,11 @@ machine profile discovered below. This is an agent-driven test with genuine comp
 and published release bytes. The coordinator supplies lifecycle, planning and evidence gates; the agent performs and
 attests the product checks. It does not publish, promote a release or modify the host's installed Farhelm.
 
+This is a **pre-promotion gate**: run it after the candidate's version-path artifacts are published and before moving
+`/latest` to it. The endpoint is expected to name the preceding promoted stable. That difference is not a missing
+prerequisite and does not call for promotion; it selects the override or manual update path below. An after-promotion
+run remains useful, but cannot gate the candidate's initial exposure.
+
 Read [RECIPE.md](RECIPE.md) for the product checks and [OPERATIONS.md](OPERATIONS.md) for guest commands, GUI mechanics
 and evidence collection. [BRING-UP.md](BRING-UP.md) covers preparing another machine. A previously successful run proves
 that run's versions and paths; a new candidate needs its own checks against its actual artifacts.
@@ -57,6 +62,9 @@ exact tag. Do not interpret `vX.Y.Z` literally.
   candidate commit, observes `https://get.farhelm.io/latest`, lists eligible stable upgrades from v0.23.0 onward and
   checks candidate installer metadata availability. Availability and an advertised hash are **not** signature
   verification. Needed payloads and the previous releases' inputs must also exist for their actual guest flows.
+- Upgrade baselines run through the stable named by `/latest`, excluding the candidate itself. A newer intervening tag
+  that has not been promoted is not another installed stable baseline just because it exists; do not require its
+  artifacts or treat its omission as a coverage gap. The candidate's own published artifacts are still required.
 - Run `python3 -B releasing/mac-vm-test/brick_test.py init vX.Y.Z`. Save the returned private `run_dir` as `test_run`.
   The output names every pass and required checkpoint. The run gets its own directory under the configured evidence
   root, a profile snapshot, candidate input copies and initial free-space observation. No guests start yet.

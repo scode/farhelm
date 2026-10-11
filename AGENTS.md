@@ -16,6 +16,13 @@ read its operator policy and journal, and run the complete planned fresh/upgrade
 mutations. Missing prerequisites mean could not run; resolve them with the maintainer instead of guessing machine
 bindings. A test request does not authorize publication or release promotion.
 
+Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
+promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
+through that public default, excluding unpromoted intervening tags. For an old app that supports it, quit and relaunch
+inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOME/Applications/Farhelm.app"`, then use
+the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
+removal checks in both cases.
+
 # Talking to the user
 
 Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
