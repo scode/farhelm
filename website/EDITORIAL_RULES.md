@@ -140,6 +140,10 @@ and the example that prompted it, with the date.
   search shot on Start a session, which typed `harness:` when plain `claude` finds the same thing; it became two shots,
   `claude` and `name: fix login bug`, 2026-10-03.)
 
+- Leave out guarantees about edge cases the reader never acts on, such as how a repeated or retried request is handled,
+  even when they are true. (Prompted by a proposed sentence for Approve what agents do saying that a repeated
+  managed-checkout request finishes the same session without asking again, 2026-10-11.)
+
 ## Learning from feedback
 
 This applies whenever the maintainer reviews wording an agent drafted for this site, interactively or in a later
