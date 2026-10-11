@@ -85,3 +85,42 @@ Implementation and investigation were local, as required by no-workhorse mode. N
 counters are unavailable; this evidence gap is retained in private galaxy-brain session
 `5c9810ab-dcb4-4a62-9a79-bfb239f2d810`, with its location in the plan working log beside the checkouts, and does not
 affect the validation results.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1907. The rebase met the review queue index, where installer-and-font-license-fixes had
+removed an adjacent entry; both removals were kept.
+
+#### Fix made while landing
+
+In #1907, before it merged: the WebKit run of "a failed notification read mark retries on the next close" failed with
+"Response has been disposed" inside the notifications spec's stand-in for the session listing. This plan makes a
+successful read or clear request a fresh listing, and the test ended while that read was still inside the stand-in; the
+page closed under it. The spec's cleanup now removes its stand-ins first, ignoring a handler still in flight, as
+header.spec.ts already does. The product behaviour was correct.
+
+#### Review before merging
+
+No findings. The new refreshes go through the same explicit listing reads that version-skew rules allow, so nothing
+newly applies a mismatched helm's replies; ordering goes through the listing's existing read gate; and the read and
+unread writer can outlive the sidebar without spawning from the wrong scope. Notes left as they are:
+
+- A sidebar test now sorts the list by title for its run, a setup fix the plan made because the failing row's new error
+  line moved another row's open menu.
+- Closing the bell and Clear now cost one extra listing read even on healthy pages, as rename and delete already do.
+
+#### Checks
+
+These two plans were landed together, bell-build-mismatch-fixes first with launcher-and-terminal-copy-fixes on top.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check`, the changelog lint,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `88bbf3a0`, 454 of 454);
+  the UI JavaScript tests (238 of 238); and on Chromium and WebKit with one worker and no retries the notifications,
+  launcher-enter, quick-switcher, templates, terminal-create-idempotency and terminal-reconnect specs (run `9222a97b`:
+  161 passed, 1 failed, described in bell-build-mismatch-fixes' notes).
+- After the test fix: the notifications spec (run `fcc7695f`, 16 passed) and the sidebar's read-mark, unread and
+  notification tests (run `6e2ea146`, 22 passed), both engines.
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
