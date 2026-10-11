@@ -7,12 +7,15 @@ import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { Director } from "../readme-video/overlay";
 import { loadScenario } from "../readme-hero/scenario";
 import { DOCS_SHOTS_DIR } from "./paths";
-import { DOCS_THEME, openDocsFleet, readFleet } from "./stage-docs";
+import { DOCS_THEME, openDocsFleet, readFleet, type DocsFleetOptions } from "./stage-docs";
 
-/** Open the staged fleet with the docs overlay installed. */
-export async function open(page: Page, request: APIRequestContext) {
+/**
+ * Open the staged fleet with the docs overlay installed. `options` stages
+ * what only some shots show, such as a full managed checkout trash.
+ */
+export async function open(page: Page, request: APIRequestContext, options: DocsFleetOptions = {}) {
   const scenario = loadScenario(DOCS_SHOTS_DIR);
-  await openDocsFleet(page, request, scenario);
+  await openDocsFleet(page, request, scenario, options);
   return { scenario, director: await Director.install(page, DOCS_THEME) };
 }
 

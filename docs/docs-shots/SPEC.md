@@ -22,8 +22,9 @@ something the fleet lacks, as long as the existing shots still show what their p
 ## What is real and what is not
 
 Everything visible comes from a real helm, real supervisors, and real terminals, with the hero's two exceptions (the
-staged fleet, and each row's age and folder rewritten in transit) and three more, all of them in transit, all of them
-from `scenario.json5`, and no others:
+staged fleet, and each row's age and folder rewritten in transit) and five more, all of them in transit, all of them
+from `scenario.json5`, and no others. The last two are installed only for the shots that ask for them, so every other
+shot shows the fleet's real replies:
 
 - **Launch history.** The session launcher's recent setups come from launches it remembers. A fresh stack remembers
   none, and staged sessions are not launches made from the launcher, so the history reply carries the scenario's
@@ -33,6 +34,14 @@ from `scenario.json5`, and no others:
 - **Host destinations.** Host settings and details show each host's ssh destination. The staged remotes are self-ssh
   spellings on the capturing machine, and one of them names its account, which must never be photographed, so every host
   reply shows each remote's `shown_ssh` instead.
+- **Managed checkout trash.** The trash beside new lists managed checkouts whose last session was deleted. Making one
+  needs a real GitHub clone, which the staged fleet does not make, so the trash shots get the scenario's
+  `checkout_trash` as each host's listing, with names and paths built the way Farhelm records an archive. Deleting from
+  that trash is refused outright.
+- **Terminal file checks.** Hovering a file path in a session's terminal checks it on the session's host and shows the
+  host, the full path, and the size. The staged sessions' real directories are the run's temporary state, which must
+  never be photographed, and the transcripts name files that do not exist there, so the download shot gets the
+  scenario's `terminal_files` as the check's answer. Downloads are refused outright.
 
 One more thing is staged rather than real, the add-host check. Asking Farhelm to add a host makes it check that host
 over ssh before showing what setup would install, and the staged fleet has no spare machine to check. So for the

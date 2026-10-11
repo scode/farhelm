@@ -193,12 +193,90 @@ async function installDocsRewrites(page: Page, request: APIRequestContext, scena
 }
 
 /**
+ * Answer the managed checkout trash listing from the scenario's
+ * `checkout_trash`, for the host each request names. Opt-in per shot (see
+ * `openDocsFleet`): with it, the trash button beside new shows a count, which
+ * every other shot should not. The archive time, name and path are built the
+ * way Farhelm records them, so the dialog shows what a real archive would.
+ * Requests to delete are refused outright rather than passed on: no shot
+ * empties the trash, and a fake listing must never reach real deletion.
+ */
+async function installCheckoutTrash(page: Page, request: APIRequestContext, scenario: Scenario, now: number) {
+  const ids = await hostIds(request, scenario);
+  const keyById = new Map([...ids.entries()].map(([key, id]) => [id, key]));
+  const stamp = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  await page.route((url) => url.pathname === "/api/checkout-trash/delete", (route) =>
+    route.fulfill({ status: 409, body: "docs capture: the staged trash cannot be emptied" }),
+  );
+  await page.route((url) => url.pathname === "/api/checkout-trash/list", async (route) => {
+    const { host } = route.request().postDataJSON() as { host: number };
+    const key = keyById.get(host);
+    const checkouts = (scenario.checkout_trash ?? [])
+      .filter((checkout) => checkout.host === key)
+      .map((checkout) => {
+        const archivedAt = now - checkout.age;
+        const name = `${checkout.checkout}-${stamp(archivedAt)}`;
+        return {
+          id: `docs-${key}-${checkout.checkout}`,
+          name,
+          repository: checkout.repository,
+          path: `${checkout.root}/farhelm-archived-working-copies/${name}`,
+          archived_at: archivedAt,
+          bytes: checkout.bytes,
+        };
+      });
+    await route.fulfill({ json: { checkouts, issues: [] } });
+  });
+}
+
+/**
+ * Answer the terminal's file check from the scenario's `terminal_files`: the
+ * host it names (by its alias, as the helm reports it), the invented full
+ * path, and the size. A path the scenario does not list reads as not found.
+ * Downloads are refused outright, so a click in a shot fetches nothing.
+ */
+async function installTerminalFiles(page: Page, scenario: Scenario) {
+  const alias = new Map(scenario.hosts.map((host) => [host.key, host.alias]));
+  await page.route(
+    (url) => /^\/api\/sessions\/[^/]+\/files\/download$/.test(url.pathname),
+    (route) => route.fulfill({ status: 409, body: "docs capture: downloads are not staged" }),
+  );
+  await page.route(
+    (url) => /^\/api\/sessions\/[^/]+\/files\/stat$/.test(url.pathname),
+    async (route) => {
+      const { path } = route.request().postDataJSON() as { path: string };
+      const file = (scenario.terminal_files ?? []).find((candidate) => candidate.path === path);
+      await route.fulfill({
+        json: file
+          ? { host: alias.get(file.host), path: file.shown_path, size: file.size, status: "ready" }
+          : { host: "", path, size: 0, status: "not_found" },
+      });
+    },
+  );
+}
+
+/** What a shot can ask `openDocsFleet` to stage beyond the fleet every shot sees. */
+export interface DocsFleetOptions {
+  /** Fill the managed checkout trash from the scenario's `checkout_trash`. */
+  checkoutTrash?: boolean;
+  /** Answer the terminal's file hover from the scenario's `terminal_files`. */
+  terminalFiles?: boolean;
+}
+
+/**
  * Load the UI on the staged fleet with every rewrite in place: the hero's two
  * (ages and folders, installed by `openStagedFleet`) and the docs' own.
  */
-export async function openDocsFleet(page: Page, request: APIRequestContext, scenario: Scenario): Promise<StagedFleet> {
+export async function openDocsFleet(
+  page: Page,
+  request: APIRequestContext,
+  scenario: Scenario,
+  options: DocsFleetOptions = {},
+): Promise<StagedFleet> {
   const fleet = readFleet();
   await installDocsRewrites(page, request, scenario, fleet.now);
+  if (options.checkoutTrash) await installCheckoutTrash(page, request, scenario, fleet.now);
+  if (options.terminalFiles) await installTerminalFiles(page, scenario);
   await openStagedFleet(page, request, scenario, DOCS_SHOTS_DIR, fleet);
   return fleet;
 }

@@ -26,7 +26,9 @@ says which agents Farhelm can resume, and a command you run yourself needs an ag
 it; see [Custom commands](/docs/agents/custom-commands/).
 
 **restart with** resumes the conversation the same way, with different settings: another model, effort, permission
-mode, or workspace trust. It is greyed out whenever **restart** is.
+mode, or workspace trust. It is greyed out whenever **restart** is. Enter on one of its choices picks it and restarts
+with the result; when the button says **stop and restart**, because the agent is working, Enter also confirms stopping
+it first.
 
 **replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
@@ -53,8 +55,8 @@ already ended and has no shell tabs open is deleted at once.
 
 For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into
-`farhelm-archived-working-copies` under the configured checkout root. This archive is the checkout's trash: the move
-preserves its contents and frees no disk space. The [trash button beside
+`farhelm-archived-working-copies` in the directory managed checkouts go into. This archive is the checkout's trash: the
+move preserves its contents and frees no disk space. The [trash button beside
 New](/docs/using/session-list/#managed-checkout-trash) shows where to recover that work and lets you delete it
 permanently after confirmation. If the move fails, Delete still removes the session and tells you which directory was
 left behind; Farhelm no longer manages it.

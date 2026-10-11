@@ -29,18 +29,26 @@ the last session using it. The same mark appears beside the directory at the top
 ## Managed checkout trash
 
 The trash can immediately left of **new** holds [managed
-checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted. When it holds
-anything on reachable hosts, its lid opens and a count appears. Open it to see the checkouts grouped by host, newest
-first, with their repository, archive time, disk usage and directory on disk. Copy work you want to recover out of that
-directory before deleting it.
+checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted.
 
-You can **delete all on** one host, or **delete all** across reachable hosts. Each asks you to confirm permanent
-deletion: work that was never committed or pushed is lost. An unreachable host stays greyed out and is skipped by the
-global action. Global cleanup waits until every reachable host can be read. Sizes can be partial when some directories
-cannot be measured. If an archive directory was replaced or moved since Farhelm archived it, it stays untouched and the
-dialog explains what was left behind. Changing the files inside it does not protect it: copy anything you want to keep
-out of the archive first. Cleanup can partially remove a directory
-before failing; the dialog tells you when that happened.
+<Screenshot
+  name="session-list/trash-button"
+  alt="The trash button beside new, its lid open and a count of 3, explained."
+/>
+
+Open it to see the checkouts grouped by host, newest first, with their repository, archive time and disk usage.
+
+<Screenshot
+  name="session-list/trash-dialog"
+  alt="The trash dialog listing archived checkouts on two hosts, with where they are on disk explained."
+/>
+
+**delete all** at the top deletes the trash on every reachable host, and **delete all on** a host only on that one.
+Each asks you to confirm, and work in the trash that was never committed or pushed is lost. An unreachable host stays
+greyed out and is skipped by **delete all**, which waits until every reachable host can be read. Sizes can be partial when some directories cannot be measured. If an archive directory was replaced or moved since
+Farhelm archived it, it stays untouched and the dialog explains what was left behind. Changing the files inside it does
+not protect it: copy anything you want to keep out of the archive first. Cleanup can partially remove a directory before
+failing; the dialog tells you when that happened.
 
 Nothing empties the trash automatically. A deletion in another window updates the count when its managed session
 disappears; emptying the trash in another window can leave this count high until you open the dialog.

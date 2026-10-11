@@ -89,3 +89,42 @@ test("row menu", async ({ page, request }) => {
   });
   await shot(page, `${PAGE}/row-menu`, [row, panel], { maxWidth: 930 });
 });
+
+/**
+ * The trash button beside new, holding the scenario's archived managed
+ * checkouts. The trash is staged for this shot alone (`checkoutTrash`), so
+ * every other shot shows the fleet's real, empty one.
+ */
+test("trash button", async ({ page, request }) => {
+  const { director } = await open(page, request, { checkoutTrash: true });
+  const button = page.locator(".checkout-trash-button");
+  await expect(button.locator(".checkout-trash-count")).toHaveText("3");
+  await director.callout(
+    button,
+    "Managed checkouts whose last session was deleted. The lid opens and a count shows while it holds any.",
+    { side: "right", dx: 160, dy: -70 },
+  );
+  await shot(page, `${PAGE}/trash-button`, [button, page.locator(".new-session-button")], { maxWidth: 930 });
+});
+
+/**
+ * The trash dialog over the same staged trash. Stops at the listing: delete
+ * would only ask to confirm, and the staging refuses deletion outright anyway.
+ */
+test("trash dialog", async ({ page, request }) => {
+  // About the docs' text column wide, with room below the dialog for the
+  // callout. The delete buttons get no callout: they sit at the dialog's top
+  // and right edges, where a callout would cover the listing or the dialog's
+  // own explanation, so the page's text explains them instead.
+  await page.setViewportSize({ width: 960, height: 1150 });
+  const { director } = await open(page, request, { checkoutTrash: true });
+  await page.locator(".checkout-trash-button").click();
+  const dialog = page.locator(".checkout-trash-dialog");
+  await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(3);
+  await director.callout(
+    dialog.locator(".checkout-trash-path").last(),
+    "Where each host keeps them. Copy out anything you want back before deleting.",
+    { side: "bottom", dx: -40, dy: 60 },
+  );
+  await shot(page, `${PAGE}/trash-dialog`, [dialog], { maxWidth: 930 });
+});

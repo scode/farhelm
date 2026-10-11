@@ -140,3 +140,41 @@ test("applied in turn", async ({ page, request }) => {
   });
   await shot(page, `${PAGE}/applied`, [submit, summary], { maxWidth: 930 });
 });
+
+/**
+ * The launcher's save-as-template panel, filled in from a setup made by hand.
+ * Stops before save, so no template is created and the staged list stays the
+ * scenario's.
+ */
+test("save as template", async ({ page, request }) => {
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  // A setup with choices made by hand, so the panel has something checked:
+  // the agent and an effort, on top of the launcher's starting host and
+  // directory, which it offers unchecked.
+  await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
+  await form.locator(".launch-composer-effort-choice button", { hasText: /^high$/ }).click();
+  await form.locator(".launch-composer-save-template").click();
+  const panel = form.locator(".save-template-panel");
+  await expect(panel).toBeVisible();
+  const name = panel.locator(".save-template-name");
+  // The panel focuses the name field by itself, which shows its hover text
+  // over the launcher. Clicking into it makes that a pointer focus, which
+  // hides the text the way a click does in the app.
+  await name.click();
+  await expect(page.locator(".farhelm-tooltip").filter({ visible: true })).toHaveCount(0);
+  await name.fill("codex-high");
+  // Down the left of the launcher, each level with what it explains.
+  await director.callout(name, "A new name. One already in use is refused.", { side: "left", dy: -20 });
+  await director.callout(
+    panel.locator(".save-template-choice").first(),
+    "Checked: the choices you made for this launch. Tick or untick each one; the template keeps only what is ticked.",
+    { side: "left", dy: 20 },
+  );
+  await director.callout(
+    panel.locator(".save-template-save"),
+    "Saves the template and opens it in the templates panel. Nothing is launched.",
+    { side: "left", dy: 110 },
+  );
+  await shot(page, `${PAGE}/save-as-template`, [panel], { maxWidth: 930 });
+});

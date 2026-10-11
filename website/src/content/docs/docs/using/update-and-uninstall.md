@@ -39,7 +39,7 @@ Mac is offline, it tries again the next day.
 
 ## Turn automatic updates off
 
-Select the gear at the top of the sidebar and untick **install updates automatically**. Farhelm then stops checking by
+Select the gear at the top of the sidebar and turn off **install updates automatically**. Farhelm then stops checking by
 itself. **check for updates** and your Mac's **update** still work, and you can still update by running the installer
 again, as in [Install Farhelm](/docs/get-started/install/). The red version number still appears when a newer version is
 installed, however it got there.
