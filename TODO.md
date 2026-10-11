@@ -179,6 +179,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   "send" and "cancel" sit flush against each other with no gap, and a disabled "send" barely reads as a button; and
   there is no × close at the top. Give it a general pass so it looks like the rest of the app. Details to be worked out.
 
+- **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
+  from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
+  `grok` 1.0.50, started as Farhelm starts it with no YOLO choice (`grok --no-leader`), showed "always-approve" in its
+  status line because the host's Grok configuration defaults to it. The same can happen to any agent whose settings set
+  a default approval mode. Two parts, across all agents. First, assess the non-YOLO launch on real agents with
+  `scripts/agent-tui.py` (`.agents/real-agent-tui.md`): what each shows at start when it really is in its approval mode
+  (workspace trust, approval prompts), since for Grok only its always-approve mode has been seen. Second, decide how
+  Farhelm avoids claiming a session asks for approval when it does not: pass an explicit non-YOLO flag where the agent
+  has one, detect the effective mode from what the agent reports or from its configuration, or show the permission as
+  the agent's own setting when Farhelm cannot know. The plain shield on a row, the YOLO confirmation, and the host
+  setting that stops agents from starting YOLO sessions all rely on that claim being true.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
