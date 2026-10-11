@@ -33,7 +33,9 @@ verified workaround is guest-only clipboard preparation through the journaled co
 (`printf %s <text> | /usr/bin/pbcopy` inside the Mac guest), followed by computer use on the guest's Edit menu. Click
 Edit, navigate with `Down` keys held for 100 ms until Paste is visibly highlighted, then press Return. Direct clicks on
 guest native menu items can dismiss the menu and reach the underlying window instead. Keep Tart's shared clipboard
-disabled and the host clipboard untouched; inspect both the pasted text and the form's response before proceeding.
+disabled and the host clipboard untouched; inspect both the pasted text and the form's response before proceeding. If
+Tart window lookup fails, follow OPERATIONS.md's reconciliation notes: the guests may still be running. Preserve their
+foreground supervision and resolve GUI access instead of restarting guests or using the host's Farhelm.
 
 # Talking to the user
 
