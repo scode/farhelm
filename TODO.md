@@ -164,6 +164,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   machinery (`docs/docs-shots/SPEC.md`), which captures the web UI against a staged fleet, is a likely starting point.
   The output is for review, not for publishing.
 
+- **Show that "check for updates" is doing something.** In the desktop app, clicking "check for updates" in the `?` menu
+  gives no visible sign that a check started or is still running. You wait, and maybe the version readout turns red. The
+  check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
+  to miss. Solution to be worked out.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
