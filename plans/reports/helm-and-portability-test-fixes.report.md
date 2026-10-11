@@ -79,3 +79,31 @@ checked the five test contracts, all mutation proofs, the platform split, the au
 test-authoring checklist. I read and accepted the complete report; no source correction was needed, and all five
 outcomes stayed within the agreed scope. The independent wording cold read also accepted the title and motivation.
 Implementation and validation stayed local as required; native model attribution and usage counters were unavailable.
+
+### Landing
+
+Landed on 2026-10-11 (UTC) as #1912. The rebase met the review queue index, where supervisor-lifecycle-test-fixes had
+removed adjacent entries; both sets of removals were kept and the index still matches its files.
+
+#### Review before merging
+
+No blockers; every change in the product files sits inside their test modules. The browse, upload-abort, idle-flush,
+upload-memory and tab-reaping tests now observe what their findings said they missed; the idle-flush test was traced
+against the pinned Tokio and is deterministic under load. Note left as is: if a browse were sent only to the local host,
+the test would hang until the runner's five-minute limit rather than fail with a clear message; a timeout around the
+request would fix that.
+
+#### Checks
+
+These two plans, which change only tests, were landed together: helm-and-portability-test-fixes first,
+browser-spec-fixes on top.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (288 delays, none
+  without a reason) and `cargo clippy --all-targets -- -D warnings`; the helm and supervisor unit tests through the
+  recorder with pinned tmux 3.7c, four slots and no retries (run `b6805a2b`, 2143 of 2143); and on Chromium and WebKit
+  with one worker and no retries the auth and spawn specs (run `c12ecee6`, 16 passed; the opt-in real-Claude spawn test
+  skipped on both engines as designed) and the sidebar's long-folder-path test (run `b8ed84e9`, 2 passed).
+- Not run: macOS; the real-Claude spawn test, which needs vendor credentials and is opt-in.
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
