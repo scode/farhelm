@@ -237,10 +237,12 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 
 /**
  * Sidebar heading buttons keep their requested hierarchy and density.
+ * The session heading fits three actions with narrower side padding; the
+ * host heading keeps its own spacing rather than sharing that layout budget.
  * The permanent native host select is deliberately outside this button-paint
  * contract; explicit dimensions guard the compact heading size independently.
  */
-test("sidebar heading buttons share secondary paint and compact sizing", async ({ page }) => {
+test("sidebar heading buttons retain their hierarchy and compact sizing", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
@@ -255,10 +257,13 @@ test("sidebar heading buttons share secondary paint and compact sizing", async (
     .evaluate((node) => getComputedStyle(node).backgroundColor);
   expect(primaryBackground).not.toBe(secondaryBackground);
 
-  for (const selector of [".new-session-button", ".add-host-button"]) {
+  for (const [selector, sidePadding] of [
+    [".new-session-button", "6px"],
+    [".add-host-button", "8px"],
+  ]) {
     await expect(page.locator(selector)).toHaveCSS("font-size", "12px");
     await expect(page.locator(selector)).toHaveCSS("padding-top", "2px");
-    await expect(page.locator(selector)).toHaveCSS("padding-right", "8px");
+    await expect(page.locator(selector)).toHaveCSS("padding-right", sidePadding);
   }
 
   // Details is a native checkbox: its checked state is the disclosure

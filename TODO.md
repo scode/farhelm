@@ -293,14 +293,6 @@ Deferred work, with its original triggers:
 
 ## Broken tests
 
-- **Sidebar heading buttons no longer share padding.**
-  `sidebar heading buttons share secondary paint and compact sizing` in `e2e/tests/buttons.spec.ts` fails in both
-  engines since #1788, which gave the session heading's buttons (New, Templates, Trash) 6px side padding so three fit,
-  while the hosts heading's Add keeps the 8px the test expects of both. Seen in recorded run
-  `c3250c4f-7747-4d0c-aaae-0abf3644e2c1`, on a dependency-update stack over main `fa0051cd` that does not touch the
-  sidebar: `expect(locator('.new-session-button')).toHaveCSS("padding-right", "8px")` received `6px`. Decide whether the
-  two headings should match again or the test should accept the split.
-
 ## Code review
 
 The residue of the September 2026 review swarms (700 findings over seven areas, reviewed at `db76f00b`) after the policy
