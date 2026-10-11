@@ -155,6 +155,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   checkout folder setting that is being planned there, keeping the existing meaning of an empty command (explicitly
   disabled) versus no command. Per-host overrides stay command-line only unless decided otherwise.
 
+- **Delete one checkout from the trash.** The trash dialog (archived managed checkouts, listed per host) can only delete
+  everything on one host or everything on every host. Add a delete button on each checkout so a single one can go
+  without taking the rest with it.
+
+- **Put the trash's "delete all" at the top right.** The global "delete all" sits in the trash dialog's footer, below
+  every host's list, so with more than a few archived checkouts you have to scroll to find it. Move it to the top right
+  of the dialog so it is visible without scrolling.
+
+- **Give the trash and host settings dialogs some vertical margin.** Both dialogs take up almost the entire height of
+  the window, which makes them feel jammed in, as if they only barely fit. Leave visible space above and below them.
+
+- **Keep the host settings dialog's header and footer in view.** The footer's close button and its "changes save as you
+  make them" note should be pinned where they are and always visible, as should the header. Only the settings between
+  the header and the footer scroll.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
