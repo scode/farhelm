@@ -635,6 +635,9 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     "{version}"
                 }
             }
+            if let Some(updater) = updater.clone() {
+                crate::app_updater::UpdateCheckStatus { updater }
+            }
             button {
                 r#type: "button",
                 class: "btn btn-neutral app-settings-toggle",

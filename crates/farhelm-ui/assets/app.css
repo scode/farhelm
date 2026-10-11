@@ -777,6 +777,49 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
 }
 
+/* Inline check feedback gives way before the fixed gear/help controls. Keep
+   the live region mounted while empty, without reserving a gap in that case;
+   version text and feedback can both ellipsize in the narrow sidebar. */
+.app-update-status {
+  align-items: center;
+  color: var(--fg-1);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  max-width: 90px;
+  min-width: 0;
+}
+.app-update-status-visible {
+  margin-left: 6px;
+}
+.app-update-status-content {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+.app-update-status-text,
+.app-update-failure {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Dismissal is a real keyboard control, but the failure reads as status
+   alongside the version. Its reason remains available in the existing hover. */
+.app-update-failure {
+  background: none;
+  border: 0;
+  color: var(--warn);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.app-update-failure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* The update arrow and the warning mark below each lead the readout. */
 .app-version-arrow,
 .app-version-warning {

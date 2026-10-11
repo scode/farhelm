@@ -10,6 +10,31 @@
 //! all, so the update-only branches compile there without a `cfg` at every
 //! call site and can never be taken.
 
+use dioxus::prelude::*;
+
+/// The updater activity exposed to presentation, without a renderer dependency.
+///
+/// The native worker publishes non-idle check states only for a run the user
+/// requested or joined. Keeping the same type here lets the inline feedback and
+/// its expiry rules be tested in both builds; it does not activate a web updater.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// No native worker constructs these variants in the web build, but the same
+// presentation functions and tests must compile there without target forks.
+#[cfg_attr(not(native_desktop), allow(dead_code))]
+pub(crate) enum Activity {
+    #[default]
+    Idle,
+    Checking,
+    /// The installer is running for this version.
+    Installing(String),
+    /// This latest stable release is no newer than the installed version.
+    UpToDate(String),
+    /// A user-visible check or install failure; its reason stays in the hover.
+    Failed(String),
+    /// Relaunch failed, which is not an outcome of checking for updates.
+    RestartFailed,
+}
+
 /// How the sidebar's version readout looks for the updater's current state
 /// (see `desktop::updater::readout`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +47,199 @@ pub(crate) struct Readout {
     pub(crate) needs_reinstall: bool,
     /// The readout's hover text.
     pub(crate) tooltip: String,
+    /// Activity identity, kept apart from installation and verification changes
+    /// so those changes cannot restart inline expiry or undo a dismissal.
+    pub(crate) activity: Activity,
+    /// Persistent identity of the user-visible request, including when watch
+    /// delivery skips its intermediate checking/installing publications.
+    pub(crate) user_check_id: u64,
+    /// Readiness captured at successful user-check completion, so automatic or
+    /// external installations do not acquire a check-completion announcement.
+    pub(crate) user_update_ready: bool,
+}
+
+/// Short inline words and styling, independent of the hover and version marks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InlineStatus {
+    Checking,
+    Installing,
+    UpToDate,
+    Failed,
+}
+
+impl InlineStatus {
+    /// The same words are visible and announced by the mounted live region.
+    pub(crate) fn text(self) -> &'static str {
+        match self {
+            Self::Checking => "checking…",
+            Self::Installing => "installing…",
+            Self::UpToDate => "up to date",
+            Self::Failed => "check failed",
+        }
+    }
+
+    /// Only active work needs motion; the existing spinner handles reduced motion.
+    pub(crate) fn spinning(self) -> bool {
+        matches!(self, Self::Checking | Self::Installing)
+    }
+}
+
+/// Hide only the exact outcome dismissed or expired in this component.
+///
+/// An installed update owns the up-to-date answer, but not active progress or a
+/// failed check. Restart failures remain hover-only. Reinstall warnings and build
+/// skew have their existing independent presentation and do not alter this choice.
+pub(crate) fn inline_status(
+    activity: &Activity,
+    update_ready: bool,
+    suppressed: Option<&Activity>,
+) -> Option<InlineStatus> {
+    match activity {
+        Activity::Checking => Some(InlineStatus::Checking),
+        Activity::Installing(_) => Some(InlineStatus::Installing),
+        Activity::UpToDate(_) if !update_ready && suppressed != Some(activity) => {
+            Some(InlineStatus::UpToDate)
+        }
+        Activity::Failed(_) if suppressed != Some(activity) => Some(InlineStatus::Failed),
+        _ => None,
+    }
+}
+
+/// Announce a successful waiting update without competing with its red readout.
+/// Failure and progress own their visible words; readiness from background work
+/// alone carries no user-check provenance and must remain silent.
+pub(crate) fn announce_update_ready(readout: &Readout) -> bool {
+    readout.user_update_ready
+        && readout.update_ready
+        && matches!(readout.activity, Activity::Idle | Activity::UpToDate(_))
+}
+
+/// Component-local visibility, never a second copy of the updater's work state.
+///
+/// Activity and producer request identity together clear suppression. Unlike a
+/// counter of observed transitions, the producer identity survives a watch
+/// subscriber missing checking between identical outcomes. Hover words are separate.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct InlineFeedback {
+    activity: Activity,
+    user_check_id: u64,
+    suppressed: Option<Activity>,
+}
+
+impl InlineFeedback {
+    /// Observe a new check/activity and request expiry only for a new success.
+    /// Installation-record changes with unchanged activity must not stretch its
+    /// five-second lifetime or revive a failure the user dismissed.
+    pub(crate) fn observe(&mut self, activity: &Activity, user_check_id: u64) -> bool {
+        if self.activity == *activity && self.user_check_id == user_check_id {
+            return false;
+        }
+        self.activity = activity.clone();
+        self.user_check_id = user_check_id;
+        self.suppressed = None;
+        matches!(activity, Activity::UpToDate(_))
+    }
+
+    /// Expire the success that scheduled this callback, never a later result.
+    pub(crate) fn expire(&mut self, activity: &Activity, user_check_id: u64) {
+        if self.user_check_id == user_check_id
+            && self.activity == *activity
+            && matches!(activity, Activity::UpToDate(_))
+        {
+            self.suppressed = Some(self.activity.clone());
+        }
+    }
+
+    /// Dismiss only the failure currently visible; progress and success do not
+    /// acquire an accidental dismissal path through a stale click handler.
+    pub(crate) fn dismiss(&mut self, activity: &Activity, user_check_id: u64) {
+        if self.user_check_id == user_check_id
+            && self.activity == *activity
+            && matches!(activity, Activity::Failed(_))
+        {
+            self.suppressed = Some(activity.clone());
+        }
+    }
+}
+
+/// Show a user-requested desktop check beside either version readout.
+///
+/// The empty live region stays mounted so WebKit can announce later text. The
+/// memo filters unrelated publications before they can reset expiry. Scoped tasks
+/// die with the component; their activity/request pairs reject older callbacks.
+#[component]
+// The shared tree still typechecks this component on the web, where its
+// uninhabited updater argument deliberately makes the whole body unreachable.
+#[cfg_attr(not(native_desktop), allow(unreachable_code, unused_variables))]
+pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
+    let watched = updater.clone();
+    let activity = use_memo(move || {
+        let readout = watched.readout();
+        (readout.activity, readout.user_check_id)
+    });
+    let mut feedback = use_signal(InlineFeedback::default);
+    use_effect(move || {
+        let (current, request) = activity();
+        let expires = feedback.write().observe(&current, request);
+        if expires {
+            spawn(async move {
+                crate::reader::sleep_ms(5_000).await;
+                if *activity.peek() == (current.clone(), request) {
+                    feedback.write().expire(&current, request);
+                }
+            });
+        }
+    });
+    let readout = updater.readout();
+    let shown = inline_status(
+        &readout.activity,
+        readout.update_ready,
+        feedback.read().suppressed.as_ref(),
+    );
+    let announce_ready = announce_update_ready(&readout);
+    rsx! {
+        span {
+            class: if shown.is_some() { "app-update-status app-update-status-visible" } else { "app-update-status" },
+            role: "status",
+            "aria-live": "polite",
+            "aria-atomic": "true",
+            // A new request replaces the child even if watch delivery skipped
+            // progress and the final words match. The live parent stays mounted.
+            if shown.is_some() || announce_ready {
+                span {
+                    key: "{readout.user_check_id}",
+                    class: "app-update-status-content",
+                    if let Some(shown) = shown {
+                        if shown.spinning() {
+                            span { class: "delete-spinner", "aria-hidden": "true" }
+                        }
+                        if shown == InlineStatus::Failed {
+                            button {
+                                r#type: "button",
+                                class: "app-update-failure",
+                                aria_label: "check failed; dismiss update check status",
+                                "data-tooltip": "{readout.tooltip}",
+                                onclick: move |_| {
+                                    feedback.write().dismiss(&readout.activity, readout.user_check_id);
+                                    // Dismissing removes this focused button; without a
+                                    // new target, keyboard focus falls to the page body.
+                                    // The gear beside it is the natural next stop.
+                                    dioxus::document::eval(
+                                        "requestAnimationFrame(() => document.querySelector('.app-settings-toggle')?.focus({preventScroll:true}))",
+                                    );
+                                },
+                                "{shown.text()}"
+                            }
+                        } else {
+                            span { class: "app-update-status-text", "{shown.text()}" }
+                        }
+                    } else if announce_ready {
+                        span { class: "visually-hidden", "update ready" }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// One glyph leading the version readout, with the class that styles it.
@@ -303,6 +521,9 @@ mod tests {
             update_ready: false,
             needs_reinstall: false,
             tooltip: idle_tooltip("1.2.3", true),
+            activity: Activity::Idle,
+            user_check_id: 0,
+            user_update_ready: false,
         };
         assert_eq!(
             version_tooltip("1.2.3", None, Some(&state)),
@@ -331,6 +552,9 @@ mod tests {
             update_ready,
             needs_reinstall,
             tooltip: String::new(),
+            activity: Activity::Idle,
+            user_check_id: 0,
+            user_update_ready: false,
         };
         assert_eq!(readout_marks(&readout(false, false)), vec![]);
         assert_eq!(readout_marks(&readout(true, false)), vec![UPDATE_MARK]);
@@ -339,5 +563,207 @@ mod tests {
             readout_marks(&readout(true, true)),
             vec![WARNING_MARK, UPDATE_MARK]
         );
+    }
+
+    /// Progress and failure remain visible alongside a waiting update, while
+    /// success yields to the red readout. Restart failures and idle automatic
+    /// work never acquire inline check feedback.
+    #[farhelm_testtrace::test]
+    fn inline_feedback_follows_activity_and_waiting_update_precedence() {
+        for ready in [false, true] {
+            for (activity, expected) in [
+                (Activity::Idle, None),
+                (Activity::Checking, Some(InlineStatus::Checking)),
+                (
+                    Activity::Installing("1.2.0".into()),
+                    Some(InlineStatus::Installing),
+                ),
+                (
+                    Activity::UpToDate("1.2.0".into()),
+                    (!ready).then_some(InlineStatus::UpToDate),
+                ),
+                (
+                    Activity::Failed("offline".into()),
+                    Some(InlineStatus::Failed),
+                ),
+                (Activity::RestartFailed, None),
+            ] {
+                assert_eq!(
+                    inline_status(&activity, ready, None),
+                    expected,
+                    "{activity:?}, ready={ready}"
+                );
+            }
+        }
+        assert_eq!(InlineStatus::Checking.text(), "checking…");
+        assert_eq!(InlineStatus::Installing.text(), "installing…");
+        assert_eq!(InlineStatus::UpToDate.text(), "up to date");
+        assert_eq!(InlineStatus::Failed.text(), "check failed");
+        for status in [
+            InlineStatus::Checking,
+            InlineStatus::Installing,
+            InlineStatus::UpToDate,
+            InlineStatus::Failed,
+        ] {
+            assert_eq!(
+                status.spinning(),
+                matches!(status, InlineStatus::Checking | InlineStatus::Installing)
+            );
+        }
+    }
+
+    /// A success expires once and unrelated published changes cannot revive it.
+    /// A newer result, even for the same release, must get its own full lifetime.
+    #[farhelm_testtrace::test]
+    fn expiry_belongs_to_one_success_not_the_next_check() {
+        let success = Activity::UpToDate("1.2.0".into());
+        let mut feedback = InlineFeedback::default();
+        assert!(feedback.observe(&success, 1));
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::UpToDate)
+        );
+        assert!(!feedback.observe(&success, 1));
+        feedback.expire(&success, 1);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            None
+        );
+        assert!(!feedback.observe(&success, 1));
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            None
+        );
+
+        feedback.observe(&Activity::Checking, 2);
+        feedback.expire(&success, 1);
+        assert_eq!(
+            inline_status(&Activity::Checking, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Checking)
+        );
+        assert!(feedback.observe(&success, 2));
+        feedback.expire(&success, 1);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::UpToDate)
+        );
+        feedback.expire(&success, 2);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            None
+        );
+    }
+
+    /// Only a click on the current failure suppresses it. The next check clears
+    /// that dismissal, including when it later fails for the identical reason.
+    #[farhelm_testtrace::test]
+    fn failure_dismissal_survives_refreshes_but_not_another_check() {
+        let failure = Activity::Failed("offline".into());
+        let mut feedback = InlineFeedback::default();
+        feedback.observe(&failure, 1);
+        feedback.expire(&failure, 1);
+        assert_eq!(
+            inline_status(&failure, true, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Failed)
+        );
+        feedback.dismiss(&Activity::Failed("different failure".into()), 1);
+        assert_eq!(
+            inline_status(&failure, true, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Failed)
+        );
+        feedback.dismiss(&failure, 1);
+        feedback.observe(&failure, 1);
+        assert_eq!(
+            inline_status(&failure, true, feedback.suppressed.as_ref()),
+            None
+        );
+        feedback.observe(&Activity::Checking, 2);
+        feedback.dismiss(&failure, 1);
+        assert_eq!(
+            inline_status(&Activity::Checking, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Checking)
+        );
+        feedback.observe(&failure, 2);
+        assert_eq!(
+            inline_status(&failure, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Failed)
+        );
+
+        let success = Activity::UpToDate("1.2.0".into());
+        feedback.observe(&success, 3);
+        feedback.dismiss(&success, 3);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::UpToDate)
+        );
+    }
+
+    /// Watch delivery can skip every intermediate activity. Request identity
+    /// must still give identical outcomes a fresh lifetime and dismissal state.
+    #[farhelm_testtrace::test]
+    fn coalesced_identical_results_belong_to_different_requests() {
+        let success = Activity::UpToDate("1.2.0".into());
+        let mut feedback = InlineFeedback::default();
+        assert!(feedback.observe(&success, 1));
+        feedback.expire(&success, 1);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            None
+        );
+        assert!(feedback.observe(&success, 2));
+        feedback.expire(&success, 1);
+        assert_eq!(
+            inline_status(&success, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::UpToDate)
+        );
+
+        let failure = Activity::Failed("offline".into());
+        feedback.observe(&failure, 3);
+        feedback.dismiss(&failure, 3);
+        assert_eq!(
+            inline_status(&failure, false, feedback.suppressed.as_ref()),
+            None
+        );
+        feedback.observe(&failure, 4);
+        feedback.dismiss(&failure, 3);
+        assert_eq!(
+            inline_status(&failure, false, feedback.suppressed.as_ref()),
+            Some(InlineStatus::Failed)
+        );
+    }
+
+    /// The red toggle replaces visible success, but user-check completion still
+    /// needs words in the live region. Automatic readiness and failures cannot
+    /// masquerade as that successful outcome.
+    #[farhelm_testtrace::test]
+    fn ready_announcements_require_a_successful_user_check() {
+        for update_ready in [false, true] {
+            for captured in [false, true] {
+                for activity in [
+                    Activity::Idle,
+                    Activity::Checking,
+                    Activity::Installing("1.2.0".into()),
+                    Activity::UpToDate("1.2.0".into()),
+                    Activity::Failed("offline".into()),
+                    Activity::RestartFailed,
+                ] {
+                    let readout = Readout {
+                        update_ready,
+                        needs_reinstall: false,
+                        tooltip: String::new(),
+                        activity: activity.clone(),
+                        user_check_id: 1,
+                        user_update_ready: captured,
+                    };
+                    assert_eq!(
+                        announce_update_ready(&readout),
+                        update_ready
+                            && captured
+                            && matches!(activity, Activity::Idle | Activity::UpToDate(_)),
+                        "{activity:?}, ready={update_ready}, captured={captured}"
+                    );
+                }
+            }
+        }
     }
 }

@@ -149,11 +149,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
   as a non-goal for v1, so this needs a SPEC change alongside it.
 
-- **Show that "check for updates" is doing something.** In the desktop app, clicking "check for updates" in the `?` menu
-  gives no visible sign that a check started or is still running. You wait, and maybe the version readout turns red. The
-  check's outcome (up to date, installing, update ready, or failed) is only shown in the readout's hover, which is easy
-  to miss. Solution to be worked out. Plan: `plans/queue/update-check-feedback.md`.
-
 - **Pin the app settings dialog's header and footer, and add an × close.** The settings dialog opened from the gear at
   the top of the sidebar has grown (host choices, checkout folder, post-clone command, and more) until it runs past the
   bottom of the window, and its close button only appears once you scroll down to it. Give it a header and footer that
