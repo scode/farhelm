@@ -18,11 +18,8 @@ None open.
 
 - `uninstall-race-first-time-service-setup.md` — Concurrent setup and uninstall can leave services pointing at a deleted
   executable.
-- `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
-  file.

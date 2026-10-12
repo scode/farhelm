@@ -2210,6 +2210,11 @@ pub(crate) fn ListView(
     // does not do for a client that already has a page open.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
+    // The shared row handler keeps one unresolved intent, bound to its source.
+    // Choosing another source abandons it; this is not a cross-row key registry.
+    // Reserve the source before awaiting a key: row tasks can overlap, so an
+    // older mint or reply must not overwrite or clear a newer source's intent.
+    let mut replace_key = use_signal(|| None::<(String, Option<String>)>);
     // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches
     // (`YoloReplaceQuestion`: the question, and the row snapshot and answer
     // it continues), shown as the loud confirmation above the list until the
@@ -2251,6 +2256,12 @@ pub(crate) fn ListView(
             let base = replace_base.clone();
             let refresh = replace_refresh.clone();
             let allow_yolo = answered.is_some();
+            let retained = replace_key
+                .peek()
+                .as_ref()
+                .filter(|(source, _)| source == &id)
+                .and_then(|(_, key)| key.clone());
+            replace_key.set(Some((id.clone(), retained.clone())));
             spawn(async move {
                 if let Some(YoloReplaceAnswer {
                     pending,
@@ -2269,8 +2280,44 @@ pub(crate) fn ListView(
                     end_row_op(&id);
                     return;
                 }
-                match replace_session(&base, &id, guard, allow_yolo).await {
+                let key = match retained {
+                    Some(key) => key,
+                    None => match api::mint_intent_key().await {
+                        Ok(key) => {
+                            let owns_pending_key = replace_key
+                                .peek()
+                                .as_ref()
+                                .is_some_and(|(source, key)| source == &id && key.is_none());
+                            if owns_pending_key {
+                                replace_key.set(Some((id.clone(), Some(key.clone()))));
+                            }
+                            key
+                        }
+                        Err(reason) => {
+                            errors
+                                .write()
+                                .insert(id.clone(), format!("replace: {reason}"));
+                            end_row_op(&id);
+                            return;
+                        }
+                    },
+                };
+                // Same-row admission excludes another active attempt on this
+                // source. Matching its key also protects a newer row's slot.
+                let mut end_intent = || {
+                    let owns_key = replace_key
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(source, retained)| {
+                            source == &id && retained.as_ref() == Some(&key)
+                        });
+                    if owns_key {
+                        replace_key.set(None);
+                    }
+                };
+                match replace_session(&base, &id, &key, guard, allow_yolo).await {
                     Ok((session, notice)) => {
+                        end_intent();
                         delete_notice.publish(notice);
                         // A pre-replace listing cannot establish the new
                         // session's absence. Fence it before selecting the reply;
@@ -2284,6 +2331,9 @@ pub(crate) fn ListView(
                         refresh(Trigger::Explicit);
                     }
                     Err(e) => {
+                        if !e.retain_replace_key() {
+                            end_intent();
+                        }
                         // Keyed by the SOURCE id: the row this error belongs
                         // beside is the one the user clicked "replace" on,
                         // which — on a delete-after-create failure — is also
@@ -2344,6 +2394,13 @@ pub(crate) fn ListView(
         ) {
             return;
         }
+        if replace_key
+            .peek()
+            .as_ref()
+            .is_some_and(|(id, _)| id != &session.id)
+        {
+            replace_key.set(None);
+        }
         row_phases
             .write()
             .insert(session.id, RowPhase::ConfirmingReplace);
@@ -2371,7 +2428,14 @@ pub(crate) fn ListView(
         }
     };
     let cancel_replace = move |id: String| {
-        leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace);
+        if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace)
+            && replace_key
+                .peek()
+                .as_ref()
+                .is_some_and(|(source, _)| source == &id)
+        {
+            replace_key.set(None);
+        }
     };
 
     // The "clone" menu item's click. It never calls the API itself — it
@@ -2481,6 +2545,7 @@ pub(crate) fn ListView(
         ) {
             return;
         }
+        replace_key.set(None);
         menu_open.set(None);
         let generation = clone_prefill
             .peek()
@@ -2529,6 +2594,7 @@ pub(crate) fn ListView(
         );
         let mut prefill = prefill_from(&session, generation);
         if replace_with {
+            replace_key.set(None);
             mark_replace_with(&mut prefill, &session);
             replace_source_seen.set(None);
         }
@@ -3305,7 +3371,11 @@ pub(crate) fn ListView(
                     {
                         let mut phases = row_phases.write();
                         leave_phase(&mut phases, &id, RowPhase::ConfirmingDelete);
-                        leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace);
+                        if leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace)
+                            && replace_key.peek().as_ref().is_some_and(|(source, _)| source == &id)
+                        {
+                            replace_key.set(None);
+                        }
                     }
                     if menu_open.peek().as_deref() == Some(id.as_str()) {
                         menu_open.set(None);
@@ -3776,6 +3846,12 @@ pub(crate) fn ListView(
                                     // an earlier question leaves a later one
                                     // (and its error) alone.
                                     if yolo_replace.take(&question).is_some() {
+                                        let owns_source = replace_key.peek().as_ref().is_some_and(|(source, _)| {
+                                            source == &question.pending.source.id
+                                        });
+                                        if owns_source {
+                                            replace_key.set(None);
+                                        }
                                         yolo_replace_error.set(None);
                                     }
                                 }

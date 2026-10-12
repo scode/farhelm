@@ -12841,7 +12841,8 @@
   acknowledged result still gets a new key. Cover the header and sidebar Replace paths with a test of the lost-reply
   retry if it fits existing machinery. If this needs more than retaining the key in the UI's existing operation state,
   stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
+- Execution: `complete`; jj change `tltwkmrqlvpxyovlsvtoqtrzqztxvzrs`; bookmark
+  `plan/ui-retry-and-notice-fixes/01-ui-fixes`; https://github.com/scode/farhelm/pull/1936/changes.
 
 ## upload-cancellation-drops-final-reply.md
 
@@ -12887,7 +12888,14 @@
 - Completion criteria: when the GUI never observed the uninstall finish, the notice says the outcome is unknown rather
   than that Farhelm was removed. If this needs more than a small change to the notice logic, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
+- Execution: `pending`, waiting on the user. The authorized small notice change cannot distinguish successful uninstall
+  from another GUI's Remove: normal uninstall forgets the host and purges its result before completion can be observed,
+  and accepting the request does not prove it finished. An observed-success flag would therefore turn ordinary success
+  into unknown too, against the specified success notice. Options: accept the current concurrent-GUI residual
+  (recommended under the one-GUI complexity policy); hedge every uninstall notice (changes normal-success wording); or
+  separately authorize a correlated final result that survives forgetting the host (helm/API lifecycle work beyond this
+  gate). No product change for this outcome; its original feedback remains queued. Scope review confirmed the gate
+  return; the recorded Outcome is unchanged.
 
 ## newer-completed-run-leaves-older-update-permanently.md
 
@@ -12970,7 +12978,8 @@
   note naming what was omitted and why (it looked like the clipboard's generated copy of another pasted file), and the
   misleading code comment is corrected. The deduplication itself is unchanged. Add a test if it fits existing paste
   tests. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
+- Execution: `complete`; jj change `tltwkmrqlvpxyovlsvtoqtrzqztxvzrs`; bookmark
+  `plan/ui-retry-and-notice-fixes/01-ui-fixes`; https://github.com/scode/farhelm/pull/1936/changes.
 
 ## probe-reregister-drops-terminals.md
 

@@ -294,9 +294,9 @@ impl Flavor {
 ///
 /// ## What counts as image DATA rather than a file reference
 ///
-/// This is the one judgment call, and it decides only one thing: whether
-/// the upload keeps a name or gets a generated one. Both are intercepted
-/// and both are published either way.
+/// This judgment decides the winning bucket as well as the upload's name.
+/// Image data gets a generated name when it wins; beside a file reference
+/// it is omitted, with a visible note explaining the heuristic.
 ///
 /// An entry is image data when all of the following hold, and a file
 /// reference otherwise:
@@ -314,8 +314,10 @@ impl Flavor {
 /// reference and keeps `holiday.png`, because its name is not the
 /// placeholder and its `lastModified` is its own. A user's genuine file
 /// that happens to be called `image.png` AND was written seconds ago is
-/// the one case the rule gets wrong, and it costs a name rather than a
-/// byte. An earlier version of this rule used the clipboard alone and got
+/// a case the rule gets wrong: alone it gets a generated name, but beside
+/// another file it is omitted. The note makes that omission visible; the
+/// heuristic cannot establish that the image really is a duplicate.
+/// An earlier version of this rule used the clipboard alone and got
 /// that case backwards for every copied image file, which is why the
 /// narrowing exists; the manual desktop pass (this module's header, step
 /// 3) is what records what the engines actually put on the clipboard for
@@ -323,14 +325,14 @@ impl Flavor {
 ///
 /// ## Why image data loses to a file rather than uploading alongside it
 ///
-/// When a payload carries both, they are two REPRESENTATIONS of one thing
+/// A payload carrying both often has two REPRESENTATIONS of one thing
 /// — copying an image file puts the file reference and a rendering of its
 /// contents on the clipboard together — so uploading both would publish
 /// the same picture twice under two names for one paste. Precedence exists
-/// to pick one. That is not the same as dropping a distinct file: several
-/// real files in one payload all count toward `has_file` and are ALL
-/// uploaded, which is what the narrowing above makes possible (an image
-/// file is a file reference, so it is one of them).
+/// to pick one. Entries classified as file references are all uploaded,
+/// but a genuine fresh `image.png` can land in the losing image bucket.
+/// The visible omission note acknowledges this ambiguity without changing
+/// which bucket wins.
 ///
 /// Directories are folded into `has_file` by terminal.js rather than given
 /// a flavor of their own: a dragged folder IS a file-system object, so it
@@ -507,6 +509,11 @@ const FAILED_TEXT: &str = "attaching {name} failed: {reason} — no path was ins
 const DIRECTORY_TEXT: &str =
     "{name} is a directory — this version attaches files only, so nothing was uploaded";
 
+/// The losing image bucket may contain a genuine fresh placeholder-named file.
+/// Name the original item and state the heuristic rather than claiming a duplicate.
+const OMITTED_IMAGE_TEXT: &str =
+    "left out {name}, which looked like the clipboard's copy of another pasted file";
+
 /// A dropped item whose bytes could not be read, which is how a directory
 /// arrives on an engine with no drag-entry API (PLAN_M4.md item 7's
 /// fallback).
@@ -657,6 +664,7 @@ pub(crate) fn attachment_policy(session_id: &str) -> serde_json::Value {
             "busyMany": BUSY_MANY_TEXT,
             "failed": FAILED_TEXT,
             "directory": DIRECTORY_TEXT,
+            "omittedImage": OMITTED_IMAGE_TEXT,
             "unreadable": UNREADABLE_TEXT,
             "detached": DETACHED_TEXT,
             "landed": LANDED_TEXT,
@@ -957,6 +965,7 @@ mod tests {
             "busyMany",
             "failed",
             "directory",
+            "omittedImage",
             "unreadable",
             "detached",
             "landed",
