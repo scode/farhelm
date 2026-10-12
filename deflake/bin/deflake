@@ -336,19 +336,80 @@ def playwright_exclusion(ids: list[TestId]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def read_log_edges(log: pathlib.Path, edge_bytes: int = 2 * 1024 * 1024) -> str:
+    """Keep recorder announcements and the final excerpt without loading a whole log.
+
+    Console capture remains unbounded on disk. Classification needs only the
+    beginning and end, where the recorder announces evidence and errors land.
+    The separator prevents a cut line from masquerading as an announcement.
+    """
+    with log.open("rb") as stream:
+        head = stream.read(edge_bytes)
+        end = stream.seek(0, os.SEEK_END)
+        tail_start = max(len(head), end - edge_bytes)
+        stream.seek(tail_start)
+        tail = stream.read(edge_bytes)
+    separator = b"\n[console log middle omitted]\n" if tail_start > len(head) else b""
+    return (head + separator + tail).decode("utf-8", errors="replace")
+
+
+def rerun_conclusion(test: TestId, status: int, evidence: pathlib.Path | None) -> tuple[bool, str]:
+    """Separate a selected test's failure from failure to run or report that test.
+
+    A successful command is a pass. Nonzero per-test runs establish failure
+    only through their own structured report; monolithic batteries retain
+    their command-status rule because the whole phase is their unit.
+    """
+    if status == 0:
+        return True, "command passed"
+    if test.kind == "phase":
+        return True, "monolithic phase failed"
+    if evidence is None:
+        return False, "rerun has no evidence announcement"
+    try:
+        if test.kind == "nextest":
+            failures = nextest_failures(
+                (evidence / "nextest" / "default" / "junit.xml").read_text(encoding="utf-8"),
+                require_execution=True,
+            )
+        else:
+            report = json.loads((evidence / "playwright.json").read_text(encoding="utf-8"))
+            failures = [failed for failed, _, _ in playwright_failures(report)]
+    except (OSError, ValueError, ET.ParseError, AttributeError, TypeError) as error:
+        return False, f"rerun report unreadable: {type(error).__name__}"
+    if test in failures:
+        return True, "selected test failed in rerun report"
+    return False, "rerun report does not name the selected test as failed"
+
+
+def classification_verdict(results: list[dict]) -> str:
+    """Require three conclusive failures; one pass establishes a flake.
+
+    Stopping early or losing report evidence leaves classification incomplete,
+    rather than turning a tooling problem into a deterministic test bug.
+    """
+    if any(result["passed"] for result in results):
+        return "flake"
+    if len(results) == CLASSIFICATION_RERUNS and all(result["conclusive"] for result in results):
+        return "deterministic"
+    return "unclassified"
+
+
 def evidence_dir_from_log(text: str) -> pathlib.Path | None:
     """The recorder announces its run directory once on stderr; find it."""
     matches = re.findall(r"^test-run evidence: (.+)$", text, flags=re.MULTILINE)
     return pathlib.Path(matches[-1].strip()) if matches else None
 
 
-def nextest_failures(junit_text: str) -> list[TestId]:
+def nextest_failures(junit_text: str, require_execution: bool = False) -> list[TestId]:
     """Failed cases from a nextest JUnit report as (binary id, test name) ids.
 
     Nextest names each testsuite by binary id (`farhelm::e2e`, `farhelm-helm`)
     and each testcase by its full test path, which is exactly the pair the
     filterset in `nextest_exclusion` needs. Skipped and selected-out cases are
-    reported too; only `failure`/`error` children count here.
+    reported too; only `failure`/`error` children count here. Classification
+    requires execution: nextest's `execution failure` error names a test that
+    could not start, so it is useful in the sweep but inconclusive in a rerun.
     """
     if "<!DOCTYPE" in junit_text or "<!ENTITY" in junit_text:
         raise ValueError("XML declarations are not supported")
@@ -357,6 +418,9 @@ def nextest_failures(junit_text: str) -> list[TestId]:
     for suite in root.iter("testsuite"):
         binary = suite.attrib.get("name", "")
         for case in suite.findall("testcase"):
+            error = case.find("error")
+            if require_execution and error is not None and error.get("type") == "execution failure":
+                continue
             if case.find("failure") is not None or case.find("error") is not None:
                 failed.append(TestId("nextest", (binary, case.attrib.get("name", ""))))
     return failed
@@ -1258,7 +1322,7 @@ class Daemon:
 
     def classify_phase(self, sweep: int, phase: Phase, log: pathlib.Path, status: int) -> None:
         """Turn a failed phase into events, one per failed test, each with a verdict."""
-        text = log.read_text(encoding="utf-8", errors="replace")
+        text = read_log_edges(log)
         evidence = evidence_dir_from_log(text)
         failures: list[tuple[TestId, dict]] = []
         try:
@@ -1306,7 +1370,7 @@ class Daemon:
                           evidence=str(evidence) if evidence else None, **details)
 
     def classify(self, sweep: int, phase: Phase, test: TestId) -> tuple[str, list[dict]]:
-        """Rerun one failed unit alone; every-time failure means deterministic.
+        """Rerun one failed unit alone; require evidence for each per-test failure.
 
         Passing even once under identical conditions is the definition of a
         flake for the sweep's purposes. Reruns are narrow recorded runs so each
@@ -1330,13 +1394,13 @@ class Daemon:
                 # This attempt was killed by the stop, not by the test; it is
                 # not evidence either way.
                 break
-            text = log.read_text(encoding="utf-8", errors="replace")
+            text = read_log_edges(log)
             evidence = evidence_dir_from_log(text)
+            conclusive, reason = rerun_conclusion(test, status, evidence)
             results.append({"attempt": attempt, "exit_status": status, "passed": status == 0,
+                            "conclusive": conclusive, "reason": reason,
                             "evidence": str(evidence) if evidence else None, "log": str(log)})
-        if len(results) < CLASSIFICATION_RERUNS and not any(r["passed"] for r in results):
-            return "unclassified", results
-        return ("flake" if any(r["passed"] for r in results) else "deterministic"), results
+        return classification_verdict(results), results
 
 
 # ---------------------------------------------------------------------------

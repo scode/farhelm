@@ -55,18 +55,25 @@ deflake/AGENTS.md exactly, with ONLY these deviations because this is an evaluat
 
 1. Start the driver with `deflake/bin/deflake start --profile eval`. Everything else about the protocol is unchanged.
 2. For waiting: run `deflake/bin/deflake wait` in the background with your harness's largest tool timeout and do
-   nothing until its completion notification arrives. Do not poll, tail logs, read its output file, or run `status`
-   between events. If `wait` exits 3, run it again the same way.
+   nothing until its completion notification arrives. While it runs, do not poll, tail logs, read its output file, or
+   run `status`. If the notification has only the exit code, read the completed command's output once to receive the
+   event text. If `wait` exits 3, run it again the same way.
 3. PRs: the jjstack skill and GitHub are NOT available. Where deflake/AGENTS.md says to make a PR, make the commit with
    `jj commit -m ...` (one commit per record or fix, stacked linearly, Conventional Commit format) and set a bookmark
-   `pr/<slug>` on it. Do not push, do not run any `gh` command. Run no finishing-work gate except `dprint check` on
-   files you edited.
+   `pr/<slug>` on it. The required starting fetch is allowed: this checkout's origin is the local bare evaluation
+   repository, so it reaches no GitHub service. Do not push, do not run any `gh` command. For these throwaway commits,
+   this deviation replaces the ordinary PR, test and reviewer gates: run only `dprint check` on covered edited files,
+   no additional tests and no cold commit-message reader. If dprint covers none of a fix's files, do not substitute
+   another check. These exceptions apply only to the eval subject's commits.
 4. Do not modify anything under deflake/ except deflake/known-flakes.txt.
 5. Never touch any other checkout or anything under ~/.local/state/farhelm. The driver's own state under
    /tmp/farhelm-tmp/deflake is fine.
 
+The numeric phase-log prefix is the sweep number; batteries execute sequentially within each sweep.
+
 Keep going until `wait` returns exit 4, or until deflake/AGENTS.md tells you to end the run on a tooling event. Then
-write your final report, containing in this order: every event you received, verbatim as `wait` printed it; for each
+write your final report, containing in this order: every event you received, verbatim as `wait` printed it, with no
+trimming, abbreviation or replacement of any lines (including excerpts); for each
 event, what you decided and did, the exact commit message and bookmark of any commit, and the full text you added to
 TODO.md, FLAKES.md and deflake/known-flakes.txt; the output of
 `jj log -r 'main..@' --no-graph -T 'change_id.short() ++ " " ++ bookmarks ++ " " ++ description.first_line() ++ "\n"'`;

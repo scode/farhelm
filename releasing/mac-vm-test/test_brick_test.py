@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import unittest
 import uuid
+from unittest import mock
 
 from brick_test import Run, artifact, metadata, plan, smoke, version
 from control import Control, Refused, atomic_json
@@ -416,6 +417,36 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(self.run.verdict(self.run.selected('fresh')), 'could not run')
             self.run.record('fresh', 'remote-terminal', 'fail', [], 'Synthetic failure scenario.')
             self.assertEqual(self.run.verdict(self.run.selected('fresh')), 'fail')
+
+    def test_record_hashes_the_bytes_it_validated_including_receipts(self):
+        """Replacing evidence after its first read cannot inherit the old attestation.
+
+        Receipt references also appear in the ordinary evidence list. Each must
+        be read once, checked for progress, and bound to that same byte string.
+        """
+        self.prepare('upgrade-v0.24.0')
+        receipt = {'pid': 42, 'start_ticks': 100,
+                   'boot_id': '00000000-0000-0000-0000-000000000001', 'counter': 5}
+        before = json.dumps(receipt).encode()
+        after = json.dumps(dict(receipt, counter=6)).encode()
+        refs = [self.evidence_file('before.json', before), self.evidence_file('after.json', after)]
+        original = dict(zip(refs, (before, after)))
+        reads = []
+
+        def replace_after_read(root, reference):
+            """Return valid bytes, then leave different bytes for any accidental reread."""
+            raw = artifact(root, reference)
+            reads.append(reference)
+            (root / reference).write_bytes(b'replaced evidence')
+            return raw
+
+        with self.run.locked(), mock.patch('brick_test.artifact', side_effect=replace_after_read):
+            self.run.record('upgrade-v0.24.0', 'continuity-before', 'pass', refs,
+                            'Synthetic bytes/progress contract only.', *refs)
+        result = self.run.selected('upgrade-v0.24.0')['results']['continuity-before']
+        self.assertCountEqual(reads, refs)
+        self.assertEqual(result['sha256'], {ref: hashlib.sha256(raw).hexdigest()
+                                           for ref, raw in original.items()})
 
     def test_continuity_rejects_replacement_stale_or_malformed_receipts(self):
         """A larger counter cannot substitute a replacement process or an untyped identity."""

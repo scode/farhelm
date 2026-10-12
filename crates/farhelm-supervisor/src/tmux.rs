@@ -5388,8 +5388,10 @@ mod tests {
     /// prepends the pinned build's directory to `PATH` while the distro's
     /// below-floor tmux stays at `/usr/bin`, so both ends of the scenario
     /// are present exactly where the suite already runs.
+    /// Each version query has a local deadline: a shadowed, broken candidate
+    /// must not stall discovery of the binaries the test can actually use.
     #[cfg(unix)]
-    fn tmux_binaries_on_path() -> Vec<(PathBuf, TmuxVersion)> {
+    async fn tmux_binaries_on_path() -> Vec<(PathBuf, TmuxVersion)> {
         let Some(path_var) = std::env::var_os("PATH") else {
             return Vec::new();
         };
@@ -5398,8 +5400,18 @@ mod tests {
             if !is_executable_file(&candidate) || found.iter().any(|(seen, _)| seen == &candidate) {
                 continue;
             }
-            let Ok(output) = std::process::Command::new(&candidate).arg("-V").output() else {
-                continue;
+            let mut command = tokio::process::Command::new(&candidate);
+            let probe = command.arg("-V").kill_on_drop(true).output();
+            let output = match tokio::time::timeout(Duration::from_secs(3), probe).await {
+                Ok(Ok(output)) => output,
+                Ok(Err(_)) => continue,
+                Err(_) => {
+                    eprintln!(
+                        "skipping tmux candidate {}: version probe timed out",
+                        candidate.display()
+                    );
+                    continue;
+                }
             };
             if !output.status.success() {
                 continue;
@@ -5436,7 +5448,7 @@ mod tests {
     #[cfg(unix)]
     #[farhelm_testtrace::test]
     async fn an_adopted_below_floor_server_is_refused_without_being_killed() {
-        let binaries = tmux_binaries_on_path();
+        let binaries = tmux_binaries_on_path().await;
         let old = binaries
             .iter()
             .find(|(_, version)| *version < TMUX_FLOOR)

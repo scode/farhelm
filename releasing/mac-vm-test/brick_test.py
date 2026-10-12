@@ -212,9 +212,20 @@ def is_image(value):
             and value[12:16] == b'IHDR' and all(struct.unpack('>II', value[16:24])))
 
 
-def progress(root, before, after):
-    """Reject malformed receipts as well as replayed or replaced process observations."""
-    values = [json.loads(artifact(root, ref)) for ref in (before, after)]
+def progress(root, before, after, contents=None):
+    """Reject malformed receipts as well as replayed or replaced process observations.
+
+An observation's optional byte cache is shared with its digest binding, so the
+receipt checked for progress cannot change between validation and recording.
+"""
+    # One observation binds one read of each reference. Repeated references in
+    # a continuity chain must be validated and hashed from those same bytes.
+    if contents is None:
+        contents = {}
+    for ref in (before, after):
+        if ref not in contents:
+            contents[ref] = artifact(root, ref)
+    values = [json.loads(contents[ref]) for ref in (before, after)]
     for value in values:
         if not isinstance(value, dict) or any(type(value.get(k)) is not int or value[k] < 0
                                              for k in ('pid', 'start_ticks', 'counter')) or value['pid'] == 0:
@@ -224,27 +235,31 @@ def progress(root, before, after):
     return values
 
 
-def continuity_chain(root, entry, check_id, before=None, after=None):
+def continuity_chain(root, entry, check_id, before=None, after=None, contents=None):
     """Bind each ordered milestone to the same original, advancing Linux process.
 
 Each pair must be live and advancing, but pairwise checks alone could accept a
 replacement or replay old evidence at the next milestone. Later before samples
 must be at least the preceding after sample, and later after samples must advance.
 Recheck the same relation when reporting retained results, not only at recording.
+An optional byte cache ties recursive checks to the observation being recorded;
+callers that omit it still reread evidence when revalidating a retained result.
 """
+    if contents is None:
+        contents = {}
     order = ('continuity-before', 'remote-update', 'reopen')
     index = order.index(check_id)
     if before is None or after is None:
         references = entry['results'][check_id]['continuity']
         before, after = references['before'], references['after']
-    current_before, current_after = progress(root, before, after)
+    current_before, current_after = progress(root, before, after, contents)
     if index:
         predecessor = entry['results'].get(order[index - 1])
         if not predecessor or predecessor['status'] != 'pass':
             raise Refused('record the preceding continuity milestone as pass first')
         previous = predecessor['continuity']
-        continuity_chain(root, entry, order[index - 1])
-        _, previous_after = progress(root, previous['before'], previous['after'])
+        continuity_chain(root, entry, order[index - 1], contents=contents)
+        _, previous_after = progress(root, previous['before'], previous['after'], contents)
         if any(current_before[key] != previous_after[key] for key in ('pid', 'start_ticks', 'boot_id')):
             raise Refused('continuity milestone changed the original process identity')
         if current_before['counter'] < previous_after['counter']:
@@ -441,7 +456,9 @@ checks, and later report generation revalidates retained artifact references.
             raise Refused('provide a supported result and an actual observation')
         if len(detail) > 4000 or len(references) > 20:
             raise Refused('observation or evidence list exceeds its bound')
-        contents = [artifact(self.directory, ref) for ref in references]
+        bound = set(references) | {ref for ref in (before, after) if ref is not None}
+        validated = {ref: artifact(self.directory, ref) for ref in bound}
+        contents = [validated[ref] for ref in references]
         spec = entry['required'][check_id]
         if status == 'pass':
             if not any(contents) or (spec['gui'] and not any(is_image(v) for v in contents)):
@@ -453,7 +470,7 @@ checks, and later report generation revalidates retained artifact references.
             if spec['continuity']:
                 if before is None or after is None:
                     raise Refused('continuity requires independent before/after receipts')
-                continuity_chain(self.directory, entry, check_id, before, after)
+                continuity_chain(self.directory, entry, check_id, before, after, contents=validated)
             if check_id == 'artifact-verification':
                 target = self.data['plan']['candidate']
                 values = []
@@ -475,8 +492,7 @@ checks, and later report generation revalidates retained artifact references.
             value['continuity'] = {'before': before, 'after': after}
         # Bind each accepted observation to retained bytes, so a later accidental
         # overwrite cannot inherit the old attestation just by keeping its name.
-        bound = set(references) | {ref for ref in (before, after) if ref is not None}
-        value['sha256'] = {ref: hashlib.sha256(artifact(self.directory, ref)).hexdigest() for ref in bound}
+        value['sha256'] = {ref: hashlib.sha256(validated[ref]).hexdigest() for ref in bound}
         entry['results'][check_id] = value
         self.save()
         self.note('decision', f'Pass `{pass_id}`, check `{check_id}` recorded `{status}`; private evidence retained.')

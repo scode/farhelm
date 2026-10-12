@@ -125,6 +125,67 @@ def cleanup_direct_child(process: subprocess.Popen) -> None:
     process.wait(timeout=READY_TIMEOUT)
 
 
+class DiagnosticWrites(unittest.TestCase):
+    """Repeated in-process recording must not accumulate writers under backpressure."""
+
+    def full_pipe(self, blocking):
+        """Establish a full owned pipe before testing the recorder's delivery boundary."""
+        reader, writer = os.pipe()
+        self.addCleanup(os.close, writer)
+        os.set_blocking(writer, False)
+        try:
+            while True:
+                os.write(writer, b'x' * 4096)
+        except BlockingIOError:
+            pass
+        with self.assertRaises(BlockingIOError):
+            os.write(writer, b'x')
+        os.set_blocking(writer, blocking)
+        self.assertEqual(os.get_blocking(writer), blocking)
+        return reader, writer
+
+    def test_nonblocking_backpressure_waits_and_expires(self):
+        """A full nonblocking descriptor waits once and releases its slot at deadline."""
+        reader, writer = self.full_pipe(False)
+        try:
+            with mock.patch.object(RECORDER.select, 'select', wraps=select.select) as readiness:
+                self.assertEqual(RECORDER.best_effort_write(writer, b'diagnostic', timeout=0.05), 0)
+                wait_for(lambda: not RECORDER._diagnostic_lock.locked())
+            self.assertEqual(readiness.call_count, 1)
+            self.assertFalse(os.get_blocking(writer))
+        finally:
+            os.close(reader)
+
+    def test_blocking_backpressure_keeps_one_worker_across_calls(self):
+        """A kernel-blocked write consumes one slot; later attempts drop their output.
+
+        The test owns both pipe ends and closes the reader to release the worker
+        before closing its descriptor, so no stale writer can reach a reused fd.
+        """
+        reader, writer = self.full_pipe(True)
+        entered = threading.Event()
+        original_write = os.write
+
+        def observe_write(fd, data):
+            """Witness the actual owned write, then preserve its kernel backpressure."""
+            if fd == writer:
+                entered.set()
+            return original_write(fd, data)
+
+        try:
+            with mock.patch.object(RECORDER.os, 'write', side_effect=observe_write) as writes:
+                self.assertEqual(RECORDER.best_effort_write(writer, b'diagnostic', timeout=0.05), 0)
+                self.assertTrue(entered.wait(READY_TIMEOUT), 'diagnostic worker never attempted its write')
+                self.assertTrue(RECORDER._diagnostic_lock.locked())
+                for _ in range(100):
+                    self.assertEqual(RECORDER.best_effort_write(writer, b'dropped'), 0)
+                self.assertEqual(writes.call_count, 1)
+                self.assertTrue(os.get_blocking(writer))
+        finally:
+            os.close(reader)
+            wait_for(lambda: not RECORDER._diagnostic_lock.locked())
+
+
 class RecorderTest(unittest.TestCase):
     """Drive the real CLI inside isolated Git and process fixtures."""
 

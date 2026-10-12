@@ -230,8 +230,12 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
   if (sessions.length === 0) fail("at least one session is required");
   let open = 0;
   let previousAge = -1;
+  // Staging and selection use titles as identity, even across different hosts.
+  const sessionTitles = new Set<string>();
   for (const session of sessions) {
     if (!session.title) fail("every session needs a title");
+    if (sessionTitles.has(session.title)) fail(`duplicate session title ${session.title}`);
+    sessionTitles.add(session.title);
     if (!keys.has(session.host)) fail(`session ${session.title}: unknown host ${session.host}`);
     if (!session.cwd) fail(`session ${session.title}: cwd is required`);
     if (!WRAPPERS.includes(session.wrapper)) fail(`session ${session.title}: wrapper must be claude or codex`);

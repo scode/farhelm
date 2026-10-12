@@ -301,7 +301,17 @@ jobs:
             sleep 1
           done
 
+          if ! kill -0 "$helm" 2>/dev/null; then
+            echo "the launched helm exited before the UI request" >&2
+            cat helm.log >&2
+            exit 1
+          fi
           status=$(curl -s -o body.html -D headers.txt -w '%{http_code}' "http://127.0.0.1:$port/")
+          if ! kill -0 "$helm" 2>/dev/null; then
+            echo "the launched helm exited during the UI request" >&2
+            cat helm.log >&2
+            exit 1
+          fi
           kill "$helm" 2>/dev/null || true
           if [ "$status" != 200 ]; then
             echo "the published binary answered / with HTTP $status, not 200" >&2
@@ -312,6 +322,14 @@ jobs:
           if ! grep -iq '^content-type: *text/html' headers.txt; then
             echo "the published binary served / as something other than text/html" >&2
             cat headers.txt >&2
+            exit 1
+          fi
+          # dx names the bootstrap asset after the farhelm-ui Cargo target;
+          # the helm serves its embedded index verbatim. HTML alone could be
+          # an unrelated listener that acquired the selected port first.
+          if ! grep -Eq 'assets/farhelm-ui[^"[:space:]]*\.js' body.html; then
+            echo "the published binary's HTML lacks the farhelm-ui bootstrap asset" >&2
+            cat helm.log >&2
             exit 1
           fi
           echo "ok: the published farhelm $version serves its embedded UI"
