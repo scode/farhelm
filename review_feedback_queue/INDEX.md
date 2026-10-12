@@ -40,13 +40,9 @@ None open.
 - `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
   against argument expansion.
 - `archive-rename-move-replacement-directory.md` — Checkout archiving could move a foreign replacement directory.
-- `service-start-timing-could-evade-restart-detection.md` — Setup could miss a service that starts from its old
-  definition.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
-  refreshes never write the store and so never see the row is gone.
 - `session-detail-drains-full-list.md` — every fleet-revision bump makes each open session view trigger a full
   ListSessions on its host.
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
@@ -76,12 +72,8 @@ None open.
   covering the operation.
 - `omp-child-report-fixtures-bypass-nested-runtime-check.md` — The child-report test rejects its fixture before checking
   nested-runtime ownership.
-- `shutdown-race-test-releases-sink-shutdown-starts.md` — The shutdown race test starts after the critical transition is
-  over.
 - `busy-pane-assertion-depends-another-panes-readiness.md` — A delayed producer could make the busy-pane test reject
   correct status.
-- `host-identity-race-test-pass-exercising-competing-writes.md` — The identity-race test can pass after the write guard
-  is removed.
 - `prompt-classification-test-finish-waiting-prompt-appears.md` — A delayed prompt could make its classification test
   fail on correct behavior.
 - `shutdown-race-test-establish-intended-interleaving.md` — The shutdown-race test does not hold reconciliation at the
@@ -101,8 +93,6 @@ None open.
   incomplete value.
 - `persistence-assertion-rejects-legitimately-newer-activity-timestamp.md` — A newer persisted timestamp could make the
   persistence test time out.
-- `client-task-scheduling-mistaken-server-side-overlap.md` — Client scheduling could make a serialized server pass the
-  overlap test.
 - `stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md` — The stubborn Stop fixture lacks cleanup ownership of
   its whole process tree.
 - `dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md` — The dispatch-overlap fixture arms incomplete cleanup
@@ -128,8 +118,6 @@ None open.
   outside cleanup.
 - `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks
   refer to the wrong session.
-- `stop-recovery-test-fail-wrong-listing-request.md` — The Stop recovery test could inject failure into an earlier
-  listing read.
 - `constructor-font-regression-observes-mutable-value-construction.md` — The constructor-font test observes a value that
   can already have been corrected.
 - `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
@@ -151,20 +139,10 @@ None open.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
 - `ambiguous-claim-orphaned-next-pick.md` — An uncertain plan claim could be stranded when the executor claims another.
-- `retained-failed-tags-become-mandatory-upgrade-test-inputs.md` — Failed release tags could make standard upgrade
-  validation impossible.
 - `cancelled-attach-retain-abandoned-terminal-channel.md` — Cancellation before attach transmission could retain local
   terminal-routing metadata.
-- `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` — The wedged-browser test observes a detach that does
-  not prove handler completion.
 - `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
   surviving runtime.
-- `wedged-browser-test-accepts-detach-handler-completion.md` — A matching detach frame can precede browser-handler
-  cleanup.
-- `wedged-browser-test-accepts-independent-cleanup-signal.md` — The cleanup signal in the wedged-browser test has
-  independent producers.
-- `concurrent-first-use-barrier-guarantees-disputed-interleaving.md` — The first-use test could pass without exercising
-  concurrent absent observations.
 - `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an
   unintended asynchronous Delete.
 - `replay-refusal-tests-do-directly-observe-absence-delete-replace-with-overrides.md` — Replace with overrides has a
@@ -173,23 +151,15 @@ None open.
   query-stripping tests pass with no input.
 - `recreation-test-assumes-distinct-birth-timestamps.md` — Immediate directory recreation could preserve the identity
   the test expects to differ.
-- `replacement-tests-overstate-immediate-list-no-delete-evidence.md` — Replacement tests refresh away the
-  immediate-cache regression.
-- `wedged-browser-test-may-encounter-queue-backpressure-blocked.md` — Queue overflow can satisfy the wedged-browser test
-  before socket cleanup.
 - `sink-healing-witness-consume-queued-output.md` — The healed-sink test could consume output queued before the failure.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
   file.
-- `legacy-launch-validation-could-prevent-startup.md` — A historical launch shape could make the whole supervisor refuse
-  startup.
 - `feed-retained-browser-sign-in-interruption-falsely-represents.md` — Lost browser storage could leave an invisible
   feed counted as an available GUI.
 - `template-supplied-session-names-rendered-raw.md` — A template's saved session name could be misleading in the
   launcher.
-- `watchdog-logs-rather-recovering-window.md` — A persistent desktop bridge outage could accumulate native query
-  entries.
 - `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
   template.
 - `concurrent-starts-bypass-sweep-serialization.md` — Concurrent sweep starts could publish the losing run as current.
@@ -205,35 +175,24 @@ None open.
   death.
 - `work-order-progress-reads-observe-empty-file-during.md` — An empty progress baseline could make old output look newly
   produced.
-- `browser-children-retain-detached-descendants-every-platform.md` — Non-Linux supervision could leave detached browser
-  descendants alive.
 - `screenshot-runs-collide-through-shared-fleet-auth.md` — Overlapping screenshot commands could interfere through
   shared files.
 - `shared-authentication-files-causing-concurrent-run-interference.md` — Overlapping runs could remove each other's
   authentication state.
 - `held-synthetic-delete-handlers-delay-failure-teardown.md` — Failed assertions could leave synthetic DELETE handlers
   blocking teardown.
-- `descendant-surviving-markeddecoy-destruction.md` — A decoy's sleep child could survive cleanup on non-procfs
-  platforms.
 - `guest-addresses-account-names-inject-ssh-configuration.md` — An IPv6 scope suffix could inject text into guest SSH
   configuration.
 - `replaced-evidence-repeated-continuity-receipts-retain-passing.md` — Evidence replaced during digest capture could
   inherit a passing validation.
 - `aggregate-identity-skew-creates-false-host-match.md` — An aggregate identity mismatch remains an unresolved
   transition question.
-- `dropping-upload-guard-outside-tokio-runtime-skips.md` — Dropping an upload owner outside runtime context could skip
-  cleanup.
 - `detached-terminal-cleanup-tasks-wait-writer-capacity.md` — Repeated detach cleanup could accumulate tasks waiting for
   writer capacity.
-- `oversized-successful-agent-reply-becomes-internal.md` — An oversized success reply could be reported as an internal
-  failure after mutation.
 - `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md` — A failed Pi callback could leave Resume
   pointing at an earlier conversation.
-- `unbounded-aggregate-capture-replies.md` — Aggregate terminal capture could exceed a safe memory bound.
 - `live-panes-process-read-error-degrades-pid-only-identity.md` — A live-pane identity read failure could admit an old
   report by process number alone.
-- `omp-context-changes-initial-eligibility-check.md` — A retained reporter context leaves an unresolved
-  foreground-ownership question.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
