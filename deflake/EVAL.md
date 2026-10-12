@@ -16,9 +16,10 @@ evidence, and a low-power model's confusions are exactly the instruction gaps th
 ## Procedure
 
 1. From your checkout, with the driver and instructions you want to test committed on the current working-copy parent,
-   run `deflake/eval-setup.sh <empty dir>`. It prints the eval checkout path. It clones your checkout, points `origin`
-   at a local bare repository so nothing reaches GitHub, initializes jj, and commits two fixtures on that clone's
-   `main`: a farhelm-proto unit test that fails once per marker file and a JS test with a wrong assertion.
+   run `deflake/eval-setup.sh <empty dir>`, with the directory inside your scratch directory (root AGENTS.md, "Agent
+   scratch space"). It prints the eval checkout path. It clones your checkout, points `origin` at a local bare
+   repository so nothing reaches GitHub, initializes jj, and commits two fixtures on that clone's `main`: a
+   farhelm-proto unit test that fails once per marker file and a JS test with a wrong assertion.
 2. Make sure no sweep is running on the machine (`deflake/bin/deflake status` in your checkout); the daemon lock allows
    one at a time.
 3. Delegate the run to a fresh, low-power agent (a Sonnet-class model at medium effort is the intended calibration: the
@@ -29,7 +30,7 @@ evidence, and a low-power model's confusions are exactly the instruction gaps th
 5. Check that the driver deleted the eval worktree's build outputs: `target/` under the sweep worktree (below) must be
    gone once `wait` has returned 4.
 6. Clean up: delete the eval directory, the sweep worktree the driver made for it under
-   `~/.local/state/farhelm-deflake/workspaces/<key>` (its `status.json` under `runs/<uuid>/` names the path) with the
+   `/tmp/farhelm-tmp/deflake/workspaces/<key>` (its `status.json` under `runs/<uuid>/` names the path) with the
    `<key>.lock` beside it, the pointer under `current/`, and `/tmp/deflake-eval-flaky-marker`. Delete the lock file only
    once the run is over: a process still holding it is a command of that run, and removing the file under it would let
    the next run build beside that command.
@@ -62,7 +63,7 @@ deflake/AGENTS.md exactly, with ONLY these deviations because this is an evaluat
    files you edited.
 4. Do not modify anything under deflake/ except deflake/known-flakes.txt.
 5. Never touch any other checkout or anything under ~/.local/state/farhelm. The driver's own state under
-   ~/.local/state/farhelm-deflake is fine.
+   /tmp/farhelm-tmp/deflake is fine.
 
 Keep going until `wait` returns exit 4, or until deflake/AGENTS.md tells you to end the run on a tooling event. Then
 write your final report, containing in this order: every event you received, verbatim as `wait` printed it; for each

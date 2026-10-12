@@ -40,7 +40,7 @@ verification later needs them.
 Check that no other deflake sweep holds the machine: `deflake/bin/deflake start` refuses while another daemon lives, but
 finding out now avoids running static checks under someone else's sweep. If another checkout's sweep is running, tell
 the user. When that sweep is on the same `main` commit, offer to use its results (its run directory under
-`~/.local/state/farhelm-deflake/runs/` has `status.json` and `events/`) instead of waiting for the lock; its own session
+`/tmp/farhelm-tmp/deflake/runs/` has `status.json` and `events/`) instead of waiting for the lock; its own session
 records its flakes. Coordinate with that session before fixing a failure it reported, so the two of you do not open
 duplicate PRs.
 

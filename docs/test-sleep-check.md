@@ -5,7 +5,9 @@ the inventory to inspect intent before changing a test: readiness polling belong
 observation window or deliberate timing stimulus may need to remain. An annotation records a reason; it does not prove
 that reason is sound. Apply [.agents/test-authoring.md](../.agents/test-authoring.md) when reviewing the result.
 
-Install the small pinned parser packages in an isolated environment outside the checkout, then invoke that interpreter:
+Install the small pinned parser packages in an isolated environment outside the checkout, then invoke that interpreter.
+Agents create it in their scratch directory (root AGENTS.md, "Agent scratch space"), not under `~/.cache` or `~/.local`,
+where nothing would ever remove it:
 
 ```sh
 python3 -m venv /path/to/test-sleep-env

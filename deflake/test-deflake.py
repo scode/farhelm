@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -227,6 +229,39 @@ class EventLifecycle(unittest.TestCase):
             data = json.loads((run.events / "0001.json").read_text())
             self.assertEqual(data["kind"], "failure")
             self.assertIn("event 0001: failure", D.format_event(data))
+
+
+class StateRootLocation(unittest.TestCase):
+    """The driver's state lives in the temporary agent scratch tree, and only this user's.
+
+    The state tree (one persistent sweep worktree per checkout, plus every
+    run's logs) used to sit under `~/.local/state`, where nothing reclaimed
+    it. It now sits at `<tmp>/farhelm-tmp/deflake` beside the recorder's
+    evidence. Because that is a fixed name in a shared directory and the
+    daemon executes what it finds in the worktree there, a root another
+    account owns must be refused rather than used.
+    """
+
+    def test_root_follows_an_absolute_tmpdir_only(self):
+        self.assertEqual(D.state_root({}), pathlib.Path("/tmp/farhelm-tmp/deflake"))
+        self.assertEqual(D.state_root({"TMPDIR": "relative"}), pathlib.Path("/tmp/farhelm-tmp/deflake"))
+        self.assertEqual(D.state_root({"XDG_STATE_HOME": "/state"}), pathlib.Path("/tmp/farhelm-tmp/deflake"))
+        self.assertEqual(D.state_root({"TMPDIR": "/scratch"}), pathlib.Path("/scratch/farhelm-tmp/deflake"))
+
+    def test_prepare_creates_a_private_root_and_refuses_a_foreign_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "farhelm-tmp" / "deflake"
+            with mock.patch.object(D, "state_root", return_value=root):
+                self.assertEqual(D.prepare_state_root(), root)
+                self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+                # A different effective uid stands in for another account,
+                # since a test cannot create directories someone else owns.
+                with mock.patch.object(os, "geteuid", return_value=os.geteuid() + 1):
+                    with self.assertRaises(SystemExit):
+                        D.prepare_state_root()
+                root.chmod(0o755)
+                with self.assertRaises(SystemExit):
+                    D.prepare_state_root()
 
 
 if __name__ == "__main__":

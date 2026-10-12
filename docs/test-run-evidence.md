@@ -97,12 +97,19 @@ test process groups needs an allowance longer than its internal termination grac
 
 `--help` and `-h` work without the required labels or a command. Help after the `--` boundary belongs to the child argv.
 
-The default root is `$XDG_STATE_HOME/farhelm-test-runs` when `XDG_STATE_HOME` is set, otherwise
-`~/.local/state/farhelm-test-runs`. This is deliberately separate from live product state. The recorder rejects roots
-equal to or below the tested Git checkout, the conventional `~/.local/state/farhelm` tree, or `$XDG_STATE_HOME/farhelm`
-when XDG state is configured. A newly created root and every run directory use mode `0700`; private files use mode
-`0600` for recorder-created files. Runner-created files may use their own file modes inside the private run directory.
-An existing root must have no group or other permission bits, and the recorder does not change its owner permissions.
+The default root is `$TMPDIR/farhelm-tmp/test-runs` when `TMPDIR` is an absolute path, otherwise
+`/tmp/farhelm-tmp/test-runs`: the agent scratch tree root AGENTS.md describes. The default used to be
+`~/.local/state/farhelm-test-runs`, where nothing ever pruned it, and agents running thousands of recorded commands grew
+it to about ten gigabytes in a month. In a temporary directory it goes away with that directory's ordinary cleanup
+(often at boot, or after some weeks unused), so raw evidence is not durable there. Record what a failure showed (a fix
+PR or FLAKES.md entry) while the run is still present, or pass `--output-root` for evidence that must outlive the
+machine's temporary files. The recorder rejects roots equal to or below the tested Git checkout, the conventional
+`~/.local/state/farhelm` tree, or `$XDG_STATE_HOME/farhelm` when XDG state is configured. A newly created root and every
+run directory use mode `0700`; private files use mode `0600` for recorder-created files. Runner-created files may use
+their own file modes inside the private run directory. An existing root must have no group or other permission bits and
+must belong to the invoking user, and the directory holding it must belong to that user or to root, or be sticky like
+`/tmp`; otherwise another account that created the fixed-name directory first could swap or read the evidence. The
+recorder does not change an existing root's permissions.
 
 Every invocation gets a full UUID directory. A retry always creates another directory, so a later passing run cannot
 overwrite the failure that prompted it. The path is written to stderr as `test-run evidence: PATH` once the directory
@@ -163,8 +170,8 @@ existing nonzero command status is preserved. A recorder killed before collectio
 unproven. Nextest does not run doctests; maintained suite commands must retain a separate doctest invocation.
 
 When changing this integration, run the small Python policy/recorder checks and, on a Linux sandbox with the pinned
-runner, `python3 scripts/test-nextest-cleanup.py --output-root /tmp/nextest-cleanup-evidence`. Repeat with
-`--trigger test` to exercise nextest's own test deadline instead of the recorder's execution deadline. The fixture
+runner, `python3 scripts/test-nextest-cleanup.py --output-root /tmp/farhelm-tmp/<id>/nextest-cleanup-evidence`. Repeat
+with `--trigger test` to exercise nextest's own test deadline instead of the recorder's execution deadline. The fixture
 shortens only its copy of the per-test execution period for that case, retaining the real five-second signal grace. Both
 commands compile a dependency-free fixture and verify that nextest kills a SIGTERM-resistant test and its child in the
 runner-owned test group. These are explicit lifecycle checks, not a per-edit stress requirement or an added CI job.
