@@ -71,3 +71,30 @@ Private galaxy-brain evidence reuses session `29405ad6-d9d8-4919-8d82-c1a7afa9b9
 Native tools expose no independently reported model attribution, effort or token usage; those remain evidence gaps. The
 local implementation decision was recorded after editing and describes its recording time, not an invented start time.
 These accounting limitations supply no runtime or cost claim.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1931.
+
+#### Review before merging
+
+No findings. The PR removes exactly the eleven findings its plan names, nine discarded and two deferred, marks each
+ledger entry complete, and changes nothing else in the ledger. Its two TODO changes follow the recorded decisions: the
+failed-create cleanup case is folded into the existing Maybe-later entry about requiring a systemd user manager, and a
+new Maybe-later entry covers Mac window restoration across display scales, saying it needs work on a real Mac. Note left
+as is: the new systemd case leans on internal terms more than the plan's "in product terms" asked.
+
+#### Checks
+
+These two plans were landed together, triage-bookkeeping-round-two first with dev-tooling-robustness-fixes on top, after
+ui-layout-and-escaping-fixes; the rebases met only the review queue index, which still matches its files.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check` (after fixing a double blank line the
+  landing's own index merge left), the test-delay checker, `shellcheck` on `website/scripts/preview.sh` and
+  `deflake/eval-setup.sh`, the test recorder's self-tests (60), the deflake driver's tests (18), the brick-test
+  tooling's unit tests (26 and 6), `cargo clippy --all-targets -- -D warnings`, and the supervisor's tmux module tests
+  through the recorder (run `31f6afcc`, 52 of 52).
+- Not run: the signing workflow, which runs only on a release; the deflake end-to-end evaluation, which the executor ran
+  and passed; and any browser or wider Rust tests, since nothing they cover changed.
+
+Nothing in the report above was made untrue by the landing.
