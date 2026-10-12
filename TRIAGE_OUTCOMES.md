@@ -11597,7 +11597,8 @@
   longer than the drain bound and asserting shutdown completes within the drain bound. If the flood cannot be reached
   that way without a production test hook, record `discard`; other complications go back to the user. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## sink-healing-witness-consume-queued-output.md
 
@@ -11611,7 +11612,8 @@
 - Completion criteria: the post-heal witness is fresh output produced after healing (for example a new marker written
   after the heal, or draining the queue before the check), so pre-kill output cannot satisfy it. Same gate as the
   sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## ignored-transcript-feeder-write-errors-conceal-missing-input.md
 
@@ -11724,7 +11726,8 @@
 - Completion criteria: run the test narrowly first to learn whether it fails, passes or skips today, and record that.
   Then check the first marker before the restart and wait for the second marker on its own afterwards, with the comment
   corrected. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## environment-value-parsed-output-complete.md
 
@@ -11736,7 +11739,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the value is parsed only from a complete line (or after `FAKE-AGENT READY`), the same shape as
   the fixed `directory-witness-read-pwd-writes-it.md`. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## persistence-assertion-rejects-legitimately-newer-activity-timestamp.md
 
@@ -11748,7 +11752,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the assertion accepts a stored value at least as new as the advanced one. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## macos-environment-test-accepts-failed-observations-success.md
 
@@ -12384,7 +12389,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: the child is owned for cleanup from the moment it is spawned (for example `kill_on_drop` set
   before spawning, guard armed before the readiness wait). Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## pipe-scan-assertion-failures-leave-fixture-processes-running.md
 
@@ -12394,7 +12400,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: kill-and-reap guards are armed right after each spawn. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md
 
@@ -12406,7 +12413,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: the marker-based cleanup guard is armed right after create, owning the whole fixture tree. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md
 
@@ -12416,7 +12424,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling; the two can share one change. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## busy-selection-test-loses-source-second-creation-fails.md
 
@@ -12454,7 +12463,8 @@
   back to the user if the gate affects CI or release selections beyond a contained change. Remove this feedback file and
   its index entry, together with `child-discovery-always-times-out-macos.md`,
   `unavailable-process-scan-certifies-no-marked-processes.md` and `pid-cleanup-guard-inert-macos.md`.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## child-discovery-always-times-out-macos.md
 
@@ -12465,7 +12475,8 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## unavailable-process-scan-certifies-no-marked-processes.md
 
@@ -12476,7 +12487,8 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## pid-cleanup-guard-inert-macos.md
 
@@ -12487,7 +12499,8 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
+- Execution: `complete`: jj change `rwvwtpsqrypruprvyqrporxovqwwuxpo`, bookmark
+  `plan/e2e-oracle-and-cleanup-fixes/01-e2e-test-fixes`; https://github.com/scode/farhelm/pull/1925/changes.
 
 ## browser-children-retain-detached-descendants-every-platform.md
 

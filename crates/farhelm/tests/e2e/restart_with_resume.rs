@@ -1515,6 +1515,10 @@ pub(crate) fn write_rc_files(home: &std::path::Path, value: &str) {
 /// it says so loudly and stops rather than asserting something it cannot
 /// observe: a silent pass would be worse than an honest skip, and a
 /// failure would blame the product for the harness's blind spot.
+/// Wait for the fixture's READY line before parsing its preceding
+/// environment line, which may arrive across several frames. After
+/// restart, require the complete new value independently: Restart clears
+/// the visible grid, so the first run's line need not be replayed.
 #[farhelm_testtrace::test]
 async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
     let home = farhelm_teststate::tempdir().expect("fixture home");
@@ -1556,7 +1560,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
         .await
         .expect("attach");
     let mut seen = initial_replay;
-    wait_for(&mut rx, &mut seen, &format!("ENV:{RC_MARKER_VAR}="), 20).await;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let observed = marker_value(&seen, &format!("ENV:{RC_MARKER_VAR}="));
     if observed != "first" {
         // Deterministic, not a shrug: the rc files this test writes cover
@@ -1594,23 +1598,20 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
 
     // A restart detaches whatever was attached to the previous run (the
     // supervisor's `detach_for_restart`), so the client reattaches — which
-    // is also how it gets the reused terminal's scrollback replayed,
-    // first run's line included.
+    // is also how it observes the relaunched agent's output. The reused
+    // terminal keeps history but clears the old visible grid.
     h.client.detach(chan).await;
     let (_chan2, initial_replay, mut rx2) = h
         .client
         .attach_live(&session.id, 80, 24)
         .await
         .expect("attach after restart");
-    // Anchored AFTER the first run's own line, which is still in the
-    // reused terminal's scrollback: an unanchored wait would match the
-    // pre-restart value and pass without the relaunch having sourced
-    // anything.
+    // The complete second value cannot match the first run's output and
+    // does not require the cleared first line to survive in replay.
     let mut replay = initial_replay;
-    wait_for_after(
+    wait_for(
         &mut rx2,
         &mut replay,
-        &format!("ENV:{RC_MARKER_VAR}=first"),
         &format!("ENV:{RC_MARKER_VAR}=second"),
         30,
     )

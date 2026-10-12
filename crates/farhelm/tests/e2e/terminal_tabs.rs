@@ -2428,6 +2428,11 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
 /// the sink is keeping readable, so if a respawn left the session without
 /// one for good, this is the shape that would show it — as a tab that
 /// went quiet and never came back.
+/// A fresh shell round trip sent only after replacement proves that the
+/// tab is still being read; flood frames queued before the kill cannot
+/// satisfy it, nor can the shell's echo of the command.
+/// Consume the flood while observing healing so this test's own viewer
+/// does not stall, then interrupt the producer to let the shell answer.
 #[farhelm_testtrace::test]
 async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
     let h = harness().await;
@@ -2467,33 +2472,57 @@ async fn a_killed_session_sink_comes_back_while_its_terminals_stay_attached() {
                 .to_vec(),
         )
         .await;
-    wait_for(&mut tab_rx, &mut tab_seen, "HEAL-FLOOD-", 20).await;
+    // A rendered record proves the flood started; the echoed printf command
+    // contains HEAL-FLOOD-%s and cannot satisfy this witness.
+    wait_for(&mut tab_rx, &mut tab_seen, "HEAL-FLOOD-0", 20).await;
 
     let doomed = h
         .sup
         .session_sink_pid(&tmux_name)
         .expect("an attached session must have a sink");
-    kill_verified_tmux_client(doomed, &h).await;
+    let heal_and_agent_roundtrip = async {
+        kill_verified_tmux_client(doomed, &h).await;
+        let healed = wait_for_replacement_sink(&h, &tmux_name, doomed).await;
+        await_process_gone(doomed, "the killed sink's process must be gone").await;
+        assert!(
+            std::path::Path::new(&format!("/proc/{healed}")).exists(),
+            "the replacement sink must be a live process"
+        );
 
-    let healed = wait_for_replacement_sink(&h, &tmux_name, doomed).await;
-    await_process_gone(doomed, "the killed sink's process must be gone").await;
-    assert!(
-        std::path::Path::new(&format!("/proc/{healed}")).exists(),
-        "the replacement sink must be a live process"
-    );
-
-    // The attachments must have been undisturbed throughout — the sink is
-    // invisible infrastructure, and a self-heal that cost the user their
-    // terminal would be no better than the failure.
-    h.client
-        .send_input(chan, b"after-the-sink-died\r".to_vec())
-        .await;
-    wait_for(&mut rx, &mut seen, "after-the-sink-died", 20).await;
-    // And the busy tab is still being read: its flood kept arriving
-    // across the respawn rather than stopping at the moment the sink died.
+        // The attachments must have been undisturbed throughout — the sink is
+        // invisible infrastructure, and a self-heal that cost the user their
+        // terminal would be no better than the failure.
+        h.client
+            .send_input(chan, b"after-the-sink-died\r".to_vec())
+            .await;
+        wait_for(&mut rx, &mut seen, "after-the-sink-died", 20).await;
+    };
+    tokio::pin!(heal_and_agent_roundtrip);
+    // A flooding pane can fill the viewer's bounded queue while the test
+    // polls the sink. Keep consuming during that observation; otherwise the
+    // viewer is correctly detached as stalled before the recovery witness.
+    loop {
+        tokio::select! {
+            () = &mut heal_and_agent_roundtrip => break,
+            event = tab_rx.recv() => match event {
+                Some(TermEvent::Data(_) | TermEvent::ReplayComplete) => {}
+                other => panic!("the busy tab detached during sink healing: {other:?}"),
+            }
+        }
+    }
+    // Queued flood frames can survive the kill. Only output answering a
+    // new post-heal command proves the tab is still being read now.
     let before = tab_seen.len();
     tab_seen.clear();
-    wait_for(&mut tab_rx, &mut tab_seen, "HEAL-FLOOD-", 30).await;
+    h.client.send_input(tab_chan, vec![3]).await;
+    wait_for_shell(
+        &h.client,
+        tab_chan,
+        &mut tab_rx,
+        &mut tab_seen,
+        "AFTER-SINK-HEAL",
+    )
+    .await;
     assert!(
         before > 0,
         "test premise: the tab must have been flooding before the sink was killed"
@@ -3360,35 +3389,55 @@ fn inspect_stdin_pipe_at(proc_root: &std::path::Path, pid: u32) -> PipeHolderSca
 /// second writer is the scan's actual quarry in production: an unexpected
 /// extra process keeping EOF from ever arriving. All three holders must
 /// appear with exact modes.
+/// Each child is owned for kill-and-reap from spawn, so a failed scan
+/// assertion cannot leave either pipe holder running.
 #[farhelm_testtrace::test]
 async fn the_pipe_holder_scan_names_every_holder_of_a_live_pipe() {
     use std::os::fd::AsFd as _;
+
+    /// Own one pipe-holder process through every assertion and setup failure.
+    ///
+    /// A std Child has no kill-on-drop option. Reaping after killing also
+    /// prevents a failed scan from leaving a zombie in later diagnostics.
+    struct PipeHolder(std::process::Child);
+
+    impl Drop for PipeHolder {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     if !std::path::Path::new("/proc/self/fd").exists() {
         println!("SKIPPED: no /proc on this platform, nothing to scan");
         return;
     }
     // std rather than tokio spawns: the test needs the ChildStdin as a
     // borrowable fd to duplicate, and nothing here awaits.
-    let mut cat = std::process::Command::new("cat")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn cat");
-    let write_end = cat.stdin.take().expect("piped stdin");
+    let mut cat = PipeHolder(
+        std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn cat"),
+    );
+    let write_end = cat.0.stdin.take().expect("piped stdin");
     let dup = write_end
         .as_fd()
         .try_clone_to_owned()
         .expect("duplicate the pipe's write end");
-    let mut extra_writer = std::process::Command::new("sleep")
-        .arg("60")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::from(dup))
-        .spawn()
-        .expect("spawn the extra write-end holder");
-    let report = stdin_pipe_holder_scan(cat.id());
+    let extra_writer = PipeHolder(
+        std::process::Command::new("sleep")
+            .arg("60")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(dup))
+            .spawn()
+            .expect("spawn the extra write-end holder"),
+    );
+    let report = stdin_pipe_holder_scan(cat.0.id());
     let me = std::process::id();
-    let cat_pid = cat.id();
-    let extra_pid = extra_writer.id();
+    let cat_pid = cat.0.id();
+    let extra_pid = extra_writer.0.id();
     // " mode read:" (with the colon) and not a bare "mode read", so a
     // decoder that misreports read-write cannot sneak past the substring.
     let holds = |pid: u32, mode: &str| {
@@ -3408,10 +3457,9 @@ async fn the_pipe_holder_scan_names_every_holder_of_a_live_pipe() {
         holds(cat_pid, " mode read:"),
         "the scan must name the child as the read-end holder:\n{report}"
     );
-    let _ = extra_writer.kill();
-    let _ = extra_writer.wait();
+    drop(extra_writer);
     drop(write_end);
-    let _ = cat.wait();
+    let _ = cat.0.wait();
 }
 
 /// The scan's gap accounting is what keeps a blind spot from being read
