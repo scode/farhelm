@@ -2108,8 +2108,8 @@
     /**
      * Whether this entry is raw image DATA rather than a file reference —
      * the narrow rule `classify`'s docs in
-     * farhelm-ui/src/attachments.rs spell out, and the only thing that
-     * decides whether an upload keeps its name.
+     * farhelm-ui/src/attachments.rs spell out. This chooses both the
+     * upload name and the bucket that loses to a file reference.
      *
      * Nameless image bytes are unambiguous. A name is treated as
      * engine-synthesized only when it is EXACTLY the placeholder for this
@@ -2172,7 +2172,12 @@
           : undefined;
         const generated = capturedName === null
           || (capturedName === undefined && isRawClipboardImage(source, file));
-        const entry = { file, name: capturedName || attachmentName(file, generated) };
+        const entry = {
+          file,
+          name: capturedName || attachmentName(file, generated),
+          // A generated upload name cannot identify an omitted original item.
+          originalName: file.name || "unnamed clipboard image",
+        };
         (generated ? images : files).push(entry);
       };
       const items = data.items ? Array.prototype.slice.call(data.items) : [];
@@ -2453,11 +2458,14 @@
       for (const name of payload.directories) {
         fail(fillTemplate(messages.directory, { name }));
       }
-      // Every entry of the winning bucket, never a subset: two files in
-      // one payload are two attachments, and dropping either would be the
-      // silent loss SPEC.md forbids. Image data loses to a file reference
-      // because they are two representations of one thing, which is what
-      // the precedence order is FOR (see `classify`).
+      // Upload every entry of the winning bucket. The image bucket often
+      // renders a copied file, but a fresh real image.png can land there too.
+      // Disclose every omission instead of claiming the heuristic proves a copy.
+      if (flavor === "file") {
+        for (const entry of payload.images) {
+          fail(fillTemplate(messages.omittedImage, { name: entry.originalName }));
+        }
+      }
       const queue = flavor === "file" ? payload.files : flavor === "image" ? payload.images : [];
       render();
       if (queue.length) send(queue);

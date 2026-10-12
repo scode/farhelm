@@ -1084,53 +1084,53 @@ test("clipboard facts survive a failed File projection without intercepting past
   }
 });
 
-// The precedence case with all three flavors present at once: a file
-// reference, raw image DATA, and text.
-//
-// One upload, one insertion, and the file's own name — because the image
-// data and the file are two REPRESENTATIONS of one copy (copying an image
-// file offers both), so uploading both would publish the same picture
-// twice under two names. That is what the precedence order is for, and it
-// is a different question from the test above, where two distinct files
-// both had to survive.
-test("a file reference beside raw image data uploads the file alone", async ({ page, request }) => {
-  test.setTimeout(120_000);
-  const stamp = Date.now();
-  const uploads = countUploads(page);
-  let id: string | undefined;
-  try {
-    const session = await openAttachmentSession(page, request, `attach-mixed-${stamp}`);
-    id = session.id;
+// File precedence still chooses one upload when an image bucket and text
+// accompany a file reference. The ordinary image-file copy and the ambiguous
+// genuine fresh image.png
+// exercise the same heuristic. Both need an omission note; upload selection
+// stays unchanged, and the note must identify the original item, not a name
+// reserved for an upload that never happened.
+for (const ordinaryCopy of [false, true]) {
+  test(`a file reference beside raw image data reports the omitted image (${ordinaryCopy ? "ordinary image copy" : "fresh image.png"})`, async ({ page, request }) => {
+    test.setTimeout(120_000);
+    const stamp = Date.now();
+    const uploads = countUploads(page);
+    let id: string | undefined;
+    try {
+      const session = await openAttachmentSession(page, request, `attach-mixed-${stamp}`);
+      id = session.id;
+      const fileName = ordinaryCopy ? `holiday-${stamp}.png` : `report-${stamp}.txt`;
 
-    await dispatchPayload(page, "terminal", "paste", {
-      entries: [
-        {
-          name: `report-${stamp}.txt`,
-          mime: "text/plain",
-          content: "the file itself",
-          lastModified: stamp - 60_000,
-        },
-        // No name at all: unambiguously the engine's rendering of the
-        // clipboard's bytes rather than a file the user chose.
-        { name: "", mime: "image/png", content: "the rendering" },
-      ],
-      text: `/home/somebody/report-${stamp}.txt`,
-    });
+      await dispatchPayload(page, "terminal", "paste", {
+        entries: [
+          {
+            name: fileName,
+            mime: ordinaryCopy ? "image/png" : "text/plain",
+            content: "the file itself",
+            lastModified: stamp - 60_000,
+          },
+          { name: "image.png", mime: "image/png", content: ordinaryCopy ? "the rendering" : "a distinct real image" },
+        ],
+        text: `/home/somebody/report-${stamp}.txt`,
+      });
 
-    const match = await waitForIslandMatch(
-      page,
-      "terminal",
-      new RegExp(`(${hostPathEnding(`report-${stamp}\\.txt`)})`),
-    );
-    expect(fs.readFileSync(match[1], "utf8")).toBe("the file itself");
-    const buffer = await islandLogicalText(page, "terminal");
-    expect(buffer, "the rendering is not a second attachment").not.toContain("pasted-");
-    expect(buffer, "and the text sibling is not pasted either").not.toContain("/home/somebody/");
-    expect(uploads.count(), "one copy is one upload").toBe(1);
-  } finally {
-    if (id) await cleanupSession(request, id);
-  }
-});
+      const match = await waitForIslandMatch(
+        page,
+        "terminal",
+        new RegExp(`(${hostPathEnding(ordinaryCopy ? `holiday-${stamp}\\.png` : `report-${stamp}\\.txt`)})`),
+      );
+      expect(fs.readFileSync(match[1], "utf8")).toBe("the file itself");
+      const buffer = await islandLogicalText(page, "terminal");
+      expect(buffer, "the rendering is not a second attachment").not.toContain("pasted-");
+      expect(buffer, "and the text sibling is not pasted either").not.toContain("/home/somebody/");
+      expect(uploads.count(), "file precedence still uploads only the file reference").toBe(1);
+      const note = page.locator('[data-terminal="agent"] .attach-error');
+      await expect(note).toHaveText("left out image.png, which looked like the clipboard's copy of another pasted file");
+    } finally {
+      if (id) await cleanupSession(request, id);
+    }
+  });
+}
 
 // The inserted path is TERMINAL INPUT, so a path a shell would split is a
 // path the agent cannot open. The supervisor sanitizes the filename, but

@@ -1175,6 +1175,9 @@ async fn send_read(request: reqwest::RequestBuilder) -> Result<reqwest::Response
 #[derive(Debug)]
 enum SendError {
     Unauthenticated,
+    /// A consumed HTTP refusal, even when its body could not be read.
+    /// Plain Replace needs this fact to retire an acknowledged intent.
+    Refused(String),
     Request(String),
 }
 
@@ -1292,16 +1295,14 @@ async fn execute_with_receipt(
 fn send_error_text(error: SendError) -> String {
     match error {
         SendError::Unauthenticated => "authentication is required".to_string(),
-        SendError::Request(detail) => detail,
+        SendError::Request(detail) | SendError::Refused(detail) => detail,
     }
 }
 
-/// [`send`]'s typed body — split only so `send` can flatten the typed
-/// error at one seam; every caller but one goes through `send` or
-/// `send_read` at a fixed constant. (A deadline parameter left when the
-/// paged listing went and returned with the preference seed: [`send_within`]
-/// is the one caller-chosen deadline, and `PreferencesGate`'s docs say why
-/// it earns the exception the paged listing lost.)
+/// The common transport, authentication and build-stamp funnel.
+/// Most endpoints flatten its errors through `send` or `send_read`; plain
+/// Replace retains their origin so a consumed 401 ends its retry intent.
+/// Only `send_within` chooses a deadline; other callers use a fixed constant.
 async fn send_inner(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
@@ -1325,7 +1326,7 @@ async fn send_inner(
         let body = resp
             .text()
             .await
-            .map_err(|error| SendError::Request(error.to_string()))?;
+            .map_err(|error| SendError::Refused(error.to_string()))?;
         if device_auth_required(&body) {
             // Stamp classification happens first. A bundle that disagrees
             // with the helm cannot safely interpret even this marker, so the
@@ -1341,7 +1342,7 @@ async fn send_inner(
             return Err(SendError::Unauthenticated);
         }
         let detail = body.trim();
-        return Err(SendError::Request(if detail.is_empty() {
+        return Err(SendError::Refused(if detail.is_empty() {
             "the helm refused this request as unauthorized".to_string()
         } else {
             detail.to_string()
@@ -1702,31 +1703,76 @@ impl CreateRefusal {
     }
 }
 
-/// A refused session action (replace, restart), and whether the helm asked
-/// for an explicit YOLO confirmation before it would run it.
+/// A session action's failure, including whether the helm answered it.
+/// Plain Replace preserves response origin through the HTTP funnel: transport
+/// and success-body decoding failures leave the outcome unknown, while an HTTP
+/// refusal answers it even when its explanatory body cannot be read.
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRefusal {
+    pub(crate) answered: bool,
     pub(crate) yolo_confirmation: bool,
     pub(crate) text: String,
 }
 
 impl From<String> for ActionRefusal {
+    /// Text alone carries no response origin and cannot end a retry intent.
     fn from(text: String) -> Self {
         ActionRefusal {
+            answered: false,
             yolo_confirmation: false,
             text,
         }
     }
 }
 
+impl From<SendError> for ActionRefusal {
+    /// Preserve a consumed refusal's origin rather than guessing from its text.
+    /// Authentication still runs through the funnel's existing global effects.
+    fn from(error: SendError) -> Self {
+        Self {
+            answered: !matches!(&error, SendError::Request(_)),
+            yolo_confirmation: false,
+            text: send_error_text(error),
+        }
+    }
+}
+
 impl ActionRefusal {
+    /// Continue an unresolved Replace or its YOLO question under the same key.
+    ///
+    /// Only a refusal that settles the outcome ends the intent: a consumed
+    /// authentication refusal, or a helm reply marked definitely unaccepted.
+    /// Any other HTTP refusal may sit on top of a create that already landed
+    /// (the helm's reply from a host lost after sending, or "created X but
+    /// could not remove the original"), and the helm replays or completes a
+    /// same-key retry; a fresh key there would start a second agent. Keeping
+    /// a key whose create never ran is harmless, since the helm treats an
+    /// unknown key as new.
+    pub(crate) fn retain_replace_key(&self) -> bool {
+        !self.answered || self.yolo_confirmation
+    }
+
+    /// Read a refusal's outcome from its headers before reading display text.
+    /// It counts as answered only when the helm marks the create definitely
+    /// unaccepted, the same rule [`submit_fresh_create`] applies; a lost body
+    /// cannot change that.
     async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
         let yolo_confirmation = asks_yolo_confirmation(resp.headers());
         ActionRefusal {
+            answered: is_definitely_unaccepted(resp.headers()),
             yolo_confirmation,
             text: refusal_text(method, url, resp).await,
         }
     }
+}
+
+/// Whether a refusal carries the helm's own statement that the create was
+/// definitely not accepted, so a retry under a new key cannot duplicate it.
+/// Its absence means the create may have landed.
+fn is_definitely_unaccepted(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(farhelm_proto::http::CREATE_OUTCOME_HEADER)
+        .is_some_and(|value| value == farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED)
 }
 
 /// Whether a refusal is the helm's own request for an explicit YOLO confirmation (a YOLO
@@ -2599,12 +2645,10 @@ fn spawn_seen_writer(base: String, id: String) {
 /// with restart (replace's whole point is a NEW id and a discarded
 /// conversation; restart keeps both).
 ///
-/// Mints its own idempotency key per call — the way `create_session`'s
-/// caller mints one — but INTERNALLY rather than as an argument. Unlike
-/// `CreateSessionForm`, a row's confirm click has no editable state a key
-/// could go stale against while it is being minted (see `create_form.rs`'s
-/// key-rebinding loop for what that guards there), so one mint immediately
-/// before the one POST is enough; there is nothing to re-bind against.
+/// The caller owns `intent_key` across unknown outcomes and YOLO confirmation
+/// retries. Minting here would turn a lost reply into a second replacement
+/// instead of recovering the first. Success and other answered refusals end
+/// that intent; a deliberate new Replace must get a new key.
 ///
 /// The reply's `id` differs from `id` on success — that is the whole point
 /// of replace, not a surprise for the caller to guard against. A failure
@@ -2627,10 +2671,10 @@ fn spawn_seen_writer(base: String, id: String) {
 pub(crate) async fn replace_session(
     base: &str,
     id: &str,
+    intent_key: &str,
     guard: crate::DeleteGuard,
     allow_yolo: bool,
 ) -> Result<(Session, Option<String>), ActionRefusal> {
-    let intent_key = mint_intent_key().await?;
     let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
     let mut body = serde_json::json!({
         "intent_key": intent_key,
@@ -2640,7 +2684,9 @@ pub(crate) async fn replace_session(
     if allow_yolo {
         confirm_yolo(&mut body);
     }
-    let resp = send(client().post(&url).json(&body)).await?;
+    let resp = send_inner(client().post(&url).json(&body), REQUEST_TIMEOUT)
+        .await
+        .map_err(ActionRefusal::from)?;
     if !resp.status().is_success() {
         return Err(ActionRefusal::read("POST", &url, resp).await);
     }
@@ -3752,6 +3798,42 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// Unknown outcomes and YOLO continuations must recover the first create;
+    /// an acknowledged refusal ends the intent even if it describes partial success.
+    /// Otherwise a retry either duplicates an agent or replays an intent the user ended.
+    #[farhelm_testtrace::test]
+    fn replace_retains_only_unknown_or_yolo_refusals() {
+        let unknown = ActionRefusal::from("lost reply".to_string());
+        assert!(unknown.retain_replace_key());
+        assert!(ActionRefusal::from(SendError::Request("transport".into())).retain_replace_key());
+        for consumed in [
+            SendError::Unauthenticated,
+            SendError::Refused("unauthorized".into()),
+            SendError::Refused("unreadable refusal body".into()),
+        ] {
+            assert!(!ActionRefusal::from(consumed).retain_replace_key());
+        }
+        for yolo_confirmation in [false, true] {
+            let refusal = ActionRefusal {
+                answered: true,
+                yolo_confirmation,
+                text: "answered refusal".to_string(),
+            };
+            assert_eq!(refusal.retain_replace_key(), yolo_confirmation);
+        }
+        // Only the helm's definitely-unaccepted marker settles an HTTP refusal;
+        // a bare error status may sit on top of a create that already landed.
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert!(!is_definitely_unaccepted(&headers));
+        headers.insert(
+            farhelm_proto::http::CREATE_OUTCOME_HEADER,
+            reqwest::header::HeaderValue::from_static(
+                farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
+            ),
+        );
+        assert!(is_definitely_unaccepted(&headers));
+    }
+
     /// A successful delete reply yields its notice, `{}` yields none, and an
     /// unreadable or undecodable reply yields a notice that one may have
     /// been lost.

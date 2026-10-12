@@ -44,8 +44,18 @@ import {
 } from "./helpers/fleet";
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
-import { LIVE_BADGE, LIVE_STATES } from "./helpers/terminal-suite";
+import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_STATES } from "./helpers/terminal-suite";
+
+/** The helm's marker that a create was definitely not accepted. Only a refusal
+ * carrying it ends a Replace intent; a bare error status may sit on top of a
+ * create that already landed, so the UI keeps the key for a same-key retry. */
+const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
+import { routeGate } from "./helpers/route-gate";
 import { attachSession, waitForTermText } from "./helpers/term";
+
+// Fabricated refusals need the live helm's stamp. The existing suite reset
+// captures it per engine and prevents unrelated build-skew recovery behavior.
+installTerminalSuiteHooks();
 
 /** Find one session by its opaque server id, independent of title changes —
  * the same helper `clone.spec.ts` defines locally,
@@ -54,6 +64,218 @@ import { attachSession, waitForTermText } from "./helpers/term";
 function row(page: Page, id: string) {
   return page.locator(`.session-row[data-session-id="${id}"]`);
 }
+
+// Aborting before the helm sees the request leaves the source available for a
+// real retry. Key equality is the oracle: session count alone cannot prove
+// recovery when the first request never created anything. A subsequent 401
+// without the authentication marker ends that intent, even though the shared
+// HTTP funnel consumes it before the endpoint decodes the reply.
+for (const surface of ["sidebar", "header"] as const) {
+  test(`plain Replace retries an unknown outcome with the same key (${surface})`, async ({ page, request }) => {
+    expect(helmBuild(), "controlled refusals use the live helm's nonempty build stamp").not.toBe("");
+    const source = await createSession(request, { title: `replace-retry-${surface}-${Date.now()}` });
+    let replacementId: string | undefined;
+    const keys: string[] = [];
+    const endpoint = `**/api/sessions/${source.id}/replace`;
+    try {
+      await page.route(endpoint, async (route) => {
+        keys.push(route.request().postDataJSON().intent_key);
+        if (keys.length === 1) await route.abort();
+        else if (keys.length === 2) await fulfillAsHelm(route, { status: 401, body: "fixture unauthorized" });
+        else await route.continue();
+      });
+      await page.goto("/");
+      await attachSession(page, source.id);
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      const sourceRow = row(page, source.id);
+      await expect(sourceRow).toBeVisible();
+      const replace = surface === "header"
+        ? page.locator(".header-replace")
+        : sourceRow.locator(".session-row-replace");
+      const confirm = surface === "header"
+        ? page.locator(".header-replace-confirm .btn-danger")
+        : sourceRow.locator(".confirm-replace");
+      if (surface === "sidebar") await openRowMenu(sourceRow);
+      await replace.click();
+      await confirm.click();
+      const error = surface === "header" ? page.locator(".replace-error") : sourceRow.locator(".action-error").first();
+      await expect(error).toContainText("replace:");
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toEqual(expect.any(String));
+      expect(keys[0].length).toBeGreaterThan(0);
+      expect((await listSessions(request)).sessions.some((session) => session.id === source.id)).toBe(true);
+
+      // Retry through the same controls once the error proves the first task
+      // settled; reopening a prompt is not a new intent after an unknown reply.
+      if (surface === "sidebar") await openRowMenu(sourceRow);
+      await replace.click();
+      await confirm.click();
+      await expect(error).toContainText("fixture unauthorized");
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).toBe(keys[0]);
+
+      // This acknowledged refusal is a new boundary: the next attempt must
+      // mint a fresh key, rather than replaying the refused intent forever.
+      if (surface === "sidebar") await openRowMenu(sourceRow);
+      await replace.click();
+      const [response] = await Promise.all([
+        page.waitForResponse((response) => response.request().method() === "POST"
+          && response.url().endsWith(`/api/sessions/${source.id}/replace`)),
+        confirm.click(),
+      ]);
+      expect(response.ok()).toBe(true);
+      replacementId = (await response.json()).id;
+      expect(keys).toHaveLength(3);
+      expect(keys[2]).not.toBe(keys[1]);
+      await expect(sourceRow).toHaveCount(0, { timeout: 20_000 });
+      await expect(row(page, replacementId!)).toHaveAttribute("data-session-selected", "true");
+    } finally {
+      await page.unroute(endpoint);
+      if (replacementId) await cleanupSession(request, replacementId);
+      await cleanupSession(request, source.id);
+    }
+  });
+}
+
+/** Confirm a sidebar Replace through its real row controls.
+ * Callers wait for their own request/error boundary before using the row again;
+ * this helper does not hide the overlapping operations these tests exercise. */
+async function confirmSidebarReplace(sourceRow: Locator) {
+  await openRowMenu(sourceRow);
+  await sourceRow.locator(".session-row-replace").click();
+  await sourceRow.locator(".confirm-replace").click();
+}
+
+/** Release every owned fixture, keeping the test's original failure primary.
+ * Route release and session deletion are independent: a failed teardown step
+ * must not strand a sibling in the shared stack or conceal the key assertion. */
+async function cleanupReplaceFixtures(bodyFailed: boolean, steps: (() => Promise<unknown>)[]) {
+  const results = await Promise.allSettled(steps.map((step) => step()));
+  const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+  if (failures.length) {
+    const error = new AggregateError(failures, "Replace fixture cleanup failed");
+    if (bodyFailed) console.error(error);
+    else throw error;
+  }
+}
+
+// Rows intentionally run concurrently. An older row's answered result or its
+// still-open YOLO question must not end the unresolved intent of a newer row.
+for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
+  test(`plain Replace keeps a newer row's retry key after an older ${olderAction}`, async ({ page, request }) => {
+    expect(helmBuild(), "controlled refusals use the live helm's nonempty build stamp").not.toBe("");
+    let older: SessionRow | undefined;
+    let newer: SessionRow | undefined;
+    let bodyFailed = false;
+    const held = routeGate();
+    let olderDispatched = false;
+    const keys: string[] = [];
+    try {
+      older = await createSession(request, { title: `replace-older-${Date.now()}` });
+      newer = await createSession(request, { title: `replace-newer-${Date.now()}` });
+      const olderEndpoint = `**/api/sessions/${older.id}/replace`;
+      const newerEndpoint = `**/api/sessions/${newer.id}/replace`;
+      await page.route(olderEndpoint, async (route) => {
+        olderDispatched = true;
+        if (olderAction === "late refusal") {
+          await held.wait();
+          await fulfillAsHelm(route, { status: 403, body: "older answered refusal", headers: UNACCEPTED });
+        } else {
+          await fulfillAsHelm(route, {
+            status: 409,
+            body: "fixture asks for YOLO confirmation",
+            headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+          });
+        }
+      });
+      await page.route(newerEndpoint, async (route) => {
+        keys.push(route.request().postDataJSON().intent_key);
+        if (keys.length === 1) await route.abort();
+        else await fulfillAsHelm(route, { status: 403, body: "newer answered refusal", headers: UNACCEPTED });
+      });
+      await page.goto("/");
+      const olderRow = row(page, older.id);
+      const newerRow = row(page, newer.id);
+      await expect(olderRow).toBeVisible();
+      await expect(newerRow).toBeVisible();
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      await confirmSidebarReplace(olderRow);
+      await expect.poll(() => olderDispatched).toBe(true);
+      const question = page.locator(".yolo-confirmation");
+      if (olderAction === "YOLO cancellation") await expect(question).toBeVisible();
+
+      await confirmSidebarReplace(newerRow);
+      await expect(newerRow.locator(".action-error").first()).toContainText("replace:");
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toEqual(expect.any(String));
+      expect(keys[0].length).toBeGreaterThan(0);
+      expect((await listSessions(request)).sessions.some((session) => session.id === newer.id)).toBe(true);
+
+      if (olderAction === "late refusal") {
+        held.release();
+        await expect(olderRow.locator(".action-error").first()).toContainText("older answered refusal");
+      } else {
+        await question.locator(".yolo-cancel").click();
+        await expect(question).toHaveCount(0);
+      }
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      await confirmSidebarReplace(newerRow);
+      await expect(newerRow.locator(".action-error").first()).toContainText("newer answered refusal");
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).toBe(keys[0]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      held.release();
+      await cleanupReplaceFixtures(bodyFailed, [
+        () => page.unrouteAll({ behavior: "wait" }),
+        async () => { if (older) await cleanupSession(request, older.id); },
+        async () => { if (newer) await cleanupSession(request, newer.id); },
+      ]);
+    }
+  });
+}
+
+/** Header Replace with abandons the sidebar's unresolved plain Replace.
+ * Cancelling its launcher must not revive the old key: the next plain Replace
+ * describes a newly chosen intent even though the source is the same. */
+test("plain Replace gets a fresh sidebar key after cancelling header Replace with", async ({ page, request }) => {
+  expect(helmBuild(), "controlled refusals use the live helm's nonempty build stamp").not.toBe("");
+  const source = await createSession(request, { title: `replace-with-abandons-${Date.now()}` });
+  const endpoint = `**/api/sessions/${source.id}/replace`;
+  const keys: string[] = [];
+  try {
+    await page.route(endpoint, async (route) => {
+      keys.push(route.request().postDataJSON().intent_key);
+      if (keys.length === 1) await route.abort();
+      else await fulfillAsHelm(route, { status: 403, body: "new intent answered", headers: UNACCEPTED });
+    });
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await expect(page.locator(".build-skew")).toHaveCount(0);
+    const sourceRow = row(page, source.id);
+    await confirmSidebarReplace(sourceRow);
+    await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
+    expect(keys).toHaveLength(1);
+    await page.locator(".header-replace-with").click();
+    const launcherCancel = page.locator(".launch-composer-cancel");
+    await expect(launcherCancel).toBeVisible();
+    await launcherCancel.click();
+    await expect(launcherCancel).toHaveCount(0);
+    await confirmSidebarReplace(sourceRow);
+    await expect(sourceRow.locator(".action-error").first()).toContainText("new intent answered");
+    await expect(page.locator(".build-skew")).toHaveCount(0);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[0].length).toBeGreaterThan(0);
+    expect(keys[1]).not.toBe(keys[0]);
+  } finally {
+    await page.unroute(endpoint);
+    await cleanupSession(request, source.id);
+  }
+});
 
 test("replacing a live session creates a fresh row in its place, selected, with no prior scrollback", async ({
   page,

@@ -635,6 +635,9 @@ pub(crate) fn SessionView(
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
     let mut replacing = use_signal(|| false);
+    // This view is keyed by source id. An unanswered Replace keeps its key
+    // while the user retries here; cancellation or Replace with abandons it.
+    let mut replace_key = use_signal(|| None::<String>);
     // Each Replace prompt is a `ConfirmSlot` holding the lifecycle claim it
     // took when it opened: confirming moves that claim into the replace
     // task, cancelling drops it, and neither can touch a claim it does not
@@ -1494,8 +1497,24 @@ pub(crate) fn SessionView(
                 }
                 replace_yolo.set(None);
             }
-            match replace_session(&base, &id, guard, allow_yolo).await {
+            let retained = replace_key.peek().clone();
+            let key = match retained {
+                Some(key) => key,
+                None => match crate::api::mint_intent_key().await {
+                    Ok(key) => {
+                        replace_key.set(Some(key.clone()));
+                        key
+                    }
+                    Err(reason) => {
+                        replace_error.set(Some(reason));
+                        replacing.set(false);
+                        return;
+                    }
+                },
+            };
+            match replace_session(&base, &id, &key, guard, allow_yolo).await {
                 Ok((new_session, notice)) => {
+                    replace_key.set(None);
                     header_refresh.set(true);
                     delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
@@ -1521,7 +1540,12 @@ pub(crate) fn SessionView(
                         guard,
                     }));
                 }
-                Err(error) => replace_error.set(Some(error.text)),
+                Err(error) => {
+                    if !error.retain_replace_key() {
+                        replace_key.set(None);
+                    }
+                    replace_error.set(Some(error.text));
+                }
             }
             replacing.set(false);
         });
@@ -2339,7 +2363,11 @@ pub(crate) fn SessionView(
                                     class: "btn btn-neutral",
                                     autofocus: true,
                                     "data-tooltip": "cancel: keep this session as it is",
-                                    onclick: move |_| confirming_header_replace.cancel_for(&()),
+                                    onclick: move |_| {
+                                        if confirming_header_replace.take(&()).is_some() {
+                                            replace_key.set(None);
+                                        }
+                                    },
                                     "cancel"
                                 }
                             }
@@ -2358,7 +2386,10 @@ pub(crate) fn SessionView(
                         class: "btn btn-primary header-replace-with",
                         "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                         disabled: lifecycle.busy(),
-                        onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
+                        onclick: move |_| {
+                            replace_key.set(None);
+                            prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone())));
+                        },
                         "replace with"
                     }
                     // A shortcut for deleting the open session without finding
@@ -2589,6 +2620,7 @@ pub(crate) fn SessionView(
                     },
                     on_cancel: move |_| {
                         replace_yolo.set(None);
+                        replace_key.set(None);
                         replace_yolo_error.set(None);
                     },
                 }
@@ -2697,7 +2729,10 @@ pub(crate) fn SessionView(
                             class: "btn btn-primary replace-with-from-notice",
                             "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                             disabled: lifecycle.busy(),
-                            onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone()))),
+                            onclick: move |_| {
+                                replace_key.set(None);
+                                prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone())));
+                            },
                             "replace with"
                         }
                     } else {
@@ -2741,7 +2776,11 @@ pub(crate) fn SessionView(
                                 class: "btn btn-neutral replace-cancel",
                                 "data-tooltip": "cancel: keep this session as it is",
                                 autofocus: true,
-                                onclick: move |_| confirming_replace.cancel_for(&()),
+                                onclick: move |_| {
+                                    if confirming_replace.take(&()).is_some() {
+                                        replace_key.set(None);
+                                    }
+                                },
                                 "cancel"
                             }
                         }
