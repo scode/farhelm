@@ -315,11 +315,11 @@ pub struct LaunchTemplate {
     pub fields: TemplateFields,
 }
 
-/// Refuse templates whose name, commands or size cannot be safely edited.
-/// Commands cannot contain controls or invisible formatting characters: the
-/// single-line editor cannot show or preserve them. Every save path shares
+/// Refuse templates whose names, commands or size cannot be safely edited.
+/// Session names and commands cannot contain controls or invisible formatting
+/// characters: the single-line editor cannot show or preserve them. Every save path shares
 /// this check; applying an already stored template does not run it, so legacy
-/// commands remain usable until the user edits the template (SPEC.md).
+/// values remain usable until the user edits the template (SPEC.md).
 /// Names must also survive use as a URL segment: `.` and `..` navigate instead
 /// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
@@ -345,6 +345,7 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
         return Err("a template name cannot contain control characters".to_string());
     }
     for (field, command) in [
+        ("session name", template.fields.name.as_deref()),
         ("launch command", template.fields.command.as_deref()),
         (
             "resume command",
@@ -1295,6 +1296,46 @@ mod tests {
             },
         ] {
             check_template_shape(&template("ordinary", fields)).unwrap();
+        }
+    }
+
+    /// A saved session name is relayed into a single-line launcher field.
+    /// Save refuses characters that the field cannot show faithfully,
+    /// including a joiner inside emoji; existing templates still apply with
+    /// their original bytes until the user repairs the name and saves again.
+    #[test]
+    fn template_session_names_refuse_hidden_characters_only_when_saved() {
+        for name in [
+            "line\nbreak",
+            "hidden\u{200B}name",
+            "reverse\u{202E}",
+            "👩\u{200D}👩\u{200D}👧",
+        ] {
+            let legacy = template(
+                "name",
+                TemplateFields {
+                    name: Some(name.into()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(check_template_shape(&legacy), Err("a template's session name cannot contain control or invisible formatting characters".into()));
+            let applied = apply_template(
+                &LauncherState::default(),
+                &legacy,
+                &context(&[], &[], false),
+            )
+            .unwrap();
+            assert_eq!(applied.name.as_deref(), Some(name));
+        }
+        for name in [None, Some(""), Some("世界 ❤️"), Some("literal \\u{200B}")] {
+            check_template_shape(&template(
+                "name",
+                TemplateFields {
+                    name: name.map(str::to_owned),
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
         }
     }
 

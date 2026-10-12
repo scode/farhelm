@@ -265,6 +265,8 @@ impl Field {
 
 /// Default remains a value inside the control. Its label explains whether the
 /// harness's omission asks for approval or runs without prompts.
+/// An unset agent offers every choice: partial templates defer compatibility
+/// to the agent selected when they are applied, rather than guessing here.
 fn permission_options(agent: Option<LaunchHarness>) -> Vec<(String, String)> {
     let mut options = vec![(
         DEFAULT.into(),
@@ -282,11 +284,7 @@ fn permission_options(agent: Option<LaunchHarness>) -> Vec<(String, String)> {
         LaunchPermission::ALL
             .iter()
             .copied()
-            .filter(|permission| {
-                agent.map_or(*permission == LaunchPermission::Yolo, |a| {
-                    a.offers_permission(*permission)
-                })
-            })
+            .filter(|permission| agent.is_none_or(|a| a.offers_permission(*permission)))
             .map(|p| {
                 (
                     word(p),
@@ -1004,7 +1002,9 @@ pub(super) fn TemplatesDialog(
 
     let delete_base = base.clone();
     let delete = move |_| {
-        if busy() {
+        // Save's authoritative reload must land before Delete snapshots the
+        // fields for Undo; the retained resource value can still be older.
+        if busy() || templates.pending() {
             return;
         }
         let Some(name) = previous() else {
@@ -1401,6 +1401,34 @@ mod tests {
         assert!(draft.refusal(None).is_some());
         Field::Permissions.remove(&mut draft.fields);
         assert_eq!(draft.refusal(None), None);
+    }
+
+    /// Approvals-only templates cannot assume which agent will receive them.
+    /// Every declared choice is editable and saveable without an agent; the
+    /// launcher's existing compatibility check decides whether it applies.
+    #[test]
+    fn partial_templates_offer_every_approval_choice() {
+        for permission in LaunchPermission::ALL {
+            assert!(
+                permission_options(None)
+                    .iter()
+                    .any(|(key, _)| key == &word(permission))
+            );
+            let draft = Draft {
+                name: "approvals".into(),
+                fields: TemplateFields {
+                    kind: Some(LauncherKind::Agent),
+                    permissions: Some(Some(permission)),
+                    ..Default::default()
+                },
+            };
+            assert_eq!(draft.refusal(None), None);
+            check_template_shape(&LaunchTemplate {
+                name: draft.name,
+                fields: draft.fields,
+            })
+            .unwrap();
+        }
     }
 
     /// Presence must survive editing for null resets and false approvals alike.

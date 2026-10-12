@@ -84,6 +84,27 @@ pub(crate) fn display_peer(raw: &str) -> String {
     }
 }
 
+/// A peer-supplied value as it should SEED an editable field: unsafe
+/// characters escaped exactly as [`display_peer`] escapes them, but with no
+/// placeholder for an empty or whitespace-only value.
+///
+/// An editor's text becomes the new value as soon as the user types into it.
+/// Seeding `(empty)` or `(whitespace only: N characters)` would make typing
+/// "foo" into an untouched field produce "(empty)foo", a value the user never
+/// wrote. An empty or blank value seeds as itself, which the field shows
+/// faithfully.
+pub(crate) fn editable_peer(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if is_presentation_unsafe(ch) {
+                format!("<U+{:04X}>", ch as u32)
+            } else {
+                ch.to_string()
+            }
+        })
+        .collect()
+}
+
 /// A host identity as it should be SHOWN: spaces and every non-ASCII
 /// character escaped, not just the known-bad ones [`display_peer`] escapes.
 ///
@@ -256,6 +277,20 @@ pub(crate) fn PeerBlock(class: String, text: String) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Why this matters: rename seeds its field with this spelling, and the
+    /// field's text becomes the new title as soon as the user types. Spec:
+    /// unsafe characters escape exactly as on display, but an empty or blank
+    /// title seeds as itself, never as a placeholder phrase the user could
+    /// end up saving ("(empty)foo").
+    #[farhelm_testtrace::test]
+    fn editable_seeds_escape_without_placeholders() {
+        assert_eq!(editable_peer(""), "");
+        assert_eq!(editable_peer("   "), "   ");
+        assert_eq!(editable_peer("a\u{202E}b"), "a<U+202E>b");
+        assert_eq!(editable_peer("plain title"), "plain title");
+        assert_eq!(display_peer(""), "(empty)");
+    }
 
     /// Why this matters: the adopt prompt exists so a user notices when a
     /// destination reports a different install than the one recorded. Two

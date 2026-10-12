@@ -349,12 +349,13 @@ fn reset_checkboxes_js() -> String {
         .to_string()
 }
 
-/// Undo a checkbox click whose write never started.
+/// Restore the shown settings after a refused checkbox write or start.
 ///
 /// The hosts panel refuses to start a write while another operation holds
 /// the page's lock; the click has already flipped the box by then, and with
-/// no write there is no end of one to trigger the reset in
-/// `refocus_after_write`.
+/// no write there is no end of one to trigger `refocus_after_write`. A fast
+/// failed write can also settle before that effect ever observes busy, so
+/// its result calls this directly rather than relying on an intermediate render.
 pub(super) fn reset_checkboxes() {
     let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
     document::eval(&format!(

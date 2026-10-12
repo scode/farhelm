@@ -9,6 +9,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, openRowMenu } from "./helpers/fleet";
+import { routeGate } from "./helpers/route-gate";
 
 /** Store a template through the helm's API, as the panel would. */
 async function putTemplate(request: APIRequestContext, name: string, fields: Record<string, unknown>) {
@@ -154,6 +155,78 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   const body = await response.json();
   return body.templates.find((template: any) => template.name === name);
 }
+
+/** An approvals-only template deliberately leaves the agent unset. Saving
+ * non-YOLO choices must preserve that omission, since the agent selected at
+ * launch owns the eventual compatibility decision. */
+test("an approvals-only template saves every offered approval choice", async ({ page, request }) => {
+  const name = `partial-approvals-${Date.now()}`;
+  try {
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-new").click();
+    await dialog.locator(".templates-name").fill(name);
+    await addField(dialog, "approvals");
+    const choices = dialog.getByLabel("approvals", { exact: true });
+    for (const choice of ["approve", "smart_approve", "chat", "yolo"]) {
+      await choices.selectOption(choice);
+      await expect(dialog.locator(".templates-save")).toBeEnabled();
+      await dialog.locator(".templates-save").click();
+      await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+      expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", permissions: choice });
+      await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    }
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
+/** Save's authoritative list read can lag the successful write. A synthetic
+ * Delete bypasses rendered disabled controls to exercise the handler guard;
+ * after the held read lands, Delete and Undo must use the newly saved fields. */
+test("delete waits for the saved template list before offering undo", async ({ page, request }) => {
+  const name = `saved-delete-${Date.now()}`;
+  const gate = routeGate();
+  let hold = false;
+  let held = false;
+  let deletes = 0;
+  await putTemplate(request, name, { name: "old title" });
+  await page.route("**/api/templates", async (route) => {
+    if (hold && route.request().method() === "GET") {
+      held = true;
+      await gate.wait();
+    }
+    await route.fallback();
+  });
+  page.on("request", (r) => { if (r.method() === "DELETE" && r.url().endsWith(`/api/templates/${name}`)) deletes++; });
+  try {
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+    await dialog.getByLabel("session name", { exact: true }).fill("new title");
+    hold = true;
+    await dialog.locator(".templates-save").click();
+    await expect.poll(() => held).toBe(true);
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "true");
+    expect((await storedTemplate(request, name)).fields.name).toBe("new title");
+    await dialog.locator(".templates-delete").dispatchEvent("click");
+    // sleep-ok: observe the absence of a queued Delete while the saved list is deliberately held.
+    await page.waitForTimeout(250);
+    expect(deletes).toBe(0);
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    hold = false;
+    gate.release();
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await dialog.locator(".templates-delete").click();
+    await expect(dialog.locator(".templates-undo")).toBeVisible();
+    expect(deletes).toBe(1);
+    await dialog.locator(".templates-undo").click();
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.name).toBe("new title");
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await deleteTemplate(request, name);
+  }
+});
 
 /** Destination type is a presentation choice over the existing stored schema.
  * Saving each type proves the editor does not confuse a repository with a

@@ -1466,6 +1466,9 @@ fn AppBody() -> Element {
     // header confirms, the list performs the delete (see
     // `list::HeaderDeleteRequest` for why it is not the header's own call).
     let header_delete = use_signal(|| None::<list::HeaderDeleteRequest>);
+    // Header mutations owe the persistent sidebar an attended read even
+    // while a build mismatch has withdrawn its background reader.
+    let header_refresh = use_signal(|| false);
     // Sessions with a delete in flight. The list writes it (its delete path
     // is the only one) and both panes read it: the row and the header show
     // the same in-progress state until the supervisor's reply lands.
@@ -1654,6 +1657,7 @@ fn AppBody() -> Element {
                             layout_epoch,
                             prefill_request,
                             header_delete,
+                            header_refresh,
                             deleting,
                         }
                     }
@@ -1706,6 +1710,7 @@ fn AppBody() -> Element {
                                     selection: current,
                                     prefill_request,
                                     header_delete,
+                                    header_refresh,
                                     deleting,
                                 }
                             },

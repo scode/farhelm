@@ -725,6 +725,8 @@ pub(crate) fn ListView(
     prefill_request: Signal<Option<HeaderPrefillRequest>>,
     /// The session header's confirmed deletes, run through `do_delete`.
     header_delete: Signal<Option<HeaderDeleteRequest>>,
+    /// One-shot attended listing demand from a successful header mutation.
+    header_refresh: Signal<bool>,
     /// Sessions with a delete in flight, written only by `do_delete` and
     /// read by the rows here and by the session header. AppBody owns it
     /// because the header is this view's sibling.
@@ -1628,6 +1630,17 @@ pub(crate) fn ListView(
         move |trigger: Trigger| request_read(listing_surface, trigger, listing_read.clone());
     let request_hosts =
         move |trigger: Trigger| request_read(hosts_surface, trigger, hosts_read.clone());
+
+    // AppBody owns the demand so replacing the keyed detail view cannot
+    // drop it. The existing reader coalesces it with any read already out.
+    let mut header_refresh = header_refresh;
+    let header_listing = request_listing.clone();
+    use_effect(move || {
+        if header_refresh() {
+            header_refresh.set(false);
+            header_listing(Trigger::Explicit);
+        }
+    });
 
     // This effect runs in the list's scope, unlike the root-owned seen
     // writer. Zero means no manual save has settled, so mount keeps its one
@@ -2543,7 +2556,7 @@ pub(crate) fn ListView(
         {
             return;
         }
-        rename_draft.set(title);
+        rename_draft.set(crate::peer::editable_peer(&title));
         rename_error.set(None);
         rename_focus_owned.set(false);
         // A new editor is a distinct focus lifetime, even if the previous
@@ -2553,7 +2566,7 @@ pub(crate) fn ListView(
         rename_generation.set(generation);
         rename_editor.set(Some(RenameEditor {
             id: id.clone(),
-            current_title: rename_draft.peek().clone(),
+            current_title: title,
             generation,
             unavailable: false,
         }));

@@ -1343,9 +1343,15 @@ pub(crate) fn HostsPanel(
         let base = yolo_base.clone();
         let started = run(
             host,
-            Box::pin(
-                async move { set_yolo_without_asking(&base, host, yolo_without_asking).await },
-            ),
+            Box::pin(async move {
+                let outcome = set_yolo_without_asking(&base, host, yolo_without_asking).await;
+                // A fast refusal can finish before the dialog observes busy.
+                // Restore native checkbox state from the result itself.
+                if outcome.is_err() {
+                    settings_dialog::reset_checkboxes();
+                }
+                outcome
+            }),
         );
         if started {
             dialog_write
@@ -1364,7 +1370,12 @@ pub(crate) fn HostsPanel(
         let started = run(
             host,
             Box::pin(async move {
-                set_commands_without_asking(&base, host, commands_without_asking).await
+                let outcome =
+                    set_commands_without_asking(&base, host, commands_without_asking).await;
+                if outcome.is_err() {
+                    settings_dialog::reset_checkboxes();
+                }
+                outcome
             }),
         );
         if started {
@@ -1723,6 +1734,7 @@ pub(crate) fn HostsPanel(
                                 .get(&host.id)
                                 .copied()
                                 .unwrap_or_default(),
+                            provisioning_planning: provisioning_menu_states.read().values().any(|state| state.planning),
                             remote_update_available: remote_update_available(
                                 &host,
                                 provisioning_menu_states.read().get(&host.id),
@@ -1764,8 +1776,12 @@ pub(crate) fn HostsPanel(
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
                             on_settings_start: move |id: HostId| {
+                                // Any host's planning has not claimed the page operation
+                                // lock yet, but its eventual confirmation owns
+                                // modal isolation. Settings must wait for it.
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
+                                    || provisioning_menu_states.peek().values().any(|state| state.planning)
                                 {
                                     return;
                                 }
@@ -2672,6 +2688,10 @@ fn HostRow(
     update_progress: Option<HostUpdateProgress>,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
+    /// Any host's pending plan can produce a modal confirmation. Settings
+    /// shares page-wide isolation with it, even when opened for another host.
+    #[props(default)]
+    provisioning_planning: bool,
     /// The shared update eligibility, including the parent's live provisioning
     /// busy flag; unrelated page operations do not disable update planning.
     remote_update_available: bool,
@@ -3022,7 +3042,7 @@ fn HostRow(
                             {
                                 span {
                                     class: "host-status-label",
-                                    "data-tooltip": too_new_title(&host.state),
+                                    "data-tooltip": too_new_title(&host.state).unwrap_or_else(|| phase_display_label(&host.state).to_string()),
                                     "{phase_display_label(&host.state)}"
                                 }
                             }
@@ -3380,7 +3400,7 @@ fn HostRow(
                                     class: "btn session-row-menu-item host-row-menu-item host-settings",
                                     role: "menuitem",
                                     aria_describedby: "host-menu-settings-description",
-                                    aria_disabled: if busy { "true" },
+                                    aria_disabled: if busy || provisioning_planning { "true" },
                                     tabindex: if menu_tab_stop == Some(HostMenuAction::Settings) { "0" } else { "-1" },
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, HostMenuAction::Settings, element.data())
@@ -3395,7 +3415,7 @@ fn HostRow(
                                         // `on_settings_start` closes the menu once
                                         // its own busy guard lets it through, as
                                         // `on_edit_start` does for the editor.
-                                        if !busy {
+                                        if !busy && !provisioning_planning {
                                             on_settings_start.call(id);
                                         }
                                     },

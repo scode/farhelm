@@ -24,6 +24,7 @@ import {
   type FeedStub,
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { routeGate } from "./helpers/route-gate";
 import { expectKeyboardTooltip, expectQuietInitialCancel, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
@@ -360,6 +361,59 @@ test.beforeAll(async ({ request }) => {
 
 test.beforeEach(async () => {
   await configureBackend();
+});
+
+/** A planning request owns no mutation lock, but its eventual confirmation
+ * will isolate the page. Settings must remain refused until that request
+ * settles, or two independent focus traps can make both dialogs unusable. */
+test("Settings waits while an uninstall confirmation is being planned", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "settings-plan");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  const gate = routeGate();
+  let planning = false;
+  await page.route(`**/api/hosts/${accepted.host_id}/uninstall`, async (route) => {
+    planning = true;
+    await gate.wait();
+    await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: { probe_id: "held-settings-plan", confirmation: "remove the fixture host's Farhelm installation", plan: { state_dir: "/tmp/fixture-retained-state" } } });
+  });
+  try {
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+    const hosts = await (await request.get("/api/hosts")).json();
+    const local = hosts.hosts.find((host: { kind: string }) => host.kind === "local");
+    expect(local, "another host supplies an independent Settings entry point").toBeTruthy();
+    const otherRow = page.locator(`[data-host-id="${local.id}"]`);
+    await openHostMenu(otherRow);
+    await otherRow.locator(".host-settings").click();
+    await expect(page.locator(".host-settings-dialog")).toBeVisible();
+    await page.locator(".host-settings-close").click();
+    await openHostMenu(row);
+    await row.locator(".provisioning-uninstall").click();
+    await expect.poll(() => planning).toBe(true);
+    await openHostMenu(row);
+    const settings = row.locator(".host-settings");
+    await expect(settings).toHaveAttribute("aria-disabled", "true");
+    await settings.dispatchEvent("click");
+    await expect(page.locator('.host-settings-dialog:not(.host-uninstall-dialog)')).toHaveCount(0);
+    await openHostMenu(otherRow);
+    await expect(otherRow.locator(".host-settings")).toHaveAttribute("aria-disabled", "true");
+    await otherRow.locator(".host-settings").dispatchEvent("click");
+    await expect(page.locator('.host-settings-dialog:not(.host-uninstall-dialog)')).toHaveCount(0);
+    gate.release();
+    const confirmation = page.locator(".host-uninstall-dialog");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".uninstall-cancel")).toBeFocused();
+    await confirmation.locator(".uninstall-cancel").click();
+    await expect(confirmation).toHaveCount(0);
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    await expect(page.locator('.host-settings-dialog:not(.host-uninstall-dialog)')).toBeVisible();
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
 });
 
 /** An earlier uninstall refusal occupies the same display slot as Update.

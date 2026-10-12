@@ -1350,13 +1350,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    dot-only rule in the status-badge section below is later in the sheet at
    equal specificity, so it still wins for the three that draw as a dot.
 
-   `flex-shrink: 0`: the badge is an 8px dot or a string already capped at
-   32ch by `.status-badge` itself, so shrinking it further would not free
-   meaningful space while making the one thing it exists to state
-   unreadable — unlike the copy fields and title, which have somewhere useful
-   to give. */
+   Ended and failed badges can be longer than the remaining space at the
+   supported 650px main-pane width. Their words ellipsize before the action
+   cluster moves outside the header; the tooltip retains the full status. */
 .titlebar .status-badge {
   padding: 1px 6px;
+  flex-shrink: 1;
+}
+/* The live statuses draw only an 8px dot, which shrinking would clip in a
+   crowded header; only the worded statuses may give up width. */
+.titlebar .status-badge:is(.running, .waiting, .idle) {
   flex-shrink: 0;
 }
 
@@ -4306,17 +4309,25 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   unicode-bidi: isolate;
 }
 
-/* Host state uses the session list's status grammar: a fixed-size dot, then
-   words only when the state needs saying. The whole group is the trailing
-   gutter, so names give up width before statuses move. */
+/* Phase words give up width before the menu leaves the supported 240px
+   sidebar. The dot remains visible and the label's tooltip keeps its full
+   wording, so truncation loses neither the coarse state nor its explanation. */
 .host-status {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;
   color: var(--fg-1);
   font-size: 12px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
+}
+
+.host-status > .status-dot { flex-shrink: 0; }
+.host-status > .host-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .host-status.connected {
@@ -4358,7 +4369,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 /* An update's inline status is far wider than any phase label (e.g.
    `updating: 0/9 create-directories 0:00`, about 250px at this size), and
    the 340px sidebar cannot fit it beside even `.host-name`'s 4em floor and
-   the "⋯" toggle. Unlike the phase labels, this status group may shrink;
+   the "⋯" toggle. Like the phase labels, this status group may shrink;
    `min-width: 0` is what lets a flex item go below its content width. The
    row stays `nowrap` (see `.host-row-main` for why wrapping is ruled out),
    so the width has to come from inside the status, and the step name below

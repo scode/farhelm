@@ -37,9 +37,11 @@ import { waitForSessionMounted, waitForSessionRevealed } from "./helpers/termina
 
 installTerminalSuiteHooks({ tabSweep: true });
 
-/** Rename shows the exact title's hidden characters without changing the raw
- * editable value. A peer-authored refusal uses the same isolated display rule. */
-test("rename exposes peer title and refusal characters while retaining the raw draft", async ({ page, request }) => {
+/** Rename shows the exact title's hidden characters, in the current title and
+ * in the field it seeds, without changing the stored title: the field starts
+ * escaped so an agent-set title cannot hide characters from the user who edits
+ * it. A peer-authored refusal uses the same isolated display rule. */
+test("rename exposes peer title and refusal characters and seeds an escaped draft", async ({ page, request }) => {
   const title = `rename-peer-${Date.now()}\u202Etitle\u200B`;
   const shown = title.replace("\u202E", "<U+202E>").replace("\u200B", "<U+200B>");
   const session = await createTabSession(request, title);
@@ -58,7 +60,7 @@ test("rename exposes peer title and refusal characters while retaining the raw d
     await expect(current).toHaveText(shown);
     await expect(current).toHaveAttribute("dir", "ltr");
     expect(await current.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
-    await expect(draft).toHaveValue(title);
+    await expect(draft).toHaveValue(shown);
     await draft.fill(`${title}-edited`);
     await draft.press("Enter");
     const error = dialog.locator(".rename-error .peer-value");
