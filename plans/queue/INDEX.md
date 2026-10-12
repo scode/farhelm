@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `browser-oracle-and-fixture-fixes.md` — 12 triage outcomes: browser specs that can pass while their behavior is broken, or skip cleanup after a failure (one test-only PR)
+- [landing e95fc1] `browser-oracle-and-fixture-fixes.md` — 12 triage outcomes: browser specs that can pass while their behavior is broken, or skip cleanup after a failure (one test-only PR)
 - [in-flight c9a9fe] `dev-tooling-robustness-fixes.md` — 9 triage outcomes: small robustness fixes in deflake, the recorder, the release smoke check, the brick test, the preview script, README hero staging and a tmux test helper; each discarded instead if its fix is not small
 - [in-flight e41ddb] `ui-layout-and-escaping-fixes.md` — 12 triage outcomes: header and sidebar refresh, no unattended takeover under a build mismatch, read-state queue, escaped Rename and template names, layout at minimum widths, refresh-failure notice, approvals-only templates, template delete guard, permission-switch reset
 - [in-flight 17e43e] `helm-supervisor-small-fixes.md` — 5 triage outcomes: setup/uninstall exclusion on a fresh machine, lock-table pruning, helm shutdown retiring clients, a total template-catalog cap, and Pi reporter guard
