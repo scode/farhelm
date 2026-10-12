@@ -20897,7 +20897,7 @@ pub(crate) mod tests {
             std::fs::write(
                 entry_dir.join("cli.js"),
                 r#"import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 const dir = process.argv[2];
 const child = spawn("sh", ["internal", "hook", "--vendor", "omp"], {
   cwd: dir,
@@ -20905,6 +20905,15 @@ const child = spawn("sh", ["internal", "hook", "--vendor", "omp"], {
   stdio: "ignore",
 });
 writeFileSync(`${dir}/reporter.pid`, `${child.pid}\n`);
+// The pane runtime owns the nested runtime's group from its spawn. The
+// nested directory has no trigger, so it cannot recursively start children.
+const trigger = setInterval(() => {
+  if (!existsSync(`${dir}/start-nested`)) return;
+  clearInterval(trigger);
+  spawn(process.execPath, [process.argv[1], `${dir}/nested`, "--resume", `${dir}/nested/conv.jsonl`], {
+    stdio: "ignore",
+  });
+}, 20);
 await new Promise(() => {});
 "#,
             )
@@ -21085,18 +21094,49 @@ exit 0
             peer
         }
 
-        /// A second live chain for the same fixture — a separately
-        /// launched interactive runtime whose reporter passes the asset
-        /// gate but must fail process attribution. Both chains stay
-        /// owned: the sibling's runtime is appended beside the parent's,
-        /// so teardown reaps every tree it started and the parent remains
-        /// owned and live while the sibling's rejection is measured.
-        /// The pane answer is left naming the first runtime: this
-        /// chain's ancestry can never reach it.
-        async fn spawn_sibling(&mut self) -> Option<crate::procs::ProcessIdentity> {
+        /// Start a nested OMP runtime under the pane's existing runtime.
+        /// Its reporter reaches the pane, so rejection must come from the
+        /// nested-runtime corridor rather than an unrelated process tree.
+        /// The parent's owned group covers the child before pid publication,
+        /// including a timeout or failed ancestry premise below.
+        async fn spawn_nested(&mut self) -> crate::procs::ProcessIdentity {
             let root = self.scratch.path().to_path_buf();
-            std::fs::remove_file(root.join("reporter.pid")).ok();
-            self.spawn_one().await
+            let nested = root.join("nested");
+            std::fs::create_dir(&nested).expect("nested runtime directory");
+            std::fs::copy(root.join("internal"), nested.join("internal"))
+                .expect("nested reporter script");
+            let pane_pid = self.runtimes.first().expect("pane runtime").child.id();
+            std::fs::write(root.join("start-nested"), b"").expect("request nested runtime");
+            let reporter_pid = Self::await_reporter(
+                &nested.join("reporter.pid"),
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+            )
+            .await;
+            let Some(reporter_pid) = reporter_pid else {
+                let parent = self.runtimes.first_mut().expect("owned pane runtime");
+                panic!(
+                    "nested reporter publication failed; {}",
+                    reporter_timeout_diagnostic(&mut parent.child)
+                );
+            };
+            let (runtime_pid, _, state) = crate::procs::read_process(reporter_pid)
+                .expect("read nested reporter")
+                .expect("nested reporter exists");
+            assert_eq!(state, crate::procs::ProcessState::Running);
+            let (parent_pid, _, state) = crate::procs::read_process(runtime_pid)
+                .expect("read nested runtime")
+                .expect("nested runtime exists");
+            assert_eq!(state, crate::procs::ProcessState::Running);
+            assert_eq!(
+                parent_pid, pane_pid,
+                "nested runtime must descend from the pane"
+            );
+            let (_, _, state) = crate::procs::read_process(pane_pid)
+                .expect("read pane runtime")
+                .expect("pane runtime exists");
+            assert_eq!(state, crate::procs::ProcessState::Running);
+            crate::procs::ProcessIdentity::read(reporter_pid)
+                .expect("nested reporter has a live identity")
         }
 
         /// Spawn one runtime, premise-assert its reporter's parentage,
@@ -21922,16 +21962,16 @@ exit 0
         assert_eq!(error_kind(&error), ErrorKind::Conflict);
     }
 
-    /// A separately launched interactive child's persistent report —
+    /// A nested interactive child's persistent report —
     /// which passes the asset gate on its own context — establishes
     /// nothing when it arrives first: process attribution refuses it,
     /// and the session keeps no token, version 0, and a `NotCaptured`
     /// offer.
     ///
     /// Why this test matters: the child-first race is the attack the
-    /// asset gate cannot stop (the child's context is genuinely
-    /// interactive), so this is where the supervisor half of the proof
-    /// earns its keep.
+    /// asset gate cannot stop (the child's context is interactive). Its
+    /// ancestry reaches the pane, so only the nested-runtime rejection
+    /// distinguishes this report from the parent's legitimate report.
     #[farhelm_testtrace::test]
     async fn omp_child_report_before_parent_establishes_nothing() {
         let mut fixture = OmpAdmission::launch().await;
@@ -21950,13 +21990,11 @@ exit 0
             )
             .await;
         // The parent chain exists (the pane answer names it) but has not
-        // reported yet; the child's chain is fully live beside it.
+        // reported yet; the child's chain is fully live beneath it.
         let Some(_) = fixture.spawn_runtime(&id).await else {
             return;
         };
-        let Some(sibling) = fixture.spawn_sibling().await else {
-            return;
-        };
+        let sibling = fixture.spawn_nested().await;
         let file = fixture.session_file("child.jsonl", "omp-child");
         let error = fixture
             .report(
@@ -21971,15 +22009,11 @@ exit 0
             error.kind == ErrorKind::Conflict,
             "unexpected refusal: {error:#}"
         );
-        // Past provenance, refused in attribution: the row names the
-        // gated asset, so only the walk can refuse. The exact walk
-        // diagnostic is substrate-dependent (a foreign ancestry climbs
-        // into unreadable processes on some hosts and past the depth
-        // bound on others), so this pins the family — not provenance —
-        // rather than the sentence.
+        // The live chain reaches the pane and passes provenance; pin the
+        // corridor's nested-runtime boundary rather than any earlier refusal.
         assert!(
-            !format!("{error:#}").contains("did not install the current OMP reporter"),
-            "the refusal must come after provenance, from attribution: {error:#}"
+            format!("{error:#}").contains("a nested OMP process cannot report for the foreground"),
+            "the refusal must come from the nested-runtime corridor: {error:#}"
         );
         assert_eq!(fixture.binding(&id).await, (None, 0));
         assert_eq!(
@@ -21993,6 +22027,8 @@ exit 0
     /// refuse, and the exact saved target, the ownership version, and
     /// the public offer stay the parent's — durably and through the
     /// real offer path.
+    /// The child's chain is pane-anchored; both refusals must name the
+    /// nested-runtime boundary to exclude a vacuous ancestry failure.
     #[farhelm_testtrace::test]
     async fn omp_child_reports_after_parent_leave_the_binding() {
         let mut fixture = OmpAdmission::launch().await;
@@ -22019,9 +22055,7 @@ exit 0
             .report(&id, token.clone(), "session_start", Some(peer))
             .await
             .expect("the parent report admits");
-        let Some(sibling) = fixture.spawn_sibling().await else {
-            return;
-        };
+        let sibling = fixture.spawn_nested().await;
         // Premise: the parent stays owned AND live while the sibling's
         // rejection is measured — a dead parent would refuse the child
         // reports for the wrong reason (no chain to walk past).
@@ -22050,6 +22084,11 @@ exit 0
                 error.kind == ErrorKind::Conflict,
                 "unexpected refusal: {error:#}"
             );
+            assert!(
+                format!("{error:#}")
+                    .contains("a nested OMP process cannot report for the foreground"),
+                "the nested-runtime corridor must refuse: {error:#}"
+            );
         }
         assert_eq!(fixture.binding(&id).await, (Some(token), 1));
         assert_eq!(
@@ -22062,6 +22101,8 @@ exit 0
     /// the child fails attribution before any CAS contention, so the
     /// outcome is deterministic — the parent admits, the child refuses,
     /// and the binding is the parent's.
+    /// Both chains reach the pane; the child's refusal must specifically
+    /// come from the nested-runtime corridor, even under this contention.
     #[farhelm_testtrace::test]
     async fn omp_concurrent_child_and_parent_reports_resolve_to_the_parent() {
         let mut fixture = OmpAdmission::launch().await;
@@ -22083,9 +22124,7 @@ exit 0
         let Some(peer) = fixture.spawn_runtime(&id).await else {
             return;
         };
-        let Some(sibling) = fixture.spawn_sibling().await else {
-            return;
-        };
+        let sibling = fixture.spawn_nested().await;
         let parent_token = fixture.locator_token("omp-parent", Some(&file));
         let child_file = fixture.session_file("racer-child.jsonl", "omp-child");
         let child_token = fixture.locator_token("omp-child", Some(&child_file));
@@ -22098,6 +22137,11 @@ exit 0
         assert!(
             child_error.kind == ErrorKind::Conflict,
             "unexpected refusal: {child_error:#}"
+        );
+        assert!(
+            format!("{child_error:#}")
+                .contains("a nested OMP process cannot report for the foreground"),
+            "the nested-runtime corridor must refuse: {child_error:#}"
         );
         assert_eq!(fixture.binding(&id).await, (Some(parent_token), 1));
     }

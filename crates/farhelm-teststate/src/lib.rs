@@ -113,9 +113,9 @@ const TMUX_KILL_DEADLINE: Duration = Duration::from_secs(5);
 /// Ceiling on the time ONE sweep pass spends on tmux kills in total.
 /// The per-kill deadline above bounds one wedged socket; this bounds a
 /// /tmp full of them, since neither the directory count nor the socket
-/// count is otherwise limited. A pass that exhausts it keeps reclaiming
-/// directories without further kill attempts — disk reclamation is the
-/// contract, and a wedged server can be retried by the next sweep.
+/// count is otherwise limited. A pass that exhausts it still reclaims
+/// directories without tmux sockets, but keeps those whose kills could not
+/// complete. Their socket paths remain available for the next sweep.
 const TMUX_KILL_TOTAL_BUDGET: Duration = Duration::from_secs(30);
 
 /// The sweep's time thresholds, injectable so tests can use zero instead
@@ -220,8 +220,8 @@ fn sweep_as_owner(root: &Path, policy: &SweepPolicy, owner: libc::uid_t) -> Swee
     // per-kill deadline bounds one wedged socket, but a /tmp full of them
     // times an unbounded directory count would still stall the sweep for
     // minutes. Once spent, remaining reaps skip their kill attempts and
-    // keep reclaiming disk — reclaiming disk is the contract; a wedged
-    // server is a process leak the next sweep can retry.
+    // keep any directory holding a tmux socket for the next sweep, while
+    // directories without one are still reclaimed.
     let tmux_kill_budget = std::time::Instant::now() + TMUX_KILL_TOTAL_BUDGET;
     for entry in entries {
         let entry = match entry {
@@ -441,11 +441,9 @@ fn flock_blocking(file: &File) -> io::Result<()> {
 /// one: the stack script nests a second supervisor's state (and its tmux
 /// server) at `remote/tmux.sock`, and a server whose socket dir is
 /// deleted out from under it lingers forever — the old shell sweep had
-/// exactly that gap. The kill is best-effort with a deadline; the
-/// directory is removed even if a kill fails, because reclaiming disk is
-/// this crate's reason to exist and the old shell sweep made the same
-/// trade (a wedged server minus its socket is a process leak, not a
-/// disk leak).
+/// exactly that gap. Kills are bounded; when one cannot be confirmed or
+/// the pass's budget is exhausted, keep the directory so a later sweep
+/// can retry using the socket. Removing it would strand a live server.
 fn reap(
     dir: &Path,
     owner: libc::uid_t,
@@ -458,15 +456,24 @@ fn reap(
     }
     let mut sockets = Vec::new();
     collect_tmux_sockets(dir, TMUX_SOCKET_WALK_DEPTH, &mut sockets);
+    let mut kills_confirmed = true;
     for socket in sockets {
         if std::time::Instant::now() >= tmux_kill_budget {
             diag(format!(
                 "tmux kill budget exhausted; not contacting {}",
                 socket.display()
             ));
+            kills_confirmed = false;
             continue;
         }
-        kill_tmux_server(&socket);
+        kills_confirmed &= kill_tmux_server(&socket);
+    }
+    if !kills_confirmed {
+        diag(format!(
+            "keeping {} for a later tmux kill retry",
+            dir.display()
+        ));
+        return;
     }
     match fs::remove_dir_all(dir) {
         Ok(()) => outcome.reaped.push(dir.to_path_buf()),
@@ -486,11 +493,29 @@ fn reap(
 /// excepted, which the spawn needs to find tmux — because a tmux client
 /// ships its environment to the server before it can know what is
 /// actually listening; a fake listener squatting on an orphan's socket
-/// path must not be handed CI credentials for free. Best-effort
-/// throughout: failure to spawn, a nonzero exit, or a timeout are all
-/// acceptable outcomes (the server may simply be long dead), and the
-/// caller removes the directory regardless.
-fn kill_tmux_server(socket: &Path) {
+/// path must not be handed CI credentials for free.
+///
+/// A socket nothing listens on counts as killed without running tmux. tmux
+/// never deletes its socket file when its server exits (sessions ending,
+/// `kill-server`, a crash or SIGKILL all leave it), and `kill-server` on
+/// such a socket fails; treating that as unconfirmed would keep every dead
+/// run whose server already exited forever, which is the disk leak this
+/// crate exists to prevent. Otherwise only a successful command confirms
+/// the kill: spawn, timeout and wait errors, and a failed command against a
+/// socket that accepted the connection (a live incompatible server, or a
+/// wedged one), preserve the directory for retry.
+fn kill_tmux_server(socket: &Path) -> bool {
+    match std::os::unix::net::UnixStream::connect(socket) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+            ) =>
+        {
+            return true;
+        }
+        _ => {}
+    }
     let mut command = std::process::Command::new("tmux");
     command.env_clear();
     if let Some(path) = std::env::var_os("PATH") {
@@ -504,16 +529,16 @@ fn kill_tmux_server(socket: &Path) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
-    let Ok(mut child) = child else { return };
+    let Ok(mut child) = child else { return false };
     let deadline = std::time::Instant::now() + TMUX_KILL_DEADLINE;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return,
+            Ok(Some(status)) => return status.success(),
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return;
+                    return false;
                 }
                 // sleep-ok: throttle cleanup's child-exit poll until the kill-server command exits or exhausts its allowance.
                 std::thread::sleep(Duration::from_millis(25));
@@ -524,7 +549,7 @@ fn kill_tmux_server(socket: &Path) {
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return;
+                return false;
             }
         }
     }
@@ -1004,9 +1029,95 @@ mod tests {
         assert_eq!(found, expected);
     }
 
+    /// A dead run whose tmux server already exited is reaped. tmux leaves
+    /// its socket file behind when the server goes, and `kill-server` on it
+    /// fails; if that failure kept the directory, every such run would leak
+    /// its disk forever. A socket nothing listens on therefore counts as a
+    /// confirmed kill. The premise checks pin tmux's own behaviour.
+    #[test]
+    fn reap_removes_a_directory_whose_tmux_socket_is_dead() {
+        use std::os::unix::net::UnixListener;
+
+        let root = tempfile::tempdir().unwrap();
+        let dead = dead_dir(root.path(), "fh-it.tmuxfail");
+        let socket = dead.join("tmux.sock");
+        let listener = UnixListener::bind(&socket).expect("fixture socket");
+        drop(listener);
+        assert!(
+            socket.exists(),
+            "a dead socket remains after its listener exits"
+        );
+        let failed = std::process::Command::new("tmux")
+            .arg("-S")
+            .arg(&socket)
+            .arg("kill-server")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("tmux must execute to establish the failed-exit premise");
+        assert!(
+            !failed.success(),
+            "the dead socket must produce an unsuccessful exit"
+        );
+        assert!(
+            socket.exists(),
+            "the failed command must leave a socket to retry"
+        );
+        let mut outcome = SweepOutcome {
+            reaped: Vec::new(),
+            live: 0,
+        };
+        reap(
+            &dead,
+            euid(),
+            std::time::Instant::now() + Duration::from_secs(10),
+            &mut outcome,
+        );
+        assert_eq!(
+            outcome.reaped,
+            vec![dead.clone()],
+            "a socket nothing listens on is a server that already exited"
+        );
+        assert!(!dead.exists(), "the dead run's directory is reclaimed");
+    }
+
+    /// A socket that accepts the connection but never answers, as a wedged
+    /// or incompatible live server would, is not proof the server is gone:
+    /// the kill times out and the directory stays for the next sweep.
+    #[test]
+    fn reap_keeps_the_socket_directory_when_a_listener_never_answers() {
+        use std::os::unix::net::UnixListener;
+
+        let root = tempfile::tempdir().unwrap();
+        let dead = dead_dir(root.path(), "fh-it.tmuxwedged");
+        let socket = dead.join("tmux.sock");
+        let _listener = UnixListener::bind(&socket).expect("fixture socket");
+        let mut outcome = SweepOutcome {
+            reaped: Vec::new(),
+            live: 0,
+        };
+        reap(
+            &dead,
+            euid(),
+            std::time::Instant::now() + Duration::from_secs(30),
+            &mut outcome,
+        );
+        assert!(
+            outcome.reaped.is_empty(),
+            "an unanswered kill must not count as reaped"
+        );
+        assert!(
+            socket.exists(),
+            "unconfirmed kills retain the socket for retry"
+        );
+    }
+
     /// Reaping actually terminates a real tmux server, not just its
     /// socket file — the production `tmux -S … kill-server` path end to
-    /// end. Without this, a misspelled kill command leaves the suite
+    /// end. An exhausted sweep budget first keeps the live socket and
+    /// directory for retry; the next sweep must kill and remove them.
+    /// Without this, a skipped kill can permanently orphan the server,
+    /// and a misspelled kill command leaves the suite
     /// green while orphan servers accumulate (the leak half of the
     /// incident this crate exists for).
     #[test]
@@ -1050,6 +1161,30 @@ mod tests {
             .trim()
             .parse()
             .expect("tmux pid");
+
+        let mut skipped = SweepOutcome {
+            reaped: Vec::new(),
+            live: 0,
+        };
+        reap(&dead, euid(), std::time::Instant::now(), &mut skipped);
+        assert!(
+            skipped.reaped.is_empty(),
+            "an uncontacted server cannot be reaped"
+        );
+        assert!(
+            dead.exists(),
+            "the retry directory must survive an exhausted budget"
+        );
+        assert!(
+            sock.exists(),
+            "the live server's socket must remain reachable"
+        );
+        // SAFETY: signal 0 only probes the owned server's existence.
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "the skipped server must still be live"
+        );
 
         let outcome = sweep(root.path(), &instant_policy());
         assert_eq!(outcome.reaped, vec![dead.clone()]);

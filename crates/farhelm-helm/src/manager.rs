@@ -10303,9 +10303,10 @@ mod tests {
     /// stopped through has already been drained, and the manager they
     /// belong to is on its way out.
     ///
-    /// The `yield_now` is the barrier: it lets the spawned reconcile get as
-    /// far as its store read before the shutdown runs, which is exactly the
-    /// interleaving that used to lose.
+    /// The existing database mutex holds the registry read. A manual poll
+    /// proves reconciliation is pending while owning its admission lock,
+    /// then shutdown runs before that read can complete. A scheduling yield
+    /// alone would also pass when reconciliation finished before shutdown.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_shutdown_beats_a_reconciliation_that_is_already_running() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
@@ -10324,13 +10325,23 @@ mod tests {
             .expect("actor is running");
         let dials = fixture.transport.attempts(host).len();
 
-        let manager = Arc::clone(&fixture.manager);
-        let reconciling = tokio::spawn(async move { manager.sync_registry().await });
-        tokio::task::yield_now().await;
-        fixture.manager.shutdown();
+        let connection = fixture.store.connection_for_test();
+        let mut reconciling = std::pin::pin!(fixture.manager.sync_registry());
+        {
+            let _registry_gate = connection.lock();
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(
+                reconciling.as_mut().poll(&mut cx).is_pending(),
+                "the reconcile must await the held registry connection"
+            );
+            assert!(
+                fixture.manager.reconcile.try_lock().is_err(),
+                "the pending reconcile must own admission before shutdown"
+            );
+            fixture.manager.shutdown();
+        }
         reconciling
             .await
-            .expect("the reconcile task must not panic")
             .expect("a reconcile after shutdown is a no-op, not an error");
 
         assert!(
@@ -10519,6 +10530,8 @@ mod tests {
     ///
     /// The test-owned capture follows the manager actor through the runtime,
     /// so this filters the two destination-specific transition lines it owns.
+    /// Each steady-state tick is observed through its completed publication;
+    /// advancing several intervals at once need not complete several refreshes.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn the_reconnection_trail_names_the_host_and_its_current_destination() {
         let captured = crate::test_capture::current();
@@ -10537,10 +10550,50 @@ mod tests {
             .await
             .expect("actor is running");
 
-        // Several refresh ticks, each of which republishes the connected
-        // status without changing the phase.
-        tokio::time::advance(REFRESH_INTERVAL * 5).await;
-        tokio::task::yield_now().await;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("initial refresh completed");
+        let mut status = fixture
+            .manager
+            .actors
+            .lock()
+            .expect("actor map mutex poisoned")
+            .actors[&host]
+            .status
+            .subscribe();
+        for _ in 0..5 {
+            let requests = fixture.transport.requests(host).len();
+            status.mark_unchanged();
+            tokio::time::advance(REFRESH_INTERVAL).await;
+            tokio::time::timeout(Duration::from_secs(1), status.changed())
+                .await
+                .expect("the next refresh must finish")
+                .expect("actor keeps publishing");
+            assert!(
+                matches!(
+                    &status.borrow_and_update().state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                ),
+                "the observed publication must complete a successful refresh"
+            );
+            assert!(
+                fixture.transport.requests(host).len() > requests,
+                "the publication must follow a new list request"
+            );
+        }
 
         fixture
             .store

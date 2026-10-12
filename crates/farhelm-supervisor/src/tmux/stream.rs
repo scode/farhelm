@@ -1859,24 +1859,6 @@ mod tests {
         );
     }
 
-    /// The pane filter driven through the PRODUCTION path —
-    /// [`OutputStream::next_output`] itself, over a real reader — rather
-    /// than through `classify_control_line` alone.
-    ///
-    /// The grammar test above pins which lines carry which pane; this
-    /// pins what the method built on it actually EMITS, which is a
-    /// different claim and the one that matters. Two properties only this
-    /// shape can show:
-    ///
-    /// - A passthrough wrapper of OUR pane, split across notifications,
-    ///   survives foreign payloads interleaved into the split. The
-    ///   decoder carries wrapper state across calls, so a filter that
-    ///   dropped foreign lines only AFTER decoding would feed a
-    ///   stranger's bytes into our half-open wrapper and corrupt it.
-    /// - A foreign `%pause` produces no event at all. Surfacing it would
-    ///   send this terminal through a full reset-and-replay catch-up for
-    ///   bytes it never carried.
-    ///
     /// An [`OutputStream`] over a canned transcript, plus the process
     /// standing in for tmux on its WRITE half.
     ///
@@ -1888,10 +1870,19 @@ mod tests {
     /// pane filter). A write half nothing drained would fill at 64 KiB and
     /// park the stream under test — a hang, not an assertion failure.
     ///
+    /// The feeder task must be joined after consuming the stream: an empty
+    /// stream must not conceal failed fixture delivery. Keeping the task
+    /// concurrent also lets transcripts larger than a pipe buffer drain.
     /// The returned `Child` is the write half's holder: dropping it kills
     /// that process and closes the pipe, so callers must keep it alive for
     /// as long as they drive the stream.
-    fn stream_over_transcript(transcript: &'static [u8]) -> (OutputStream, Child) {
+    fn stream_over_transcript(
+        transcript: &'static [u8],
+    ) -> (
+        OutputStream,
+        Child,
+        tokio::task::JoinHandle<std::io::Result<()>>,
+    ) {
         let mut feeder = Command::new("cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1900,9 +1891,7 @@ mod tests {
             .expect("spawning the transcript feeder");
         let mut feeder_stdin = feeder.stdin.take().expect("piped stdin");
         let feeder_stdout = feeder.stdout.take().expect("piped stdout");
-        tokio::spawn(async move {
-            let _ = feeder_stdin.write_all(transcript).await;
-        });
+        let delivery = tokio::spawn(async move { feeder_stdin.write_all(transcript).await });
         let mut command_sink = Command::new("cat")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -1938,7 +1927,7 @@ mod tests {
             pane_list_timeout: PANE_LIST_TIMEOUT,
             exit_reason: None,
         };
-        (stream, command_sink)
+        (stream, command_sink, delivery)
     }
 
     /// Build the production reader around a pipe whose writer the test owns.
@@ -2008,6 +1997,11 @@ mod tests {
         writer.flush().await.expect("flushing pane payload");
     }
 
+    /// The production stream filters foreign notifications before decoding
+    /// its own split passthrough wrapper. Foreign payload must neither
+    /// corrupt that wrapper nor turn a foreign pause into our catch-up event.
+    /// Observed feeder delivery prevents missing input from weakening either
+    /// assertion; the grammar-only tests do not cover this reader path.
     #[farhelm_testtrace::test]
     async fn next_output_emits_only_its_own_panes_events_through_a_split_wrapper() {
         let transcript: &[u8] = b"%output %0 before\\033Ptmux;\\033\\033]52;c;\n\
@@ -2018,11 +2012,15 @@ mod tests {
                                   %extended-output %0 0 : aGk=\\007\\033\\134after\n\
                                   %pause %0\n\
                                   %exit\n";
-        let (mut stream, _command_sink) = stream_over_transcript(transcript);
+        let (mut stream, _command_sink, delivery) = stream_over_transcript(transcript);
         let mut events = Vec::new();
         while let Some(event) = stream.next_output().await.expect("stream must not fail") {
             events.push(event);
         }
+        delivery
+            .await
+            .expect("feeder task")
+            .expect("transcript delivery");
         assert_eq!(
             events,
             vec![
@@ -2046,6 +2044,8 @@ mod tests {
     /// The identical bare query is stripped because tmux parsed and answered
     /// it. Testing every wrapper split pins both the provenance boundary and
     /// the decoder's existing ability to carry that boundary across lines.
+    /// A positive sentinel after the bare query proves input was delivered;
+    /// immediate EOF cannot stand in for successful query stripping.
     #[farhelm_testtrace::test]
     async fn passthrough_queries_bypass_stripping_across_every_wrapper_split() {
         let wrapped = b"\x1bPtmux;\x1b\x1b[6n\x1b\\";
@@ -2071,14 +2071,22 @@ mod tests {
             );
         }
 
-        let (mut stream, _command_sink) = stream_over_transcript(b"%output %0 \x1b[6n\n%exit\n");
-        assert!(
-            stream
-                .next_output()
-                .await
-                .expect("reading bare query")
-                .is_none(),
-            "the ordinary query must be removed because tmux answers it"
+        let (mut stream, _command_sink, delivery) =
+            stream_over_transcript(b"%output %0 \x1b[6n\n%output %0 after-query\n%exit\n");
+        let mut observed = Vec::new();
+        while let Some(event) = stream.next_output().await.expect("reading bare query") {
+            let OutputEvent::Bytes(bytes) = event else {
+                panic!("unexpected event: {event:?}")
+            };
+            observed.extend(bytes);
+        }
+        delivery
+            .await
+            .expect("feeder task")
+            .expect("transcript delivery");
+        assert_eq!(
+            observed, b"after-query",
+            "tmux's answered query must be stripped while the following bytes survive"
         );
     }
 
@@ -2086,7 +2094,8 @@ mod tests {
     /// once before callers learn that the control client ended.
     #[farhelm_testtrace::test]
     async fn exit_flushes_a_retained_query_prefix_before_end_of_stream() {
-        let (mut stream, _command_sink) = stream_over_transcript(b"%output %0 \x1b[\n%exit\n");
+        let (mut stream, _command_sink, delivery) =
+            stream_over_transcript(b"%output %0 \x1b[\n%exit\n");
         assert_eq!(
             stream.next_output().await.expect("reading exit flush"),
             Some(OutputEvent::Bytes(b"\x1b[".to_vec()))
@@ -2095,6 +2104,10 @@ mod tests {
             stream.next_output().await.expect("reading stream end"),
             None
         );
+        delivery
+            .await
+            .expect("feeder task")
+            .expect("transcript delivery");
     }
 
     /// An open pipe with no further own-pane bytes must release a pending
@@ -2537,13 +2550,17 @@ mod tests {
             transcript.extend_from_slice(b"%exit\n");
             transcript
         });
-        let (mut stream, _command_sink) = stream_over_transcript(&TRANSCRIPT);
+        let (mut stream, _command_sink, delivery) = stream_over_transcript(&TRANSCRIPT);
         while stream
             .next_output()
             .await
             .expect("the stream must not fail")
             .is_some()
         {}
+        delivery
+            .await
+            .expect("feeder task")
+            .expect("transcript delivery");
         assert!(
             stream.silenced.len() <= MAX_SILENCED_PANES,
             "the filtered-pane memo grew to {} entries",

@@ -1371,32 +1371,40 @@ pub(crate) async fn spliced_helm_listing(
 ///
 /// The far side of every "the helm refused this by itself" assertion:
 /// it completes the handshake, so its host really is connected and
-/// routable, and then fails if any request arrives at all. Bounded
-/// silence rather than an EOF, because the harness holds the connection
-/// open for the whole test (`rest_harness`'s module docs) — so
-/// "nothing was forwarded" is only observable as nothing arriving. The
-/// window is generous on purpose: a leak would send its frame
-/// immediately, so a longer wait only costs time on the failing path.
-pub(crate) async fn silent_supervisor(peer_side: tokio::io::DuplexStream) {
+/// routable, and then fails if any request arrives at all. The returned
+/// signal starts a two-second observation window after the caller's last
+/// request. Keep the harness alive until joining: manager shutdown cancels
+/// queued writes, so EOF after shutdown cannot prove that nothing was sent.
+pub(crate) fn silent_supervisor(
+    peer_side: tokio::io::DuplexStream,
+) -> (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+) {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
 
-    let (r, w) = tokio::io::split(peer_side);
-    let mut reader = FrameReader::new(r);
-    let mut writer = FrameWriter::new(w);
-    handshake(&mut reader, &mut writer, "supervisor")
-        .await
-        .unwrap();
-    // Three outcomes, and only one of them is a failure. A timeout is
-    // the ordinary pass (nothing was sent). A clean EOF is also a pass:
-    // the harness tears connections down deliberately — a host taken
-    // down, a retry, a reconnect — and a closed stream is not a request.
-    // Only a FRAME means something reached a supervisor that must not
-    // have been asked anything.
-    let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
-    assert!(
-        !matches!(leaked, Ok(Ok(Some(_)))),
-        "no request may reach this supervisor, but one arrived: {leaked:?}"
-    );
+    let (start, after_request) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let read = reader.read_frame();
+        tokio::pin!(read);
+        tokio::select! {
+            observed = &mut read => panic!("silent peer ended before post-request observation: {observed:?}"),
+            started = after_request => started.expect("caller must start post-request observation"),
+        }
+        match tokio::time::timeout(Duration::from_secs(2), read).await {
+            Err(_) => {}
+            Ok(observed) => {
+                panic!("silent peer must remain connected without receiving a frame: {observed:?}")
+            }
+        }
+    });
+    (start, task)
 }
 
 /// The supervisor end of a spliced host, as a test script drives it: the
