@@ -453,7 +453,10 @@ pub(crate) mod tests {
             fs::write(path, bytes).expect("fixture bytes");
         }
         fn digest(bytes: &[u8]) -> String {
-            format!("{:x}", Sha256::digest(bytes))
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
         }
         /// Publish synthetic installed bytes and matching metadata with the producer's mode.
         pub(crate) fn flat(&self, desktop: Option<&[u8]>) {
