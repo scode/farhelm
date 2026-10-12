@@ -1032,7 +1032,7 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
 
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
@@ -1055,6 +1055,7 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
         "the helm's own refusal must name the id it could not place"
     );
 
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -1258,7 +1259,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
 
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
@@ -1281,6 +1282,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
         "the helm's own refusal must name the id it could not place"
     );
 
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -2693,7 +2695,7 @@ async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
         ..rest_harness::session("sess-1", 1_700_000_000)
     };
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
@@ -2706,7 +2708,7 @@ async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
         body.contains("before launch kinds") && body.contains("Replace with"),
         "{body}"
     );
-    drop(harness);
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -4537,7 +4539,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
     peer.await.unwrap();
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, _, body) = post_json(
         &harness,
@@ -4565,7 +4567,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
         headers[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
         farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED
     );
-    drop(harness);
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -4580,7 +4582,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
 #[farhelm_testtrace::test]
 async fn bodies_naming_a_retired_launch_field_are_refused_by_name() {
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     let harness = rest_harness::spliced_helm(client_side).await;
     let command = serde_json::json!({"command": "agent", "yolo": false});
     for (field, value, replacement) in [
@@ -4622,7 +4624,7 @@ async fn bodies_naming_a_retired_launch_field_are_refused_by_name() {
             "{field}: {body}"
         );
     }
-    drop(harness);
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -5000,7 +5002,7 @@ async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
 
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
@@ -5025,6 +5027,7 @@ async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
         "the helm's own refusal must name the id it could not place"
     );
 
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -5756,7 +5759,7 @@ async fn a_session_operation_routes_to_the_host_that_owns_it() {
 
     // The host that must NOT be asked, and the one that must.
     let (alpha_client, alpha_peer) = tokio::io::duplex(64 * 1024);
-    let alpha_task = tokio::spawn(silent_supervisor(alpha_peer));
+    let (observe, alpha_task) = silent_supervisor(alpha_peer);
     let (beta_client, beta_peer) = tokio::io::duplex(64 * 1024);
     let beta_task = tokio::spawn(async move {
         let (r, w) = tokio::io::split(beta_peer);
@@ -5808,6 +5811,7 @@ async fn a_session_operation_routes_to_the_host_that_owns_it() {
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
 
     beta_task.await.unwrap();
+    observe.send(()).expect("start post-request observation");
     alpha_task.await.unwrap();
 }
 
@@ -6019,7 +6023,7 @@ fn refusal_text_names_every_non_connected_state() {
 #[farhelm_testtrace::test]
 async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
     let (alpha_client, alpha_peer) = tokio::io::duplex(64 * 1024);
-    let alpha_task = tokio::spawn(silent_supervisor(alpha_peer));
+    let (observe, alpha_task) = silent_supervisor(alpha_peer);
 
     let (builder, down) = rest_harness::FleetBuilder::new()
         .await
@@ -6067,6 +6071,7 @@ async fn creating_on_a_non_connected_host_is_refused_with_no_session() {
     // The connected host must not have been used as a fallback: a
     // create that silently landed somewhere else would be worse than
     // one that failed.
+    observe.send(()).expect("start post-request observation");
     alpha_task.await.unwrap();
 }
 
@@ -6166,7 +6171,7 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
     use farhelm_proto::{ControlMsg, Frame};
 
     let (local_client, local_peer) = tokio::io::duplex(64 * 1024);
-    let local_task = tokio::spawn(silent_supervisor(local_peer));
+    let (observe, local_task) = silent_supervisor(local_peer);
     let (remote_client, remote_peer) = tokio::io::duplex(64 * 1024);
     let remote_task = tokio::spawn(async move {
         let (reader, writer) = tokio::io::split(remote_peer);
@@ -6227,6 +6232,7 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
         serde_json::json!(["/remote/home/project/src"])
     );
 
+    observe.send(()).expect("start post-request observation");
     local_task.await.expect("local browse peer stayed silent");
     remote_task.await.expect("remote browse peer");
 }
@@ -6636,7 +6642,7 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
             .unwrap();
     });
     let (impostor_client, impostor_peer) = tokio::io::duplex(64 * 1024);
-    let impostor_task = tokio::spawn(silent_supervisor(impostor_peer));
+    let (observe, impostor_task) = silent_supervisor(impostor_peer);
 
     let (builder, owner) = rest_harness::FleetBuilder::new()
         .await
@@ -6709,6 +6715,12 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
         "and the refusal must name both candidates so the user can fix it: {body}"
     );
 
+    // Observe the refusal while the impostor's original connection is live.
+    // The next phase deliberately closes it to refresh its claim; that EOF
+    // cannot stand in for evidence that the refusal sent no request.
+    observe.send(()).expect("start post-request observation");
+    impostor_task.await.unwrap();
+
     // The impostor stops claiming it. Nothing is told to forget
     // anything — the contest is rebuilt from the next drain's evidence,
     // and that evidence no longer contains the id.
@@ -6732,8 +6744,6 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
         "a contest clears itself when the claimant stops claiming: {body}"
     );
     owner_task.await.unwrap();
-    // The impostor must never have been asked anything about it.
-    impostor_task.await.unwrap();
 
     let (status, value) = get_json(&harness, "/api/sessions/contested").await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -6993,7 +7003,7 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
 #[farhelm_testtrace::test]
 async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     let harness = rest_harness::spliced_helm(client_side).await;
 
     let (status, body) = post_text(
@@ -7007,6 +7017,7 @@ async fn creating_on_an_unknown_host_is_refused_without_falling_back() {
         axum::http::StatusCode::NOT_FOUND,
         "a create naming a host nothing holds is a 404, not a create somewhere else: {body}"
     );
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -8424,7 +8435,7 @@ async fn create_with_invalid_github_repo_names_the_parse_error() {
     use tower::ServiceExt;
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
 
@@ -8453,6 +8464,7 @@ async fn create_with_invalid_github_repo_names_the_parse_error() {
         text.contains("invalid GitHub repository"),
         "the refusal must be the parse error, not the backend refusal: {text}"
     );
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -8472,7 +8484,7 @@ async fn create_with_valid_github_repo_without_a_root_points_to_settings() {
     // fire at the helm's resolution (before any create frame reaches the
     // host), which needs the host dial to succeed first.
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(silent_supervisor(peer_side));
+    let (observe, peer) = silent_supervisor(peer_side);
     let harness = rest_harness::spliced_helm(client_side).await;
     let (claim, _) = super::create_target(&harness.state, None).unwrap();
     let preview = serde_json::json!({
@@ -8511,6 +8523,7 @@ async fn create_with_valid_github_repo_without_a_root_points_to_settings() {
     // The refusal happened at the helm: the connected silent supervisor
     // proves no create frame reached it. (It panics inside its own task on
     // a leaked frame; joining asserts it stayed silent for the window.)
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 

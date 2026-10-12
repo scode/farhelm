@@ -11625,7 +11625,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: feeder write errors fail the test, and a sentinel after the query proves input arrived before the
   stripped-query assertion is trusted. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md
 
@@ -11637,7 +11638,9 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the scripted peer keeps reading until the connection closes and the test asserts no
   `DeleteSession` arrived. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete`: gate tripped (manager shutdown cancels queued writes; proving a drained close needs a new
+  product test seam); discarded per the recorded decision, in jj change `qqptutmm`, bookmark
+  `plan/unit-test-oracle-fixes/01-unit-test-oracles`; https://github.com/scode/farhelm/pull/1927/changes.
 
 ## replay-refusal-tests-do-directly-observe-absence-delete-replace-with-overrides.md
 
@@ -11648,7 +11651,9 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: same as the plain-Replace sibling, applied to the Replace-with test; the two can share one
   change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete`: gate tripped (manager shutdown cancels queued writes; proving a drained close needs a new
+  product test seam); discarded per the recorded decision, in jj change `qqptutmm`, bookmark
+  `plan/unit-test-oracle-fixes/01-unit-test-oracles`; https://github.com/scode/farhelm/pull/1927/changes.
 
 ## recreation-test-assumes-distinct-birth-timestamps.md
 
@@ -11661,7 +11666,8 @@
 - Completion criteria: the test checks its own premise (the recreated directory's birth time actually differs) and
   reports a premise skip instead of a failure when it does not. Same gate as the sibling entry. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## no-directory-created-assertion-requires-directory-exist.md
 
@@ -11674,7 +11680,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test's documentation and assertions agree with the actual contract (no checkout directory
   invented; an empty archive directory may exist). Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## prompt-classification-test-finish-waiting-prompt-appears.md
 
@@ -11686,7 +11693,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test waits for the dialog text to appear in the pane before counting the quiet streak. Same
   gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## shutdown-race-test-establish-intended-interleaving.md
 
@@ -11699,7 +11707,8 @@
 - Completion criteria: the test holds the reconcile at the store read, shuts down, then releases it, so the intended
   interleaving is forced. If holding it needs a new test-only hook in production code, record `discard`; other
   complications go back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## logging-test-establish-refresh-completed.md
 
@@ -11711,7 +11720,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test advances one interval at a time and waits for each refresh publication before checking
   the log. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## restart-test-requires-screen-content-restart-correctly.md
 
@@ -11765,7 +11775,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test requires at least one successful argv-only observation of the live process before it
   accepts the withheld environment. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## retarget-test-failing-deliver-old-target-plan.md
 
@@ -11837,7 +11848,8 @@
 - Completion criteria: the silence window is measured from after the request under test has been answered. If it needs
   coordination across many callers beyond a contained harness change, bring it back to the user. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## omp-child-report-fixtures-bypass-nested-runtime-check.md
 
@@ -11849,7 +11861,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the fixture spawns its child under the pane so the tests reach and exercise the nested-runtime
   check. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## busy-pane-assertion-depends-another-panes-readiness.md
 
@@ -11860,7 +11873,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test also waits for the busy pane to produce output, reusing the existing helper. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## wedged-browser-teardown-test-pass-browser-cleanup-finishes.md
 
@@ -12447,7 +12461,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: a directory whose kill was skipped or failed is kept so the next sweep retries it, and the
   comment matches the behavior. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
+- Execution: `complete` in jj change `qqptutmm`, bookmark `plan/unit-test-oracle-fixes/01-unit-test-oracles`;
+  https://github.com/scode/farhelm/pull/1927/changes.
 
 ## live-processes-reported-dead-macos.md
 

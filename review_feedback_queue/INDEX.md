@@ -53,27 +53,11 @@ None open.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
-- `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
-  covering the operation.
-- `omp-child-report-fixtures-bypass-nested-runtime-check.md` — The child-report test rejects its fixture before checking
-  nested-runtime ownership.
-- `busy-pane-assertion-depends-another-panes-readiness.md` — A delayed producer could make the busy-pane test reject
-  correct status.
-- `prompt-classification-test-finish-waiting-prompt-appears.md` — A delayed prompt could make its classification test
-  fail on correct behavior.
-- `shutdown-race-test-establish-intended-interleaving.md` — The shutdown-race test does not hold reconciliation at the
-  database boundary.
-- `logging-test-establish-refresh-completed.md` — The quiet-logging test could inspect logs before any refresh
-  completes.
-- `macos-environment-test-accepts-failed-observations-success.md` — The macOS environment test treats failed observation
-  as successful withholding.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
 - `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.
-- `no-directory-created-assertion-requires-directory-exist.md` — The no-directory-creation test requires the directory
-  to have been created.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
@@ -108,14 +92,6 @@ None open.
   geometry.
 - `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
   surviving runtime.
-- `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an
-  unintended asynchronous Delete.
-- `replay-refusal-tests-do-directly-observe-absence-delete-replace-with-overrides.md` — Replace with overrides has a
-  separate unobserved-Delete test boundary.
-- `ignored-transcript-feeder-write-errors-conceal-missing-input.md` — A failed transcript feeder could make
-  query-stripping tests pass with no input.
-- `recreation-test-assumes-distinct-birth-timestamps.md` — Immediate directory recreation could preserve the identity
-  the test expects to differ.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
@@ -130,8 +106,6 @@ None open.
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
   Stop for later.
-- `cleanup-leaves-orphan-tmux-processes-kill-failure.md` — Failed or skipped tmux shutdown could leave an orphan without
-  its socket path.
 - `release-smoke-mistake-another-listener-child.md` — Release smoke could validate another listener instead of its
   launched helm.
 - `process-death-falsely-inferred-proc-read-errors.md` — A later process-read error could be mistaken for confirmed

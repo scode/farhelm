@@ -2033,9 +2033,11 @@ mod tests {
     /// cannot see a reparented descendant whose exec'd image is a platform
     /// binary (shells, chiefly), which is an accepted residual documented
     /// on `sweep::environ_markers_of` — the deferred follow-up is a
-    /// session-id membership channel. If this test ever FAILS, Apple has
+    /// session-id membership channel. If the marker assertion fails, Apple has
     /// started returning environments for platform binaries again: good
     /// news, and the cue to update that documentation rather than a bug.
+    /// Only successful reads after the sleep argv is visible count: failed
+    /// observations or the pre-exec image cannot establish withholding.
     #[cfg(target_os = "macos")]
     #[farhelm_testtrace::test]
     fn a_platform_binary_childs_environment_is_withheld_on_modern_macos() {
@@ -2047,27 +2049,44 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .spawn()
             .expect("spawning /bin/sleep");
-        // No handshake is possible with a child that prints nothing, so
-        // poll past the exec window instead; the marker CANNOT appear
-        // pre-exec either (the test process's own environment does not
-        // carry it), so a positive sighting is definitive whenever it
-        // lands.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         let mut marker_seen = false;
+        let mut exec_seen = false;
+        let mut observations = 0;
         while std::time::Instant::now() < deadline {
-            if let Some(environ) = read_environ(child.id()) {
-                marker_seen = environ
-                    .split(|&b| b == 0)
-                    .any(|entry| entry == b"FARHELM_PROCS_TEST_MARKER=sentinel-value");
-                if marker_seen {
-                    break;
+            // argv is the exec boundary for this silent child. Environment
+            // reads made before it cannot prove anything about /bin/sleep.
+            if !exec_seen {
+                exec_seen = read_process_argv(child.id()).is_some_and(|argv| {
+                    argv.len() == 2 && argv[0].ends_with(b"sleep") && argv[1] == b"30"
+                });
+            }
+            if exec_seen {
+                if let Some(environ) = read_environ(child.id()) {
+                    observations += 1;
+                    marker_seen = environ
+                        .split(|&b| b == 0)
+                        .any(|entry| entry == b"FARHELM_PROCS_TEST_MARKER=sentinel-value");
+                    if marker_seen {
+                        break;
+                    }
                 }
             }
-            // sleep-ok: sample marker visibility throughout the negative observation window; one absent pre-exec read is insufficient.
+            // sleep-ok: poll for post-exec argv and then sample successful environment reads across the withholding observation window.
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        let still_running = child
+            .try_wait()
+            .expect("observe child before cleanup")
+            .is_none();
         let _ = child.kill();
         let _ = child.wait();
+        assert!(exec_seen, "never observed /bin/sleep's post-exec argv");
+        assert!(observations > 0, "no successful post-exec environment read");
+        assert!(
+            still_running,
+            "the platform child exited during observation"
+        );
         assert!(
             !marker_seen,
             "macOS returned a platform binary's environment — the withholding this test \

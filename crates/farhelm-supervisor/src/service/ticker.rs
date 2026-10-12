@@ -6010,6 +6010,8 @@ mod tests {
     /// The pre-ticker assertion is what makes it a transition rather than
     /// a coincidence: before the first pass the same session classifies
     /// `Running`, so `Idle` below can only have come from being watched.
+    /// Before the final classification, the busy pane must expose a changed
+    /// screen of its own; its quiet neighbour cannot prove that producer ran.
     #[farhelm_testtrace::test]
     async fn a_busy_pane_classifies_running_and_a_quiet_one_decays_to_idle() {
         let state = StateDir::new();
@@ -6038,6 +6040,10 @@ mod tests {
             || still.lock().expect("activity mutex").unchanged_streak >= 3,
         )
         .await;
+        ticker.shutdown().await;
+        wait_for_busy_pane_to_change(&sup, "busy").await;
+        let (_stop, mut stop) = never_stopped();
+        sample_pass(&sup, &mut None, SAMPLE_TAIL_BUDGET, &mut stop).await;
         assert_eq!(
             classify(&sup, "busy").await,
             SessionStatus::Running,
@@ -6049,7 +6055,6 @@ mod tests {
             SessionStatus::Idle,
             "a pane watched repeatedly with nothing printed is at rest"
         );
-        ticker.shutdown().await;
     }
 
     /// The same decay, with more sessions than the budget can sample in
@@ -6125,6 +6130,8 @@ mod tests {
     ///
     /// The fixture ends in the dialog footer Claude draws under every
     /// question, which is what the Claude reader anchors waiting on.
+    /// Both footers must be visible before quiet samples count: an unchanged
+    /// blank pane would correctly classify Idle while its shell starts.
     #[farhelm_testtrace::test]
     async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
         let state = StateDir::new();
@@ -6136,6 +6143,39 @@ mod tests {
         // half, in the one place where "the tail really did reach the
         // classifier" is not in question.
         install_live_session(&sup, "unintegrated", DIALOG).await;
+
+        for id in ["asking", "unintegrated"] {
+            let terminal = sup
+                .sessions
+                .lock()
+                .await
+                .get(id)
+                .expect("fixture session")
+                .terminal
+                .clone()
+                .expect("fixture terminal");
+            let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+            loop {
+                let capture = sup
+                    .tmux
+                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
+                    .await;
+                if capture
+                    .as_ref()
+                    .is_ok_and(|tail| tail.contains("Esc to cancel"))
+                {
+                    break;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    let panes = sup.tmux.pane_states().await;
+                    panic!(
+                        "{id} never drew the dialog footer; capture: {capture:?}; panes: {panes:?}"
+                    );
+                }
+                // sleep-ok: poll the real pane's dialog footer before starting quiet-streak sampling.
+                tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+            }
+        }
 
         let asking = sample_of(&sup, "asking").await;
         let unintegrated = sample_of(&sup, "unintegrated").await;
