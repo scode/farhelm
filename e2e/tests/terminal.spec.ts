@@ -3655,25 +3655,29 @@ test("an interrupted session shows its badge and deletes without confirming", as
     });
   });
 
-  await page.goto("/");
-  const row = page.locator(`[data-session-id="${session.id}"]`);
-  await expect(row.locator(".status-badge.interrupted")).toHaveText(
-    "interrupted",
-    { timeout: 10_000 },
-  );
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${session.id}"]`);
+    await expect(row.locator(".status-badge.interrupted")).toHaveText(
+      "interrupted",
+      { timeout: 10_000 },
+    );
 
-  await openRowMenu(row);
-  await row.locator(".session-row-delete").click();
-  // The DELETE is stalled, so the row is still on screen — and while it
-  // is, no confirmation controls exist at all.
-  await expect(row).toHaveCount(1);
-  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
-  await expect(row.locator(".confirm-delete")).toHaveCount(0);
-  expect(deleteRequests).toBe(1);
-  // Skipping the prompt is safe only because the supervisor re-checks:
-  // the delete must ask it to refuse if something turns out to be alive.
-  expect(deletePrecondition).toBe("true");
-  releaseDelete();
+    await openRowMenu(row);
+    await row.locator(".session-row-delete").click();
+    // The DELETE is stalled, so the row is still on screen — and while it
+    // is, no confirmation controls exist at all.
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".confirm-delete")).toHaveCount(0);
+    expect(deleteRequests).toBe(1);
+    // Skipping the prompt is safe only because the supervisor re-checks:
+    // the delete must ask it to refuse if something turns out to be alive.
+    expect(deletePrecondition).toBe("true");
+  } finally {
+    // Route-draining teardown must progress even when an assertion fails.
+    releaseDelete();
+  }
 });
 
 // PLAN_M3.md item 3: the launch shim's exec-failure sentinel, surfaced on
@@ -3734,32 +3738,36 @@ test("an error session shows its badge with detail and deletes without confirmin
     });
   });
 
-  await page.goto("/");
-  const row = page.locator(`[data-session-id="${session.id}"]`);
-  // The badge must state the shim's own recorded detail, not just the
-  // bare word "error" — it is the one piece of information that actually
-  // explains why the row needs attention, and the class must be the
-  // dedicated `error` modifier (red family), never `exited`'s.
-  await expect(row.locator(".status-badge.error")).toHaveText(
-    `error — ${detail}`,
-    { timeout: 10_000 },
-  );
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${session.id}"]`);
+    // The badge must state the shim's own recorded detail, not just the
+    // bare word "error" — it is the one piece of information that actually
+    // explains why the row needs attention, and the class must be the
+    // dedicated `error` modifier (red family), never `exited`'s.
+    await expect(row.locator(".status-badge.error")).toHaveText(
+      `error — ${detail}`,
+      { timeout: 10_000 },
+    );
 
-  await openRowMenu(row);
-  await row.locator(".session-row-delete").click();
-  // The DELETE is stalled, so the row is still on screen — and while it
-  // is, no confirmation controls exist at all: the agent's own exec never
-  // succeeded, so there is no lingering process tree for a delete to warn
-  // about (see this test's own top-of-file comment for why that is not
-  // the same claim as "nothing ever ran").
-  await expect(row).toHaveCount(1);
-  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
-  await expect(row.locator(".confirm-delete")).toHaveCount(0);
-  expect(deleteRequests).toBe(1);
-  // Skipping the prompt is safe only because the supervisor re-checks:
-  // the delete must ask it to refuse if something turns out to be alive.
-  expect(deletePrecondition).toBe("true");
-  releaseDelete();
+    await openRowMenu(row);
+    await row.locator(".session-row-delete").click();
+    // The DELETE is stalled, so the row is still on screen — and while it
+    // is, no confirmation controls exist at all: the agent's own exec never
+    // succeeded, so there is no lingering process tree for a delete to warn
+    // about (see this test's own top-of-file comment for why that is not
+    // the same claim as "nothing ever ran").
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    await expect(row.locator(".confirm-delete")).toHaveCount(0);
+    expect(deleteRequests).toBe(1);
+    // Skipping the prompt is safe only because the supervisor re-checks:
+    // the delete must ask it to refuse if something turns out to be alive.
+    expect(deletePrecondition).toBe("true");
+  } finally {
+    // Route-draining teardown must progress even when an assertion fails.
+    releaseDelete();
+  }
 });
 
 // Launch errors contain arbitrary argv text. The complete message must wrap

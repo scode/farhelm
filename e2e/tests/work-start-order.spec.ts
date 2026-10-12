@@ -56,8 +56,9 @@ function keysById(rows: { id: string; last_work_started_at: number }[]): Map<str
 
 /**
  * A real shell emits numbered output only in run mode. The progress file is
- * written after printf, providing a positive producer witness for the period
- * during which continuing output must leave the already allocated key alone.
+ * published atomically after printf, providing a positive producer witness for
+ * the period during which output must leave the already allocated key alone.
+ * Readers must see a whole number: truncation would turn an empty baseline into 0.
  */
 async function startProducer(request: APIRequestContext, directory: string, name: string, host: number) {
   const mode = join(directory, `${name}.mode`);
@@ -65,7 +66,7 @@ async function startProducer(request: APIRequestContext, directory: string, name
   await writeFile(mode, "idle");
   await writeFile(progress, "0");
   // sleep-ok: this private producer's polling interval drives controlled continuing output; API status and progress are the readiness oracles.
-  const program = `n=0; printf 'producer ready\\n'; while :; do mode=$(cat ${shellWord(mode)}); if [ "$mode" = run ]; then n=$((n + 1)); printf 'work %s\\n' "$n"; printf '%s' "$n" > ${shellWord(progress)}; fi; sleep 0.1; done`;
+  const program = `n=0; printf 'producer ready\\n'; while :; do mode=$(cat ${shellWord(mode)}); if [ "$mode" = run ]; then n=$((n + 1)); printf 'work %s\\n' "$n"; printf '%s' "$n" > ${shellWord(`${progress}.next`)} && mv ${shellWord(`${progress}.next`)} ${shellWord(progress)}; fi; sleep 0.1; done`;
   const session = await createSession(request, {
     title: `work-start-${name}`,
     cwd: directory,

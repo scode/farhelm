@@ -1927,6 +1927,13 @@ test("collapsed trace transitions invalidate fixed-surface geometry", async ({
   }
 });
 
+/**
+ * Invalidation must survive delivery of a plan already made for the old target.
+ * Holding the request before server execution would plan the new target instead;
+ * both legs wait for their released reply, then observe a renderer window before
+ * checking for an unintended submission. Network completion alone could let an
+ * already-satisfied negative assertion run before the UI handles the reply.
+ */
 test("a retarget and a foreign run each invalidate an unsubmitted update", async ({
   page,
   request,
@@ -1941,79 +1948,119 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   const planningGate = new Promise<void>((resolve) => {
     releasePlanning = resolve;
   });
+  let planningCaptured!: () => void;
+  const oldPlanCaptured = new Promise<void>((resolve) => { planningCaptured = resolve; });
   let holdPlanning = true;
   await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
     if (holdPlanning && !route.request().postData()) {
+      const response = await route.fetch();
+      expect(response.ok(), "the old-target plan must exist before retargeting").toBe(true);
+      planningCaptured();
       await planningGate;
+      await route.fulfill({ response });
+      return;
     }
     await route.continue();
   });
-  await page.goto("/");
-  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  try {
+    await page.goto("/");
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+    const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
 
-  // Retarget before plan completion: the held planning reply arrives for a
-  // row that no longer matches, so the intent dies and nothing submits.
-  await openHostMenu(row);
-  await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(pendingUpdate(row, "planning")).toBeVisible();
-  const changed = `${remote}-moved`;
-  const response = await request.post(`/api/hosts/${accepted.host_id}/destination`, {
-    data: { ssh: changed },
-  });
-  expect(response.ok(), await responseBody(response)).toBe(true);
-  await notifyFeed(feed, 2);
-  // The refresh delivering the new binding invalidates the intent while
-  // planning is still held: the pending status going away proves the
-  // watcher ran, before the stale reply is even released.
-  await expect(row.locator(".host-update-pending")).toHaveCount(0);
-  holdPlanning = false;
-  releasePlanning();
-  await expect(row.locator(".host-detail")).toHaveCount(0);
-  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  expect(updates.plans).toBe(1);
-  expect(updates.confirms).toBe(0);
+    /**
+     * Observe stale-plan handling without mistaking the foreign run's legitimate
+     * progress panel for an old plan. Both legs forbid a pending intent or POST;
+     * only the retarget leg requires the row's details to stay hidden.
+     */
+    const observeNoLatePlan = async (hiddenDetails: boolean) => {
+      for (let observation = 0; observation < 10; observation++) {
+        // sleep-ok: after positive reply receipt, sample a 500 ms decoding/reactive-submission window with the request counter continuously armed.
+        await page.waitForTimeout(50);
+        expect(updates.confirms).toBe(0);
+        await expect(row.locator(".host-update-pending")).toHaveCount(0);
+        if (hiddenDetails) await expect(row.locator(".host-detail")).toHaveCount(0);
+        else await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
+        await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+      }
+    };
 
-  // A foreign running update during planning invalidates the local intent
-  // instead of queueing behind it: the row follows the observed run with
-  // an explanation, and still submits nothing of its own.
-  await configureBackend({ targets: { [target(changed)]: { hold_actions: true } } });
-  holdPlanning = true;
-  const secondGate = new Promise<void>((resolve) => {
-    releasePlanning = resolve;
-  });
-  // A promise gate cannot be re-armed, so the second hold re-registers
-  // the same route shape around a fresh gate.
-  await page.unroute(`**/api/hosts/${accepted.host_id}/update`);
-  await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
-    if (holdPlanning && !route.request().postData()) {
-      await secondGate;
-    }
-    await route.continue();
-  });
-  await openHostMenu(row);
-  await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(pendingUpdate(row, "planning")).toBeVisible();
-  const competingPlan = await request.post(`/api/hosts/${accepted.host_id}/update`);
-  expect(competingPlan.ok(), await responseBody(competingPlan)).toBe(true);
-  const competing = (await competingPlan.json()) as { probe_id: string };
-  const competingRun = await request.post(`/api/hosts/${accepted.host_id}/update`, {
-    data: { probe_id: competing.probe_id },
-  });
-  expect(competingRun.status()).toBe(202);
-  await notifyFeed(feed, 3);
-  await expect(row.locator(".provisioning-warning")).toContainText(
-    "another provisioning run started on this host first",
-  );
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
-  holdPlanning = false;
-  releasePlanning();
-  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  expect(updates.plans).toBe(2);
-  expect(updates.confirms).toBe(0);
+    // Retarget before plan completion: the held planning reply arrives for a
+    // row that no longer matches, so the intent dies and nothing submits.
+    await openHostMenu(row);
+    await row.locator(".provisioning-update").dispatchEvent("click");
+    await expect(pendingUpdate(row, "planning")).toBeVisible();
+    await oldPlanCaptured;
+    const changed = `${remote}-moved`;
+    const response = await request.post(`/api/hosts/${accepted.host_id}/destination`, {
+      data: { ssh: changed },
+    });
+    expect(response.ok(), await responseBody(response)).toBe(true);
+    await notifyFeed(feed, 2);
+    // The refresh delivering the new binding invalidates the intent while
+    // planning is still held: the pending status going away proves the
+    // watcher ran, before the stale reply is even released.
+    await expect(row.locator(".host-update-pending")).toHaveCount(0);
+    const oldReply = page.waitForResponse((reply) =>
+      new URL(reply.url()).pathname === `/api/hosts/${accepted.host_id}/update`
+      && reply.request().method() === "POST" && !reply.request().postData());
+    holdPlanning = false;
+    releasePlanning();
+    expect(await (await oldReply).finished(), "the captured old-target reply must finish arriving").toBeNull();
+    await observeNoLatePlan(true);
+    await expect(row.locator(".host-detail")).toHaveCount(0);
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+    expect(updates.plans).toBe(1);
+    expect(updates.confirms).toBe(0);
+
+    // A foreign running update during planning invalidates the local intent
+    // instead of queueing behind it: the row follows the observed run with
+    // an explanation, and still submits nothing of its own.
+    await configureBackend({ targets: { [target(changed)]: { hold_actions: true } } });
+    holdPlanning = true;
+    const secondGate = new Promise<void>((resolve) => {
+      releasePlanning = resolve;
+    });
+    // A promise gate cannot be re-armed, so the second hold re-registers
+    // the same route shape around a fresh gate.
+    await page.unroute(`**/api/hosts/${accepted.host_id}/update`);
+    await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
+      if (holdPlanning && !route.request().postData()) {
+        await secondGate;
+      }
+      await route.continue();
+    });
+    await openHostMenu(row);
+    await row.locator(".provisioning-update").dispatchEvent("click");
+    await expect(pendingUpdate(row, "planning")).toBeVisible();
+    const competingPlan = await request.post(`/api/hosts/${accepted.host_id}/update`);
+    expect(competingPlan.ok(), await responseBody(competingPlan)).toBe(true);
+    const competing = (await competingPlan.json()) as { probe_id: string };
+    const competingRun = await request.post(`/api/hosts/${accepted.host_id}/update`, {
+      data: { probe_id: competing.probe_id },
+    });
+    expect(competingRun.status()).toBe(202);
+    await notifyFeed(feed, 3);
+    await expect(row.locator(".provisioning-warning")).toContainText(
+      "another provisioning run started on this host first",
+    );
+    await expect(row.locator(".provisioning-run")).toHaveAttribute(
+      "data-provisioning-status",
+      "running",
+    );
+    const foreignReply = page.waitForResponse((reply) =>
+      new URL(reply.url()).pathname === `/api/hosts/${accepted.host_id}/update`
+      && reply.request().method() === "POST" && !reply.request().postData());
+    holdPlanning = false;
+    releasePlanning();
+    expect(await (await foreignReply).finished(), "the released foreign-run planning reply must finish arriving").toBeNull();
+    await observeNoLatePlan(false);
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+    expect(updates.plans).toBe(2);
+    expect(updates.confirms).toBe(0);
+  } finally {
+    // Neither captured reply may strand route teardown after an assertion fails.
+    releasePlanning();
+  }
 });
 
 test("UPDATE planning refusal shows the concrete reason and stays expanded", async ({
