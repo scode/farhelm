@@ -11864,7 +11864,8 @@
   correct) as "Fix, skip hard ones": discard where the fix needs a new test-only hook in production code. Telling
   handler completion apart from the queue-overflow Detach needs such a completion seam.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## wedged-browser-test-accepts-detach-handler-completion.md
 
@@ -11873,7 +11874,8 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## wedged-browser-test-accepts-independent-cleanup-signal.md
 
@@ -11883,7 +11885,8 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## wedged-browser-test-may-encounter-queue-backpressure-blocked.md
 
@@ -11893,7 +11896,8 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## concurrent-first-use-barrier-guarantees-disputed-interleaving.md
 
@@ -11904,7 +11908,8 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## replacement-tests-overstate-immediate-list-no-delete-evidence.md
 
@@ -11915,7 +11920,8 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## shutdown-race-test-releases-sink-shutdown-starts.md
 
@@ -11926,7 +11932,8 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## host-identity-race-test-pass-exercising-competing-writes.md
 
@@ -11936,7 +11943,8 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## stop-recovery-test-fail-wrong-listing-request.md
 
@@ -11945,7 +11953,8 @@
   reader to go idle, so an earlier pending read could take the injected failure. Speculative.
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## client-task-scheduling-mistaken-server-side-overlap.md
 
@@ -11954,7 +11963,8 @@
   regression that serializes Stop on the server and an unlikely wake order on the client.
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## screenshot-runs-collide-through-shared-fleet-auth.md
 
@@ -12136,7 +12146,8 @@
 - Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest". It
   fails safe, and a fix needs planning from the published release inventory, which is not small.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## save-followed-immediately-delete-restores-outdated-local.md
 
@@ -12199,7 +12210,8 @@
 - Decision: on 2026-10-11 the user chose to fix only super-cheap findings without a reachable trigger and discard the
   rest; this one touches no security boundary.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## oversized-successful-agent-reply-becomes-internal.md
 
@@ -12211,7 +12223,8 @@
   denial of service by a malicious or arbitrarily broken host is acceptable; a wrong error message to that host's own
   agent breaks no security boundary.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## unbounded-aggregate-capture-replies.md
 
@@ -12220,7 +12233,8 @@
   bounded only by 12,000 history lines times the terminal width. No harmful case was measured.
 - Decision: on 2026-10-11 the user chose to discard findings without a demonstrated trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## hostnotfound-refresh-keeps-serving.md
 
@@ -12230,7 +12244,8 @@
   without stopping its connection.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## legacy-launch-validation-could-prevent-startup.md
 
@@ -12241,7 +12256,8 @@
   `restart-with-skips-create-validation.md` kept load-time strictness and fixed the writer instead.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## service-start-timing-could-evade-restart-detection.md
 
@@ -12251,7 +12267,8 @@
   success, but no such start has been shown.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## watchdog-logs-rather-recovering-window.md
 
@@ -12261,7 +12278,8 @@
 - Decision: on 2026-10-11 the user chose to discard findings of this kind unless super cheap; changing it means the
   persistent-channel design the module docs rejected.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## detached-terminal-cleanup-tasks-wait-writer-capacity.md
 
@@ -12456,7 +12474,8 @@
 - Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting the documented non-Linux limitations of the
   browser harness.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## descendant-surviving-markeddecoy-destruction.md
 
@@ -12465,7 +12484,8 @@
   separate child exists, and any survivor is test-owned and gone after two minutes on a non-procfs platform.
 - Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting non-Linux harness limitations.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## host-actions-disappear-supported-sidebar-widths.md
 
@@ -12601,7 +12621,8 @@
 - Decision: on 2026-10-11 the user chose to fix only simple issues for these harnesses and to document known issues
   likely to matter to typical users; this one is neither.
 - Completion criteria: remove this feedback file and its index entry, without code, spec or website changes.
-- Execution: planned in `plans/queue/review-queue-discards.md`.
+- Execution: complete; jj change `vlystxvxqkkwrxkukpyozunlmxmmxupy`; bookmark `plan/review-queue-discards/01-discards`;
+  https://github.com/scode/farhelm/pull/1921/changes.
 
 ## snapshot-root.md
 
