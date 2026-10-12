@@ -52,11 +52,6 @@ None open.
   needed to retry process cleanup.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `live-processes-reported-dead-macos.md` — macOS process checks can certify death without observing the process.
-- `child-discovery-always-times-out-macos.md` — Child-discovery fixtures cannot reach lifecycle checks on macOS.
-- `unavailable-process-scan-certifies-no-marked-processes.md` — A missing process scan can make cleanup assertions pass
-  without inspection.
-- `pid-cleanup-guard-inert-macos.md` — The fixture's PID cleanup guard does not work on macOS.
 - `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
 - `shared-silence-observers-have-same-premature-success-boundary.md` — Shared silence assertions can succeed without
   covering the operation.
@@ -70,22 +65,8 @@ None open.
   database boundary.
 - `logging-test-establish-refresh-completed.md` — The quiet-logging test could inspect logs before any refresh
   completes.
-- `restart-test-requires-screen-content-restart-correctly.md` — The restart test waits for screen content that correct
-  restart erases.
-- `readiness-failure-leave-systemd-probe-child-running.md` — Readiness failure could leave a systemd probe child without
-  cleanup ownership.
-- `pipe-scan-assertion-failures-leave-fixture-processes-running.md` — Failed pipe-scan tests leave children and
-  descriptors open.
 - `macos-environment-test-accepts-failed-observations-success.md` — The macOS environment test treats failed observation
   as successful withholding.
-- `environment-value-parsed-output-complete.md` — A split output line could make the environment test parse an
-  incomplete value.
-- `persistence-assertion-rejects-legitimately-newer-activity-timestamp.md` — A newer persisted timestamp could make the
-  persistence test time out.
-- `stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md` — The stubborn Stop fixture lacks cleanup ownership of
-  its whole process tree.
-- `dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md` — The dispatch-overlap fixture arms incomplete cleanup
-  after fallible setup.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
@@ -123,8 +104,6 @@ None open.
   its known session.
 - `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` — Keyboard-launch teardown skips session
   deletion if policy restoration fails.
-- `short-writer-timeout-masks-shutdown-drain-regression.md` — An independent writer timeout hides a broken
-  shutdown-drain bound.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
 - `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
@@ -137,7 +116,6 @@ None open.
   query-stripping tests pass with no input.
 - `recreation-test-assumes-distinct-birth-timestamps.md` — Immediate directory recreation could preserve the identity
   the test expects to differ.
-- `sink-healing-witness-consume-queued-output.md` — The healed-sink test could consume output queued before the failure.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image

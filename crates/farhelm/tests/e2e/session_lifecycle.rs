@@ -302,9 +302,11 @@ async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
 
 /// Observe the durable activity value through a separate database connection.
 ///
-/// Listing state is updated before persistence completes. Require the exact
-/// value observed by the caller, preserving the test's restart contract and
-/// its diagnostic distinction between a stalled server and a missing write.
+/// Listing state is updated before persistence completes. The durable value
+/// must reach at least the caller's observation: activity writes only move
+/// forward, so later output may legitimately overtake that sample before
+/// this connection reads it. A value still below the sample does not prove
+/// that the reported activity would survive a restart.
 async fn wait_for_persisted_activity(
     store: &SessionStore,
     session_id: &str,
@@ -319,12 +321,12 @@ async fn wait_for_persisted_activity(
             .expect("read the session row")
             .expect("the created session has a row")
             .last_activity_at;
-        if stored == advanced {
+        if stored >= advanced {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the advance the list reported ({advanced}) never reached the row ({stored}); a \
+            "the row ({stored}) never reached at least the advance the list reported ({advanced}); a \
              value that lives only in memory does not survive the restart this field exists \
              to answer across ({})",
             why()
@@ -2792,15 +2794,16 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
 /// misbehaves and made the test's original shape unable to reach its own
 /// half-close: a peer that never reads still stalls the read loop on the
 /// inline replies it sends to the full writer queue, so the flood below
-/// backs up into the request direction. `WRITER_STALL_TIMEOUT` is
-/// what breaks that — shortened here, since the production value is a
-/// minute — and the request count is now sized to fit comfortably inside
-/// the transport buffer either way, so the half-close is reachable
-/// whether or not the read loop is still draining when it happens.
+/// backs up into the request direction. The request count below fits
+/// inside the transport buffer even if the read loop stops draining it,
+/// so the peer can reach its half-close without a writer stall timeout.
+/// Keep that timeout longer than the test's 30-second deadline: otherwise
+/// it could release an unconditional writer join and mask a missing
+/// drain bound.
 #[farhelm_testtrace::test]
 async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
     let h = harness_with_timeouts(SupervisorTimeouts {
-        writer_stall: Duration::from_secs(2),
+        writer_stall: Duration::from_secs(60),
         ..SupervisorTimeouts::default()
     })
     .await;
@@ -2820,8 +2823,8 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
         .await
         .expect("handshake");
 
-    // Enough cheap requests to fill the reply direction several times
-    // over and leave a real backlog queued behind the parked writer, but
+    // Enough cheap requests to overflow the reply direction (about 4.6 KB
+    // of replies against a 4 KiB buffer) and park the writer, but
     // few enough (a `ListSessions` request is a few dozen bytes) that
     // they all fit in this 4 KiB transport buffer on their own. That
     // second property is what keeps the flood from blocking the TEST:
@@ -2841,12 +2844,22 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
     // with the writer task still parked on an unwritable reply and a
     // full backlog queued behind it.
     writer.shutdown().await.expect("half-close write side");
+    let shutdown_started = std::time::Instant::now();
 
     tokio::time::timeout(Duration::from_secs(30), handle)
         .await
         .expect("handle_connection must return within the bounded writer drain, not hang forever")
         .expect("connection task panicked")
         .expect("a peer closing its write half cleanly is not itself a connection error");
+    // The premise is a writer parked on undeliverable replies, so only the
+    // drain bound can end the connection. A return well before that bound
+    // means every reply fit and the test exercised nothing; load can only
+    // lengthen this, never shorten it.
+    assert!(
+        shutdown_started.elapsed() >= Duration::from_secs(4),
+        "the writer must have been parked so the drain window ended the connection; returned after {:?}",
+        shutdown_started.elapsed()
+    );
 }
 
 /// The real socket transport: `Supervisor::serve` plus
@@ -4545,6 +4558,8 @@ async fn stop_kills_the_whole_process_tree() {
 /// racing the child's own startup could catch it before `trap ''` has
 /// run, and SIGTERM would kill it the ordinary way, silently defeating
 /// the point of this test.
+/// The session marker owns the whole stubborn tree from creation, even
+/// if attachment or readiness fails before either PID can be extracted.
 #[farhelm_testtrace::test]
 async fn stop_kills_a_child_that_ignores_sigterm() {
     let h = harness().await;
@@ -4560,6 +4575,7 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
         )
         .await
         .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (_chan, rx_replay, mut rx) = h
         .client
@@ -4570,11 +4586,11 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
-    // The child ignores HUP as well as TERM, and an ignored disposition
-    // survives exec into its `sleep`, so nothing but SIGKILL ends it: a
-    // failure before the stop below would otherwise leak the pair for an
-    // hour. The guard's start-time check keeps it harmless after a
-    // successful stop has already reaped and recycled the pid.
+    // The ignored HUP/TERM dispositions survive exec into the child's
+    // `sleep`. This targeted guard complements the marker's whole-tree
+    // cleanup, covering the published PID even if it later loses its marker.
+    // Its start-time check keeps it harmless after a successful stop has
+    // already reaped and recycled the pid.
     let _child_cleanup = PidKillGuard::arm(child_pid);
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
@@ -4607,6 +4623,8 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 /// connection's single serial read loop would not even read the attach
 /// request's frame off the wire until the stop request ahead of it had
 /// been handled to completion, let alone reply to it first.
+/// Whole-tree cleanup is armed at creation because a readiness failure
+/// must not leave the ignored-signal child alive outside this test.
 #[farhelm_testtrace::test]
 async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
     let h = harness().await;
@@ -4622,6 +4640,7 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         )
         .await
         .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let (_chan, rx_replay, mut rx) = h
         .client
         .attach_live(&session.id, 80, 24)
@@ -6015,6 +6034,8 @@ async fn a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the
 /// workaround this quirk provoked cannot casually go back to trusting
 /// `systemctl kill`'s own exit status again, because this fixture is
 /// exactly the input that exit status lies about.
+/// The child handle owns cleanup before readiness is awaited; systemd-run
+/// execs the fixture in place, so a failed readiness check must kill it too.
 #[farhelm_testtrace::test]
 async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_down() {
     let Some(scopes) = probed_scope_manager(
@@ -6045,6 +6066,7 @@ async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_do
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .expect("spawning the stubborn-threads fixture under systemd-run");
 
