@@ -68,6 +68,9 @@ quotas to prevent growth under that behavior is not a bug; do not spend implemen
 it. This exception does not excuse unbounded accumulation during ordinary operation with a correctly behaving supervisor
 or failure to perform the specified cleanup when a connection is retired or a host is removed.
 
+SPEC.md's "Remote input, session defaults, and availability" records the broader 2026-10-11 acceptance of denial of
+service by a malicious or arbitrarily broken host; the examples here do not narrow that rule.
+
 ## Leftover files
 
 Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a
@@ -3854,6 +3857,11 @@ Tooling may recognise its own files and processes by naming convention, such as 
 or the demo recorder's still-image names, and may act on whatever matches. The agent-screen capture tool keeps skipping
 author-name parts shorter than three characters to avoid false matches, with the documented manual read of the diff as
 backstop.
+
+**A checkout runs one harness or tooling command at a time.** Decided 2026-10-11. This includes browser tests,
+screenshot and video capture and publishing, deflake and similar tooling. The docs preview server, which one agent
+leaves running beside its own commands, is not a second run in this sense. Keeping concurrent agents in separate
+checkouts is the maintainer's responsibility; tooling need not tolerate overlapping runs in one checkout.
 
 ## Version and skew
 

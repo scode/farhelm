@@ -388,7 +388,10 @@ installation must produce an actionable refusal before changes begin.
 The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
 `--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
 `--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions and any blockers without changing
-files, stopping processes, or disabling services.
+files, stopping processes, or disabling services. Confirmed 2026-10-11: those blockers are ownership, recognition and
+ambiguity refusals, not predictions about locks held at preview time, such as an open desktop app or a running
+installer. The preview warns that an install or upgrade running now makes uninstall refuse; the real run refuses with a
+clear message for any held lock.
 
 Removal covers the recognized installer-created macOS app bundle and its terminal link, the installed CLI on Linux, and
 Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the existing setup
@@ -457,6 +460,10 @@ acceptable: deleting or replacing a file the command does not own, reporting a r
 binaries, the macOS app bundle and their ownership records disagreeing with each other, leaving the helm and supervisor
 services configured against different state directories, or leaving a state that no documented command recovers from.
 Reach this with the simplest mechanism that works, and prefer a refusal to machinery that tries to carry on.
+
+Confirmed 2026-10-11: a run killed between two adjacent atomic writes may leave state that rerunning the same command
+repairs. That is an accepted stopped-partway state and the expected recovery, even if the intermediate state is one of
+the wrong outcomes above, such as the helm and supervisor services configured against different state directories.
 
 ### Acceptance coverage
 
@@ -2180,6 +2187,11 @@ serving other hosts. Requests involving the affected host may fail or remain pen
 continue to function. This allowance concerns filesystem errors and hangs, not ordinary cancellation or disconnection
 while the filesystem is healthy.
 
+Confirmed 2026-10-11: for a malicious or arbitrarily broken host, the denial-of-service acceptance under
+[Remote input, session defaults, and availability](#remote-input-session-defaults-and-availability) supersedes this
+availability guarantee. The protections against corrupting the helm's state or affecting other hosts' security or data
+still apply.
+
 ### Waiting between operations on one host
 
 Confirmed 2026-09-28: session-management operations on the same host (create, restart, delete, and agent-requested
@@ -2454,22 +2466,23 @@ helm and the GUI show. A host may crowd or clutter those views so that other ses
 reporting enough sessions that sort first to push every other host's sessions out of the merged all-hosts list (which is
 capped), and so out of agents' fleet listings, which have no per-host option. In the GUI, per-host views still show the
 others, routing by session id still reaches them, and removing the host restores the list. Farhelm is not required to
-defend against that. What must still be prevented is a host breaking the helm itself or affecting the security of other
-hosts.
+defend against that. What must still be prevented is a host compromising the helm, corrupting its own state, or
+affecting other hosts' security or data.
 
-Confirmed 2026-10-01: a misbehaving host degrading the helm's performance or availability, the way a denial-of-service
-attack would, is accepted when it cannot easily be avoided. Farhelm avoids such effects where it reasonably can but does
-not spend elaborate complexity on them. One it avoids: a supervisor's "sessions changed" hints make the helm refresh
-that host at once, and each such refresh makes every open client re-read, so the helm spaces the refreshes hints cause
-by the same minimum gap the supervisor promises to keep between its hints, with at most one more pending. A host that
-hints without pause then costs the helm no more than a busy honest one.
+Confirmed 2026-10-11: denial of service of the helm or the desktop app by a malicious or arbitrarily broken host is
+accepted outright, whether or not Farhelm could avoid it. Farhelm adds no complexity to defend against those effects.
+This does not accept a host corrupting the helm's own state or affecting other hosts' security or data. Existing
+mitigations remain: a supervisor's "sessions changed" hints make the helm refresh that host at once, and each such
+refresh makes every open client re-read, so the helm spaces the refreshes hints cause by the same minimum gap the
+supervisor promises to keep between its hints, with at most one more pending. A host that hints without pause then costs
+the helm no more than a busy honest one.
 
-Confirmed 2026-10-10: beyond that acceptance, two effects a hostile or compromised host can have are accepted even where
-Farhelm could avoid them. Through the bundled terminal library, for example, escape sequences with huge repeat counts,
-link records or combining characters that pile up, and the library's own caches can make a session's terminal slow or
-exhaust the viewer's memory; the remedy is upgrading the library when upstream fixes such a problem, never a workaround
-in Farhelm. And a supervisor can fill the helm's log by sending large unexpected messages, which Farhelm need not limit.
-Neither extends to a host gaining execution, reading secrets, or changing what Farhelm does on other hosts.
+Confirmed 2026-10-10: two examples of accepted effects from a hostile or compromised host follow. Through the bundled
+terminal library, escape sequences with huge repeat counts, link records or combining characters that pile up, and the
+library's own caches can make a session's terminal slow or exhaust the viewer's memory; the remedy is upgrading the
+library when upstream fixes such a problem, never a workaround in Farhelm. And a supervisor can fill the helm's log by
+sending large unexpected messages, which Farhelm need not limit. Neither extends to a host gaining execution, reading
+secrets, or changing what Farhelm does on other hosts.
 
 ### Ownership during cleanup and provisioning
 
@@ -2565,9 +2578,9 @@ user whose key needs a hardware touch or an agent confirmation per login sees as
 
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
-aliasing, and the proxy case below). An install whose `farhelm` program path contains `$` is unsupported and refused,
-because systemd does not decode `$$` in a service's program position, so a service written for that path could not
-start.
+aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, and
+the proxy case below). An install whose `farhelm` program path contains `$` is unsupported and refused, because systemd
+does not decode `$$` in a service's program position, so a service written for that path could not start.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
@@ -2580,6 +2593,16 @@ A session that reaches a managed checkout, a working directory, or any other fol
 is not recognized as being there, and a file hard-linked between checkouts is not treated as shared. Farhelm need not
 detect aliasing or add complexity to cope with it.
 
+Confirmed 2026-10-11: Farhelm has dedicated ownership of the managed checkouts it creates, their checkout roots and the
+trash (`farhelm-archived-working-copies`). Out-of-band manipulation of those paths is unsupported, including restoring a
+filesystem snapshot over them, user-instigated kernel-level overrides, or using uncommon filesystems such as FAT.
+Farhelm adds no complexity to detect or defend against these changes. The foreign-replacement guard protects ordinary
+replacement, such as a folder removed and recreated or a re-clone; replacing a folder inside the guard's check-then-move
+window is out of band too. This acceptance does not extend to the state directory or installation, or change the
+ownership checks required elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the
+symlink and canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS
+and overlayfs remain supported, as the managed-checkout identity rule above specifies.
+
 ### Supported host setup
 
 Confirmed 2026-09-28: for remote hosts, the supported, user-facing way to install and update a supervisor is the helm's
@@ -2591,6 +2614,10 @@ provisioning does not target. Do not spend significant complexity making setup o
 or preserve such setups; refusing with a clear message is enough. Setup and Update may treat the layout they install as
 their own, including re-applying the settings they manage, such as start at boot and linger, on every run. The rules
 above about shared directories and unrelated host configuration still hold.
+
+Confirmed 2026-10-11: switching a remote host to `farhelm helm setup` or another best-effort setup while a panel setup
+or Update is queued or running is best effort too. The panel run may act on the binary that setup now uses, and a
+visible failure is enough; Farhelm need not re-check for such a switch mid-run.
 
 Confirmed 2026-10-10: Farhelm's units use systemd's `simple` service type (the default, so a unit may also leave it
 unset) with one start command. Setup and uninstall treat a Farhelm unit changed to any other type as one they do not

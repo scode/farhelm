@@ -18,14 +18,11 @@ None open.
 - `upload-cancellation-drops-final-reply.md` — Delete can discard an upload result during temporary connection
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
-- `snapshot-root.md` — Writable snapshot may pass replacement checkout ownership.
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the
   host.
 
 - `uninstall-race-first-time-service-setup.md` — Concurrent setup and uninstall can leave services pointing at a deleted
   executable.
-- `interrupted-paired-writes-still-split-service-state.md` — Interrupted service reconfiguration can persist
-  incompatible state directories.
 - `host-actions-disappear-supported-sidebar-widths.md` — A narrow sidebar could hide the actions needed for an
   unreachable host.
 - `build-mismatch-turns-unattended-mounts-into-displacing.md` — Build mismatch can turn automatic recovery into an
@@ -37,7 +34,6 @@ None open.
   open dialogs.
 - `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
   against argument expansion.
-- `archive-rename-move-replacement-directory.md` — Checkout archiving could move a foreign replacement directory.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -49,11 +45,7 @@ None open.
   sidebar keeps deleted/stale rows.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
-- `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
-  checking whether `farhelm helm setup` took the host over.
 
-- `uninstall-dryrun-locks.md` — Uninstall preview omits currently held lock blockers.
-- `publisher-copy-race.md` — Screenshot publication may certify pixels different from those it checked.
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
 
 - `failed-confirmation-discard-session-despite-failed-process.md` — Failed create recovery could discard the session
@@ -84,7 +76,6 @@ None open.
   cleanup ownership.
 - `pipe-scan-assertion-failures-leave-fixture-processes-running.md` — Failed pipe-scan tests leave children and
   descriptors open.
-- `repeated-buffer-copying-amplifies-tiny-frame-traffic.md` — Tiny supervisor frames could amplify buffer-copying cost.
 - `macos-environment-test-accepts-failed-observations-success.md` — The macOS environment test treats failed observation
   as successful withholding.
 - `environment-value-parsed-output-complete.md` — A split output line could make the environment test parse an
@@ -137,8 +128,6 @@ None open.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
 - `ambiguous-claim-orphaned-next-pick.md` — An uncertain plan claim could be stranded when the executor claims another.
-- `cancelled-attach-retain-abandoned-terminal-channel.md` — Cancellation before attach transmission could retain local
-  terminal-routing metadata.
 - `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
   surviving runtime.
 - `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an
@@ -160,7 +149,6 @@ None open.
   launcher.
 - `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
   template.
-- `concurrent-starts-bypass-sweep-serialization.md` — Concurrent sweep starts could publish the losing run as current.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
@@ -173,10 +161,6 @@ None open.
   death.
 - `work-order-progress-reads-observe-empty-file-during.md` — An empty progress baseline could make old output look newly
   produced.
-- `screenshot-runs-collide-through-shared-fleet-auth.md` — Overlapping screenshot commands could interfere through
-  shared files.
-- `shared-authentication-files-causing-concurrent-run-interference.md` — Overlapping runs could remove each other's
-  authentication state.
 - `held-synthetic-delete-handlers-delay-failure-teardown.md` — Failed assertions could leave synthetic DELETE handlers
   blocking teardown.
 - `guest-addresses-account-names-inject-ssh-configuration.md` — An IPv6 scope suffix could inject text into guest SSH
@@ -185,8 +169,6 @@ None open.
   inherit a passing validation.
 - `aggregate-identity-skew-creates-false-host-match.md` — An aggregate identity mismatch remains an unresolved
   transition question.
-- `detached-terminal-cleanup-tasks-wait-writer-capacity.md` — Repeated detach cleanup could accumulate tasks waiting for
-  writer capacity.
 - `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md` — A failed Pi callback could leave Resume
   pointing at an earlier conversation.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
