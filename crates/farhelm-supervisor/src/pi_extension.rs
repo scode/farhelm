@@ -30,7 +30,8 @@ pub(crate) struct VendorAsset {
 /// not a supervisor is running; Pi's end-of-turn reports heal the rare
 /// report that does not.
 ///
-/// `v2` because the bytes changed after `v1` had shipped (#811, first in
+/// `v3` moves vendor getters and encoding inside the silent error guard.
+/// The identity must change whenever the bytes do: `v2` followed `v1` (#811, first in
 /// v0.13.0) and [`materialize_asset`] refuses a published file whose bytes
 /// differ: every host that had already published `v1` went on launching Pi
 /// without the extension. A new name publishes beside the old file instead.
@@ -38,7 +39,7 @@ pub(crate) struct VendorAsset {
 /// happening again.
 pub(crate) const PI_ASSET: VendorAsset = VendorAsset {
     directory: "pi",
-    file_name: "farhelm-conversation-v2.ts",
+    file_name: "farhelm-conversation-v3.ts",
     source: include_bytes!("../assets/pi-conversation-v1.ts"),
 };
 
@@ -156,7 +157,7 @@ mod tests {
         let state = farhelm_teststate::tempdir().expect("state directory");
         let path = state
             .path()
-            .join("integrations/pi/farhelm-conversation-v2.ts");
+            .join("integrations/pi/farhelm-conversation-v3.ts");
         crate::ensure_private_dir(path.parent().unwrap())
             .await
             .expect("artifact directory");
@@ -264,8 +265,8 @@ mod tests {
         let pinned = [
             (
                 "pi",
-                "farhelm-conversation-v2.ts",
-                "a1d4f427a8e418b1b548671aafa4ae3aad8a6fb49793a12015c3aae118afc045",
+                "farhelm-conversation-v3.ts",
+                "b60e95a692119c3c0fe19302dd19edc0fff7134660d663be42dd0e25c6ae8b2d",
             ),
             (
                 "omp",

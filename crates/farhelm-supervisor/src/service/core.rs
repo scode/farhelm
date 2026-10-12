@@ -1675,8 +1675,9 @@ fn is_agent_request_fingerprint(fingerprint: &str) -> bool {
 /// relative to the settlement — a late settlement simply means the next
 /// request reconciles instead of replaying.
 ///
-/// Entries are pruned when the last holder leaves, so the map is bounded
-/// by in-flight creates rather than by every key ever seen.
+/// Entries are pruned when the last holder leaves and on the next lookup
+/// after a waiting claim is cancelled. The scan covers only live operations
+/// and abandoned entries since the previous lookup, not every key ever seen.
 #[derive(Debug, Default)]
 pub(crate) struct KeyedLocks {
     /// `Weak` so an entry dies with its last guard; see [`KeyedGuard`]'s
@@ -1700,6 +1701,7 @@ impl KeyedLocks {
     /// acquisition await.
     fn lock_for(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
         let mut locks = self.locks.lock().expect("keyed lock map poisoned");
+        locks.retain(|_, entry| entry.strong_count() > 0);
         match locks.get(key).and_then(std::sync::Weak::upgrade) {
             Some(existing) => existing,
             None => {
@@ -25517,6 +25519,35 @@ exit 0
             sup.sessions.lock().await.is_empty(),
             "no attempt may have created a session"
         );
+    }
+
+    /// A cancelled waiter leaves no dead registry entry after the next lookup.
+    ///
+    /// Dropping the holder first leaves its weak entry alive for the waiter;
+    /// cancelling before the waiter constructs a guard then bypasses guard
+    /// cleanup. An unrelated lookup must prune that entry while preserving
+    /// any live mutexes, or unique abandoned keys accumulate until restart.
+    #[farhelm_testtrace::test]
+    async fn cancelled_keyed_waiters_are_pruned_on_an_unrelated_lookup() {
+        use std::future::Future as _;
+        let locks = Arc::new(KeyedLocks::default());
+        let holder = locks.claim("abandoned").await;
+        let live = locks.lock_for("live");
+        let mut waiter = Box::pin(locks.claim_before(
+            "abandoned",
+            tokio::time::Instant::now() + Duration::from_secs(10),
+        ));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(waiter.as_mut().poll(&mut cx).is_pending());
+        drop(holder);
+        assert!(locks.locks.lock().unwrap().contains_key("abandoned"));
+        drop(waiter);
+        assert_eq!(locks.locks.lock().unwrap()["abandoned"].strong_count(), 0);
+
+        let other = locks.claim("other").await;
+        assert!(!locks.locks.lock().unwrap().contains_key("abandoned"));
+        assert!(Arc::ptr_eq(&live, &locks.lock_for("live")));
+        drop(other);
     }
 
     /// The per-key lock actually excludes, actually hands off, and
