@@ -2890,7 +2890,11 @@ impl ConnectionManager {
     /// There is no drain and no graceful phase, deliberately: SPEC.md's
     /// durability promise is that killing the helm does nothing to any
     /// session, so there is nothing an orderly shutdown would protect.
-    /// Aborting is enough (see the module docs).
+    /// Published clients are withdrawn and retired too, so retained clones
+    /// cannot keep their transports alive after actor cancellation.
+    /// During panic unwinding, withdrawal and cancellation still happen,
+    /// but explicit retirement is skipped: a poisoned client task list
+    /// must not turn cleanup into a second panic and abort the process.
     ///
     /// TERMINAL, and that is what makes it safe against a concurrent
     /// [`Self::sync_registry`]. A reconcile that read the registry a moment
@@ -2913,8 +2917,20 @@ impl ConnectionManager {
             Err(poisoned) => poisoned.into_inner(),
         };
         map.shut_down = true;
+        let mut withdrawn = Vec::new();
         for (_, handle) in map.actors.drain() {
+            handle
+                .status
+                .send_modify(|status| withdrawn.extend(status.client.take()));
             handle.task.abort();
+        }
+        drop(map);
+        // Retirement may lock a poisoned client task list. Drop during an
+        // unwind must not turn that second panic into a process abort.
+        if !std::thread::panicking() {
+            for client in withdrawn {
+                retire_withdrawn(Some(client));
+            }
         }
     }
 }
@@ -9858,6 +9874,59 @@ mod tests {
             fixture.transport.closures.borrow().clone(),
             Arc::strong_count(&retained_direct)
         );
+    }
+
+    /// Shutdown closes every published transport even while callers retain
+    /// client clones and the runtime continues serving other work.
+    ///
+    /// Actor cancellation alone used to leave these clones live. The peer's
+    /// observed close proves retirement, and a retained status receiver must
+    /// also lose the client so it cannot hand out a fresh clone after shutdown.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn shutdown_retires_a_retained_published_client() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            transport.set_script(local_id(&store).await, Script::default());
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[0].id;
+        let refreshed = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await;
+        assert!(
+            matches!(refreshed, Ok(Some(_))),
+            "fixture must finish its initial refresh"
+        );
+        let retained = status_client(&fixture.manager, host).expect("published client");
+        let status = fixture.manager.actors.lock().unwrap().actors[&host]
+            .status
+            .subscribe();
+        fixture.manager.shutdown();
+        assert!(
+            status.borrow().client.is_none(),
+            "shutdown must withdraw publication"
+        );
+        let closed = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.transport.wait_for_closures(host, 1),
+        )
+        .await;
+        assert!(
+            closed.is_ok(),
+            "peer must close while client is retained; closures={:?}, refs={}",
+            fixture.transport.closures.borrow().clone(),
+            Arc::strong_count(&retained)
+        );
+        fixture.manager.shutdown();
     }
 
     /// Replacing an actor that looks dead but has not yet retired its

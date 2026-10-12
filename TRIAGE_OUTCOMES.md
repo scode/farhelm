@@ -11521,7 +11521,15 @@
   definitions pointing at a removed executable while uninstall reports success. Add a focused test if one fits the
   existing setup/uninstall tests without new machinery. Stop and bring it back to the user if this needs a redesign of
   the lock layout. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Execution: `pending`, waiting on the user: locking only when uninstall can reach the user manager leaves a first-setup
+  race when another invocation can reach it. Locking the fallback unit directory also misses different manager and
+  caller directories; inspecting the installer lock without acquiring it still races its creation. One option is to
+  refuse standalone uninstall whenever the manager cannot identify its unit directory, losing the existing CLI-only
+  no-manager removal path. The behavior-preserving option is a separate shared-exclusion change: reuse the installer
+  lock for precisely the installations eligible for flat removal, or authorize an executable-keyed lock that does not
+  require writing beside the binary. That needs an explicit participation contract for supported executable paths and
+  installation transitions. Recommend that separately scoped exclusion change. No partial fix shipped; the original
+  setup/uninstall race remains unfixed. Feedback file and index entry retained.
 
 ## failed-sink-record-hides-older-reaper.md
 
@@ -12209,7 +12217,8 @@
   complexity gate".
 - Completion criteria: dead entries are pruned (for example when a lock is looked up or released). Only if the fix is a
   few lines; otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Execution: `complete`; jj change `qmtvpknn`, bookmark `plan/helm-supervisor-small-fixes/01-small-fixes`; PR
+  https://github.com/scode/farhelm/pull/1934/changes.
 
 ## shutdown-leaves-retained-supervisor-clients-active.md
 
@@ -12221,7 +12230,8 @@
   reuses the retirement code host removal already has.
 - Completion criteria: shutdown retires published clients the way host removal does. Only if the fix is a few lines;
   otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Execution: `complete`; jj change `qmtvpknn`, bookmark `plan/helm-supervisor-small-fixes/01-small-fixes`; PR
+  https://github.com/scode/farhelm/pull/1934/changes.
 
 ## template-discovery-fails-permanently-once-reply-exceeds.md
 
@@ -12236,7 +12246,12 @@
 - Completion criteria: saving a template is refused when it would push the catalog past a total size that still fits a
   reply. If the cap is not cheap, bring it back to the user rather than discarding it. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Execution: `pending`, waiting on the user: the cheap stored-name/fields cap cannot guarantee an agent listing fits its
+  8 MiB reply. Per-row encoding and resolved host display names also count; SSH destinations are unbounded and host
+  names can change after a template is saved. A save-time snapshot budget would leave later host changes outside the
+  guarantee; bounding host display names would broaden the host-input contract. Recommend a separate byte-bounded
+  listing/pagination plan, which can also handle existing oversized catalogs. No cap shipped; the original cross-host
+  discovery risk remains unfixed. Feedback file and index entry retained.
 
 ## dropping-upload-guard-outside-tokio-runtime-skips.md
 
@@ -12662,7 +12677,8 @@
   calls out the caveat."
 - Completion criteria: the getter reads move inside the existing guard, as in the OMP reporter. Stop and bring it back
   to the user if it is not that simple. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Execution: `complete`; jj change `qmtvpknn`, bookmark `plan/helm-supervisor-small-fixes/01-small-fixes`; PR
+  https://github.com/scode/farhelm/pull/1934/changes.
 
 ## partial-templates-cannot-retain-non-yolo-approval-choices.md
 

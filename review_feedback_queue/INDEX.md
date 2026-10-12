@@ -52,7 +52,6 @@ None open.
   promised pane width.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
   the user's latest choice.
-- `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
@@ -83,8 +82,6 @@ None open.
   deletion if policy restoration fails.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
-- `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
-  surviving runtime.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
@@ -113,8 +110,6 @@ None open.
   inherit a passing validation.
 - `aggregate-identity-skew-creates-false-host-match.md` — An aggregate identity mismatch remains an unresolved
   transition question.
-- `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md` — A failed Pi callback could leave Resume
-  pointing at an earlier conversation.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across

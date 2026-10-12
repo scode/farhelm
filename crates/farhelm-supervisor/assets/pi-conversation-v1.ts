@@ -13,35 +13,45 @@ export default function farhelmConversation(pi) {
     if (!executable) return;
     let pending = Promise.resolve();
 
-    /** Serialize reports so a slow old session cannot win after a switch. */
+    /** Serialize reports so a slow old session cannot win after a switch.
+     *
+     * Capture identity at the event boundary, then recheck it and read the
+     * persisted file when this report executes. Vendor getters and encoding
+     * can throw; all preparation belongs inside the silent-failure boundary
+     * so one failed callback neither escapes into Pi nor poisons the queue.
+     */
     function report(source, ctx) {
-        const sessionId = ctx.sessionManager.getSessionId();
-        const file = ctx.sessionManager.getSessionFile();
-        const payload = JSON.stringify({
-            vendor: "pi",
-            session_id: sessionId,
-            session_file: ctx.sessionManager.isPersisted() && file && existsSync(file) ? file : null,
-            source,
-        });
-        pending = pending.then(() => new Promise((resolve) => {
-            if (ctx.sessionManager.getSessionId() !== sessionId) {
-                resolve();
-                return;
-            }
-            try {
-                // The envelope discriminator, sourced from this
-                // asset's own entry point: the payload `vendor`
-                // above stays as a consistency check only.
-                const child = execFile(executable, ["internal", "hook", "--vendor", "pi"], {
-                    timeout: 2000,
-                    maxBuffer: 8192,
-                }, () => resolve());
-                child.stdin?.on("error", () => {});
-                child.stdin?.end(payload);
-            } catch {
-                resolve();
-            }
-        })).catch(() => {});
+        try {
+            const sessionId = ctx.sessionManager.getSessionId();
+            pending = pending.then(() => new Promise((resolve) => {
+                try {
+                    if (ctx.sessionManager.getSessionId() !== sessionId) {
+                        resolve();
+                        return;
+                    }
+                    const file = ctx.sessionManager.getSessionFile();
+                    const payload = JSON.stringify({
+                        vendor: "pi",
+                        session_id: sessionId,
+                        session_file: ctx.sessionManager.isPersisted() && file && existsSync(file) ? file : null,
+                        source,
+                    });
+                    // The envelope discriminator, sourced from this
+                    // asset's own entry point: the payload `vendor`
+                    // above stays as a consistency check only.
+                    const child = execFile(executable, ["internal", "hook", "--vendor", "pi"], {
+                        timeout: 2000,
+                        maxBuffer: 8192,
+                    }, () => resolve());
+                    child.stdin?.on("error", () => {});
+                    child.stdin?.end(payload);
+                } catch {
+                    resolve();
+                }
+            })).catch(() => {});
+        } catch {
+            return pending;
+        }
         return pending;
     }
 
