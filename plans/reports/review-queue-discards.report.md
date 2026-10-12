@@ -41,3 +41,21 @@ The required independent review on `gpt-6.1-sol` at high effort found no defects
 21 removals against their discard decisions, the unchanged surrounding ledger fields, the completed execution links, the
 remaining queue index, and the PR's draft state. The commit/title cold read also conveyed the intended cleanup, with no
 claim contradicted by the diff or repository convention violation.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1921. The rebase met no conflicts.
+
+#### Review before merging
+
+No findings. The PR removes exactly the 21 feedback files the plan lists and their index entries; each of the 21 ledger
+entries keeps its `discard` outcome and now records completion with this PR; no other ledger entry or field changed; and
+the review queue's index lists exactly the files present.
+
+#### Checks
+
+- Run now: `dprint check`, and a comparison of the review queue's index with its directory (no entry without a file, no
+  file without an entry).
+- Not run: any test suite, since only review-queue files and the triage ledger changed.
+
+Nothing in the report above was made untrue by the landing.
