@@ -802,6 +802,21 @@ are large mostly because of their tests.
   does not work around non-security bugs in the vendored bundle (SPEC_impl.md, decided 2026-10-10), so when the bundle
   is next upgraded, check whether upstream fixed these and remove this entry.
 
+- **Close the remaining session-start gap in the race-free Mac installer.** A follow-up to the Near term entry "Make the
+  Mac installer race-free", once that design (https://snippets.scode.org/s/farhelm-installer-race-free-design/) is
+  built. In that design a version can only be deleted when nothing holds its lock. A new session's window holds its
+  version from a "hold" step that runs as the window's first command, but between the supervisor creating the window and
+  that step running (normally a few milliseconds) only the supervisor keeps the version alive. If the supervisor goes
+  away in that moment (Farhelm quit, with the window slower than the supervisor's few-second wait for the window to
+  report "held" because it was stopped or starved, or the supervisor killed) and an install runs then and deletes that
+  exact version (no longer Installed, held by nothing else), the hold step finds its version gone and that session fails
+  to start, with an error in its window. Starting it again works, nothing is lost, and other sessions are unaffected.
+  The maintainer chose (2026-10-11) to narrow the gap rather than close it while building the design. Closing it would
+  mean the supervisor starts a small lock-holding helper outside tmux before creating the window, which holds the
+  version until that window's hold step reports "held" (matched by process id) and gives up after a generous time limit
+  so it cannot linger if the window never starts; the gap would then remain only for a window stalled longer than that
+  limit.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
