@@ -11443,7 +11443,10 @@
   mitigations (such as the spacing of "sessions changed" refreshes) may stay; the change does not ask for their removal.
   Make no code change to the frame reader. Remove this feedback file and its index entry, and those of the two items
   above, in the same change.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Denial of service is accepted outright; helm state and
+  other-host security/data remain protected.
 
 ## header-actions-skip-listing-read.md
 
@@ -11979,7 +11982,10 @@
   responsibility, and tooling need not handle overlapping runs in one checkout. No code change. Remove this feedback
   file and its index entry, together with `shared-authentication-files-causing-concurrent-run-interference.md`,
   `concurrent-starts-bypass-sweep-serialization.md` and `publisher-copy-race.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). One harness or tooling run per checkout is explicit in
+  SPEC_impl.md; AGENTS.md already requires separate checkouts for concurrent agents.
 
 ## shared-authentication-files-causing-concurrent-run-interference.md
 
@@ -11990,7 +11996,10 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). One harness or tooling run per checkout is explicit in
+  SPEC_impl.md; AGENTS.md already requires separate checkouts for concurrent agents.
 
 ## concurrent-starts-bypass-sweep-serialization.md
 
@@ -12002,7 +12011,10 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). One harness or tooling run per checkout is explicit in
+  SPEC_impl.md; AGENTS.md already requires separate checkouts for concurrent agents.
 
 ## publisher-copy-race.md
 
@@ -12013,7 +12025,10 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). One harness or tooling run per checkout is explicit in
+  SPEC_impl.md; AGENTS.md already requires separate checkouts for concurrent agents.
 
 ## classification-counts-runner-failures-deterministic-test-failures.md
 
@@ -12292,7 +12307,10 @@
   helm/desktop in the face of a malicous or arbitrairly broken host is acceptable").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Denial of service is accepted outright; helm state and
+  other-host security/data remain protected.
 
 ## cancelled-attach-retain-abandoned-terminal-channel.md
 
@@ -12306,7 +12324,10 @@
   broken host is acceptable). Related existing principle: SPEC_impl.md "Supervisor metadata retention and nonresponse".
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Denial of service is accepted outright; helm state and
+  other-host security/data remain protected.
 
 ## history-fixture-enables-yolo-installing-restoration-guard.md
 
@@ -12548,7 +12569,10 @@
 - Completion criteria: SPEC.md's "Concurrent and interrupted runs" says that a run killed between two adjacent atomic
   writes may leave state that rerunning the same command repairs, and that this is the expected recovery. No code
   change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Rerunning the same command is the accepted recovery
+  after interruption between adjacent atomic writes.
 
 ## provisioning-update-replaces-binary-before-setup-guard.md
 
@@ -12559,7 +12583,10 @@
 - Decision: on 2026-10-11 the user chose "Accept, fix cheap ones" for operator-caused setup races.
 - Completion criteria: SPEC.md states that moving a remote host to non-panel setup while a panel operation is in flight
   is best effort, and a visible failure is enough. No code change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Remote handoff to non-panel setup during a panel run
+  is best effort; a visible failure is sufficient.
 
 ## automatic-updates-overwrite-newer-manual-installation.md
 
@@ -12589,7 +12616,10 @@
 - Completion criteria: SPEC.md's dry-run wording says the reported blockers are ownership and ambiguity refusals; locks
   held at preview time are covered by the generic warning and the real run's clear refusal. No code change. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Uninstall preview reports ownership, recognition and
+  ambiguity blockers; held locks are refused by the real run.
 
 ## pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md
 
@@ -12644,7 +12674,10 @@
   user-instigated kernel-level overrides, or uncommon filesystems like FAT; Farhelm adds no complexity to defend against
   these. No code change. Remove this feedback file and its index entry, together with
   `archive-rename-move-replacement-directory.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Dedicated managed-checkout ownership excludes
+  out-of-band manipulation while retaining ordinary replacement and remount checks.
 
 ## archive-rename-move-replacement-directory.md
 
@@ -12655,7 +12688,10 @@
   of its managed paths; out-of-band replacement is unsupported).
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `snapshot-root.md`.
-- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
+- Execution: complete; change `zruxxtqnuxnuxstnykkpnlmzklxtkons`, bookmark
+  `plan/host-trust-and-tooling-spec/01-spec-clarifications`,
+  [PR #1923](https://github.com/scode/farhelm/pull/1923/changes). Dedicated managed-checkout ownership excludes
+  out-of-band manipulation while retaining ordinary replacement and remount checks.
 
 ## template-supplied-session-names-rendered-raw.md
 
