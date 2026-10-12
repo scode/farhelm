@@ -12736,7 +12736,7 @@
   holds one tab's cleanup in its shutdown phase and proves another session still receives a fresh sample. If this needs
   significantly more than moving the close off the sampling pass (a new scheduler, a change to the lifecycle-claim
   design), stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
 
 ## plain-replace-loses-retry-identity.md
 
@@ -12752,7 +12752,7 @@
   acknowledged result still gets a new key. Cover the header and sidebar Replace paths with a test of the lost-reply
   retry if it fits existing machinery. If this needs more than retaining the key in the UI's existing operation state,
   stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
 
 ## upload-cancellation-drops-final-reply.md
 
@@ -12763,7 +12763,7 @@
   timeout of their own. The target session is gone anyway and nothing is lost.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: a rare trigger, and nothing is lost.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## unrelated-probe-failure-disables-argument-expansion-protection.md
 
@@ -12778,7 +12778,7 @@
   any other failure as inconclusive (retried later or treated as supported). If that is not a few-line change, record
   this outcome as discarded during execution (Execution `complete`: gate tripped, with the reason) instead. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
 
 ## uninstall-forgotten-success.md
 
@@ -12794,7 +12794,7 @@
 - Completion criteria: when the GUI never observed the uninstall finish, the notice says the outcome is unknown rather
   than that Farhelm was removed. If this needs more than a small change to the notice logic, stop and bring it back to
   the user unfixed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
 
 ## newer-completed-run-leaves-older-update-permanently.md
 
@@ -12805,7 +12805,7 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it under SPEC.md "One GUI at a time"; a reload
   clears it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## aggregate-identity-skew-creates-false-host-match.md
 
@@ -12817,7 +12817,7 @@
   discarded silently because it touches a cross-host security boundary, per the user's rule that such findings are never
   dropped without them seeing it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## deletes-timed-out-sink-shutdown-leaks-output-client.md
 
@@ -12829,7 +12829,7 @@
   2026-10-11 because the "only when hung" premise is a code comment, not spec text.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## live-panes-process-read-error-degrades-pid-only-identity.md
 
@@ -12857,7 +12857,7 @@
 - Completion criteria: that TODO.md entry names this case (a create whose database confirmation fails while a process
   sweep also failed keeps the session so it can be deleted). Remove this feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## recently-modified-image-png-gets-generated-attachment.md
 
@@ -12872,7 +12872,7 @@
   note naming what was omitted and why (it looked like the clipboard's generated copy of another pasted file), and the
   misleading code comment is corrected. The deduplication itself is unchanged. Add a test if it fits existing paste
   tests. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-retry-and-notice-fixes.md`.
 
 ## probe-reregister-drops-terminals.md
 
@@ -12882,7 +12882,7 @@
   the row during an update is unverified.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it as self-healing.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## session-detail-drains-full-list.md
 
@@ -12893,7 +12893,7 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: no user-visible harm at the intended
   scale.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## tab-reap-budget-starved-by-failures.md
 
@@ -12905,7 +12905,7 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: a broken user manager means a broken host
   (the 2026-10-02 decision in `ticker-retries-unkillable-tab-reaps.md`).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## feed-retained-browser-sign-in-interruption-falsely-represents.md
 
@@ -12916,7 +12916,7 @@
   request. The desktop app is unaffected.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: rare, bounded, and it recovers on sign-in.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## window-restoration-uses-wrong-display-scale-macos.md
 
@@ -12929,7 +12929,7 @@
 - Completion criteria: a Maybe later entry in TODO.md describes the mixed-scale restore problem and says it needs work
   and verification on a real Mac with displays of different scaling. Remove this feedback file and its index entry in
   the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## release-builds-fail-held-stdin-hook-test.md
 
@@ -12940,7 +12940,7 @@
 - Decision: on 2026-10-11 the user accepted the recommendation: a one-line debug-only gate on the test.
 - Completion criteria: the test is compiled or run only where the override exists, with a comment saying why, so a
   release-profile run neither fails nor silently weakens it. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
 
 ## constructor-font-regression-observes-mutable-value-construction.md
 
@@ -12950,7 +12950,7 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: TODO.md's "Make the bundled terminal font
   a hard requirement" removes the code under test. Same basis as `terminal-font-promise-leak.md`.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
 
 ## opt-in-real-agent-smoke-launches-fake-claude-executable.md
 
@@ -12970,4 +12970,4 @@
   making the real `claude` usable for the test user (logins, any configuration) is the maintainer's job, stated in one
   sentence where the opt-in is documented. Both tests stay opt-in and keep their loud skip. Remove this feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.

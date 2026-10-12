@@ -1,4 +1,4 @@
-# Execute six triage outcomes: small helm, supervisor, setup and installer fixes
+# Execute five triage outcomes: small helm, supervisor and setup fixes
 
 Written against main at d3b28820 on 2026-10-11. This is a goal file for an unattended run, executed through the planning
 system in `plans/AGENTS.md`. You, the executing agent, have none of the conversation that produced it; everything you
@@ -12,7 +12,7 @@ the two may run at the same time; if both are in flight, expect a mechanical reb
 
 ## The goal
 
-Carry out six triage outcomes recorded in root `TRIAGE_OUTCOMES.md`, each outcome `fix code`, in one draft PR. The
+Carry out five triage outcomes recorded in root `TRIAGE_OUTCOMES.md`, each outcome `fix code`, in one draft PR. The
 planning PR that queued this plan set each one's Execution field to
 `` planned in `plans/queue/helm-supervisor-small-fixes.md` ``; that is the state to expect at the start, not `pending`.
 Their headings, which are also the feedback file names under `review_feedback_queue/`:
@@ -22,7 +22,12 @@ Their headings, which are also the feedback file names under `review_feedback_qu
 - `shutdown-leaves-retained-supervisor-clients-active.md`
 - `template-discovery-fails-permanently-once-reply-exceeds.md`
 - `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md`
-- `automatic-updates-overwrite-newer-manual-installation.md`
+
+This plan originally also carried `automatic-updates-overwrite-newer-manual-installation.md` (a guard against an
+automatic update reverting a newer manual install). The user withdrew it on 2026-10-11 as superseded by the separate
+work making the Mac installer and updater race-free (TODO.md `Near term`, "Make the Mac installer race-free"); its
+ledger entry is `complete` and its feedback file is gone (#1922). Do not build that guard or touch `scripts/install.sh`
+or the desktop updater for it.
 
 What each one is about, for someone running Farhelm:
 
@@ -40,12 +45,9 @@ What each one is about, for someone running Farhelm:
 - Pi's conversation reporter reads Pi's session getters before its error guard. If one threw after a conversation
   switch, the report would be lost and Resume would stay on the earlier conversation. No such vendor behavior has been
   observed.
-- The desktop app's automatic update decides what to install before taking the installer's lock. If the user installs a
-  newer build (an RC or a dev build) by hand in that window, the automatic installer can then put the older stable
-  release back, and the next launch runs it. Rerunning the installer repairs it.
 
 None of these was reproduced at runtime; all were confirmed by reading the code. Each ledger entry (Assessment,
-Decision, Completion criteria) is the authoritative statement of what the PR must do for that outcome. Read the six
+Decision, Completion criteria) is the authoritative statement of what the PR must do for that outcome. Read the five
 entries and feedback files before starting. Where this file and a ledger entry seem to disagree, the ledger entry wins
 and the disagreement is a DECISION to log (or a gate trip, per Complexity gate).
 
@@ -78,14 +80,12 @@ user's words. They differ in what a gate trip means, and that difference is bind
   the user said "fix simple ones with complexity gate, if there is a known issue likely to matter to a typical user
   ensure the website's section on that specific agent calls out the caveat." A gate trip goes back to the user. This
   issue is unobserved, so it calls for no website caveat.
-- `automatic-updates-overwrite-newer-manual-installation.md`: the user chose "Accept, fix cheap ones": fix it only if a
-  guard is cheap; otherwise it is discarded during execution (see Complexity gate).
 
 **The user's plan-time decisions (2026-10-11):** "use the planning system to start planning all of the already triaged
-entries"; asked how to group them, the user chose "8 plans as proposed", of which this is the helm, supervisor and
-installer group. Review gate: "gpt-6.1-sol high", a single fresh-context agent with the general charter, no swarm. PR
-shape: "One PR per plan", so this plan's outcomes share one PR, overriding root `AGENTS.md`'s one-PR-per-outcome rule
-for these outcomes only. No-workhorse mode, which `plans/AGENTS.md` requires.
+entries"; asked how to group them, the user chose "8 plans as proposed", of which this is the helm, supervisor and setup
+group. Review gate: "gpt-6.1-sol high", a single fresh-context agent with the general charter, no swarm. PR shape: "One
+PR per plan", so this plan's outcomes share one PR, overriding root `AGENTS.md`'s one-PR-per-outcome rule for these
+outcomes only. No-workhorse mode, which `plans/AGENTS.md` requires.
 
 **Planner proposals** are the mechanisms and test shapes in the outline below, checked against main at d3b28820.
 Handling a gate trip by dropping that one outcome from the PR and shipping the rest follows the precedent of the earlier
@@ -101,7 +101,7 @@ any delay a test adds.
 
 ## Outline
 
-Line numbers drift; find the code by name. Verified on main at d3b28820. The six fixes touch unrelated code and do not
+Line numbers drift; find the code by name. Verified on main at d3b28820. The five fixes touch unrelated code and do not
 interact.
 
 - Setup racing uninstall (`uninstall-race-first-time-service-setup.md`): `farhelm uninstall` takes its locks in
@@ -190,38 +190,12 @@ interact.
   are mechanical and the pin test enforces them. Pi has no JS execution harness; do not build one. Gate: anything beyond
   the guard move and the identity bump (a change to the hook, the report format, or a new test harness) goes back to the
   user.
-- Automatic update over a newer manual install (`automatic-updates-overwrite-newer-manual-installation.md`): in
-  `crates/farhelm-ui/src/desktop/updater.rs`, `check_and_install` re-reads the Installed record after the probe and
-  compares it with the latest release, but then downloads and runs the release's own installer (`run_installer`,
-  `spawn_installer`), which takes the app-bundle lock (`.farhelm-app.lock` beside `Farhelm.app`) and, in its update
-  branch, reads `previous_installed` from `Contents/Versions/installed` under that lock (`scripts/install.sh`) without
-  comparing it to anything. A cheap guard is an installer input the updater sets: the Installed record exactly as it
-  just read it (`installed` in `check_and_install`), passed in a `FARHELM_INSTALL_*` variable set after
-  `farhelm_variables` strips the inherited ones, next to `VERSION_PIN_ENV`. Do not pass `baseline`, which falls back to
-  the running version when there is no Installed record; when there is none, omit the variable, or a missing record
-  would block every update. Under the bundle lock, when that variable is set and the Installed record no longer names
-  it, the installer changes nothing, says why, and exits; the updater then re-reads Installed as it already does. Having
-  it report the outcome as idle or up to date rather than a failure when the record names something newer is a nicety:
-  if the gate is tight, it is the first thing to drop, and a "did not finish" message in that rare case is acceptable. A
-  manual install never sets the variable, so manual version pinning (installing an older release on purpose) is
-  untouched. Because the updater always runs the target release's own installer, the guard takes effect for updates to
-  the first release that carries it; say so in the changelog fragment's caveat only if it matters to a reader. Cover it
-  with a case in `scripts/test-install-sh.sh` (update with the variable set while Installed names a different version:
-  nothing changes, exit as designed) and a unit test of the updater's handling of the new outcome if one fits the
-  existing updater tests. Before starting, read TODO.md's "Make the Mac installer race-free" entry, which plans a
-  redesign covering this race among others: if that redesign has landed by the time you run, this outcome is already
-  fixed (record it so, per Complexity gate); otherwise the cheap guard is still wanted now. Older desktop apps will keep
-  setting this variable when they run a newer release's installer, so say in the installer's comment beside the check,
-  and in a note added to that TODO entry's plan if one exists by then (otherwise in the plan's report), that the
-  redesign must accept or harmlessly ignore it. Do not edit TODO.md for this. Gate: if the guard needs more than the
-  variable, one check under the existing lock, a test case and a few lines in the updater (for example a new lock, a
-  change to the flat layout, or reworking the update order), discard it per Complexity gate and say why.
-- Changelog: three outcomes change what a user can see (setup and uninstall no longer race, a full template catalog is
-  refused with a message instead of breaking agent listing, an automatic update no longer reverts a newer manual
-  install), so the PR's type is `fix:` and it adds a changelog fragment under `releasing/changelog.d/` for each of them
-  that is carried out (kind `fixed`), written for someone running Farhelm per `releasing/EDITORIAL_GUIDANCE.md`. The
-  other three need none. If gate trips leave only outcomes with no user-visible effect, the type becomes `refactor:` or
-  `fix:` as root `AGENTS.md` (Conventional Commits) decides, and no fragment is added.
+- Changelog: two outcomes change what a user can see (setup and uninstall no longer race, and a full template catalog is
+  refused with a message instead of breaking agent listing), so the PR's type is `fix:` and it adds a changelog fragment
+  under `releasing/changelog.d/` for each of them that is carried out (kind `fixed`), written for someone running
+  Farhelm per `releasing/EDITORIAL_GUIDANCE.md`. The other three need none. If gate trips leave only outcomes with no
+  user-visible effect, the type becomes `refactor:` or `fix:` as root `AGENTS.md` (Conventional Commits) decides, and no
+  fragment is added.
 
 The complexity gate for each outcome is its bullet's Gate line above, together with its ledger entry.
 
@@ -239,13 +213,6 @@ actually changed:
   tmux if the selected module needs tmux, else `none`); `-p farhelm-helm` for the manager's retirement tests and the
   template tests in `templates.rs` and `store.rs`. Read the retained output for runtime `SKIPPED` lines; a skipped
   changed test is not a pass.
-- If `scripts/install.sh` changed:
-  `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` and
-  `bash scripts/test-install-sh.sh`.
-- If the updater changed: `cargo check -p farhelm-ui --features desktop` and the focused desktop nextest run of the
-  updater's tests (`cargo nextest run -p farhelm-ui --features desktop -E 'test(updater::)'` through the recorder,
-  `--tmux none`). Both need the webkit2gtk/gtk development packages; if they are missing, report the check as skipped
-  with that reason rather than installing system packages.
 - The macOS uninstall acceptance (`scripts/test-uninstall.py`) cannot run on Linux; if uninstall code changed, say in
   the report that it was not run and why. Do not dispatch the hosted macOS suite unless a change touches macOS-only
   uninstall code.
@@ -254,9 +221,9 @@ actually changed:
 - If a test adds a delay, `python -B scripts/check-test-sleeps.py` with the isolated interpreter from
   `docs/test-sleep-check.md`.
 
-No browser, e2e battery, provisioning, or website runs: nothing they cover changes. Never run the installer, setup or
-uninstall against the machine's own Farhelm installation (root `AGENTS.md`, The live install is off-limits); the test
-scripts use private fixture homes.
+No browser, e2e battery, provisioning, installer, desktop or website runs: nothing they cover changes. Never run the
+installer, setup or uninstall against the machine's own Farhelm installation (root `AGENTS.md`, The live install is
+off-limits); the test scripts use private fixture homes.
 
 ## How to run
 
@@ -334,8 +301,8 @@ Every outcome in this plan carries the user's complexity gate, stated in its led
 one turns out to need significantly more than the outline describes, do not grow it and do not block the whole plan for
 it. What happens next depends on the outcome, as the user decided:
 
-- `cancelled-lock-waiters-leave-permanent-registry-entries.md`, `shutdown-leaves-retained-supervisor-clients-active.md`
-  and `automatic-updates-overwrite-newer-manual-installation.md`: never rewrite the recorded Outcome. Set its
+- `cancelled-lock-waiters-leave-permanent-registry-entries.md` and
+  `shutdown-leaves-retained-supervisor-clients-active.md`: never rewrite the recorded Outcome. Set its
   `TRIAGE_OUTCOMES.md` Execution field to "`complete`: gate tripped (<reason>); discarded per the recorded decision",
   followed by the jj change ID, bookmark and PR URL, and remove its feedback file and index line in this PR.
 - `uninstall-race-first-time-service-setup.md`, `template-discovery-fails-permanently-once-reply-exceeds.md` and
@@ -372,9 +339,8 @@ remove an entry a live waiter or holder still references (two different mutexes 
 once); that shutdown still never panics on a poisoned lock and retires outside the lock; that the template cap is
 enforced inside the write transaction, counts a replace correctly, and reaches the GUI and agents as an invalid-request
 refusal; that the Pi asset's new bytes keep the ordering fence and the published timer, and that its identity bump and
-pin row are consistent; and that the installer guard leaves manual installs (including installing an older release on
-purpose) unchanged. Where you disagree with a finding, decide on the merits and log the DECISION. Do not write a launch
-command here or in the log; the harness-shellout skill owns launch mechanics.
+pin row are consistent. Where you disagree with a finding, decide on the merits and log the DECISION. Do not write a
+launch command here or in the log; the harness-shellout skill owns launch mechanics.
 
 ### Scope reassessment
 
@@ -400,10 +366,9 @@ the review does not find necessary and small is a complexity-gate trip, handled 
 Log each consequential choice in the working log as it happens, under a scannable `DECISION` label, with the
 alternatives considered: in particular which exclusion shape setup and uninstall got and why the others were rejected,
 where the lock-table pruning runs, the template cap's value and how it is counted, the Pi asset's new identity, the
-installer variable's name and the updater's handling of a superseded install, whether TODO.md's race-free installer work
-had landed, the Conventional Commit type and the fragments written, every outcome dropped or discarded by its gate and
-why, every runtime `SKIPPED` seen, every check skipped and why, and every review finding you decided not to follow. The
-user will ask for these later.
+Conventional Commit type and the fragments written, every outcome dropped or discarded by its gate and why, every
+runtime `SKIPPED` seen, every check skipped and why, and every review finding you decided not to follow. The user will
+ask for these later.
 
 ### Unattended fallback
 
