@@ -1,12 +1,13 @@
 //! The rename editor's draft and keyboard semantics.
 //!
 //! `RenameForm` owns only the native textarea behavior: a caller supplies
-//! the draft and receives a verbatim submission or cancellation. `RenameDialog`
+//! an escaped draft and its raw seed. Untouched submission preserves the seed;
+//! edits are submitted verbatim. `RenameDialog`
 //! gives the list that field a stable modal parent, leaving requests,
 //! optimistic paint, and response ownership in `ListView`.
 //!
 //! What is deliberately NOT here: any notion of a valid title. The draft
-//! is sent verbatim, and every rule about what a title may contain lives
+//! is not validated here, and every rule about what a title may contain lives
 //! in the supervisor (see `api::rename_session`).
 
 use crate::list::PeerTitle;
@@ -50,7 +51,7 @@ fn install_rename_focus_trap(generation: u64) {
     );
 }
 
-/// One session's rename field: edits `draft`, submits it verbatim.
+/// Show hidden characters in the seed without rewriting an untouched title.
 ///
 /// ## Why the draft belongs to the caller
 ///
@@ -59,7 +60,7 @@ fn install_rename_focus_trap(generation: u64) {
 /// by the field would be lost with any future surface change; caller ownership
 /// keeps cancellation, a refusal, and authoritative source removal from
 /// discarding it. Seeding remains the caller's job too: the draft is set from
-/// the current title when the editor opens, so another client's listing update
+/// the escaped current title when the editor opens, so another client's listing update
 /// cannot overwrite an edit in progress.
 ///
 /// ## A textarea, not a text input, and why that is not cosmetic
@@ -81,7 +82,8 @@ fn install_rename_focus_trap(generation: u64) {
 ///
 /// ## Verbatim, and therefore no client-side validation
 ///
-/// `on_submit` receives the field's contents exactly — no trim, no
+/// `on_submit` receives the raw seed when untouched, or the edited field's
+/// contents exactly — no trim, no
 /// emptiness check, no control-character screening. An empty title is a
 /// legal rename (create accepts an explicit empty title, and rename
 /// inventing a stricter rule would be an asymmetry SPEC.md nowhere asks
@@ -105,6 +107,9 @@ fn install_rename_focus_trap(generation: u64) {
 #[component]
 pub(crate) fn RenameForm(
     mut draft: Signal<String>,
+    /// Original bytes behind the escaped display. Editing replaces this
+    /// meaning even when the typed text equals the displayed spelling.
+    raw_seed: String,
     busy: bool,
     /// Reads the parent operation set at event time. Rendered attributes can
     /// lag the event that starts a request, so they are not an authority.
@@ -116,6 +121,8 @@ pub(crate) fn RenameForm(
     on_submit: EventHandler<String>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    let mut edited = use_signal(|| false);
+    let enter_seed = raw_seed.clone();
     rsx! {
         form {
             class: "rename-form",
@@ -127,7 +134,7 @@ pub(crate) fn RenameForm(
                 if busy_now.call(()) || submit_disabled {
                     return;
                 }
-                on_submit.call(draft());
+                on_submit.call(crate::list::submitted_field(&draft(), edited(), Some(&raw_seed)));
             },
             textarea {
                 class: "rename-input",
@@ -154,7 +161,7 @@ pub(crate) fn RenameForm(
                         if busy_now.call(()) || submit_disabled {
                             return;
                         }
-                        on_submit.call(draft());
+                        on_submit.call(crate::list::submitted_field(&draft(), edited(), Some(&enter_seed)));
                     }
                 },
                 autocomplete: "off",
@@ -173,6 +180,7 @@ pub(crate) fn RenameForm(
                     // snapshot must remain the visible draft until the
                     // request answers, so the handler carries the same gate.
                     if !busy_now.call(()) {
+                        edited.set(true);
                         draft.set(evt.value());
                     }
                 },
@@ -231,6 +239,7 @@ pub(crate) fn RenameDialog(
     on_submit: EventHandler<(u64, String)>,
     on_cancel: EventHandler<u64>,
 ) -> Element {
+    let raw_seed = current_title.clone();
     rsx! {
         div {
             class: "rename-dialog-backdrop",
@@ -273,6 +282,7 @@ pub(crate) fn RenameDialog(
             }
             RenameForm {
                 draft,
+                raw_seed,
                 busy,
                 busy_now,
                 submit_disabled: unavailable,

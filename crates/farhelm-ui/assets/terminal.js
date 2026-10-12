@@ -1468,11 +1468,11 @@
   }
 
   /**
-   * Whether a mount `sync()` is about to make asks for the session only if
-   * nobody else holds it (`spec.pathUnowned`, the `if_unowned` attach),
-   * rather than taking it.
+   * Whether a mount was discovered without a user asking for attachment.
+   * Capability decides whether that intent can use the refusing route;
+   * withholding capability must never turn unattended intent into takeover.
    *
-   * Every mount after the view's opening sync is unattended: a tab someone
+   * Newly discovered mounts after the view's opening sync are unattended: a tab someone
    * opened, here or in another window, or a terminal reappearing. Nobody at
    * this window asked to take the session for it, so it must not. On the
    * displacing route such a mount evicted the window that had just taken
@@ -1483,12 +1483,11 @@
    * control" state. While this view holds the session the refusal never
    * happens, so its own new tabs attach as before.
    *
-   * Displacing only for intent (the opening sync, `reclaim()`; manual
-   * reconnect takes its own path) and only on a helm that serves the
-   * refusing route: the same capability gate automatic reconnects use.
+   * Opening and `reclaim()` are intent; `sync()` also recognizes the agent's
+   * explicit restart generation. Manual reconnect takes its own path.
    */
   function unattendedMount(opening) {
-    return !opening && !reclaiming && capabilityOf(syncedPolicy) === "auto";
+    return !opening && !reclaiming;
   }
 
   /**
@@ -2677,7 +2676,7 @@
       button.type = "button";
       button.className = "btn banner-reclaim";
       button.textContent = "take control";
-      button.dataset.tooltip = "take control: attach this view again, detaching the client that took over";
+      button.dataset.tooltip = "take control: attach this view, detaching any other client attached to this session";
       button.addEventListener("click", () => farhelmTerm.reclaim());
       banner.appendChild(button);
     }
@@ -2896,7 +2895,13 @@
       // intent: its terminals take the session even from another window.
       // Read before `lastSync` is set below.
       const opening = lastSync === null;
-      lastSync = { baseUrl, specs, attach, reconnect };
+      // Only the agent's explicit Restart changes gen. Remember it across
+      // empty desired sets (e.g. an interrupted agent) so a restart is still
+      // attended when its terminal reappears, without granting tabs that intent.
+      const previousGeneration = lastSync?.generation ?? 0;
+      const generation = specs.find((spec) => spec.primary)?.gen ?? previousGeneration;
+      const restarted = generation !== previousGeneration;
+      lastSync = { baseUrl, specs, attach, reconnect, generation };
       // Adopted before anything below runs, so every decision this call
       // triggers — and every decision any controller makes afterwards —
       // reads the CURRENT capability rather than one captured earlier. A
@@ -3020,6 +3025,14 @@
           paintBanner(spec.banner, `Detached: ${takeover}`, true);
           continue;
         }
+        // An old helm may not serve the refusing attach route. Keep this
+        // island detached until a person asks, rather than falling back to
+        // the displacing route and evicting another window.
+        const unattended = unattendedMount(opening) && !(spec.primary && restarted);
+        if (unattended && capabilityOf(syncedPolicy) !== "auto") {
+          paintBanner(spec.banner, "Detached: automatic attachment unavailable", true);
+          continue;
+        }
         // One island's mount failure must not strand its siblings.
         // `mount()` rethrows after rolling itself back and banners the
         // failure where the user can see it (see its catch block), so the
@@ -3036,7 +3049,7 @@
         // harmless for the same reason, since the failing island has
         // already rolled itself back and bannered before rethrowing.
         try {
-          farhelmTerm.mountWhenReady(spec, baseUrl, attach, unattendedMount(opening));
+          farhelmTerm.mountWhenReady(spec, baseUrl, attach, unattended);
         } catch (err) {
           console.error("farhelm: mounting terminal", spec.el, "failed", err);
         }
@@ -3117,7 +3130,7 @@
     },
 
     /**
-     * Take the session back after losing it: unlatch, discard the stale
+     * Explicitly attach after takeover or a withheld unattended mount: discard stale
      * islands, and re-attach the full desired set under this view's own
      * (unchanged) lease — which displaces whoever holds the session now.
      *
@@ -3132,7 +3145,9 @@
      * never attached, and reclaiming is when they finally come up.
      */
     reclaim() {
-      if (!takeover) return;
+      // A discovered mount withheld under an old helm never attached, so it
+      // has no takeover notice to latch. Its banner is still explicit intent.
+      if (!takeover && capabilityOf(syncedPolicy) === "auto") return;
       takeover = null;
       reclaiming = true;
       for (const el of new Set([...islands.keys(), ...pendings.keys()])) {

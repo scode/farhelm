@@ -217,10 +217,10 @@ what a release supplies. Integrations are not user-authored: an agent type selec
 conversation-identity reporting for that harness, and a command launch with no declared agent type gets generic
 treatment.
 
-Confirmed 2026-10-10: a template's launch and resume commands cannot contain control characters or invisible formatting
-characters. Saving such a command is refused with a clear message, from the GUI, the CLI or an agent alike, because the
-template editor's single-line fields can neither show nor keep them. A template saved before this rule still launches,
-but saving any change to it is refused until its commands are fixed.
+Confirmed 2026-10-10, extended 2026-10-11: a template's session name, launch command and resume command cannot contain
+control characters or invisible formatting characters. Saving such a value is refused with a clear message, from the
+GUI, the CLI or an agent alike, because the template editor's single-line fields can neither show nor keep them. A
+template saved before this rule still launches, but saving any change to it is refused until those fields are fixed.
 
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal

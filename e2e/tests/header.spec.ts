@@ -86,10 +86,8 @@ test(
         48,
       );
 
-      // The badge and action never shrink (`.titlebar .status-badge`
-      // and `.titlebar-actions` are both `flex-shrink: 0`) and must
-      // therefore stay fully on screen regardless of how much the copy
-      // fields and title have to give up.
+      // Action labels remain intact; the status and identity fields give
+      // up width before an action can leave the supported main pane.
       const badgeBox = (await page.locator(".titlebar .status-badge").boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
       for (const [name, box] of [
@@ -135,6 +133,21 @@ test(
       ).toBeGreaterThanOrEqual(restartBox.y + restartBox.height - 1);
       await page.locator(".restart-cancel").click();
       await expect(restartPanel).toHaveCount(0);
+
+      // A stopped session has a much longer badge than the live dot. It
+      // must yield width to the same controls, with its full status still
+      // available in the tooltip.
+      await stopSession(request, session.id);
+      const badge = page.locator(".titlebar .status-badge");
+      await expect(badge).toHaveClass(/\bexited\b/, { timeout: 20_000 });
+      await expect(badge).toContainText("stopped by user");
+      await expect(badge).toHaveAttribute("data-tooltip", /exited.*stopped by user/);
+      for (const selector of [".restart-primary", ".restart-with-trigger", ".header-replace", ".header-replace-with", ".header-clone", ".header-delete"]) {
+        const control = page.locator(selector);
+        await expect(control).toBeVisible();
+        const box = (await control.boundingBox())!;
+        expect(box.x + box.width, `${selector} remains reachable with an ended badge`).toBeLessThanOrEqual(VIEWPORT_WIDTH + 1);
+      }
     } finally {
       await cleanupSession(request, session.id);
     }

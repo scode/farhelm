@@ -21,15 +21,9 @@ None open.
 
 - `uninstall-race-first-time-service-setup.md` — Concurrent setup and uninstall can leave services pointing at a deleted
   executable.
-- `host-actions-disappear-supported-sidebar-widths.md` — A narrow sidebar could hide the actions needed for an
-  unreachable host.
-- `build-mismatch-turns-unattended-mounts-into-displacing.md` — Build mismatch can turn automatic recovery into an
-  unsolicited takeover.
 - `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
 - `newer-completed-run-leaves-older-update-permanently.md` — An old update can remain busy after a newer run has
   completed.
-- `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
-  open dialogs.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -37,8 +31,6 @@ None open.
   ListSessions on its host.
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
   open terminal on it.
-- `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
-  sidebar keeps deleted/stale rows.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
 
@@ -48,16 +40,6 @@ None open.
   needed to retry process cleanup.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
-  promised pane width.
-- `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
-  the user's latest choice.
-- `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
-  characters in its editable title.
-- `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
-  partial settings.
-- `session-refresh-failures-silently-retain-apparently-current.md` — Failed detail refreshes leave old session
-  information looking current.
 - `deflake-duplicates-bounded-evidence-into-unlimited-logs.md` — Test sweeps duplicate bounded evidence into unbounded
   logs.
 - `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
@@ -88,10 +70,6 @@ None open.
   file.
 - `feed-retained-browser-sign-in-interruption-falsely-represents.md` — Lost browser storage could leave an invisible
   feed counted as an available GUI.
-- `template-supplied-session-names-rendered-raw.md` — A template's saved session name could be misleading in the
-  launcher.
-- `save-followed-immediately-delete-restores-outdated-local.md` — A queued Delete after Save could give Undo an outdated
-  template.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
@@ -114,5 +92,3 @@ None open.
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
   repeated attempts.
-- `rejected-permission-toggles-depend-observing-intermediate-busy.md` — A refused permission revocation could leave a
-  misleading unchecked checkbox.

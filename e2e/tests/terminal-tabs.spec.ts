@@ -1641,8 +1641,11 @@ test("a tab closed elsewhere is torn down here, leaving its sibling untouched", 
 // The reads are triggered rather than waited for: with the feed healthy
 // nothing re-reads on a timer, so the test notifies to produce the first
 // failure and the surface reader's own retry ladder (`reader`) produces the
-// rest. Three failures in a row is what makes this "a run of failures the
-// view rode out" rather than "one failure it happened to survive".
+// rest. Hold the second answer to distinguish one silent transient failure
+// from the repeated-failure notice, then recover through the same reader.
+/** A transient failed read stays quiet, repeated failures explain retained
+ * state, and recovery clears that explanation. None of those metadata reads
+ * may replace live terminal islands or disrupt their usable shells. */
 test("a failing detail read leaves the tabs and their terminals alone", async ({
   page,
   request,
@@ -1651,6 +1654,7 @@ test("a failing detail read leaves the tabs and their terminals alone", async ({
   const title = `tab-read-fail-${Date.now()}`;
   let id: string | undefined;
   const feed = await stubFeed(page);
+  const secondFailure = routeGate();
   try {
     const session = await openSessionWithTabs(page, request, title, 1);
     id = session.id;
@@ -1660,25 +1664,37 @@ test("a failing detail read leaves the tabs and their terminals alone", async ({
     const before = await mountedIslands(page);
 
     let failures = 0;
+    let failReads = true;
     await page.route(`**/api/sessions/${session.id}`, async (route) => {
-      if (route.request().method() !== "GET") {
+      if (route.request().method() !== "GET" || !failReads) {
         await route.continue();
         return;
       }
       failures++;
+      if (failures === 2) await secondFailure.wait();
       await fulfillAsHelm(route, { status: 500, contentType: "text/plain", body: "injected" });
     });
 
     // Nothing but failures for as long as the reader keeps asking.
     feed.notify(2);
+    await expect.poll(() => failures, { timeout: 20_000 }).toBe(2);
+    const notice = page.locator(".session-refresh-error");
+    await expect(notice, "one answered failure is silent while the next answer is held").toHaveCount(0);
+    secondFailure.release();
     await expect.poll(() => failures, { timeout: 20_000 }).toBeGreaterThanOrEqual(3);
+    await expect(notice).toHaveText("could not refresh this session; showing the last state this client read");
 
     await expect(page.locator(".tab-slot")).toHaveCount(1);
     expect(await mountedIslands(page)).toEqual(before);
     const live = shellMarker("POLL-FAIL-LIVE");
     await selectTerminal(page, tabId);
     await runInShell(page, `terminal-${tabId}`, live.command, live.expected);
+    failReads = false;
+    feed.notify(3);
+    await expect(notice).toHaveCount(0, { timeout: 20_000 });
+    expect(await mountedIslands(page)).toEqual(before);
   } finally {
+    secondFailure.release();
     if (id) await cleanupSession(request, id);
   }
 });

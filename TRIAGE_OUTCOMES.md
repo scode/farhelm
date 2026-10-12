@@ -11365,7 +11365,8 @@
   (new scheduling machinery, a refactor of the dialog or of the host mutation wrapper, or a test seam that cannot be
   added simply), stop and bring it back to the user unfixed. Do not touch the vendored terminal library. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## stored-template-commands-bypass-safe-display-seeding.md
 
@@ -11467,7 +11468,8 @@
   the way the sidebar's own actions do. Add browser or component coverage if it fits without new machinery. Stop and
   bring it back to the user if routing the request needs more than a small callback. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## build-mismatch-turns-unattended-mounts-into-displacing.md
 
@@ -11486,7 +11488,8 @@
   user's explicit action. Keep forbidden unattended mounts and intentional takeover as separate states. Add a regression
   test if it fits the existing terminal-tab browser specs. Stop and bring it back to the user if this needs more than a
   contained change to the mount decision. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## seen-state-queue-acknowledge-newer-choice-sending-it.md
 
@@ -11502,7 +11505,8 @@
 - Completion criteria: a choice recorded after a write was sent is always sent before the queue reports completion, even
   when it equals the value in flight, using the same mechanism as the preference queue. Add a unit test for the
   equal-valued case. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## uninstall-race-first-time-service-setup.md
 
@@ -12205,7 +12209,8 @@
   cross-host attackes, must not be silently discarded."
 - Completion criteria: the Delete handler refuses while the list is reloading. Only if this is a one- or two-line guard;
   otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## cancelled-lock-waiters-leave-permanent-registry-entries.md
 
@@ -12564,7 +12569,8 @@
 - Completion criteria: at the minimum supported sidebar width, the ⋯ menu stays reachable with the longest status (the
   status shrinks or wraps). If the fix is not simple, record `discard` instead during execution. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## ended-session-status-pushes-header-actions-beyond-promised.md
 
@@ -12577,7 +12583,8 @@
 - Completion criteria: the status badge shrinks with an ellipsis (full text in a tooltip) so all actions stay visible
   from 650 px for ended and failed sessions, and the header width test covers an ended session. If the fix is not
   simple, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## delayed-provisioning-confirmations-make-two-dialogs-mutually.md
 
@@ -12589,7 +12596,8 @@
 - Completion criteria: Settings cannot open while an uninstall plan is pending (or closes when the confirmation
   arrives), so two dialogs never lock each other. If the fix is not simple, record `discard` instead during execution.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## session-refresh-failures-silently-retain-apparently-current.md
 
@@ -12601,7 +12609,8 @@
 - Completion criteria: a persistently failing detail refresh shows a "could not refresh" notice in the session view,
   reusing the existing notice infrastructure, and clears it on the next success. If the fix is not simple, record
   `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## interrupted-paired-writes-still-split-service-state.md
 
@@ -12692,7 +12701,8 @@
   re-checks the choice against the agent type). If that is not simple, leave the code and instead add the caveat
   (approval-only templates need the agent type set) to the website's OMP and Goose sections. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## omp-context-changes-initial-eligibility-check.md
 
@@ -12750,7 +12760,8 @@
 - Completion criteria: `check_template_shape` also refuses control and invisible formatting characters in the template's
   session-name field, on every save path. Stop and bring it back to the user if it is not a contained change. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## rename-editor-conceals-title-characters-editable-title-editable-title-seed.md
 
@@ -12762,7 +12773,8 @@
 - Completion criteria: Rename seeds its input with the escaped title and keeps the original bytes unless the user edits
   the field, reusing the launcher's existing escaped-seed pattern for titles. Stop and bring it back to the user if it
   is not a contained change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+- Execution: complete; jj change `lzvmtmzv`, bookmark `plan/ui-layout-and-escaping-fixes/01-ui-fixes`;
+  https://github.com/scode/farhelm/pull/1932/changes.
 
 ## tab-cleanup-blocks-status-sampling.md
 

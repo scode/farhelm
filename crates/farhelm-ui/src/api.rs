@@ -2361,6 +2361,9 @@ struct SeenWriteSlot {
     latest: Option<i64>,
     report: Option<SeenWriteReport>,
     in_flight: bool,
+    // Equal values are still new intent: another window may have changed
+    // the helm after this window's PUT was issued.
+    recorded_since_send: bool,
 }
 
 /// What to do with a seen-state write's settled outcome, captured at the
@@ -2416,13 +2419,11 @@ struct SeenWrites(std::collections::HashMap<String, SeenWriteSlot>);
 /// How a settled seen-state PUT ends its writer's turn: see
 /// [`SeenWrites::finished`].
 enum SeenSettle {
-    /// A different value was recorded while the PUT was out: send again,
+    /// A new choice was recorded while the PUT was out, even if equal: send again,
     /// and report nothing for the value just sent.
     Superseded,
-    /// The PUT's value is the newest recorded one; report its outcome. A
-    /// caller that re-recorded that SAME value while the PUT was out left a
-    /// report of its own waiting in the slot, returned here so it hears the
-    /// same outcome instead of being dropped.
+    /// No choice was recorded after dequeue; report this PUT's outcome.
+    /// Hand back any report still waiting in the slot rather than dropping it.
     Final { waiting: Option<SeenWriteReport> },
 }
 
@@ -2434,6 +2435,7 @@ impl SeenWrites {
             slot.latest = value;
             slot.report = Some(report);
             if slot.in_flight {
+                slot.recorded_since_send = true;
                 return false;
             }
             slot.in_flight = true;
@@ -2445,6 +2447,7 @@ impl SeenWrites {
                 latest: value,
                 report: Some(report),
                 in_flight: true,
+                recorded_since_send: false,
             },
         );
         true
@@ -2461,6 +2464,7 @@ impl SeenWrites {
     fn next_to_send(&mut self, id: &str) -> Option<(Option<i64>, SeenWriteReport)> {
         let slot = self.0.get_mut(id)?;
         let report = slot.report.take()?;
+        slot.recorded_since_send = false;
         Some((slot.latest, report))
     }
 
@@ -2473,17 +2477,14 @@ impl SeenWrites {
     /// `SeenWriteReport` [`Self::next_to_send`] handed back alongside
     /// `sent`.
     ///
-    /// A newer caller that recorded the SAME value while the PUT was out
-    /// (an automatic mark and a manual "mark read" often carry the same
-    /// activity stamp) is still waiting in the slot with its own report.
-    /// That report is handed back with the settle so it is called with the
-    /// same outcome; dropping it lost a manual toggle's failure, and its
-    /// success never cleared an earlier "seen:" error on the row.
+    /// Re-recording the same activity stamp still needs a new PUT: another
+    /// window may have cleared it after this request reached the helm. Only
+    /// that newer PUT's outcome can settle the newer caller's intent.
     fn finished(&mut self, id: &str, sent: Option<i64>) -> SeenSettle {
         let Some(slot) = self.0.get(id) else {
             return SeenSettle::Final { waiting: None };
         };
-        if slot.latest != sent {
+        if slot.recorded_since_send || slot.latest != sent {
             return SeenSettle::Superseded;
         }
         let waiting = self.0.remove(id).and_then(|slot| slot.report);
@@ -4832,17 +4833,12 @@ mod seen_write_tests {
         );
     }
 
-    /// A caller that re-records the value already in flight hears that
-    /// write's outcome too, alongside the caller that started it.
-    ///
-    /// Why: an automatic mark and a manual "mark read" often carry the same
-    /// activity stamp. The manual caller's report used to be dropped when the
-    /// in-flight PUT of that same value settled, so a manual toggle's failure
-    /// never reached its row and its success never cleared an earlier error.
-    /// Spec: both reports receive the settled outcome, exactly once each, and
-    /// the slot is pruned.
+    /// An equal-valued choice made mid-flight is sent again and hears only
+    /// its own PUT's outcome. Another window can clear the stamp between the
+    /// two choices, so acknowledging the first PUT would falsely claim that
+    /// the newer intent reached the helm.
     #[farhelm_testtrace::test]
-    fn a_same_value_recorded_mid_flight_hears_the_in_flight_outcome() {
+    fn a_same_value_recorded_mid_flight_is_sent_again_before_reporting() {
         let mut queue = SeenWrites::default();
         let reported: ReportedOutcomes = Rc::new(RefCell::new(Vec::new()));
         let report_for = |label: &'static str| {
@@ -4855,16 +4851,23 @@ mod seen_write_tests {
         let (sent, automatic_report) = queue.next_to_send("sess-1").expect("a value to send");
         assert!(!queue.record("sess-1", Some(1_700_000_000), report_for("manual")));
 
-        let SeenSettle::Final { waiting } = queue.finished("sess-1", sent) else {
-            panic!("an equal value is not a newer one");
+        assert!(matches!(
+            queue.finished("sess-1", sent),
+            SeenSettle::Superseded
+        ));
+        drop(automatic_report);
+        assert!(reported.borrow().is_empty());
+        let (resent, manual_report) = queue
+            .next_to_send("sess-1")
+            .expect("the newer choice must be sent");
+        assert_eq!(resent, sent);
+        let SeenSettle::Final { waiting } = queue.finished("sess-1", resent) else {
+            panic!("the second PUT has no newer intent");
         };
+        assert!(waiting.is_none());
         let failure = Err("seen: helm unavailable".to_string());
-        waiting.expect("the manual caller's report is handed back")(failure.clone());
-        automatic_report(failure.clone());
-        assert_eq!(
-            reported.borrow().as_slice(),
-            &[("manual", failure.clone()), ("automatic", failure)],
-        );
+        manual_report(failure.clone());
+        assert_eq!(reported.borrow().as_slice(), &[("manual", failure)],);
         assert!(queue.next_to_send("sess-1").is_none(), "the slot is pruned");
     }
 

@@ -551,6 +551,8 @@ pub(crate) fn SessionView(
     /// One-shot bridge to the list's delete path, for the header's delete
     /// button once its confirmation is answered.
     header_delete: Signal<Option<crate::list::HeaderDeleteRequest>>,
+    /// Persistent one-shot listing demand; Replace can unmount this view.
+    mut header_refresh: Signal<bool>,
     /// Sessions with a delete in flight (AppBody's set, written by the
     /// list's delete path). While this view's session is in it, the header
     /// shows the delete's progress in place of its actions.
@@ -736,6 +738,9 @@ pub(crate) fn SessionView(
     // helm's detail route is listing-backed and inherits its cap — and
     // therefore why this is a staleness notice rather than an obituary.
     let mut refresh_stale = use_signal(|| false);
+    // One transient failure stays silent. Consecutive accepted failures
+    // warn that status and Resume availability are only last-known state.
+    let mut detail_failures = use_signal(|| 0_u8);
     // Tab-operation failures, keyed by OPERATION rather than pooled into
     // one slot — the same discipline `ListView` keeps for its per-session
     // errors, and for the same reason: with a single slot, closing tab B
@@ -871,6 +876,7 @@ pub(crate) fn SessionView(
                 // exists. Nothing is applied and nothing is satisfied.
                 Admission::Discarded => false,
                 Admission::Apply => {
+                    detail_failures.set(0);
                     // A 404 is surfaced rather than absorbed, and deliberately
                     // NOT acted on: the view keeps everything it has —
                     // metadata, tabs, live terminals — and merely stops
@@ -940,6 +946,15 @@ pub(crate) fn SessionView(
             // session and never reaches the commit path — the surface reader
             // retries it (see `reader`).
             let Ok(fetched) = fetch_session(&base, &id).await else {
+                // Failures carry no replacement state, but still obey the
+                // successful-read fence and the restart lifetime. An old
+                // failure must not warn over an answer for the new run.
+                if detail_reads.peek().accept_failure(generation)
+                    && *restart_epoch.peek() == started_at
+                {
+                    let consecutive = (*detail_failures.peek()).saturating_add(1).min(2);
+                    detail_failures.set(consecutive);
+                }
                 return false;
             };
             // The commit's own answer, because a reply can arrive and still
@@ -1360,6 +1375,7 @@ pub(crate) fn SessionView(
                     // that is now running. `relaunched` is what lets the
                     // terminal mount at once instead (see `terminal_absence`).
                     Ok(_) => {
+                        header_refresh.set(true);
                         relaunched.set(true);
                         if with.is_some() {
                             restart_with_open.set(None);
@@ -1480,6 +1496,7 @@ pub(crate) fn SessionView(
             }
             match replace_session(&base, &id, guard, allow_yolo).await {
                 Ok((new_session, notice)) => {
+                    header_refresh.set(true);
                     delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
                     crate::list::remember_selection(&base, preferences, &new_session.id);
@@ -2603,6 +2620,11 @@ pub(crate) fn SessionView(
                     "the helm stopped listing this session, so what is shown here may be out of \
                      date — it was deleted from another client, or there are more sessions than \
                      the helm lists at once"
+                }
+            }
+            if detail_failures() >= 2 {
+                div { class: "refresh-stale session-refresh-error", role: "status",
+                    "could not refresh this session; showing the last state this client read"
                 }
             }
             // The whole terminal surface is either present or replaced by
