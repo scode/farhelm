@@ -86,3 +86,39 @@ commit and PR wording. Implementation and validation stayed with the executor; n
 Private galaxy-brain evidence uses session `9317ea96-7a9d-4c8c-bdc5-c8d8cf7fc943`, referenced in the working log. The
 native tools did not expose actual model attribution, reasoning effort or token usage, so those remain evidence gaps
 rather than inferred measurements.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1925. The rebase met no conflicts.
+
+#### Fix made while landing
+
+In #1925, before it merged: the shutdown-drain test (`writer_never_reading_peer_does_not_hang_connection_shutdown`)
+raised its stall timeout past its deadline, so only the five-second drain bound can end a parked writer's connection,
+but nothing checked that the writer was actually parked. Its 64 replies overflow the 4 KiB buffer by only about 500
+bytes; had they fit, the test would pass without exercising the drain. It now asserts the connection took at least four
+seconds to close (it took 5.4 in the run below), and its comment no longer claims the replies fill the buffer "several
+times over".
+
+#### Review before merging
+
+No blockers. Each repaired test observes what its name claims; cleanup on early failure is scoped to what each test
+created; the Linux-only gate on the end-to-end target keeps test names and runner groups unchanged on Linux; and the
+orphan-client fix from #1911 is intact. Notes left as they are:
+
+- The sink-healing test's premise check ("the tab must have been flooding before the sink was killed") always passes,
+  since the recorded output always includes the replay; counting the output it discards would make it real. This
+  predates the PR.
+- Several new docstring sentences run into the paragraph before them because no blank doc line separates them.
+
+#### Checks
+
+- Run now, after the fix: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (288 delays, none without
+  a reason) and `cargo clippy --all-targets -- -D warnings`; and the whole end-to-end target, whose shared harness this
+  changes, through the recorder with pinned tmux 3.7c, the newly pinned nextest 0.9.148, four slots and no retries (run
+  `2070acc8`, 367 of 367, no runtime skips in its output).
+- An earlier attempt was refused by the recorder before running, because main had moved to the new nextest pin.
+- Not run: macOS, where the end-to-end target now reports itself skipped.
+- Between that run and the merge, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
