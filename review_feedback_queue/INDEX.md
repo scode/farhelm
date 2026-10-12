@@ -13,31 +13,17 @@ None open.
 
 ## High priority: material UX degradation
 
-- `upload-cancellation-drops-final-reply.md` — Delete can discard an upload result during temporary connection
-  backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
-
 - `uninstall-forgotten-success.md` — A failed uninstall can be reported as successful after another client forgets the
   host.
 
 - `uninstall-race-first-time-service-setup.md` — Concurrent setup and uninstall can leave services pointing at a deleted
   executable.
 - `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
-- `newer-completed-run-leaves-older-update-permanently.md` — An old update can remain busy after a newer run has
-  completed.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `session-detail-drains-full-list.md` — every fleet-revision bump makes each open session view trigger a full
-  ListSessions on its host.
-- `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
-  open terminal on it.
-- `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
-  failures stop exited tabs from being reaped host-wide.
-
 - `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
 
-- `failed-confirmation-discard-session-despite-failed-process.md` — Failed create recovery could discard the session
-  needed to retry process cleanup.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
 - `deflake-duplicates-bounded-evidence-into-unlimited-logs.md` — Test sweeps duplicate bounded evidence into unbounded
@@ -46,8 +32,6 @@ None open.
   outside cleanup.
 - `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks
   refer to the wrong session.
-- `constructor-font-regression-observes-mutable-value-construction.md` — The constructor-font test observes a value that
-  can already have been corrected.
 - `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
@@ -62,14 +46,10 @@ None open.
   its known session.
 - `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` — Keyboard-launch teardown skips session
   deletion if policy restoration fails.
-- `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
-  geometry.
 - `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
   select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
   file.
-- `feed-retained-browser-sign-in-interruption-falsely-represents.md` — Lost browser storage could leave an invisible
-  feed counted as an available GUI.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
@@ -86,9 +66,5 @@ None open.
   configuration.
 - `replaced-evidence-repeated-continuity-receipts-retain-passing.md` — Evidence replaced during digest capture could
   inherit a passing validation.
-- `aggregate-identity-skew-creates-false-host-match.md` — An aggregate identity mismatch remains an unresolved
-  transition question.
-- `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
-  after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
   repeated attempts.

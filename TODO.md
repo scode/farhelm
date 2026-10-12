@@ -533,7 +533,15 @@ are large mostly because of their tests.
     behave like every other cleanup Farhelm cannot confirm: the create fails visibly and the session is kept, so a later
     Delete can retry once the host is healthy.
 
-  When executing, check that both cases are actually gone.
+  A related case was folded into this entry on 2026-10-11 for the shared rollback site and remedy, rather than scoped
+  and unscoped process mixing:
+  - A failed database confirmation discards cleanup ownership
+    (`failed-confirmation-discard-session-despite-failed-process.md`). When a create's database confirmation fails and
+    its process sweep also fails, a successful tmux kill still drops the session record. A surviving detached process
+    then keeps running with no session left to Delete. The trigger is a local storage failure. Keep the session when
+    cleanup cannot be confirmed, so a later Delete can retry.
+
+  When executing, check that all three cases are actually gone.
 
   Once the fallback is gone, also assess what the process sweep still has to do on Linux (to look into, not decided,
   2026-10-05). With every launch and tab in a scope, the walk from the process numbers tmux reports for a session's
@@ -764,6 +772,14 @@ are large mostly because of their tests.
   desktop app's webview has a native zoom Farhelm never uses (Cmd/Ctrl +/− do nothing there today), while on the web the
   browser's own page zoom already works but cannot be driven from a button. The rest of the UI uses about 110 hard-coded
   pixel sizes, so a CSS-based scale would be a refactor. Deferred 2026-10-02 as more work than the terminal control.
+
+- **Fix Mac window restoration across display scales.** On a Mac whose displays use different scaling (for example a
+  Retina laptop and a non-Retina monitor), the desktop app can reopen at the wrong size or position and save that wrong
+  geometry again on close. The saved size is converted with the new window's scale and the position through the current
+  scale (`crates/farhelm-ui/src/desktop/window_state.rs`). SPEC_impl.md's desktop window-persistence paragraph already
+  says a real macOS display check is still needed. This needs work and verification on a real Mac with mixed-scale
+  displays; do not fix it blind. Deferred in review-feedback triage on 2026-10-11
+  (`window-restoration-uses-wrong-display-scale-macos.md`).
 
 - **Let the Mac's supervisor outlive the desktop app.** Quitting the app stops the Mac's local supervisor while its
   sessions keep running, so until the app is reopened the agents' `farhelm` commands that need a supervisor
