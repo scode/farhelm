@@ -57,6 +57,21 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'not already enabled'):
             route_guests(DisabledHost(), 'owned-mac', 'owned-linux', '192.0.2.20')
 
+    def test_scoped_ipv6_cannot_carry_ssh_configuration(self):
+        """Even valid ipaddress scope text must not become an SSH token or directive."""
+        for address in ('fe80::1%eth0', 'fe80::1%eth 0', 'fe80::1%eth0\n  ProxyCommand surprise'):
+            with self.subTest(address=address), self.assertRaises(Refused):
+                configuration('d2cedd3c-575e-458c-b6b7-03e40b9b4e85', address,
+                              'guest', 'ssh-ed25519 Zml4dHVyZQ==')
+
+    def test_plain_ip_addresses_remain_usable(self):
+        """The scope fence must preserve both supported IP families and normalization."""
+        for address, normalized in (('192.0.2.20', '192.0.2.20'), ('2001:db8::0020', '2001:db8::20')):
+            with self.subTest(address=address):
+                _, config, _ = configuration('d2cedd3c-575e-458c-b6b7-03e40b9b4e85', address,
+                                             'guest', 'ssh-ed25519 Zml4dHVyZQ==')
+                self.assertIn(f'  HostName {normalized}\n', config)
+
 
 if __name__ == '__main__':
     unittest.main()

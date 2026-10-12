@@ -12072,7 +12072,10 @@
 - Completion criteria: a rerun counts as a test failure only when the rerun's report shows the test itself ran and
   failed; otherwise the verdict is unclassified. If the fix is not small, record `discard` instead during execution.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Per-test deterministic classification requires three rerun reports naming the selected test as failed; runner failures
+  remain inconclusive.
 
 ## ambiguous-claim-orphaned-next-pick.md
 
@@ -12100,7 +12103,9 @@
 - Completion criteria: the smoke check confirms the launched helm is still alive before and after the request and looks
   for a Farhelm-specific marker in the body. If the fix is not small, record `discard` instead during execution. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Release smoke checks the launched helm before and after the request and requires the Farhelm UI bootstrap asset.
 
 ## replaced-evidence-repeated-continuity-receipts-retain-passing.md
 
@@ -12110,7 +12115,9 @@
 - Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest".
 - Completion criteria: the digests are computed from the same bytes that were validated. If the fix is not small, record
   `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Evidence digests use the bytes actually validated, including continuity receipts and repeated references.
 
 ## duplicate-scenario-titles-silently-conflate-distinct-sessions.md
 
@@ -12121,7 +12128,9 @@
   rest".
 - Completion criteria: scenario validation refuses duplicate session titles, like its sibling checks. If the fix is not
   small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Scenario validation rejects duplicate session titles before staging conflates them.
 
 ## preview-ready-identity.md
 
@@ -12134,7 +12143,9 @@
 - Completion criteria: the readiness check identifies the docs preview server specifically (for example its process or a
   response marker). If the fix is not small, record `discard` instead during execution. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Preview readiness requires matching listener and background-lock identity, including process age.
 
 ## diagnostic-writers-survive-their-deadline-accumulate-across.md
 
@@ -12146,7 +12157,9 @@
   rest".
 - Completion criteria: a diagnostic write past its deadline neither spins nor leaves a thread per call. If the fix is
   not small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Diagnostic backpressure waits only to the deadline and retains at most one blocked writer per process.
 
 ## guest-addresses-account-names-inject-ssh-configuration.md
 
@@ -12158,7 +12171,9 @@
 - Completion criteria: guest addresses carrying a scope suffix or whitespace are refused before they reach the ssh
   configuration. If the fix is not small, record `discard` instead during execution. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Guest SSH configuration refuses scoped IPv6 addresses and retains plain IPv4/IPv6 support.
 
 ## unbounded-test-discovery-tmux-binaries.md
 
@@ -12170,7 +12185,9 @@
   rest".
 - Completion criteria: the version probe has a short deadline and skips a candidate that does not answer. If the fix is
   not small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Each test-discovery version probe has a three-second deadline and kills the timed-out child on drop.
 
 ## deflake-duplicates-bounded-evidence-into-unlimited-logs.md
 
@@ -12183,7 +12200,10 @@
 - Completion criteria: the per-phase logs are capped (or classification reads a bounded tail), keeping the evidence the
   classifier needs. If the fix is not small, record `discard` instead during execution. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
+- Execution: complete; change `qskotuzousumonsppupuwqunlxolzztw`, bookmark
+  `plan/dev-tooling-robustness-fixes/01-tooling-fixes`, [PR #1935](https://github.com/scode/farhelm/pull/1935/changes).
+  Classification reads only the first and last 2 MiB of console logs; capture on disk remains unbounded as allowed by
+  the small-fix decision.
 
 ## retained-failed-tags-become-mandatory-upgrade-test-inputs.md
 

@@ -199,6 +199,76 @@ class ReportParsing(unittest.TestCase):
         self.assertIsNone(D.evidence_dir_from_log("nothing"))
 
 
+class ClassificationEvidence(unittest.TestCase):
+    """Runner failures must not manufacture deterministic test failures."""
+
+    def test_three_reports_must_name_the_selected_failure(self):
+        """A named testcase is not enough: its rerun must show an executed failure.
+
+        Missing, malformed and other-test reports cannot establish that result.
+        Nextest can also name the selected test when startup itself failed;
+        three such reports must not send the agent after a deterministic bug.
+        """
+        selected = TestId('nextest', ('fixture', 'selected'))
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp)
+            report = evidence / 'nextest' / 'default' / 'junit.xml'
+            report.parent.mkdir(parents=True)
+            for text, conclusive in (
+                (None, False), ('broken XML', False),
+                ('<testsuites><testsuite name="fixture"><testcase name="selected"><error type="execution failure"/></testcase></testsuite></testsuites>', False),
+                ('<testsuites><testsuite name="fixture"><testcase name="other"><failure/></testcase></testsuite></testsuites>', False),
+                ('<testsuites><testsuite name="fixture"><testcase name="selected"><failure/></testcase></testsuite></testsuites>', True),
+            ):
+                with self.subTest(text=text):
+                    if text is not None:
+                        report.write_text(text)
+                    actual, reason = D.rerun_conclusion(selected, 1, evidence)
+                    self.assertEqual(actual, conclusive)
+                    self.assertTrue(reason)
+                    results = [{'passed': False, 'conclusive': actual}] * 3
+                    self.assertEqual(D.classification_verdict(results), 'deterministic' if actual else 'unclassified')
+            self.assertFalse(D.rerun_conclusion(selected, 125, None)[0])
+            self.assertTrue(D.rerun_conclusion(selected, 0, None)[0])
+
+    def test_playwright_failures_need_the_matching_selected_identity(self):
+        """The selected browser case must be in its own rerun report, regardless of engine."""
+        selected = TestId('playwright', ('fixture.spec.ts', 'selected'))
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp)
+            report = evidence / 'playwright.json'
+            for title, conclusive in (('other', False), ('selected', True)):
+                report.write_text(json.dumps({'suites': [{'file': 'fixture.spec.ts', 'specs': [
+                    {'title': title, 'tests': [{'status': 'unexpected', 'projectName': 'webkit'}]},
+                ]}]}))
+                self.assertEqual(D.rerun_conclusion(selected, 1, evidence)[0], conclusive)
+            report.write_text('[]')
+            self.assertFalse(D.rerun_conclusion(selected, 1, evidence)[0])
+
+    def test_pass_wins_but_incomplete_failures_do_not(self):
+        """Early stop and inconclusive attempts cannot become deterministic; one pass suffices."""
+        failed = {'passed': False, 'conclusive': True}
+        inconclusive = {'passed': False, 'conclusive': False}
+        passed = {'passed': True, 'conclusive': True}
+        self.assertEqual(D.classification_verdict([]), 'unclassified')
+        self.assertEqual(D.classification_verdict([failed] * 2), 'unclassified')
+        self.assertEqual(D.classification_verdict([failed, inconclusive, failed]), 'unclassified')
+        self.assertEqual(D.classification_verdict([inconclusive, passed]), 'flake')
+        self.assertTrue(D.rerun_conclusion(TestId('phase', ('js-unit',)), 1, None)[0])
+
+    def test_large_log_keeps_announcement_and_tail_with_a_bounded_read(self):
+        """Noisy console capture must not make classification load an arbitrarily large log."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / 'phase.log'
+            log.write_bytes(b'test-run evidence: /fictional/run\n' + b'x' * 10000 + b'\nfinal failure\n')
+            text = D.read_log_edges(log, edge_bytes=100)
+            self.assertEqual(D.evidence_dir_from_log(text), pathlib.Path('/fictional/run'))
+            self.assertTrue(text.endswith('final failure\n'))
+            self.assertLess(len(text), 250)
+            log.write_bytes(b'short log\n')
+            self.assertEqual(D.read_log_edges(log, edge_bytes=100), 'short log\n')
+
+
 class EventLifecycle(unittest.TestCase):
     """Events are numbered monotonically and stay pending until acked.
 

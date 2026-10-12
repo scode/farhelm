@@ -37,14 +37,16 @@ kept in lockstep with `TODO.md`: a flake is recorded in both in the same PR, and
 a test that silently never runs again, which is the opposite of what the sweep is for.
 
 **Failures are classified mechanically before the agent sees them.** Each failed test is rerun alone a fixed number of
-times, on the same build and substrate, with the recorder retaining every attempt. Failing every time is the signal for
-a deterministic failure; passing even once is the signal for a flake. The agent gets the verdict, the rerun results, the
-retained evidence paths, and a bounded excerpt of the failure output, and decides whether to overrule. A battery with no
-per-test selection is rerun whole. A per-test battery that fails without naming a test (a build error, a refused or
-timed-out runner) is NOT rerun to classify it: that would cost hours and produce a verdict out of timeouts, so it is
-reported unclassified and the agent reads the log. Classification cannot see order dependence or shared-state leakage
-between tests, since a rerun runs the test alone; a flake verdict says the test is nondeterministic under this machine's
-conditions, not what makes it so.
+times, on the same build and substrate, with the recorder retaining every attempt. Three rerun reports naming the
+selected test as failed establish a deterministic failure; passing even once is the signal for a flake. A nonzero
+per-test rerun without that report evidence is inconclusive, so classification remains unclassified unless another
+attempt passed. The agent gets the verdict, the rerun results, the retained evidence paths, and a bounded excerpt of the
+failure output, and decides whether to overrule. A battery with no per-test selection is rerun whole and classified by
+command status. A per-test battery that fails without naming a test (a build error, a refused or timed-out runner) is
+NOT rerun to classify it: that would cost hours and produce a verdict out of timeouts, so it is reported unclassified
+and the agent reads the log. Classification cannot see order dependence or shared-state leakage between tests, since a
+rerun runs the test alone; a flake verdict says the test is nondeterministic under this machine's conditions, not what
+makes it so.
 
 **Every flake becomes a PR; every clear deterministic failure with an easy fix becomes a PR.** PRs form one linear stack
 built with the jjstack workflow. They are never opened for review or merged by the agent; the maintainer does that. A

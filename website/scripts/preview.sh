@@ -31,8 +31,9 @@
 # for a checkout reached through a symlink, and name matching is how a stale lock gets the wrong process killed: Astro's
 # own `astro dev stop` trusts any pid in the lock whose command line looks like astro, and pids get reused. A stale
 # background lock can therefore target a later build, preview or check in the same directory. The lock's recorded
-# start time also has to fit the process's age before stopping it. Astro's lock cannot say who holds the port, because
-# it is per checkout and knows nothing about another checkout's server.
+# start time also has to fit the process's age before stopping it or claiming it serves this checkout. Readiness
+# requires the listener's pid to match this checkout's background lock too: an unrelated server in the same working
+# directory is not our preview. Astro's lock alone cannot say who holds the port; the listener must be checked.
 
 port=14000
 base_url="http://127.0.0.1:$port"
@@ -76,7 +77,11 @@ runs_in() {
 }
 
 ours_is_serving() {
-  runs_in "$(listener_pid)" "$website"
+  serving_pid=$(listener_pid)
+  serving_lock="$website/.astro/dev.json"
+  runs_in "$serving_pid" "$website" &&
+    [ "$serving_pid" = "$(lock_pid "$serving_lock")" ] &&
+    started_before_lock "$serving_pid" "$serving_lock"
 }
 
 # Describe whoever holds the port, via the working directory of the listening process.

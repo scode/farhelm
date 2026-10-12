@@ -25,7 +25,12 @@ The key comes from the recorded Linux guest, not the network. Discard its
 optional comment, which may contain a machine identity irrelevant to pinning.
 """
     alias = f'fh-linux-{uuid.UUID(run_id)}'
-    address = str(ipaddress.ip_address(address))
+    parsed = ipaddress.ip_address(address)
+    # ipaddress preserves arbitrary scope text, including SSH line breaks.
+    # Guest addresses need no interface scope; plain normalized IPs are tokens.
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.scope_id is not None:
+        raise Refused('guest IPv6 address must not have an interface scope')
+    address = str(parsed)
     if not re.fullmatch(r'[a-z_][a-z0-9_-]*[$]?', username):
         raise Refused('Linux username must be a plain account name')
     fields = host_key.split()

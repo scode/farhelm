@@ -18,6 +18,7 @@ import os
 import pathlib
 import platform
 import queue
+import select
 import selectors
 import shutil
 import signal
@@ -324,30 +325,58 @@ def private_mode(path: pathlib.Path) -> bool:
     return stat.S_IMODE(path.stat().st_mode) & 0o077 == 0
 
 
-def best_effort_write(fd: int, data: bytes, timeout: float = 0.1) -> int:
-    """Write a short diagnostic without changing shared descriptor flags."""
+_diagnostic_lock = threading.Lock()
 
-    if not data:
+
+def best_effort_write(fd: int, data: bytes, timeout: float = 0.1) -> int:
+    """Bound diagnostic waiting and retain at most one blocked writer per process.
+
+    Descriptor flags belong to the caller. A blocking write cannot be cancelled
+    safely, so its worker keeps the slot until it returns and later diagnostics
+    are dropped. Nonblocking backpressure waits for writability within the same
+    deadline instead of spinning or continuing after the caller gives up.
+    """
+
+    deadline = time.monotonic() + timeout
+    if not data or timeout <= 0 or not _diagnostic_lock.acquire(blocking=False):
         return 0
     result = {"written": 0}
 
     def deliver() -> None:
-        view = memoryview(data)
-        while view:
-            try:
-                count = os.write(fd, view)
-            except (InterruptedError, BlockingIOError):
-                continue
-            except OSError:
-                return
-            if count <= 0:
-                return
-            result["written"] += count
-            view = view[count:]
+        """Own the diagnostic slot until delivery ends, including after caller timeout."""
+        try:
+            view = memoryview(data)
+            # The first write is always attempted, even if starting this
+            # thread took longer than the deadline on a loaded machine: a
+            # writable descriptor must not silently lose the evidence line.
+            # Only a descriptor that pushes back is held to the deadline.
+            while view:
+                try:
+                    count = os.write(fd, view)
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return
+                    select.select([], [fd], [], remaining)
+                    continue
+                except InterruptedError:
+                    continue
+                if count <= 0:
+                    return
+                result["written"] += count
+                view = view[count:]
+        except (OSError, ValueError):
+            return
+        finally:
+            _diagnostic_lock.release()
 
     writer = threading.Thread(target=deliver, name="recorder-diagnostic", daemon=True)
-    writer.start()
-    writer.join(timeout)
+    try:
+        writer.start()
+    except BaseException:
+        _diagnostic_lock.release()
+        raise
+    writer.join(max(0, deadline - time.monotonic()))
     return result["written"]
 
 

@@ -22,22 +22,14 @@ None open.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `preview-ready-identity.md` — Preview startup can report an unrelated server as the docs preview.
-
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `deflake-duplicates-bounded-evidence-into-unlimited-logs.md` — Test sweeps duplicate bounded evidence into unbounded
-  logs.
 - `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
   outside cleanup.
-- `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks
-  refer to the wrong session.
 - `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
   cancelled retries from surviving retries.
 - `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
   global serialization guard.
-- `classification-counts-runner-failures-deterministic-test-failures.md` — The failure classifier treats runner errors
-  as proof of deterministic test failure.
 - `history-fixture-enables-yolo-installing-restoration-guard.md` — History-test setup can leak its changed confirmation
   policy.
 - `keyboard-launch-fixture-has-same-separate-setup-ownership.md` — Keyboard-launch setup independently leaves changed
@@ -46,25 +38,15 @@ None open.
   its known session.
 - `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` — Keyboard-launch teardown skips session
   deletion if policy restoration fails.
-- `unbounded-test-discovery-tmux-binaries.md` — Test discovery could hang on a tmux executable production would never
-  select.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
   file.
 - `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
   invalidation.
 - `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
   Stop for later.
-- `release-smoke-mistake-another-listener-child.md` — Release smoke could validate another listener instead of its
-  launched helm.
 - `process-death-falsely-inferred-proc-read-errors.md` — A later process-read error could be mistaken for confirmed
   death.
 - `work-order-progress-reads-observe-empty-file-during.md` — An empty progress baseline could make old output look newly
   produced.
 - `held-synthetic-delete-handlers-delay-failure-teardown.md` — Failed assertions could leave synthetic DELETE handlers
   blocking teardown.
-- `guest-addresses-account-names-inject-ssh-configuration.md` — An IPv6 scope suffix could inject text into guest SSH
-  configuration.
-- `replaced-evidence-repeated-continuity-receipts-retain-passing.md` — Evidence replaced during digest capture could
-  inherit a passing validation.
-- `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
-  repeated attempts.

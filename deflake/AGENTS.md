@@ -27,7 +27,9 @@ saved: you do not check status, tail logs, look at the run directory, read the b
 otherwise spend a turn until `wait` returns. How to block depends on the harness:
 
 - If the harness can run a command in the background and notify you when it exits (Claude Code's `run_in_background`),
-  run `wait` that way and do nothing until the notification arrives.
+  run `wait` that way and do nothing until the notification arrives. If that notification contains only the exit code,
+  read the completed command's output once to receive its event text. The prohibition above applies while `wait` is
+  still running; a completed command's event output is what the loop handles next.
 - Otherwise run `wait` in the foreground with the largest tool timeout the harness allows.
 
 Either way, set the harness's tool timeout to its maximum and leave `--max-wait` at its default of 540 seconds, which
@@ -66,11 +68,14 @@ fix PR with the usual per-PR gates for that change. If not (needs a design decis
 record it in `TODO.md` under the bucket that fits (a product bug goes in `## Tricky bugs`, not Deflake) with the
 evidence paths, and continue. Either way do not stop the sweep and do not rerun the sweep.
 
-**`failure` with verdict `unclassified`.** No reruns were completed. For a per-test id that means the daemon was
-stopping; treat it as a flake report with `Cause: unknown` and say in the record that classification did not happen. For
-a `phase` id on a nextest or Playwright phase it means the battery failed without naming a test (build error, recorder
-refusal, runner timeout), and the driver deliberately does not rerun a whole battery to classify that: read the phase
-log's tail, and treat it as an environment or tooling problem to report to the user, not as a flake to record.
+**`failure` with verdict `unclassified`.** Classification did not establish a pass or three actual failures. For a
+per-test id, the daemon stopped early or a rerun's report was missing, unreadable, or did not name that test as failed.
+Read the rerun reasons and evidence; report runner or evidence problems as tooling problems, rather than recording them
+as flakes. If the daemon stopped before classification, record the original failure with `Cause: unknown` and say
+classification did not happen. For a `phase` id on a nextest or Playwright phase it means the battery failed without
+naming a test (build error, recorder refusal, runner timeout), and the driver deliberately does not rerun a whole
+battery to classify that: read the phase log's tail, and treat it as an environment or tooling problem to report to the
+user, not as a flake to record.
 
 **`failure` on a `phase` id of a monolithic battery** (doctests, install.sh, CentOS, desktop smoke, JS). The whole
 battery was rerun three times, so the verdict means what it does for a test, and the flake and deterministic rules above

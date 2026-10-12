@@ -39,12 +39,18 @@ dest=$(cd "$dest" && pwd -P) || exit 1
 # A bare "origin" so the agent's `jj git fetch` and any push have somewhere
 # harmless to go; the real remote must never see eval commits.
 git init -q --bare "$dest/remote.git" || exit 1
+git --git-dir="$dest/remote.git" symbolic-ref HEAD refs/heads/main || exit 1
 git clone -q "$source_checkout" "$dest/checkout" || exit 1
 cd "$dest/checkout" || exit 1
 git checkout -q --detach "$base_ref" || exit 1
 git branch -f main "$base_ref" || exit 1
 git remote set-url origin "$dest/remote.git" || exit 1
 git push -q origin main || exit 1
+
+# The source checkout may advertise a plan bookmark as its default branch.
+# Reconcile that inherited reference before jj infers trunk: the local eval
+# origin has only main, and the first fetch prunes source-only bookmarks.
+git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main || exit 1
 
 # jj on top of the clone, with the identity the source checkout uses; without
 # it every commit the agent makes carries an empty author.
