@@ -149,31 +149,39 @@ minisign-verify = "0.3"
 # transitively (both `axum` and `tower-http` depend on it), but a transitive
 # crate cannot be imported directly.
 percent-encoding = "2"
-# Feature set chosen by D3/plan Step 3, not by convenience. Two separate
-# decisions that are easy to conflate:
+# reqwest's upstream defaults, deliberately: rustls with its default crypto
+# provider (aws-lc-rs) and the operating system's certificate store (through
+# rustls-platform-verifier), plus HTTP/2 and system proxy settings. Farhelm only
+# speaks HTTPS from the machine running the helm (release downloads, feedback)
+# and from the desktop app's updater, never from a remote host, and release
+# integrity rests on the signed `SHA256SUMS`, not on TLS, so there is no reason
+# to diverge from what most reqwest users run.
 #
-# - BUNDLED webpki roots rather than the destination machine's trust store,
-#   because one static binary is meant to run on any distro and a
-#   minimal/container/embedded image may have no CA bundle installed, or one
-#   in a location the binary would have to go looking for. Bundling makes the
-#   trust set a property of the release instead of a property of wherever it
-#   was copied to.
-# - RUSTLS rather than native-tls, which is the separate reason `openssl-sys`
-#   stays out of the release binary (`cargo tree -i openssl-sys` must stay
-#   empty for `farhelm`) — OpenSSL is what makes a static musl link painful,
-#   not the choice of root store.
+# Before 0.13 this turned the defaults off to compile Mozilla's root list into
+# the binary instead of using the OS store, so HTTPS would work on a machine
+# with no CA bundle. What dropping that costs, checked on 2026-10-11 with a
+# static musl build in a busybox container: on a Linux machine with no CA
+# bundle, building ANY reqwest client fails ("No CA certificates were loaded
+# from the system"), even one that only talks to loopback. The helm survives
+# it: the feedback forwarder logs the error and reports that it cannot send,
+# and provisioning fails with "building the release download HTTP client".
+# The fix on such a machine is installing its CA certificates package. The
+# desktop app is unaffected because it only ships for macOS, whose verifier
+# always has the system keychain. If this turns out to matter in practice,
+# record the case here before changing the choice.
+#
+# Constraints that still hold:
+# - `openssl-sys` stays out of the release binary (`cargo tree -i openssl-sys`
+#   must stay empty for `farhelm`): OpenSSL is what makes a static musl link
+#   painful. rustls keeps it out.
 # - NO `gzip`: the download source hashes response bytes exactly as they
 #   arrive and compares them to `SHA256SUMS`, so transparent decompression
-#   would hash something other than the signed artifact.
+#   would hash something other than the signed artifact. (Not a default.)
 # - `stream` for the byte-at-a-time download loop (a release archive is tens
 #   of megabytes; it is never buffered whole in memory).
 # - `json` is not used by the download source at all — it is farhelm's and
 #   farhelm-ui's, and stays for them.
-reqwest = { version = "0.12", default-features = false, features = [
-  "json",
-  "rustls-tls-webpki-roots",
-  "stream",
-] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 # `bundled` compiles SQLite from source rather than linking the host's
 # libsqlite3 — required for the musl-static supervisor artifacts
 # SPEC_impl.md's cross-compilation plan ships (audited there: builds fine
