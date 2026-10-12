@@ -208,7 +208,14 @@ printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 # which binary name they are installed under and in their own counter
 # file's name, so two structured sessions on different harnesses do not
 # share one generation sequence.
+# FARHELM_REAL_AGENT=1 leaves claude to the inherited PATH; making it usable
+# with this private login home is the maintainer's job, with no credential
+# handling here. Other harnesses keep their fakes. A structured spec selecting
+# claude also reaches the real CLI in that mode, so select only the two real-agent tests.
 for structured_name in codex claude muse goose pi omp opencode; do
+  if [ "${FARHELM_REAL_AGENT:-}" = 1 ] && [ "$structured_name" = claude ]; then
+    continue
+  fi
   cat >"$structured_bin/$structured_name" <<EOF || exit 1
 #!/bin/sh
 session="\${FARHELM_SESSION_ID:?missing session id}"
@@ -227,6 +234,8 @@ exec "$fixtures" fake-agent --script claude-record --record-home "$structured_ho
 EOF
   chmod 700 "$structured_bin/$structured_name" || exit 1
 done
+# The generated login profile, not this setup shell, expands these variables.
+# shellcheck disable=SC2016
 printf '%s\n' "export PATH=$structured_bin:\$PATH" \
   'for checkout_git_variable in ${!GIT_@}; do unset "$checkout_git_variable"; done' \
   "export GIT_CONFIG_GLOBAL=$checkout_git_config" \

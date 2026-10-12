@@ -13,8 +13,6 @@ None open.
 
 ## High priority: material UX degradation
 
-- `tab-cleanup-blocks-status-sampling.md` — Automatic cleanup of an exited terminal tab can leave every session on that
-  host showing stale status for seconds while background processes stop.
 - `upload-cancellation-drops-final-reply.md` — Delete can discard an upload result during temporary connection
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
@@ -32,8 +30,6 @@ None open.
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
   open dialogs.
-- `unrelated-probe-failure-disables-argument-expansion-protection.md` — A transient probe error could disable protection
-  against argument expansion.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -52,7 +48,6 @@ None open.
   needed to retry process cleanup.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `release-builds-fail-held-stdin-hook-test.md` — The held-input hook test falsely fails release binaries.
 - `ended-session-status-pushes-header-actions-beyond-promised.md` — An ended-session badge could clip actions at the
   promised pane width.
 - `seen-state-queue-acknowledge-newer-choice-sending-it.md` — The read-state queue can report success without sending
@@ -66,8 +61,6 @@ None open.
   information looking current.
 - `deflake-duplicates-bounded-evidence-into-unlimited-logs.md` — Test sweeps duplicate bounded evidence into unbounded
   logs.
-- `opt-in-real-agent-smoke-launches-fake-claude-executable.md` — The opted-in real-agent smoke still launches the fake
-  executable.
 - `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
   outside cleanup.
 - `duplicate-scenario-titles-silently-conflate-distinct-sessions.md` — Duplicate scenario titles make capture checks

@@ -131,6 +131,11 @@
 //! screaming" are both assertions rather than hopes. In production
 //! `TickerHandle::watch` is what turns the same information into a loud
 //! log line — see `serve`.
+//!
+//! Automatic tab closes are supervisor-owned work, separate from those tasks.
+//! Stopping the ticker prevents new closes but does not join teardown already
+//! started. Each close retains its session's lifecycle claim until completion,
+//! or until runtime drop, as an explicit close does after caller cancellation.
 
 use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
@@ -146,7 +151,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 /// How often the supervisor's periodic task fires in production.
 ///
@@ -941,11 +946,12 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // non-overrun case gets.
         let mut deadline = tokio::time::Instant::now() + interval;
         // The pane-death wakeup. It lives in this loop, as a third arm of
-        // the same `select!`, rather than in a task of its own, so there is
-        // still exactly one reaper: a separate task would run its reap
-        // concurrently with the tick's and have the two race `close_tab`
-        // (and the session's lifecycle claim) over the same corpse. Being
-        // part of this task also means it stops with it, and dropping the
+        // the same `select!`, rather than in a task of its own, so reap
+        // passes stay serial with the tick's. The closes they start do run
+        // on their own tasks; what keeps two of them off the same corpse is
+        // the lifecycle claim each takes with `try_claim` before starting,
+        // and `tab_reap_inflight` caps how many run at once. Being part of
+        // this task also means the wakeup stops with it, and dropping the
         // future kills the `tmux wait-for` client (see
         // `TmuxDriver::wait_for_pane_death`).
         //
@@ -1126,12 +1132,11 @@ fn stop_requested(stop: &mut oneshot::Receiver<()>) -> bool {
 /// by up to its own duration; sampling precedes capture because its
 /// result is what a drain arriving mid-tick will read, while a capture
 /// arriving a beat later costs nothing anybody can observe. The REAP
-/// phase (inside `sample_pass`, riding its pane snapshot) is the one that
-/// weakens the old "neither half can delay a request" claim, and only
-/// narrowly: a close takes the target session's LIFECYCLE claim, so an
-/// interactive operation on that same session can wait behind one reap —
-/// bounded by [`REAP_BUDGET_PER_TICK`] and by the stop check between
-/// closes. Requests on other sessions are unaffected, and the request
+/// phase (inside `sample_pass`, riding its pane snapshot) starts bounded
+/// owned work and returns without awaiting teardown. A close retains the
+/// target session's LIFECYCLE claim, so an interactive lifecycle operation
+/// on that same session may wait behind it; sampling and requests on other
+/// sessions do not wait for that cleanup. The request
 /// semaphore stays separate (see [`Supervisor::sampling_admission`]'s
 /// docs for why sharing it was a SPEC violation rather than a tuning
 /// question).
@@ -1389,10 +1394,10 @@ pub(super) async fn observe_for_test(sup: &Supervisor) {
 /// # Cancellation
 ///
 /// `stop` is re-checked between individual captures — and, in the reap
-/// phase this pass now opens with, between individual closes — so a
-/// shutdown waits out at most one in-flight operation: one `capture-pane`
-/// (bounded by that command's own deadline) or one tab close (bounded by
-/// [`REAP_BUDGET_PER_TICK`] from ever being a batch). The cursor is still
+/// phase this pass opens with, between individual close starts — so a
+/// shutdown waits out at most one `capture-pane` and its immediate write.
+/// Already-started tab closes keep running independently; the pass never
+/// waits for their kill grace periods. The cursor is still
 /// advanced past what was actually sampled, so a resumed ticker would not
 /// redo work — though in practice nothing resumes a stopped ticker.
 ///
@@ -1786,17 +1791,18 @@ async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
     }
 }
 
-/// Upper bound on tab reaps attempted in one tick.
+/// Upper bound on owned tab closes started by one pass.
 ///
 /// The bound is a liveness guard for everything queued behind this
 /// function on the ticker's task — activity sampling, conversation
-/// capture, and cooperative shutdown — because each close can wait on a
-/// session's lifecycle claim and several teardown subprocesses. Whatever
+/// capture, and cooperative shutdown — and bounds new teardown work in a
+/// burst. A start never waits for the lifecycle claim or the close itself;
+/// the owned close keeps the claim, preventing duplicate work. Whatever
 /// the budget leaves behind stays hidden from listings and is retried
 /// next tick, so the cap trades only reap LATENCY for a mass exit, never
 /// correctness. Sized to comfortably cover the ordinary case (one shell
 /// exiting at a time) with room for a burst.
-const REAP_BUDGET_PER_TICK: usize = 4;
+pub(crate) const REAP_BUDGET_PER_TICK: usize = 4;
 
 /// Close every tab whose window's panes are ALL dead — the enforcement
 /// half of SPEC.md's "a tab whose process exits is reaped automatically"
@@ -1814,10 +1820,10 @@ const REAP_BUDGET_PER_TICK: usize = 4;
 /// reaped tab is indistinguishable from a closed one. (The client treats
 /// that notice's tab-closed reason as silent removal, per SPEC.)
 ///
-/// Reaps are awaited serially on the ticker's own task, bounded by
-/// [`REAP_BUDGET_PER_TICK`] and re-checked against `stop` between closes,
-/// so neither a mass exit nor a slow teardown can wedge sampling, capture,
-/// or shutdown behind it; the next tick retries whatever remains. The
+/// Starts are bounded by [`REAP_BUDGET_PER_TICK`] and re-checked against
+/// `stop`. The owned task holds the lifecycle claim through teardown and
+/// logs the result; a busy session, including its other dead tabs, waits
+/// for a later pass. Sampling never waits for a close's grace periods. The
 /// expected failure is a race with a manual close of the same tab
 /// (`NotFound`, logged at DEBUG — the dead-at-open refusal path can also
 /// destroy a marked window the same instant this sees it); any OTHER
@@ -1882,7 +1888,7 @@ async fn reap_dead_tabs(
             // Never wait for the session's lifecycle claim here; see
             // `Supervisor::try_close_tab`. A busy session is skipped without
             // spending budget, and its dead tabs are reaped on a later tick.
-            let Some(closed) = sup.try_close_tab(&entry.info.id, &tab.id).await else {
+            let Some(()) = sup.try_close_tab(&entry.info.id, &tab.id) else {
                 debug!(
                     session = %entry.info.id, tab = %tab.id,
                     "an exited tab's session is busy with another operation; the reap retries \
@@ -1891,32 +1897,6 @@ async fn reap_dead_tabs(
                 continue;
             };
             budget -= 1;
-            match closed {
-                Ok(()) => {
-                    // The reap the tick found on its own, with no pane-death
-                    // wakeup ahead of it; see `hints`.
-                    sup.hint_sessions_changed();
-                    info!(
-                        session = %entry.info.id, tab = %tab.id,
-                        "reaped a terminal tab whose shell exited"
-                    );
-                }
-                Err(e) if e.kind == farhelm_proto::ErrorKind::NotFound => {
-                    debug!(
-                        session = %entry.info.id, tab = %tab.id, error = %e.message,
-                        "an exited tab vanished before this tick's reap — a manual close or \
-                         the open path's own cleanup won the race"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        session = %entry.info.id, tab = %tab.id, error = %e.message,
-                        "reaping an exited tab failed; if its window survives the next tick \
-                         retries, otherwise only the close's scope and marker sweeps remain \
-                         to catch leftover processes"
-                    );
-                }
-            }
         }
     }
 }
@@ -2216,6 +2196,88 @@ mod tests {
         }
     }
 
+    /// Observe owned close completion without treating sampler return as teardown.
+    ///
+    /// The close runs on its own task. Pane absence alone is not its end: the
+    /// window is killed before the close's marker sweep and detach, so a test
+    /// returning then would tear its fixture down under supervisor work still
+    /// in flight. Completion is panes gone AND every session's lifecycle claim
+    /// released, since the close holds that claim until it finishes. A
+    /// timeout reports remaining panes and claims so a still-running close is
+    /// distinguishable from a missed start.
+    async fn wait_for_reaped_panes(sup: &Arc<Supervisor>, panes: &[String]) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            let remaining: Vec<_> = panes
+                .iter()
+                .filter(|pane| states.contains_key(*pane))
+                .collect();
+            let claimed = sup
+                .sessions
+                .lock()
+                .await
+                .keys()
+                .any(|id| sup.lifecycle_locks.claimed_for_test(id));
+            if remaining.is_empty() && !claimed {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "automatic close did not remove panes {remaining:?}; live claims: {:?}",
+                sup.sessions
+                    .lock()
+                    .await
+                    .keys()
+                    .filter(|id| sup.lifecycle_locks.claimed_for_test(id))
+                    .collect::<Vec<_>>()
+            );
+            // sleep-ok: poll the owned close's pane-removal boundary, bounded by TEST_DEADLINE.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
+    /// Keep a close inside its teardown phase until the test releases it.
+    ///
+    /// Entry count proves the close reached the boundary under its lifecycle
+    /// guard. Closing the semaphore on unwind releases every waiter, so a
+    /// failed assertion cannot strand supervisor-owned tasks in the fixture.
+    struct HeldTabCloses {
+        entered: Arc<std::sync::atomic::AtomicUsize>,
+        release: Arc<tokio::sync::Semaphore>,
+    }
+
+    impl HeldTabCloses {
+        /// Hold admitted closes until explicit release, with unwind cleanup.
+        fn new() -> Self {
+            Self {
+                entered: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                release: Arc::new(tokio::sync::Semaphore::new(0)),
+            }
+        }
+
+        /// Expose the existing async fault-hook shape at the teardown boundary.
+        fn hook(&self) -> super::super::core::SinkReservationGate {
+            let entered = Arc::clone(&self.entered);
+            let release = Arc::clone(&self.release);
+            Arc::new(move || {
+                entered.fetch_add(1, Ordering::SeqCst);
+                let release = Arc::clone(&release);
+                Box::pin(async move {
+                    if let Ok(permit) = release.acquire().await {
+                        permit.forget();
+                    }
+                })
+            })
+        }
+    }
+
+    impl Drop for HeldTabCloses {
+        fn drop(&mut self) {
+            self.release.close();
+        }
+    }
+
     /// Read the daemon's self-reported PID once its detached child exists.
     ///
     /// The child writes this file after the parent pane can die, so this
@@ -2468,8 +2530,7 @@ mod tests {
         (pane, tab_id)
     }
 
-    /// Tabs whose shells exited are REAPED by the tick — every dead tab in
-    /// the pass, not just the first match — while a live sibling tab
+    /// Tabs whose shells exited are REAPED by successive ticks while a live sibling tab
     /// survives untouched. This is the enforcement half of SPEC.md's "a
     /// tab whose process exits is reaped automatically" (BUGS_BURNDOWN.md
     /// issue 3; the listing paths only HIDE dead tabs).
@@ -2543,12 +2604,26 @@ mod tests {
 
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
-        let states = sup.tmux.pane_states().await.expect("pane states");
+        // One close owns the session claim at a time. Drive later ticks until
+        // both siblings disappear rather than confusing start with completion.
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        let states = loop {
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            if !states.contains_key(&dead_a) && !states.contains_key(&dead_b) {
+                break states;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "dead sibling tabs were not reaped; claim held: {}",
+                sup.lifecycle_locks.claimed_for_test("reap-tab")
+            );
+            // sleep-ok: later passes are the stimulus for sibling closes deferred by the session's claim.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        };
         assert!(
             !states.contains_key(&dead_a) && !states.contains_key(&dead_b),
-            "every dead tab's window must be gone after one tick, not just the first"
+            "every dead tab's window must eventually be gone, not just the first"
         );
         let survivors = tabs_from_pane_states(states.values(), tmux_name, None);
         assert_eq!(
@@ -2597,6 +2672,7 @@ mod tests {
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        wait_for_reaped_panes(&sup, std::slice::from_ref(&dead)).await;
         let states = sup.tmux.pane_states().await.expect("pane states");
         assert!(
             !states.contains_key(&dead),
@@ -2733,6 +2809,7 @@ mod tests {
 
         drop(holder);
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        wait_for_reaped_panes(&sup, std::slice::from_ref(&dead)).await;
         assert!(
             !sup.tmux
                 .pane_states()
@@ -2755,33 +2832,163 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn the_reap_budget_defers_the_overflow_to_the_next_tick() {
         let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "reap-burst", "sleep 600").await;
-        let tmux_name = "fh-reap-burst";
+        let held = HeldTabCloses::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    tab_close_gate: Some(held.hook()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .await;
         let mut corpses = Vec::new();
-        for _ in 0..(REAP_BUDGET_PER_TICK + 1) {
-            corpses.push(dead_tab_in(&sup, tmux_name).await);
+        let mut sessions = Vec::new();
+        // Distinct sessions avoid the per-session claim masking a broken cap.
+        for index in 0..(REAP_BUDGET_PER_TICK + 1) {
+            let id = format!("reap-burst-{index}");
+            install_live_session(&sup, &id, "sleep 600").await;
+            corpses.push(dead_tab_in(&sup, &format!("fh-{id}")).await);
+            sessions.push(id);
         }
 
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        let remaining = corpses
-            .iter()
-            .filter(|pane| states.contains_key(*pane))
-            .count();
+        wait_until("four closes entered teardown", || {
+            held.entered.load(Ordering::SeqCst) >= REAP_BUDGET_PER_TICK
+        })
+        .await;
         assert_eq!(
-            remaining, 1,
-            "one pass reaps exactly its budget and defers the overflow"
+            sessions
+                .iter()
+                .filter(|id| sup.lifecycle_locks.claimed_for_test(id))
+                .count(),
+            REAP_BUDGET_PER_TICK,
+            "one pass starts exactly its budget while all closes remain held"
         );
+        assert_eq!(held.entered.load(Ordering::SeqCst), REAP_BUDGET_PER_TICK);
+        let started: Vec<_> = sessions
+            .iter()
+            .zip(&corpses)
+            .filter(|(id, _)| sup.lifecycle_locks.claimed_for_test(id))
+            .map(|(_, pane)| pane.clone())
+            .collect();
+        held.release.add_permits(REAP_BUDGET_PER_TICK);
+        wait_for_reaped_panes(&sup, &started).await;
+        wait_until("first closes released their claims", || {
+            sessions
+                .iter()
+                .all(|id| !sup.lifecycle_locks.claimed_for_test(id))
+        })
+        .await;
 
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        let states = sup.tmux.pane_states().await.expect("pane states");
+        wait_until("next pass admitted the deferred close", || {
+            held.entered.load(Ordering::SeqCst) == REAP_BUDGET_PER_TICK + 1
+        })
+        .await;
+        held.release.add_permits(1);
+        wait_for_reaped_panes(&sup, &corpses).await;
+    }
+
+    /// Sampling advances while a tab's owned close is held inside teardown.
+    ///
+    /// The gate establishes a real close under its lifecycle claim, rather than
+    /// inferring slow cleanup from elapsed time. Both tick and pane-death passes
+    /// must return while it is held; a newer live screen sample proves the host's
+    /// status work continued. A duplicate automatic start is refused and an
+    /// explicit close still waits for the session claim and its final result.
+    #[farhelm_testtrace::test]
+    async fn tab_teardown_does_not_block_fresh_samples_or_start_duplicate_closes() {
+        let state = StateDir::new();
+        let held = HeldTabCloses::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    tab_close_gate: Some(held.hook()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        install_live_session(&sup, "slow-reap", "sleep 600").await;
+        install_live_session(
+            &sup,
+            "sampling-peer",
+            "i=0; while :; do i=$((i+1)); echo \"tick $i\"; sleep 0.05; done",
+        )
+        .await;
+        let (pane, tab) = dead_tab_running(&sup, "fh-slow-reap", "true").await;
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        tokio::time::timeout(
+            TEST_DEADLINE,
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
+        )
+        .await
+        .expect("sampling must not join held tab teardown");
+        wait_until("close reached its teardown phase", || {
+            held.entered.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        assert!(sup.lifecycle_locks.claimed_for_test("slow-reap"));
         assert!(
-            corpses.iter().all(|pane| !states.contains_key(pane)),
-            "the next pass finishes what the budget deferred"
+            sup.try_close_tab("slow-reap", &tab).is_none(),
+            "a held close must exclude a duplicate start"
         );
+        let explicit = sup.close_tab("slow-reap", &tab);
+        tokio::pin!(explicit);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                explicit.as_mut().poll(cx).is_pending()
+            ))
+            .await,
+            "explicit close must still wait for the lifecycle claim"
+        );
+        let sample = sample_of(&sup, "sampling-peer").await;
+        let before = sample.lock().expect("sample mutex").comparison.clone();
+        assert!(
+            before.is_some(),
+            "first pass must establish a live baseline"
+        );
+        wait_for_busy_pane_to_change(&sup, "sampling-peer").await;
+        tokio::time::timeout(TEST_DEADLINE, reap_pass(&sup, &mut stop))
+            .await
+            .expect("pane-death pass must not join held teardown");
+        tokio::time::timeout(
+            TEST_DEADLINE,
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
+        )
+        .await
+        .expect("next sample must not join held teardown");
+        assert_ne!(
+            sample.lock().expect("sample mutex").comparison,
+            before,
+            "peer must receive a fresh sample while close is held"
+        );
+        assert!(sup.lifecycle_locks.claimed_for_test("slow-reap"));
+        assert_eq!(
+            held.entered.load(Ordering::SeqCst),
+            1,
+            "later passes must not start a duplicate"
+        );
+        held.release.add_permits(1);
+        // The explicit close takes the session's claim the moment the
+        // automatic close releases it, so it must be driven to completion
+        // before waiting for every claim to clear.
+        let result = tokio::time::timeout(TEST_DEADLINE, &mut explicit)
+            .await
+            .expect("explicit close must settle after the automatic close");
+        assert_eq!(
+            result.expect_err("the original tab is now gone").kind,
+            farhelm_proto::ErrorKind::NotFound
+        );
+        wait_for_reaped_panes(&sup, std::slice::from_ref(&pane)).await;
     }
 
     /// A pass over a REAL pane that is producing output dates the
@@ -3022,7 +3229,7 @@ mod tests {
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
+        wait_for_reaped_panes(&sup, std::slice::from_ref(&genuine_dead_pane)).await;
         let after = sup
             .tmux
             .pane_states()
@@ -3068,7 +3275,7 @@ mod tests {
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
+        wait_for_reaped_panes(&sup, std::slice::from_ref(&tab_pane)).await;
         let states = sup.tmux.pane_states().await.expect("pane states");
         assert!(
             !states.contains_key(&tab_pane),
