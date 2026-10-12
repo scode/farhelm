@@ -11582,7 +11582,8 @@
   or its timer directly, or by asserting no further mount attempts after removal). If that needs a new test-only hook in
   production code, record `discard` instead; if it needs more than a contained test change, stop and bring it back to
   the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## sibling-close-concurrency-test-executes-both-closes-sequentially.md
 
@@ -11594,7 +11595,8 @@
 - Completion criteria: the test holds tab A's close in flight while tab B's close is issued and completes, so a global
   serialization guard would fail it. Same gate as the sibling entry: a needed production test hook means `discard`, any
   other complication goes back to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## short-writer-timeout-masks-shutdown-drain-regression.md
 
@@ -11801,7 +11803,8 @@
 - Completion criteria: the test captures the old target's reply, delivers it late, waits until it has been received, and
   only then asserts that nothing was shown. Same gate as the sibling entry. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## unreachable-operation-test-prove-absence-queued-work.md
 
@@ -11813,7 +11816,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: after the host reconnects and before cleanup, the test asserts the agent is still running. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## process-death-falsely-inferred-proc-read-errors.md
 
@@ -11824,7 +11828,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: only ENOENT or ESRCH counts as gone; any other read error fails the check. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## work-order-progress-reads-observe-empty-file-during.md
 
@@ -11835,7 +11840,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: an empty read is retried rather than taken as 0, or the producer writes through a rename. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## held-synthetic-delete-handlers-delay-failure-teardown.md
 
@@ -11847,7 +11853,8 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: every held handler is released in a `finally` (or equivalent) so teardown never waits on it;
   check the other variants the finding names. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## shared-silence-observers-have-same-premature-success-boundary.md
 
@@ -12402,7 +12409,8 @@
 - Completion criteria: the restore is armed before the setting can change, so any failure after the write still restores
   it. Stop and bring it back to the user if it needs more than a contained test change. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## keyboard-launch-fixture-has-same-separate-setup-ownership.md
 
@@ -12412,7 +12420,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling, for the keyboard-launch test. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## history-fixtures-policy-restoration-skip-remaining-cleanup.md
 
@@ -12422,7 +12431,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: a failed restore does not skip the remaining cleanup steps (each runs and failures are reported
   together). Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md
 
@@ -12432,7 +12442,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling, for the keyboard-launch teardown. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## readiness-failure-leave-systemd-probe-child-running.md
 
@@ -12490,7 +12501,8 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: each acquired session and route is owned by cleanup as soon as it exists. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
+- Execution: complete; jj change `tolprrmknynrpqzprlyylrkwzokovmxy`; bookmark
+  `plan/browser-oracle-and-fixture-fixes/01-browser-specs`; https://github.com/scode/farhelm/pull/1930/changes.
 
 ## cleanup-leaves-orphan-tmux-processes-kill-failure.md
 

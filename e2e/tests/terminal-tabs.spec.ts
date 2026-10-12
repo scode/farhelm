@@ -80,7 +80,8 @@ interface ProcessIdentity {
 
 /**
  * Read `/proc/<pid>/stat`, returning the process's state character and its
- * start time, or `undefined` if it is gone.
+ * start time, or `undefined` only when the kernel reports it is gone.
+ * Other read errors must fail the oracle rather than certify a live shell's death.
  *
  * The comm field (field 2) is parenthesized and may itself contain spaces
  * and parentheses, so the split starts after the LAST `)` — the standard
@@ -91,8 +92,10 @@ function readProcStat(pid: number): { state: string; startTime: string } | undef
   let raw: string;
   try {
     raw = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ESRCH") return undefined;
+    throw error;
   }
   const after = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
   // Fields are 1-based in proc(5): state is 3 and starttime is 22, so
@@ -997,9 +1000,9 @@ test("a tab whose mount fails is rolled back and bannered while its siblings sta
 // is what this pins: the M2-era "stale mount retry" bug, in its per-tab
 // form.
 //
-// `window.Terminal` is withheld to force a genuinely pending mount (an
-// unloaded box otherwise resolves the first readiness check immediately),
-// exactly as the single-terminal regression test does.
+// Count reads of the withheld `window.Terminal`: a surviving retry cannot
+// mount once its element is gone, so counting mounted islands alone would
+// miss it. A rising count first proves the retry is genuinely pending.
 test("a pending tab mount is cancelled when the tab leaves the desired set", async ({
   page,
   request,
@@ -1007,6 +1010,7 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
   test.setTimeout(120_000);
   const title = `tab-pending-${Date.now()}`;
   let id: string | undefined;
+  let bodyFailed = false;
   try {
     const session = await createTabSession(request, title);
     id = session.id;
@@ -1018,31 +1022,58 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
     // observing the page at all.
     await page.evaluate(() => {
       (window as any).__stashedTerminal = (window as any).Terminal;
-      delete (window as any).Terminal;
+      (window as any).__terminalReadCount = 0;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        get() {
+          (window as any).__terminalReadCount++;
+          return undefined;
+        },
+      });
     });
 
     const opened = await request.post(`/api/sessions/${id}/tabs`);
     const tabId = (await opened.json()).tab.id;
     await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 15_000 });
     expect(await mountedIslands(page)).toEqual(["terminal"]);
+    await expect.poll(() => page.evaluate(() => (window as any).__terminalReadCount)).toBeGreaterThan(1);
 
     // Gone again before it could ever mount.
     const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
     expect(closed.ok()).toBe(true);
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 20_000 });
 
+    const readsAfterRemoval = await page.evaluate(() => (window as any).__terminalReadCount);
+    // sleep-ok: observe ten 50 ms retry periods after removal; a surviving pending mount would keep reading the withheld global.
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as any).__terminalReadCount)).toBe(readsAfterRemoval);
+
     // Restoring the global would let any surviving retry fire. Nothing
     // may: the pending attempt was cancelled when the tab left the set,
     // and a mount now would attach a terminal the supervisor destroyed.
     await page.evaluate(() => {
-      (window as any).Terminal = (window as any).__stashedTerminal;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        writable: true,
+        value: (window as any).__stashedTerminal,
+      });
       delete (window as any).__stashedTerminal;
+      delete (window as any).__terminalReadCount;
     });
     await expect
       .poll(() => mountedIslands(page), { timeout: 5_000, intervals: [500, 500, 500, 500] })
       .toEqual(["terminal"]);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    if (id) await cleanupSession(request, id);
+    try {
+      if (id) await cleanupSession(request, id);
+    } catch (error) {
+      // A cleanup refusal must not conceal the cancellation assertion that failed first.
+      if (bodyFailed) console.error("pending-mount session cleanup failed", error);
+      else throw error;
+    }
   }
 });
 
@@ -1155,14 +1186,18 @@ test("a confirmed close sends one DELETE per tab, and a sibling can close alongs
   test.setTimeout(180_000);
   const title = `tab-close-guard-${Date.now()}`;
   let id: string | undefined;
+  let bodyFailed = false;
   const deletes: string[] = [];
+  const closeA = routeGate();
   try {
     const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
     const [a, b] = session.tabs;
     await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
       if (route.request().method() === "DELETE") {
-        deletes.push(new URL(route.request().url()).pathname.split("/").pop()!);
+        const tab = new URL(route.request().url()).pathname.split("/").pop()!;
+        deletes.push(tab);
+        if (tab === a) await closeA.wait();
       }
       await route.continue();
     });
@@ -1174,19 +1209,36 @@ test("a confirmed close sends one DELETE per tab, and a sibling can close alongs
       confirm.click();
       confirm.click();
     });
-    await expect(page.locator(`.tab-slot[data-tab-id="${a}"]`)).toHaveCount(0, {
-      timeout: 30_000,
-    });
+    await expect.poll(() => deletes.filter((tab) => tab === a).length).toBe(1);
+    await expect(page.locator(`.tab-slot[data-tab-id="${a}"]`)).toHaveCount(1);
 
-    // Tab B closes normally afterwards — the per-tab guard released, and
-    // was never holding B in the first place.
+    // B must complete while A's DELETE is still held. A global close lock
+    // would prevent B's request here, even though both could close in sequence.
     await page.locator(`.tab-slot[data-tab-id="${b}"] .tab-close`).click();
-    await page.locator(".confirm-close-tab").click();
+    // The sole prompt sits below the strip; its label establishes which
+    // tab this confirmation will close while A's request remains pending.
+    await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 2");
+    await page.locator(".tab-confirm .confirm-close-tab").click();
+    await expect(page.locator(`.tab-slot[data-tab-id="${b}"]`)).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator(`.tab-slot[data-tab-id="${a}"]`)).toHaveCount(1);
+    expect(deletes).toContain(b);
+    closeA.release();
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 30_000 });
 
     expect(deletes.sort()).toEqual([a, b].sort());
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    if (id) await cleanupSession(request, id);
+    // Route-draining teardown must also progress after a failed assertion.
+    closeA.release();
+    try {
+      if (id) await cleanupSession(request, id);
+    } catch (error) {
+      // Keep the original concurrency failure and report cleanup trouble alongside it.
+      if (bodyFailed) console.error("sibling-close session cleanup failed", error);
+      else throw error;
+    }
   }
 });
 

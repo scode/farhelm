@@ -2960,13 +2960,38 @@ test.describe("multi-host", () => {
       await expect(error).toContainText("unreachable-reprobing");
       await expect(error).toContainText("nothing was queued");
 
-      // "Nothing queued" is a claim about the SERVER, so it is checked
-      // there: the session is still exactly as it was, and no stop is
-      // waiting to be delivered when the host returns.
+      // This establishes the last-known row after refusal. The next test
+      // reconnects before checking liveness: a stale row alone cannot rule
+      // out a Stop queued for later delivery.
       const listing = await (await request.get("/api/sessions")).json();
       const still = listing.sessions.find((s: any) => s.title === staleTitle);
       expect(still, "a refused stop must not remove the row").toBeTruthy();
       expect(still.stale).toBe(true);
+    });
+
+    /**
+     * A refused Stop must leave the agent alive after its host reconnects.
+     * The stale cache cannot prove this: a queued Stop would act only when
+     * the connection returns, before the group's cleanup deletes the fixture.
+     */
+    test("a refused Stop leaves the remote agent live after reconnect", async ({ request }) => {
+      requireFleet();
+      test.setTimeout(180_000);
+      await restoreRemoteSupervisor(request);
+      const liveSession = async () => {
+        const response = await request.get("/api/sessions");
+        expect(response.ok()).toBe(true);
+        const listing = await response.json();
+        const session = listing.sessions.find((s: any) => s.id === staleSessionId);
+        return { stale: session?.stale, state: session?.status?.state };
+      };
+      await expect.poll(liveSession, { timeout: 30_000 }).toEqual({
+        stale: false,
+        state: expect.stringMatching(LIVE_BADGE),
+      });
+      // sleep-ok: cover delivery of a wrongly queued Stop and the subsequent listing refresh; this sleep agent exits on its first SIGTERM.
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      expect(await liveSession()).toEqual({ stale: false, state: expect.stringMatching(LIVE_BADGE) });
     });
   });
 

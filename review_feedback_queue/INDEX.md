@@ -24,29 +24,5 @@ None open.
 
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
-- `busy-selection-test-loses-source-second-creation-fails.md` — Failed busy-selection setup leaves acquired sessions
-  outside cleanup.
-- `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md` — The pending-mount test cannot tell
-  cancelled retries from surviving retries.
-- `sibling-close-concurrency-test-executes-both-closes-sequentially.md` — The sibling-close test could pass with a
-  global serialization guard.
-- `history-fixture-enables-yolo-installing-restoration-guard.md` — History-test setup can leak its changed confirmation
-  policy.
-- `keyboard-launch-fixture-has-same-separate-setup-ownership.md` — Keyboard-launch setup independently leaves changed
-  policy after failure.
-- `history-fixtures-policy-restoration-skip-remaining-cleanup.md` — History-test restoration failure skips cleanup of
-  its known session.
-- `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` — Keyboard-launch teardown skips session
-  deletion if policy restoration fails.
 - `recently-modified-image-png-gets-generated-attachment.md` — A mixed paste could silently omit a distinct fresh image
   file.
-- `retarget-test-failing-deliver-old-target-plan.md` — The retarget test could miss a stale plan completing after
-  invalidation.
-- `unreachable-operation-test-prove-absence-queued-work.md` — The unreachable-host test could accept queuing a refused
-  Stop for later.
-- `process-death-falsely-inferred-proc-read-errors.md` — A later process-read error could be mistaken for confirmed
-  death.
-- `work-order-progress-reads-observe-empty-file-during.md` — An empty progress baseline could make old output look newly
-  produced.
-- `held-synthetic-delete-handlers-delay-failure-teardown.md` — Failed assertions could leave synthetic DELETE handlers
-  blocking teardown.

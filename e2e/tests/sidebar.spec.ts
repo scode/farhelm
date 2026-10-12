@@ -69,6 +69,27 @@ import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, restartIdleAgent, waitForTermText, answerYolo } from "./helpers/term";
 
+/**
+ * Attempt every owned cleanup step even if a previous release fails.
+ * An assertion failure remains the primary failure; cleanup errors accompany
+ * it in stderr. With a successful body, cleanup failures fail the test together.
+ */
+async function cleanupOwnedSteps(bodyFailed: boolean, steps: [string, () => unknown | Promise<unknown>][]) {
+  const failures: Error[] = [];
+  for (const [label, step] of steps) {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(new Error(`cleanup failed: ${label}`, { cause: error }));
+    }
+  }
+  if (failures.length) {
+    const error = new AggregateError(failures, "owned fixture cleanup failed");
+    if (bodyFailed) console.error(error);
+    else throw error;
+  }
+}
+
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
@@ -1356,31 +1377,30 @@ test("a long cwd shows its tail with characters in logical order", async ({
  * that owns the reply, and the operation's outcome — success or refusal —
  * is silently discarded. The route hold makes the window deterministic
  * instead of racing a fast supervisor.
+ * Cleanup owns each session from acquisition, so a failed sibling creation
+ * cannot leave the first session running in the shared test stack.
  */
 test("an unanswered view operation disables row selection until it completes", async ({
   page,
   request,
 }) => {
-  // Resumable, because the held operation is a restart of `a`, and an
-  // unavailable Restart sends nothing.
-  const a = await createResumableSession(request, {
-    title: `busy-a-${Date.now()}`,
-    cwd: "/tmp",
-  });
-  const b = await createSession(request, {
-    title: `busy-b-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
+  let a: Awaited<ReturnType<typeof createResumableSession>> | undefined;
+  let b: Awaited<ReturnType<typeof createSession>> | undefined;
+  let bodyFailed = false;
   let releaseRestart: () => void = () => {};
   const restartHeld = new Promise<void>((resolve) => {
     releaseRestart = resolve;
   });
-  await page.route(`**/api/sessions/${a.id}/restart`, async (route) => {
-    await restartHeld;
-    await route.continue();
-  });
   try {
+    // Own each session as soon as creation returns, including when creating
+    // the sibling or installing its held route fails.
+    // Resumable: an unavailable Restart would send no request to hold.
+    a = await createResumableSession(request, { title: `busy-a-${Date.now()}`, cwd: "/tmp" });
+    b = await createSession(request, { title: `busy-b-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300" });
+    await page.route(`**/api/sessions/${a.id}/restart`, async (route) => {
+      await restartHeld;
+      await route.continue();
+    });
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await row(page, a.id).locator(".session-row-open").click();
@@ -1405,11 +1425,16 @@ test("an unanswered view operation disables row selection until it completes", a
     });
     await row(page, b.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toContainText(b.title);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
     releaseRestart();
-    await page.unroute(`**/api/sessions/${a.id}/restart`);
-    await cleanupSession(request, a.id);
-    if (b) await cleanupSession(request, b.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["restart route", () => a && page.unroute(`**/api/sessions/${a.id}/restart`)],
+      ["session A", () => a && cleanupSession(request, a.id)],
+      ["session B", () => b && cleanupSession(request, b.id)],
+    ]);
   }
 });
 
@@ -4954,6 +4979,8 @@ async function installComposerChoices(
  * A controlled feed notification then makes A consume its held fresh reply;
  * this fixture does not claim that B itself delivered that event. The final
  * search-result and folder choices are distinct promotion boundaries.
+ * The shared YOLO policy is restored even after a failed enabling readback;
+ * restoration failure must not skip the second client or its session cleanup.
  */
 test("composer holds offered history steady until destination and search promotion", async ({
   browser,
@@ -5012,11 +5039,12 @@ test("composer holds offered history steady until destination and search promoti
 
   let second: import("@playwright/test").BrowserContext | undefined;
   let secondClientSession: { id: string } | undefined;
-  // A real YOLO launch on the suite's ask-first host; the guard itself is
-  // yolo-guard.spec.ts's subject, so the host allows YOLO without asking here and put back
-  // afterwards.
-  await setLocalYoloWithoutAsking(request, true);
+  let bodyFailed = false;
   try {
+    // Arm restoration before enabling YOLO: the write may commit even when
+    // the helper's separate readback fails. This test is about history,
+    // while yolo-guard.spec.ts covers the admission policy itself.
+    await setLocalYoloWithoutAsking(request, true);
     await page.goto("/");
     const form = page.locator(".create-session-form");
     await page.locator(".new-session-button").click();
@@ -5096,10 +5124,16 @@ test("composer holds offered history steady until destination and search promoti
     await expect(freshFolder, "search activation must make the fresh destination suggestion available without another feed read").toBeVisible();
     await freshFolder.click();
     await expect(form.getByLabel("folder", { exact: true }), "the ordinary destination control must apply the fresh folder it made available").toHaveValue("/offered-history/folder-new");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await setLocalYoloWithoutAsking(request, false);
-    await second?.close();
-    if (secondClientSession) await cleanupSession(request, secondClientSession.id);
+    releaseFresh?.();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["YOLO policy", () => setLocalYoloWithoutAsking(request, false)],
+      ["second client", () => second?.close()],
+      ["second client's session", () => secondClientSession && cleanupSession(request, secondClientSession.id)],
+    ]);
   }
 });
 
@@ -6176,7 +6210,8 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
  * remains a draft-only affordance so an accidental click cannot start work.
  * Both paths begin in command mode because a recent names a complete
  * structured setup; leaving the mode unchanged would submit the dormant raw
- * command while the row appeared to select something else. */
+ * command while the row appeared to select something else. Policy restoration
+ * and session cleanup remain independent, including after setup failure. */
 test("composer Enter on a focused recent launches the filled setup", async ({ page, request }) => {
   const cwd = "/tmp";
   const launch = {
@@ -6194,11 +6229,11 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     posts.push(route.request().postDataJSON());
     await route.continue();
   });
-  // A real YOLO launch on the suite's ask-first host; the guard itself is
-  // yolo-guard.spec.ts's subject, so the host allows YOLO without asking here and put back
-  // afterwards.
-  await setLocalYoloWithoutAsking(request, true);
+  let bodyFailed = false;
   try {
+    // Restore even if enabling commits and its independent readback fails;
+    // keyboard launch must not change the shared stack's admission policy.
+    await setLocalYoloWithoutAsking(request, true);
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
@@ -6239,9 +6274,17 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
       launch: { harness: "codex", model: "enter-model", effort: "high", permissions: "yolo" },
     });
     expect(posts[0]).not.toHaveProperty("invocation");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await setLocalYoloWithoutAsking(request, false);
-    for (const id of created) await cleanupSession(request, id);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["YOLO policy", () => setLocalYoloWithoutAsking(request, false)],
+      ...created.map((id): [string, () => Promise<void>] => [
+        `session ${id}`,
+        () => cleanupSession(request, id),
+      ]),
+    ]);
   }
 });
 
