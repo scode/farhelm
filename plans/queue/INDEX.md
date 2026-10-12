@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing d181ff] `host-trust-and-tooling-spec.md` — Spec clarifications for 12 triage outcomes: host denial of service accepted, one run per checkout, dedicated ownership of managed checkouts, three setup/uninstall acceptances
 - [in-flight 083c36] `e2e-oracle-and-cleanup-fixes.md` — 13 triage outcomes: end-to-end test oracles that can pass or fail wrongly, fixture cleanup on failure paths, and gating the e2e suite to Linux
 - [in-flight 6376d5] `unit-test-oracle-fixes.md` — 13 triage outcomes: supervisor, helm and test-sweep unit tests that prove what they claim
 - [in-flight 4ecd7e] `browser-oracle-and-fixture-fixes.md` — 12 triage outcomes: browser specs that can pass while their behavior is broken, or skip cleanup after a failure (one test-only PR)

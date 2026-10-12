@@ -62,3 +62,46 @@ None. No outcome was dropped or left waiting on a maintainer decision.
 The required source review found one conflicting broken-filesystem availability promise. The cross-reference resolved
 it; the follow-up found no further issue and confirmed the intended security, data and ownership boundaries. The
 required commit/PR wording cold read and the report cold read passed before delivery.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1923. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+All in #1923, before it merged, to keep the recorded principles within what was decided and consistent with the rest of
+the specifications:
+
+- SPEC_impl.md's new one-run-per-checkout rule listed the docs preview among the runs that must not overlap, which would
+  have made the documented workflow of leaving the preview running beside one's own commands unsupported. The decision
+  was about two runs or two agents in one checkout; the preview server an agent leaves running is now said not to be a
+  second run.
+- SPEC.md's reworded hostile-host paragraph dropped "breaking the helm itself" from what must still be prevented. It now
+  reads "a host compromising the helm, corrupting its own state, or affecting other hosts' security or data".
+- The list of unsupported cases under "refuse with a clear message" said "managed paths", a wider term than the new
+  ownership paragraph's own scope; it now says managed checkouts and the trash, including uncommon filesystems under
+  them.
+- A doubled "for example" was removed.
+
+#### For the maintainer to confirm
+
+Two readings the executor took from the decisions and the landing left as written; the report discloses both:
+
+- The ownership paragraph covers the checkout root as well as the managed checkouts and the trash, reading "this path"
+  in the snapshot-root decision as the root. The root is a folder the user picks, so this also puts the user's own files
+  kept in it outside support for out-of-band changes.
+- The denial-of-service acceptance for a malicious or arbitrarily broken host now overrides the earlier guarantee that a
+  remote host's broken filesystem must not freeze the helm or stop it serving other hosts. Whether an honest host with a
+  hung disk is still covered is not stated.
+
+#### Review before merging
+
+Bookkeeping is clean: the 12 removed feedback files' ledger entries are complete with this PR, no other entry changed,
+and the review queue's index lists exactly the files present.
+
+#### Checks
+
+- Run now: `dprint check`, and a comparison of the review queue's index with its directory.
+- Not run: any test suite, since only the specifications, the triage ledger and review-queue files changed.
+
+Nothing in the report above was made untrue by the landing.
