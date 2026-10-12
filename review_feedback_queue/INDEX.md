@@ -64,8 +64,6 @@ None open.
 
 - `failed-confirmation-discard-session-despite-failed-process.md` — Failed create recovery could discard the session
   needed to retry process cleanup.
-- `template-command-editor-displays-untrusted-command-bytes.md` — The template launch-command editor hides meaningful
-  remote-derived characters.
 - `template-discovery-fails-permanently-once-reply-exceeds.md` — A large valid template catalog permanently disables
   agent discovery.
 - `live-processes-reported-dead-macos.md` — macOS process checks can certify death without observing the process.
@@ -116,10 +114,6 @@ None open.
 - `cancelled-lock-waiters-leave-permanent-registry-entries.md` — Cancelled lock waiters leave retained registry keys.
 - `no-directory-created-assertion-requires-directory-exist.md` — The no-directory-creation test requires the directory
   to have been created.
-- `stored-template-commands-bypass-safe-display-seeding.md` — The launcher can display a template command differently
-  from its retained bytes.
-- `stored-template-resume-commands-have-same-independent.md` — The template resume seed conceals bytes kept for later
-  execution.
 - `rename-editor-conceals-title-characters-editable-title-editable-title-seed.md` — The rename editor hides meaningful
   characters in its editable title.
 - `partial-templates-cannot-retain-non-yolo-approval-choices.md` — Approval-only templates cannot preserve supported
@@ -225,7 +219,6 @@ None open.
   configuration.
 - `replaced-evidence-repeated-continuity-receipts-retain-passing.md` — Evidence replaced during digest capture could
   inherit a passing validation.
-- `decoy-paths-derived-shell-pid.md` — A predictable temporary directory could redirect a test write through a symlink.
 - `aggregate-identity-skew-creates-false-host-match.md` — An aggregate identity mismatch remains an unresolved
   transition question.
 - `dropping-upload-guard-outside-tokio-runtime-skips.md` — Dropping an upload owner outside runtime context could skip
@@ -237,14 +230,10 @@ None open.
 - `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md` — A failed Pi callback could leave Resume
   pointing at an earlier conversation.
 - `unbounded-aggregate-capture-replies.md` — Aggregate terminal capture could exceed a safe memory bound.
-- `startup-verification-skipped-no-stale-client-initially.md` — An initially empty startup roster could miss a late
-  predecessor client.
 - `live-panes-process-read-error-degrades-pid-only-identity.md` — A live-pane identity read failure could admit an old
   report by process number alone.
 - `omp-context-changes-initial-eligibility-check.md` — A retained reporter context leaves an unresolved
   foreground-ownership question.
-- `failed-sink-record-hides-older-reaper.md` — An untracked older reaper could make planned shutdown finish cleanup too
-  early.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across

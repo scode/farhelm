@@ -11366,3 +11366,1292 @@
   added simply), stop and bring it back to the user unfixed. Do not touch the vendored terminal library. Remove this
   feedback file and its index entry.
 - Execution: `pending`.
+
+## stored-template-commands-bypass-safe-display-seeding.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `dd9573cc` in [#1811](https://github.com/scode/farhelm/pull/1811/changes) ("fix:
+  make GUI pastes and template text safe"), which landed after the reviewed commit. The launcher still seeds a stored
+  template's launch command as raw text, but `check_template_shape` in `crates/farhelm-proto/src/launcher.rs` now
+  refuses control and invisible formatting characters in template commands on every save path (the GUI, the helm's
+  template endpoint in `crates/farhelm-helm/src/templates.rs`, and agent requests in
+  `crates/farhelm-helm/src/agent_requests.rs`). Only a template saved before that rule can still carry such characters,
+  and SPEC.md (the 2026-10-10 template-command rule) explicitly accepts that those still launch. Same basis as the
+  ledger entry for `template-resume-command-editor-has-same-unsafe-display.md`. Checked against `f30d41e4` on
+  2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## stored-template-resume-commands-have-same-independent.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `dd9573cc` in [#1811](https://github.com/scode/farhelm/pull/1811/changes), on the
+  same basis as `stored-template-commands-bypass-safe-display-seeding.md` above: the resume command is the other field
+  `check_template_shape` checks, so a newly saved template can no longer carry hidden characters there, and templates
+  saved before the rule are accepted by SPEC.md. Checked against `f30d41e4` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## template-command-editor-displays-untrusted-command-bytes.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by `dd9573cc` in [#1811](https://github.com/scode/farhelm/pull/1811/changes). The
+  finding's path was a session's command, which can carry remote-derived bytes, being saved as a template and then shown
+  raw in the template editor. Saving it is now refused by `check_template_shape` on every save path, so such bytes can
+  no longer become a template. This executed the ledger decision on
+  `template-command-editors-hide-meaningful-characters-silently-saved-command-editor.md`. Templates saved before the
+  rule are accepted by SPEC.md. Checked against `f30d41e4` on 2026-10-11.
+- Decision: already fixed; recorded without a triage decision, per the queue rules.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: `complete`; feedback file and index entry removed during triage.
+
+## decoy-paths-derived-shell-pid.md
+
+- Outcome: `other`.
+- Assessment: confirmed by reading `scripts/test-start-stack-cleanup.sh`: the decoy directory is
+  `/tmp/fh-e2e.decoy-<shell pid>`, an existing directory is accepted, and the marker write truncates through whatever is
+  there. Exploiting it needs another local account to prepare that directory first.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md, "Development tooling
+  assumes a single-user machine" (decided 2026-10-10), says the test harnesses need not defend against hostile other
+  local accounts and explicitly accepts "a race with another account's symlink".
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## repeated-buffer-copying-amplifies-tiny-frame-traffic.md
+
+- Outcome: `fix spec` (superseded `fix code` the same day; see Decision).
+- Assessment: mechanism confirmed by reading; impact not measured. `FrameReader::read_frame` in
+  `crates/farhelm-proto/src/io.rs` drains each decoded frame from the front of a `Vec`, which moves the rest of the
+  buffer every time. A host that batches many tiny valid frames (a 9-byte empty Data frame is allowed) into one read
+  makes the helm copy far more bytes than it received. Only a hostile or broken supervisor sends that traffic. SPEC.md
+  (the 2026-10-01 rule on remote input and availability) accepts degradation by a hostile host only when it cannot
+  easily be avoided, and this can: keep a consumed offset and compact occasionally. Precedent:
+  `sessions-changed-hint-unthrottled.md` was fixed on the same rule.
+- Decision: the user asked on 2026-10-11 for findings whose outcome is straightforward and needs no significant
+  complexity or redesign to be triaged without discussion; this one follows directly from the existing spec rule.
+  Superseded later on 2026-10-11: while triaging findings about misbehaving hosts, the user said "SPEC should say that
+  denial of service of helm/desktop in the face of a malicous or arbitrairly broken host is acceptable". This finding is
+  exactly that kind of degradation, so the outcome becomes the spec change rather than the code fix. It carries the spec
+  change that also settles `detached-terminal-cleanup-tasks-wait-writer-capacity.md` and
+  `cancelled-attach-retain-abandoned-terminal-channel.md`.
+- Completion criteria: change SPEC.md's 2026-10-01 paragraph that accepts a misbehaving host degrading the helm's
+  performance or availability "when it cannot easily be avoided", so that denial of service of the helm or the desktop
+  app by a malicious or arbitrarily broken host is accepted outright, whether or not it could be avoided. State what is
+  still not accepted: a host corrupting the helm's state, or affecting other hosts' security or data. Existing
+  mitigations (such as the spacing of "sessions changed" refreshes) may stay; the change does not ask for their removal.
+  Make no code change to the frame reader. Remove this feedback file and its index entry, and those of the two items
+  above, in the same change.
+- Execution: `pending`.
+
+## header-actions-skip-listing-read.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. After a successful Replace from the session header, the UI selects the new session
+  but never asks the sidebar to re-read the session list, and a successful header Restart refreshes only the session
+  view's own detail. The sidebar's own Replace and the replace-with composer do request an explicit listing read. With a
+  healthy feed the next feed event hides this; while the "reload for the new version" notice is up, the feed and the
+  fallback poll are both off, so the sidebar keeps the deleted source row (whose actions fail with not-found) and never
+  shows the new one, and a restarted session keeps its old ended status. The F2 consequence the original report linked
+  to this was fixed separately in #1152.
+- Decision: the user asked on 2026-10-11 for findings whose outcome is straightforward and needs no significant
+  complexity or redesign to be triaged without discussion. Precedent: the 2026-10-11 decisions on
+  `clearing-notifications-leaves-cleared-bell-entries-visible.md` and
+  `manual-read-unread-toggles-cannot-visibly-toggle.md` fixed the same shape (an explicit action must refresh what it
+  changed even under a build mismatch).
+- Completion criteria: the success paths of header Replace and header Restart request an explicit sidebar listing read,
+  the way the sidebar's own actions do. Add browser or component coverage if it fits without new machinery. Stop and
+  bring it back to the user if routing the request needs more than a small callback. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## build-mismatch-turns-unattended-mounts-into-displacing.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. In `crates/farhelm-ui/assets/terminal.js` one boolean means both "an unattended
+  attach is allowed" and "this attach does not displace anyone". Once a build mismatch makes unattended attachment
+  manual-only, that boolean is false, so a tab newly discovered by a successful detail refresh mounts on the ordinary,
+  displacing route. The supervisor then takes the session's terminal away from whoever is attached in another window,
+  without anyone asking for a takeover. SPEC.md's takeover rules (unattended recovery never displaces, and "One GUI at a
+  time" explicitly keeps them) say this must not happen.
+- Decision: the user asked on 2026-10-11 for findings whose outcome is straightforward and needs no significant
+  complexity or redesign to be triaged without discussion. Precedent: `takeover-latch-misses-attaching-tabs.md` and
+  `new-tab-mount-displaces-owner-during-recovery.md` were both fixed under the same rule.
+- Completion criteria: an attach that is not an explicit takeover never takes the displacing route, whatever the build
+  mismatch state; under a mismatch, a newly discovered tab either mounts on the non-displacing route or waits for the
+  user's explicit action. Keep forbidden unattended mounts and intentional takeover as separate states. Add a regression
+  test if it fits the existing terminal-tab browser specs. Stop and bring it back to the user if this needs more than a
+  contained change to the mount decision. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## seen-state-queue-acknowledge-newer-choice-sending-it.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. The read/unread write queue in `crates/farhelm-ui/src/api.rs` decides there is
+  nothing newer to send by comparing values. When this window's mark-read is still waiting for its reply, another window
+  marks the session unread, and this window marks it read again, the new choice equals the one in flight, so the queue
+  finishes without sending it and reports success while the stored state stays unread. The preference queue beside it
+  handles exactly this case with a flag recording that a choice arrived after the send.
+- Decision: the user asked on 2026-10-11 for findings whose outcome is straightforward and needs no significant
+  complexity or redesign to be triaged without discussion. SPEC.md "One GUI at a time" says to fix concurrent-GUI races
+  when the fix is easy and adds little complexity, and the existing preference-queue pattern makes it easy.
+- Completion criteria: a choice recorded after a write was sent is always sent before the queue reports completion, even
+  when it equals the value in flight, using the same mechanism as the preference queue. Add a unit test for the
+  equal-valued case. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## uninstall-race-first-time-service-setup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading, not reproduced. When no service unit directory exists yet, uninstall takes no setup
+  lock (`crates/farhelm/src/setup.rs`, the optional unit-directory lock), so a first-ever `farhelm helm setup` running
+  at the same time can create the directory and publish service definitions after uninstall's last check. Uninstall then
+  removes the executable and reports success, leaving services that point at a deleted program. Linux flat installations
+  only, and only when the two commands genuinely overlap. SPEC.md "Concurrent and interrupted runs" requires overlapping
+  setup and uninstall to end in a correct state and does not carve out this case.
+- Decision: the user asked on 2026-10-11 for findings whose outcome is straightforward and needs no significant
+  complexity or redesign to be triaged without discussion. Precedent: `installer-stale-lock-recovery-not-exclusive.md`
+  was fixed under the same spec rule.
+- Completion criteria: setup and uninstall exclude each other even when the unit directory does not exist yet, or the
+  conflicting transition is refused by an equivalent guard, so an overlapping run can no longer leave service
+  definitions pointing at a removed executable while uninstall reports success. Add a focused test if one fits the
+  existing setup/uninstall tests without new machinery. Stop and bring it back to the user if this needs a redesign of
+  the lock layout. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-sink-record-hides-older-reaper.md
+
+- Outcome: `other`.
+- Assessment: mechanism confirmed by reading, reachability not verified. When a failed output-client record replaces one
+  whose older reaper is still running (in practice one stuck retrying), that reaper is no longer tracked, so a planned
+  stop's wait counts as settled, the supervisor exits with the client still open, and the expiry quiet-down does not
+  run. The worst case is the known tmux abort on abrupt closure of an output-bearing client.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC_impl.md (the output-client
+  teardown paragraph) says further defenses against that tmux abort are not worth significant complexity without an
+  observed abort on tmux 3.7c or later, and that "a rare path bypassing the existing safe-teardown discipline is not a
+  reason for further design or code". The `shutdown-expiry.md` decision applied that principle to planned stops, and
+  `sink-shutdown-retries-forever-after-delete.md` accepted this unregistered-reaper gap on 2026-10-01. Because the
+  consequence could be highest-bucket, an independent fresh-context reviewer checked the drop against that text on
+  2026-10-11 and agreed.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## startup-verification-skipped-no-stale-client-initially.md
+
+- Outcome: `other`.
+- Assessment: confirmed by reading. Startup recovery skips its steadiness check when the first client listing is empty,
+  so a predecessor's output client that attaches a moment later is never seen. That needs the previous supervisor to
+  have died mid-spawn without running any cleanup code, and the supervisor to restart before the orphaned client
+  finishes attaching. The late client's owner is dead, so it either closes abruptly (the tmux abort) or stays until the
+  next start's sweep; panes stay readable through the new supervisor's own sink.
+- Decision: skipped under the triage rule for findings covered by the specifications. BUGS.md accepts the abrupt-death
+  case ("only a death that runs no code is left here"), and SPEC_impl.md's output-client teardown paragraph says a rare
+  path bypassing the safe-teardown discipline is not a reason for further design or code without an observed abort on
+  tmux 3.7c or later. Because the consequence could be highest-bucket, an independent fresh-context reviewer checked the
+  drop on 2026-10-11 and agreed.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. In `crates/farhelm-ui/assets/terminal.js` a surviving mount retry needs the tab's
+  element, so once the tab is gone it polls every 50 ms and never mounts; the test in `e2e/tests/terminal-tabs.spec.ts`
+  only counts mounted terminals, so it passes whether the retry was cancelled or not. Production cancels today.
+- Decision: on 2026-10-11 the user settled the class of tests that can pass without exercising what they claim, or can
+  fail on correct code, while the product itself works: fix them with a complexity gate, and discard those whose fix
+  needs a new test-only hook in production code or that are purely speculative ("Fix, skip hard ones"). This follows the
+  2026-10-10 and 2026-10-11 bulk decisions on the same class.
+- Completion criteria: the test fails if the cancelled mount's retry survives (for example by observing the retry loop
+  or its timer directly, or by asserting no further mount attempts after removal). If that needs a new test-only hook in
+  production code, record `discard` instead; if it needs more than a contained test change, stop and bring it back to
+  the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## sibling-close-concurrency-test-executes-both-closes-sequentially.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a test gap. In `e2e/tests/terminal-tabs.spec.ts` tab B's close starts only after tab A has
+  disappeared, so a global close lock would still pass. The product guard really is per tab.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test holds tab A's close in flight while tab B's close is issued and completes, so a global
+  serialization guard would fail it. Same gate as the sibling entry: a needed production test hook means `discard`, any
+  other complication goes back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## short-writer-timeout-masks-shutdown-drain-regression.md
+
+- Outcome: `fix code`.
+- Assessment: likely, no mutation run. `writer_never_reading_peer_does_not_hang_connection_shutdown`
+  (`crates/farhelm/tests/e2e/session_lifecycle.rs`) shortens the writer stall bound to 2 s, and that bound alone can end
+  the writer, so removing the 5 s drain bound (`WRITER_DRAIN_TIMEOUT` in
+  `crates/farhelm-supervisor/src/service/connection.rs`) would probably still pass.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test can only pass because of the drain bound, for example by keeping the writer stall bound
+  longer than the drain bound and asserting shutdown completes within the drain bound. If the flood cannot be reached
+  that way without a production test hook, record `discard`; other complications go back to the user. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## sink-healing-witness-consume-queued-output.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. In `a_killed_session_sink_comes_back_while_its_terminals_stay_attached`
+  (`crates/farhelm/tests/e2e/terminal_tabs.rs`), `tab_seen.clear()` leaves frames already queued in `tab_rx`, so the
+  post-heal check can match output produced before the kill. Same class as the 2026-10-11 decision on
+  `post-stall-liveness-witness-include-replay.md`. Easy fix.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the post-heal witness is fresh output produced after healing (for example a new marker written
+  after the heal, or draining the queue before the check), so pre-kill output cannot satisfy it. Same gate as the
+  sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ignored-transcript-feeder-write-errors-conceal-missing-input.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. In `crates/farhelm-supervisor/src/tmux/stream.rs` tests the transcript feeder
+  discards its `write_all` result, and the bare-query check passes on an empty stream, so the test cannot tell "query
+  stripped" from "nothing arrived". The realistic weakness is the missing sentinel after the query.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: feeder write errors fail the test, and a sentinel after the query proves input arrived before the
+  stripped-query assertion is trusted. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed that the test cannot see a Delete, but the regression it would miss is contrived: production
+  refuses before any delete, and only an asynchronous Delete that still returned the refusal would slip through, because
+  the scripted peer stops reading after `SessionCreated`. The guarded side effect is deleting a live session.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the scripted peer keeps reading until the connection closes and the test asserts no
+  `DeleteSession` arrived. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replay-refusal-tests-do-directly-observe-absence-delete-replace-with-overrides.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, same shape as `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md`, for
+  the Replace-with test (`a_replace_with_create_reply_that_replays_the_source_id_is_refused_before_any_delete`).
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: same as the plain-Replace sibling, applied to the Replace-with test; the two can share one
+  change. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## recreation-test-assumes-distinct-birth-timestamps.md
+
+- Outcome: `fix code`.
+- Assessment: likely, never observed. `a_recreated_checkout_directory_is_a_different_object` (`working_copies.rs`) could
+  fail spuriously if a directory is recreated within one coarse birth-time tick. FLAKES.md already notes this test has
+  the same exposure as the #1845 flake but has not been seen failing.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test checks its own premise (the recreated directory's birth time actually differs) and
+  reports a premise skip instead of a failure when it does not. Same gate as the sibling entry. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## no-directory-created-assertion-requires-directory-exist.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. `reconcile_reports_source_missing_when_nothing_remains` (`working_copies.rs`) says
+  nothing is created and asserts "invented no directory", but its `entries()` helper panics if the archive directory is
+  absent, so it passes only because reconciliation creates that empty directory. The empty directory is acceptable
+  behavior; the test's statement is wrong.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test's documentation and assertions agree with the actual contract (no checkout directory
+  invented; an empty archive directory may exist). Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## prompt-classification-test-finish-waiting-prompt-appears.md
+
+- Outcome: `fix code`.
+- Assessment: likely, not observed. `a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler` (`ticker.rs`) waits
+  for an unchanged-sample streak of three without checking that the dialog text reached the pane, and blank captures
+  also build that streak, so a slow `printf` can fail it on correct code.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test waits for the dialog text to appear in the pane before counting the quiet streak. Same
+  gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## shutdown-race-test-establish-intended-interleaving.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. `a_shutdown_beats_a_reconciliation_that_is_already_running` (helm `manager.rs`)
+  calls one `yield_now` "the barrier", but nothing makes the reconcile reach its registry read before shutdown. A later
+  plain `sync_registry` call still catches a build with no shutdown checks at all.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test holds the reconcile at the store read, shuts down, then releases it, so the intended
+  interleaving is forced. If holding it needs a new test-only hook in production code, record `discard`; other
+  complications go back to the user. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## logging-test-establish-refresh-completed.md
+
+- Outcome: `fix code`.
+- Assessment: likely. `the_reconnection_trail_names_the_host_and_its_current_destination` (helm `manager.rs`) advances
+  five refresh intervals in one step and yields once, without checking that a steady-state refresh republished before it
+  asserts the log stays quiet, so a logger writing every tick might go undetected.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test advances one interval at a time and waits for each refresh publication before checking
+  the log. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-test-requires-screen-content-restart-correctly.md
+
+- Outcome: `fix code`.
+- Assessment: likely by reading, not run. In `an_rc_file_change_between_launches_reaches_the_relaunched_agent`
+  (`crates/farhelm/tests/e2e/restart_with_resume.rs`) the first marker sits on the visible screen, which a correct
+  restart clears (SPEC.md: Restart does not keep the previous run's last visible screen), yet the test requires it in
+  the new replay and its comment says it is "still in scrollback". If the reading is right the test should fail every
+  run, but FLAKES.md has no entry, so something incidental may scroll it away or the test may be skipping.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: run the test narrowly first to learn whether it fails, passes or skips today, and record that.
+  Then check the first marker before the restart and wait for the second marker on its own afterwards, with the comment
+  corrected. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## environment-value-parsed-output-complete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading, trigger not reproduced. The rc-file test in `restart_with_resume.rs` waits for the
+  prefix `ENV:VAR=` and then takes whatever has arrived, so a split line gives an empty or partial value and the test
+  fails for bash, zsh and sh or wrongly skips for other shells.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the value is parsed only from a complete line (or after `FAKE-AGENT READY`), the same shape as
+  the fixed `directory-witness-read-pwd-writes-it.md`. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## persistence-assertion-rejects-legitimately-newer-activity-timestamp.md
+
+- Outcome: `fix code`.
+- Assessment: likely. `wait_for_persisted_activity` (`session_lifecycle.rs`) requires the stored activity time to equal
+  the advanced value exactly; a later nudge can persist a newer second, after which equality never holds and the test
+  times out. Durable writes only move forward, so a newer value is also correct.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the assertion accepts a stored value at least as new as the advanced one. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## macos-environment-test-accepts-failed-observations-success.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. On macOS, `a_platform_binary_childs_environment_is_withheld_on_modern_macos`
+  (supervisor `procs.rs`) passes when every `read_environ` returns nothing, so it cannot tell "argv only, environment
+  withheld" from "observed nothing". The macOS limitation itself is accepted by SPEC_impl.md; the oracle is not.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test requires at least one successful argv-only observation of the live process before it
+  accepts the withheld environment. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## retarget-test-failing-deliver-old-target-plan.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed weak oracle. The retarget test in `provisioning.spec.ts` releases the held planning request and
+  checks for no confirmation and no host detail at once, without waiting for the old target's reply to arrive, so it
+  could pass with a broken late-reply guard in the host update flow.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test captures the old target's reply, delivers it late, waits until it has been received, and
+  only then asserts that nothing was shown. Same gate as the sibling entry. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## unreachable-operation-test-prove-absence-queued-work.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. The "nothing queued" test checks only the refusal text, the row and its stale flag, and the
+  cleanup after the supervisor comes back never checks the session survived, so a regression that queues Stop for later
+  delivery (which SPEC.md forbids) would pass. Current helm code refuses without queuing.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: after the host reconnects and before cleanup, the test asserts the agent is still running. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## process-death-falsely-inferred-proc-read-errors.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed, trigger close to impossible: every `/proc/<pid>/stat` read error counts as the process being
+  gone, so the tab-close kill assertion could in principle pass on a read error.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: only ENOENT or ESRCH counts as gone; any other read error fails the check. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## work-order-progress-reads-observe-empty-file-during.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. The producer rewrites its progress file in place, and `Number("")` is 0, so a baseline read
+  during the rewrite makes "emitted more output" trivially true in `work-start-order.spec.ts`.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: an empty read is retried rather than taken as 0, or the producer writes through a rename. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## held-synthetic-delete-handlers-delay-failure-teardown.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. Several held DELETE route handlers in the browser specs are released only on the success path,
+  so after a failed assertion `unrouteAll({behavior: "wait"})` waits on them until the hook times out, adding a timeout
+  error on top of the real failure.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: every held handler is released in a `finally` (or equivalent) so teardown never waits on it;
+  check the other variants the finding names. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## shared-silence-observers-have-same-premature-success-boundary.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. The 2 s silence window in `silent_supervisor` (helm `rest_harness.rs`) starts at the handshake,
+  not after the requests under test, so on a slow runner "the helm refused this by itself" can pass without having
+  watched the request.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the silence window is measured from after the request under test has been answered. If it needs
+  coordination across many callers beyond a contained harness change, bring it back to the user. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## omp-child-report-fixtures-bypass-nested-runtime-check.md
+
+- Outcome: `fix code`.
+- Assessment: likely. `spawn_sibling` (supervisor `core.rs` tests) builds an unrelated process tree that the earlier
+  pane-anchor check rejects, so the three child-report tests never reach the nested-runtime check; a unit test in
+  `procs.rs` covers that check directly. OMP is not a first-class harness.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the fixture spawns its child under the pane so the tests reach and exercise the nested-runtime
+  check. Same gate as the sibling entry. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## busy-pane-assertion-depends-another-panes-readiness.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed premise, flake never observed. `a_busy_pane_classifies_running_and_a_quiet_one_decays_to_idle`
+  (`ticker.rs`) waits only on the quiet pane; a neighbouring test already uses `wait_for_busy_pane_to_change`.
+- Decision: as for `pending-mount-cancellation-test-cannot-distinguish-cancellation-surviving.md`: the user chose on
+  2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
+- Completion criteria: the test also waits for the busy pane to produce output, reusing the existing helper. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## wedged-browser-teardown-test-pass-browser-cleanup-finishes.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. `a_wedged_browser_is_torn_down_by_the_stall_detach` (helm `terminal.rs`) floods 2,000 frames,
+  which overflows the helm's 256-event terminal queue; that overflow sends the same upstream Detach the test waits for,
+  so it passes even if the browser handler stays stuck. Production teardown is bounded by `WS_TEARDOWN_GRACE`.
+- Decision: on 2026-10-11 the user settled this class (tests that can pass without exercising their claim, product
+  correct) as "Fix, skip hard ones": discard where the fix needs a new test-only hook in production code. Telling
+  handler completion apart from the queue-overflow Detach needs such a completion seam.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## wedged-browser-test-accepts-detach-handler-completion.md
+
+- Outcome: `discard`.
+- Assessment: confirmed; same defect as `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md`.
+- Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
+  a production completion seam).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## wedged-browser-test-accepts-independent-cleanup-signal.md
+
+- Outcome: `discard`.
+- Assessment: confirmed; same defect as `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` (the cleanup
+  signal has independent producers).
+- Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
+  a production completion seam).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## wedged-browser-test-may-encounter-queue-backpressure-blocked.md
+
+- Outcome: `discard`.
+- Assessment: confirmed; this one names the queue overflow as the concrete defect shared with
+  `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md`.
+- Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
+  a production completion seam).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## concurrent-first-use-barrier-guarantees-disputed-interleaving.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. `directory_payloads_concurrent_first_use_both_succeed` (`provisioning.rs`) puts its only
+  barrier before `path()`, so it passes whether or not the already-exists branch in `ensure_private_extracted_dir` is
+  ever reached, although its comment says the race is forced. Forcing that branch needs a seam.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
+  test-only hook in production code.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## replacement-tests-overstate-immediate-list-no-delete-evidence.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. `replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old` calls
+  `refresh_to_completion` before asserting the new session is routable "at once", so a refresh can fill the cache even
+  if Replace never wrote it. A fix has to suppress or stall background refreshes.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
+  test-only hook in production code.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## shutdown-race-test-releases-sink-shutdown-starts.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. On a current-thread runtime `drop(lease)` runs before the spawned stop task ever runs
+  (`teardown.rs` tests), so the test would not catch a regression that splits production's atomic snapshot again. A
+  deterministic interleaving likely needs a production seam.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
+  test-only hook in production code.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## host-identity-race-test-pass-exercising-competing-writes.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. A plain `tokio::join!` in the store test gives no point where the writes are forced to compete,
+  so it would pass with the conditional-upsert guard removed. Forcing the interleaving likely needs a store seam.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
+  test-only hook in production code.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## stop-recovery-test-fail-wrong-listing-request.md
+
+- Outcome: `discard`.
+- Assessment: possible, unreproduced. `readers.spec.ts` starts holding listing reads without first waiting for the list
+  reader to go idle, so an earlier pending read could take the injected failure. Speculative.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## client-task-scheduling-mistaken-server-side-overlap.md
+
+- Outcome: `discard`.
+- Assessment: partly correct. `stop_done` is set by the client task, not the server, but a false pass needs both a
+  regression that serializes Stop on the server and an unlikely wake order on the client.
+- Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## screenshot-runs-collide-through-shared-fleet-auth.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed. The docs screenshot runs use fixed per-checkout files (`.stack-info.json`, `.fleet.json`,
+  `e2e/.auth/storage-state.json`), so two overlapping capture or test runs in one checkout break each other. AGENTS.md
+  already says one agent per checkout, but SPEC_impl.md does not state the assumption.
+- Decision: on 2026-10-11 the user said: "two runs in the same checkout is out of scope. its maintainer responsibility
+  not to have multiple agents in the same checkout. this should be SPEC_impl.md."
+- Completion criteria: extend SPEC_impl.md's "Development tooling assumes a single-user machine" with the rule that one
+  checkout runs one harness or tooling command at a time; keeping agents in separate checkouts is the maintainer's
+  responsibility, and tooling need not handle overlapping runs in one checkout. No code change. Remove this feedback
+  file and its index entry, together with `shared-authentication-files-causing-concurrent-run-interference.md`,
+  `concurrent-starts-bypass-sweep-serialization.md` and `publisher-copy-race.md`.
+- Execution: `pending`.
+
+## shared-authentication-files-causing-concurrent-run-interference.md
+
+- Outcome: `other`.
+- Assessment: confirmed. The test stack's start-up cleanup deletes the shared authentication file another run in the
+  same checkout may be using.
+- Decision: settled by the 2026-10-11 spec decision recorded under
+  `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `screenshot-runs-collide-through-shared-fleet-auth.md`.
+- Execution: `pending`.
+
+## concurrent-starts-bypass-sweep-serialization.md
+
+- Outcome: `other`.
+- Assessment: partly correct. The wrong-process half is already fixed (deflake checks process start times). Still true:
+  two simultaneous `deflake start`s from one checkout can leave the pointer on the losing run, so status and stop can
+  point at a dead run while the real sweep continues.
+- Decision: settled by the 2026-10-11 spec decision recorded under
+  `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `screenshot-runs-collide-through-shared-fleet-auth.md`.
+- Execution: `pending`.
+
+## publisher-copy-race.md
+
+- Outcome: `other`.
+- Assessment: confirmed gap in `scripts/publish-docs-shots.sh` (checksum check, later copy, no second check); the
+  overlap needs a capture running in the same checkout during a publish.
+- Decision: settled by the 2026-10-11 spec decision recorded under
+  `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `screenshot-runs-collide-through-shared-fleet-auth.md`.
+- Execution: `pending`.
+
+## classification-counts-runner-failures-deterministic-test-failures.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `classify()` in `deflake/bin/deflake` judges each per-test rerun only by the recorder's exit
+  status, so three reruns that fail for runner reasons (a build error, a recorder refusal) produce a "deterministic"
+  verdict and can send the agent after a test bug that is really an environment problem.
+- Decision: on 2026-10-11, apart from overlapping runs in one checkout, the user said for development and release
+  tooling: "fix everything small that's a legit bug, discard rest".
+- Completion criteria: a rerun counts as a test failure only when the rerun's report shows the test itself ran and
+  failed; otherwise the verdict is unclassified. If the fix is not small, record `discard` instead during execution.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ambiguous-claim-orphaned-next-pick.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct. `plans/AGENTS.md` lets an executor pick again after an ambiguous claim exit while its log
+  only describes one current claim, so a first claim that lands late can sit in flight with nobody working on it until
+  the abandoned flag fires and the maintainer releases it.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: the instructions require settling an uncertain claim (confirm or release it) before claiming
+  another plan. If the fix is not small, record `discard` instead during execution. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## release-smoke-mistake-another-listener-child.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed in code (`sign-sums.yml`): the port is released before launch, the helm's liveness is never
+  checked, and any HTML 200 passes, so in theory a release that lost its embedded UI could pass the gate. The trigger is
+  improbable on a fresh CI runner.
+- Decision: on 2026-10-11 the user said for development and release tooling: "fix everything small that's a legit bug,
+  discard rest".
+- Completion criteria: the smoke check confirms the launched helm is still alive before and after the request and looks
+  for a Farhelm-specific marker in the body. If the fix is not small, record `discard` instead during execution. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## replaced-evidence-repeated-continuity-receipts-retain-passing.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `record()` in `releasing/mac-vm-test/brick_test.py` validates the bytes it read, then reads the
+  files again to compute the digests it keeps, so evidence replaced in between could be recorded as passing.
+- Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest".
+- Completion criteria: the digests are computed from the same bytes that were validated. If the fix is not small, record
+  `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## duplicate-scenario-titles-silently-conflate-distinct-sessions.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `e2e/readme-hero/scenario.ts` checks host keys and template names for uniqueness but not
+  session titles, which `stage.ts` uses as keys, so duplicate titles would produce a subtly wrong screenshot.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: scenario validation refuses duplicate session titles, like its sibling checks. If the fix is not
+  small, record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## preview-ready-identity.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `ours_is_serving` in `website/scripts/preview.sh` checks only the listener's working directory,
+  so another server started from the website directory on the fixed port makes the script print a docs link that is
+  wrong. Nothing destructive.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: the readiness check identifies the docs preview server specifically (for example its process or a
+  response marker). If the fix is not small, record `discard` instead during execution. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## diagnostic-writers-survive-their-deadline-accumulate-across.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. In `scripts/record-test-run.py` a full non-blocking stderr makes the diagnostic writer thread
+  spin, and a blocked stderr leaves one daemon thread behind per call; the hunt loop runs the recorder in-process up to
+  1,000 times.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: a diagnostic write past its deadline neither spins nor leaves a thread per call. If the fix is
+  not small, record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## guest-addresses-account-names-inject-ssh-configuration.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct. Python's `ipaddress` keeps IPv6 scope text, including whitespace and newlines, and the
+  brick test writes the address into the Mac guest's ssh configuration. The input is Tart's output for the operator's
+  own throwaway VM, so the effect stays inside that VM.
+- Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest".
+- Completion criteria: guest addresses carrying a scope suffix or whitespace are refused before they reach the ssh
+  configuration. If the fix is not small, record `discard` instead during execution. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## unbounded-test-discovery-tmux-binaries.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed mechanically; the trigger is implausible. `tmux_binaries_on_path()` in the supervisor's tmux
+  tests runs `tmux -V` without a deadline, so a hanging tmux on a developer's PATH stalls the test until nextest kills
+  it.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: the version probe has a short deadline and skips a candidate that does not answer. If the fix is
+  not small, record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## deflake-duplicates-bounded-evidence-into-unlimited-logs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `deflake/bin/deflake` appends child output to a per-phase log with no cap and reads whole logs
+  into memory to classify failures; a pathologically noisy run can fill `/tmp` or use a lot of memory. Nothing has been
+  observed.
+- Decision: on 2026-10-11 the user said for development tooling: "fix everything small that's a legit bug, discard
+  rest".
+- Completion criteria: the per-phase logs are capped (or classification reads a bounded tail), keeping the evidence the
+  classifier needs. If the fix is not small, record `discard` instead during execution. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## retained-failed-tags-become-mandatory-upgrade-test-inputs.md
+
+- Outcome: `discard`.
+- Assessment: mechanism confirmed, impact unverified. `plan()` in `releasing/mac-vm-test/brick_test.py` makes every
+  stable-shaped tag from v0.23.0 up to the public default a required upgrade baseline without checking it was published.
+  No affected tag was found. It fails safe: the brick test reports "could not run" and the maintainer decides.
+- Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest". It
+  fails safe, and a fix needs planning from the published release inventory, which is not small.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## save-followed-immediately-delete-restores-outdated-local.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct. The template Delete handler (`crates/farhelm-ui/src/templates.rs`) has no check for "list
+  still reloading", so a Delete right after Save, followed by Undo, could restore the template as it was before the
+  Save. The trigger looks unreachable: Save marks the list busy before a Delete click can be handled and the button is
+  disabled while busy.
+- Decision: on 2026-10-11 the user said for product findings with no trigger a shipped setup can reach: "fix SUPER cheap
+  ones with complexity gate. and anything that means a security boundary is broken like helm being corrupted, or
+  cross-host attackes, must not be silently discarded."
+- Completion criteria: the Delete handler refuses while the list is reloading. Only if this is a one- or two-line guard;
+  otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## cancelled-lock-waiters-leave-permanent-registry-entries.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed but very narrow. In the supervisor's `KeyedLocks` (`service/core.rs`), a waiter aborted before
+  it builds its guard leaves its entry behind; keys that never come back (idempotency keys, deleted session ids) leave
+  about 100 bytes each until the supervisor restarts.
+- Decision: on 2026-10-11 the user said for unreachable or near-unreachable findings: "fix SUPER cheap ones with
+  complexity gate".
+- Completion criteria: dead entries are pruned (for example when a lock is looked up or released). Only if the fix is a
+  few lines; otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## shutdown-leaves-retained-supervisor-clients-active.md
+
+- Outcome: `fix code`.
+- Assessment: mechanism confirmed, no consequence in any shipped configuration. `ConnectionManager::shutdown` (helm
+  `manager.rs`) aborts actors without retiring their published clients, unlike host removal; the standalone helm exits
+  and the desktop app tears down its runtime right after, so nothing survives either way.
+- Decision: on 2026-10-11 the user said for unreachable findings: "fix SUPER cheap ones with complexity gate". The fix
+  reuses the retirement code host removal already has.
+- Completion criteria: shutdown retires published clients the way host removal does. Only if the fix is a few lines;
+  otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-discovery-fails-permanently-once-reply-exceeds.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct. Template names are now capped at 128 bytes, so the finding's example no longer works, but
+  per-template fields can reach 64 KiB, there is no total cap, and the catalog travels in one frame of at most 8 MiB, so
+  about 130 near-maximum templates would break agents' template listing until some are deleted. Agents on any host can
+  save templates, so an agent on one host could break template discovery for agents on every host.
+- Decision: on 2026-10-11 the user said "fix SUPER cheap ones with complexity gate. and anything that means a security
+  boundary is broken like helm being corrupted, or cross-host attackes, must not be silently discarded." This one is
+  cross-host, so it is not discarded silently.
+- Completion criteria: saving a template is refused when it would push the catalog past a total size that still fits a
+  reply. If the cap is not cheap, bring it back to the user rather than discarding it. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## dropping-upload-guard-outside-tokio-runtime-skips.md
+
+- Outcome: `discard`.
+- Assessment: confirmed code shape (helm `client.rs`), but nothing shipped triggers it: every caller drops the upload
+  guard inside the runtime, and a code comment documents the assumption. Only a future caller could reach it.
+- Decision: on 2026-10-11 the user chose to fix only super-cheap findings without a reachable trigger and discard the
+  rest; this one touches no security boundary.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## oversized-successful-agent-reply-becomes-internal.md
+
+- Outcome: `discard`.
+- Assessment: confirmed code shape (helm `client.rs`), likely unreachable: the success reply carries a title and folder,
+  far below the 8 MiB frame limit, so only a misbehaving supervisor could make it too large, and then an agent would be
+  told "internal error" for an operation that succeeded.
+- Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap, and said
+  denial of service by a malicious or arbitrarily broken host is acceptable; a wrong error message to that host's own
+  agent breaks no security boundary.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## unbounded-aggregate-capture-replies.md
+
+- Outcome: `discard`.
+- Assessment: confirmed code shape: the supervisor's capture parser caps each line but not the whole reply, so memory is
+  bounded only by 12,000 history lines times the terminal width. No harmful case was measured.
+- Decision: on 2026-10-11 the user chose to discard findings without a demonstrated trigger unless super cheap.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## hostnotfound-refresh-keeps-serving.md
+
+- Outcome: `discard`.
+- Assessment: confirmed but unreachable in shipped builds: supervisors that report no identity are only test peers or
+  embedded supervisors without a state directory, and the trigger also needs a rare path that deletes a host's row
+  without stopping its connection.
+- Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## legacy-launch-validation-could-prevent-startup.md
+
+- Outcome: `discard`.
+- Assessment: premise unlikely. If a stored launch record failed the load-time check, the whole supervisor would refuse
+  to start, but the check arrived in the same commit that introduced agent kinds (f4c2d70d, #36) and create already
+  refused the combination then; no released writer is known to produce such a row. The 2026-10-02 decision on
+  `restart-with-skips-create-validation.md` kept load-time strictness and fixed the writer instead.
+- Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## service-start-timing-could-evade-restart-detection.md
+
+- Outcome: `discard`.
+- Assessment: unverified premise. Setup owes a restart only when the service was active before it wrote the unit; a
+  start from the old unit inside the milliseconds before the reload would keep old arguments while setup reports
+  success, but no such start has been shown.
+- Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## watchdog-logs-rather-recovering-window.md
+
+- Outcome: `discard`.
+- Assessment: confirmed and documented in `webview_watchdog.rs` as a deliberate cost of SPEC_impl.md's log-only one-shot
+  heartbeat: while the desktop UI is already broken, memory grows by one small entry every 15 s until restart.
+- Decision: on 2026-10-11 the user chose to discard findings of this kind unless super cheap; changing it means the
+  persistent-channel design the module docs rejected.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## detached-terminal-cleanup-tasks-wait-writer-capacity.md
+
+- Outcome: `other`.
+- Assessment: confirmed shape (helm `client.rs`, one small task per detach), no growth shown: the tasks are bounded by
+  how often the user closes terminals and end when the host connection drains or closes. Only a supervisor that stops
+  reading could make them pile up.
+- Decision: settled by the 2026-10-11 spec decision recorded under
+  `repeated-buffer-copying-amplifies-tiny-frame-traffic.md` (the user: "SPEC should say that denial of service of
+  helm/desktop in the face of a malicous or arbitrairly broken host is acceptable").
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
+- Execution: `pending`.
+
+## cancelled-attach-retain-abandoned-terminal-channel.md
+
+- Outcome: `other`.
+- Assessment: mechanism confirmed, trigger unverified. The helm's `attach` (`client.rs`) registers the terminal channel
+  before waiting for writer capacity, and an attach abandoned after a credential revocation leaves the small entry until
+  that host's connection closes. It needs a supervisor that stops reading for over five seconds while its connection
+  stays up.
+- Decision: settled by the 2026-10-11 spec decision recorded under
+  `repeated-buffer-copying-amplifies-tiny-frame-traffic.md` (denial of service of the helm by a malicious or arbitrarily
+  broken host is acceptable). Related existing principle: SPEC_impl.md "Supervisor metadata retention and nonresponse".
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
+- Execution: `pending`.
+
+## history-fixture-enables-yolo-installing-restoration-guard.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. In `e2e/tests/sidebar.spec.ts` the history test turns on "YOLO without asking" before its
+  `try`; the helper writes the setting and then reads it back as a separate step that can fail, so a failure after the
+  write skips the restore in `finally` and later specs in the same run inherit the setting.
+- Decision: on 2026-10-11 the user chose to fix all ten test cleanup gaps that only show after a failed step, with a
+  complexity gate ("Fix all, with gate"). Earlier ledger decisions fixed this class
+  (`hup-resistant-process-fixture-leaks-early-failure.md`, `stopped-fixture-could-survive-assertion-failure.md`).
+- Completion criteria: the restore is armed before the setting can change, so any failure after the write still restores
+  it. Stop and bring it back to the user if it needs more than a contained test change. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## keyboard-launch-fixture-has-same-separate-setup-ownership.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed; the keyboard-launch test in `sidebar.spec.ts` has the same pattern as
+  `history-fixture-enables-yolo-installing-restoration-guard.md`.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: same as that sibling, for the keyboard-launch test. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## history-fixtures-policy-restoration-skip-remaining-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. If the history test's policy restore throws, its second browser context is not closed and its
+  session is not deleted, so a test session stays alive in the shared private test stack for the rest of the run.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: a failed restore does not skip the remaining cleanup steps (each runs and failures are reported
+  together). Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed; the keyboard-launch teardown skips session deletion if the policy restore fails, the same shape
+  as `history-fixtures-policy-restoration-skip-remaining-cleanup.md`.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: same as that sibling, for the keyboard-launch teardown. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## readiness-failure-leave-systemd-probe-child-running.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. A `systemd-run` fixture in `crates/farhelm/tests/e2e/session_lifecycle.rs` is spawned without
+  `kill_on_drop`, and a readiness wait that can panic runs before the PID guard is armed, so a failed run can leave a
+  stray fixture and transient scope. Linux and systemd only.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: the child is owned for cleanup from the moment it is spawned (for example `kill_on_drop` set
+  before spawning, guard armed before the readiness wait). Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## pipe-scan-assertion-failures-leave-fixture-processes-running.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `the_pipe_holder_scan_names_every_holder_of_a_live_pipe` (`terminal_tabs.rs`) has no unwind
+  cleanup for its `cat` and `sleep 60`, so a failed run leaves two processes for up to a minute.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: kill-and-reap guards are armed right after each spawn. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. The stubborn Stop fixture in `session_lifecycle.rs` is guarded by a single-PID guard that is
+  armed after a fallible wait and does nothing without `/proc`, so a sleep that ignores TERM and HUP can survive a
+  failed run for up to an hour. The harness's marker-based cleanup guard, used by other tests in the file, would own the
+  whole tree.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: the marker-based cleanup guard is armed right after create, owning the whole fixture tree. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed; the dispatch-overlap fixture arms its guard after the attach and readiness waits and has the
+  same gaps as `stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md`.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: same as that sibling; the two can share one change. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## busy-selection-test-loses-source-second-creation-fails.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. In `sidebar.spec.ts` ("an unanswered view operation disables row selection…"), sessions A and B
+  and the held route are set up before the `try`, so a failed setup step leaves fixture sessions running until the test
+  stack shuts down.
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: each acquired session and route is owned by cleanup as soon as it exists. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## cleanup-leaves-orphan-tmux-processes-kill-failure.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. Once the stale-state sweep's 30 s kill budget is spent, later directories are removed without a
+  kill attempt, so healthy orphaned tmux servers lose their sockets and can never be retried, contrary to the constant's
+  own doc ("can be retried by the next sweep").
+- Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
+- Completion criteria: a directory whose kill was skipped or failed is kept so the next sweep retries it, and the
+  comment matches the behavior. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## live-processes-reported-dead-macos.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `process_is_gone` in the end-to-end harness (`crates/farhelm/tests/e2e/harness.rs`) reads
+  `/proc` and treats an unreadable entry as dead, and the end-to-end binary has no Linux gate, so on macOS death checks
+  pass without checking anything and liveness checks fail.
+- Decision: on 2026-10-11 the user chose to gate the end-to-end suite to Linux ("Gate e2e to Linux") rather than port
+  the `/proc` helpers, and to accept the documented non-Linux gaps of the browser harness. Earlier macOS fixes (#1834,
+  #1912) dealt with individual tests; this sets the policy for the suite.
+- Completion criteria: the end-to-end suite (or every caller of its `/proc` helpers) is compiled or run only on Linux,
+  so it can no longer pass vacuously or time out on macOS; other platforms report the skip visibly. Stop and bring it
+  back to the user if the gate affects CI or release selections beyond a contained change. Remove this feedback file and
+  its index entry, together with `child-discovery-always-times-out-macos.md`,
+  `unavailable-process-scan-certifies-no-marked-processes.md` and `pid-cleanup-guard-inert-macos.md`.
+- Execution: `pending`.
+
+## child-discovery-always-times-out-macos.md
+
+- Outcome: `other`.
+- Assessment: confirmed. `children_of` in the end-to-end harness returns nothing without `/proc`, so these tests time
+  out in setup on macOS.
+- Decision: settled by the 2026-10-11 decision recorded under `live-processes-reported-dead-macos.md` ("Gate e2e to
+  Linux").
+- Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
+  `live-processes-reported-dead-macos.md`.
+- Execution: `pending`.
+
+## unavailable-process-scan-certifies-no-marked-processes.md
+
+- Outcome: `other`.
+- Assessment: confirmed. The marker scan in the end-to-end harness returns an empty list when `/proc` is missing, so
+  cleanup assertions pass on macOS without scanning anything.
+- Decision: settled by the 2026-10-11 decision recorded under `live-processes-reported-dead-macos.md` ("Gate e2e to
+  Linux").
+- Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
+  `live-processes-reported-dead-macos.md`.
+- Execution: `pending`.
+
+## pid-cleanup-guard-inert-macos.md
+
+- Outcome: `other`.
+- Assessment: confirmed. `proc_starttime` in the end-to-end harness is `/proc`-only, so the PID cleanup guard does
+  nothing on macOS and a failed test can leak a fixture process.
+- Decision: settled by the 2026-10-11 decision recorded under `live-processes-reported-dead-macos.md` ("Gate e2e to
+  Linux").
+- Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
+  `live-processes-reported-dead-macos.md`.
+- Execution: `pending`.
+
+## browser-children-retain-detached-descendants-every-platform.md
+
+- Outcome: `discard`.
+- Assessment: partly correct. The "every platform" claim is false; on non-Linux, the browser harness does not clean up
+  detached browser descendants, which `e2e/harness-tests/README.md` and a runtime stderr line already disclose.
+- Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting the documented non-Linux limitations of the
+  browser harness.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## descendant-surviving-markeddecoy-destruction.md
+
+- Outcome: `discard`.
+- Assessment: likely incorrect in practice: for `sh -c 'sleep 120'` both dash and bash exec the single command, so no
+  separate child exists, and any survivor is test-owned and gone after two minutes on a non-procfs platform.
+- Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting non-Linux harness limitations.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## host-actions-disappear-supported-sidebar-widths.md
+
+- Outcome: `fix code`.
+- Assessment: likely, geometry not measured. The host row's status is `flex: 0 0 auto` and `nowrap`, and the name's
+  floor was tuned for the default 340 px width, not the 240 px minimum SPEC.md supports, so an unreachable host's long
+  status can push its ⋯ menu (Retry, Settings, Remove) off-screen.
+- Decision: on 2026-10-11 the user said for the UI's layout and freshness findings: "fix all simple ones with complexity
+  gate, discard rest".
+- Completion criteria: at the minimum supported sidebar width, the ⋯ menu stays reachable with the longest status (the
+  status shrinks or wraps). If the fix is not simple, record `discard` instead during execution. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## ended-session-status-pushes-header-actions-beyond-promised.md
+
+- Outcome: `fix code`.
+- Assessment: likely by arithmetic from `header.spec.ts`'s own measurements: a live header ends at about 600 px, but an
+  ended badge such as "exited (code 0)" is about 100 px and an error badge can reach about 230 px, neither shrinks, so
+  Delete is clipped between 650 px and roughly 850 px, where SPEC.md promises all six actions. Not measured in a
+  browser.
+- Decision: on 2026-10-11 the user said: "fix all simple ones with complexity gate, discard rest".
+- Completion criteria: the status badge shrinks with an ellipsis (full text in a tooltip) so all actions stay visible
+  from 650 px for ended and failed sessions, and the header width test covers an ended session. If the fix is not
+  simple, record `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## delayed-provisioning-confirmations-make-two-dialogs-mutually.md
+
+- Outcome: `fix code`.
+- Assessment: likely, no browser reproduction. Preparing an uninstall plan does not mark the host row busy, so Settings
+  can open meanwhile, and each dialog's isolation then makes the other inert, leaving both unresponsive to clicks and
+  focus (Escape may recover). SPEC.md accepts confirming a dialog another covers, not a mutual lockout.
+- Decision: on 2026-10-11 the user said: "fix all simple ones with complexity gate, discard rest".
+- Completion criteria: Settings cannot open while an uninstall plan is pending (or closes when the confirmation
+  arrives), so two dialogs never lock each other. If the fix is not simple, record `discard` instead during execution.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## session-refresh-failures-silently-retain-apparently-current.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. When the session view's background detail read fails (`session_view.rs`) the error is dropped
+  and retried quietly, so the view can keep showing old status, Resume availability and tabs with no hint; the host list
+  surfaces its own refresh errors.
+- Decision: on 2026-10-11 the user said: "fix all simple ones with complexity gate, discard rest".
+- Completion criteria: a persistently failing detail refresh shows a "could not refresh" notice in the session view,
+  reusing the existing notice infrastructure, and clears it on the next success. If the fix is not simple, record
+  `discard` instead during execution. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## interrupted-paired-writes-still-split-service-state.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed. `write_units_together` restores only when a write returns an error; a kill landing between the
+  two renames leaves the supervisor and helm services on different state directories until setup is rerun (or a reboot
+  starts the mismatched pair).
+- Decision: on 2026-10-11 the user chose to accept operator-caused setup races and interruptions that rerunning the same
+  command repairs, fixing only cheap guards ("Accept, fix cheap ones").
+- Completion criteria: SPEC.md's "Concurrent and interrupted runs" says that a run killed between two adjacent atomic
+  writes may leave state that rerunning the same command repairs, and that this is the expected recovery. No code
+  change. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## provisioning-update-replaces-binary-before-setup-guard.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading. A queued panel Update installs its uploaded binary without checking the
+  setup-managed marker; only the unit write refuses. If the operator switches a remote host to `farhelm helm setup`
+  while the Update is queued, it replaces the binary setup's services run and then fails visibly.
+- Decision: on 2026-10-11 the user chose "Accept, fix cheap ones" for operator-caused setup races.
+- Completion criteria: SPEC.md states that moving a remote host to non-panel setup while a panel operation is in flight
+  is best effort, and a visible failure is enough. No code change. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## automatic-updates-overwrite-newer-manual-installation.md
+
+- Outcome: `fix code`.
+- Assessment: likely. The desktop updater re-reads the installed version before downloading, not under the install lock,
+  and `install.sh` has no precedence check, so a manual install of a newer build during an automatic update can be
+  replaced by the older stable release on next launch. Rerunning the installer fixes it.
+- Decision: on 2026-10-11 the user chose "Accept, fix cheap ones": fix this only if a guard is cheap.
+- Completion criteria: an automatic update re-checks the installed version under the install lock and does not replace a
+  newer one. If that is not cheap, record `discard` instead during execution. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## uninstall-dryrun-locks.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed. `farhelm uninstall --dry-run` returns before taking the locks, so with the app open the preview
+  shows a clean plan and the real uninstall then refuses with a clear message. The preview already carries a generic
+  warning that an install could make uninstall refuse.
+- Decision: on 2026-10-11 the user chose "Accept, fix cheap ones"; the preview's "blockers" means ownership and
+  ambiguity refusals.
+- Completion criteria: SPEC.md's dry-run wording says the reported blockers are ownership and ambiguity refusals; locks
+  held at preview time are covered by the generic warning and the real run's clear refusal. No code change. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. `pi-conversation-v1.ts` reads Pi's getters outside its `try`, so if one threw after a
+  conversation switch, Resume would stay on the previous conversation. The OMP reporter already wraps the same reads. No
+  vendor throwing has been observed.
+- Decision: on 2026-10-11 the user said for harnesses other than Claude Code and Codex: "fix simple ones with complexity
+  gate, if there is a known issue likely to matter to a typical user ensure the website's section on that specific agent
+  calls out the caveat."
+- Completion criteria: the getter reads move inside the existing guard, as in the OMP reporter. Stop and bring it back
+  to the user if it is not that simple. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## partial-templates-cannot-retain-non-yolo-approval-choices.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. A template with no agent type offers only the YOLO approval choice, so OMP and Goose users
+  cannot save an approvals-only template without pinning the agent type, although SPEC.md says a template may set any
+  launcher field. The refusal is visible.
+- Decision: on 2026-10-11 the user said: "fix simple ones with complexity gate, if there is a known issue likely to
+  matter to a typical user ensure the website's section on that specific agent calls out the caveat."
+- Completion criteria: while no agent type is set, the template editor offers every approval choice (launch already
+  re-checks the choice against the agent type). If that is not simple, leave the code and instead add the caveat
+  (approval-only templates need the agent type set) to the website's OMP and Goose sections. Remove this feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## omp-context-changes-initial-eligibility-check.md
+
+- Outcome: `discard`.
+- Assessment: speculative. No OMP transition is known that would make a retained reporter context misattribute a
+  conversation, and the reporter already fences on session-id changes.
+- Decision: on 2026-10-11 the user chose to fix only simple issues for these harnesses and to document known issues
+  likely to matter to typical users; this one is neither.
+- Completion criteria: remove this feedback file and its index entry, without code, spec or website changes.
+- Execution: `pending`.
+
+## snapshot-root.md
+
+- Outcome: `fix spec`.
+- Assessment: unverified premise. The code matches the claim (the identity check drops the device comparison once a
+  creation time is recorded), but whether a writable snapshot rollback keeps both inode and creation time was not
+  established. The worst case is a replacement folder moved to the trash, which can be restored.
+- Decision: on 2026-10-11 the user said: "out of scope + spec, but broadern from just snapshots. we do not add
+  complexity or attempt to protect against anything beccause \"farhelm has dedicated ownership of this path\". any
+  random out of band stuff like fs snapshot restore, weird kernel level overrides instigated by user, random ass
+  filesystems that aren't typically used (like FAT), etc we don't support".
+- Completion criteria: SPEC.md, next to the folder-aliasing rule, states that Farhelm has dedicated ownership of its
+  managed paths and does not support out-of-band manipulation of them, such as filesystem snapshot restores,
+  user-instigated kernel-level overrides, or uncommon filesystems like FAT; Farhelm adds no complexity to defend against
+  these. No code change. Remove this feedback file and its index entry, together with
+  `archive-rename-move-replacement-directory.md`.
+- Execution: `pending`.
+
+## archive-rename-move-replacement-directory.md
+
+- Outcome: `other`.
+- Assessment: confirmed check-then-rename gap; an accidental trigger is implausible. A checkout replaced in the
+  microseconds between validation and rename would be moved to the trash, which can be restored.
+- Decision: settled by the 2026-10-11 spec decision recorded under `snapshot-root.md` (Farhelm has dedicated ownership
+  of its managed paths; out-of-band replacement is unsupported).
+- Completion criteria: no code change; remove this feedback file and its index entry in the same change as
+  `snapshot-root.md`.
+- Execution: `pending`.
+
+## template-supplied-session-names-rendered-raw.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. A template's session-name field still goes raw into the launcher's single-line name input; the
+  save-time refusal added in #1811 covers only launch and resume commands, and the template-name check strips only
+  control characters. Invisible or direction-override characters can make the pre-filled name look different from what
+  is submitted.
+- Decision: on 2026-10-11 the user chose "Fix both": extend decision 7e's save-time refusal to this field.
+- Completion criteria: `check_template_shape` also refuses control and invisible formatting characters in the template's
+  session-name field, on every save path. Stop and bring it back to the user if it is not a contained change. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## rename-editor-conceals-title-characters-editable-title-editable-title-seed.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed. The Rename editor (`rename.rs`) seeds its input with the raw title, while every other place
+  titles appear escapes them (the original-title display was fixed in #1832). Titles can be set by agents. Refusing such
+  characters in titles is not viable because the blocked set includes the zero-width joiner emoji sequences use.
+- Decision: on 2026-10-11 the user chose "Fix both".
+- Completion criteria: Rename seeds its input with the escaped title and keeps the original bytes unless the user edits
+  the field, reusing the launcher's existing escaped-seed pattern for titles. Stop and bring it back to the user if it
+  is not a contained change. Remove this feedback file and its index entry.
+- Execution: `pending`.
