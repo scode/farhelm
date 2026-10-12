@@ -152,3 +152,42 @@ Implementation and focused validation stayed with the executor. The required def
 medium subject as prescribed by its procedure; its result is recorded above. The required independent report reader
 accepted this account after the tool's purpose and static-only coverage limits were clarified, and found no public
 repository hygiene violation.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1935.
+
+#### Fix made while landing
+
+In #1935, before it merged: the test recorder's new bounded diagnostic write set its deadline before starting the writer
+thread and checked it before the first write, so on a heavily loaded machine a slow thread start could drop the
+"test-run evidence" line even though the terminal was writable; the deflake driver then treats that rerun as
+inconclusive. The first write is now always attempted, and only a descriptor that pushes back is held to the deadline.
+The recorder's self-tests pass with it.
+
+#### Review before merging
+
+No other findings. The release smoke check in the signing workflow only gains failure paths and exposes no secrets; the
+recorder's outcomes, environment scrubbing and report checks are untouched, so a failed run still cannot be recorded as
+a pass; the deflake driver judges reruns by the selected test's own report; the brick-test tooling reads each evidence
+file once; the preview script's fixed port is unchanged; and the tmux change is test-only. Notes left as they are:
+
+- The deflake driver's log reader can place a cut-off line straight after its omission marker, where it could in theory
+  match an evidence announcement; its docstring says the separator prevents that.
+- One recorder self-test may see no readiness call on a loaded machine, for the same reason as the fix above.
+- The deflake evaluation instructions and setup also changed, to fix problems two failed evaluation runs exposed.
+
+#### Checks
+
+These two plans were landed together, triage-bookkeeping-round-two first with dev-tooling-robustness-fixes on top, after
+ui-layout-and-escaping-fixes; the rebases met only the review queue index, which still matches its files.
+
+- Run now, on the two stacked: `cargo fmt --all -- --check`, `dprint check` (after fixing a double blank line the
+  landing's own index merge left), the test-delay checker, `shellcheck` on `website/scripts/preview.sh` and
+  `deflake/eval-setup.sh`, the test recorder's self-tests (60), the deflake driver's tests (18), the brick-test
+  tooling's unit tests (26 and 6), `cargo clippy --all-targets -- -D warnings`, and the supervisor's tmux module tests
+  through the recorder (run `31f6afcc`, 52 of 52).
+- Not run: the signing workflow, which runs only on a release; the deflake end-to-end evaluation, which the executor ran
+  and passed; and any browser or wider Rust tests, since nothing they cover changed.
+
+Nothing in the report above was made untrue by the landing.
