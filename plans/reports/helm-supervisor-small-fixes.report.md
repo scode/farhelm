@@ -112,3 +112,44 @@ requested clearer product wording for Pi and concrete tradeoffs for the template
 reader accepted the revised account as sufficient for a standalone maintainer decision and confirmed public hygiene.
 Private galaxy-brain session evidence is referenced in the working log. Native tools expose neither actual model
 attribution nor token usage; one local-decision event was recorded late with an explicit gap, not reconstructed timing.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1934. The rebase met no conflicts.
+
+#### Fix made while landing
+
+In #1934, before it merged: the PR had no changelog fragment, which every `fix:` PR needs (with `kind: none` and a
+reason when nothing is user-facing); the plan's own wording to skip one conflicted with that rule. A `kind: fixed`
+fragment now says the Pi conversation reporter drops a failed report quietly instead of letting the error reach Pi, and
+that the helm closes host connections cleanly on shutdown.
+
+#### Review before merging
+
+No other findings. Shutdown now withdraws and retires each published host client the way host removal does, exactly once
+and safely from `Drop`; dead per-key supervisor locks are pruned without touching live ones; and every read in the Pi
+reporter now runs inside its contained step. The changed asset is published under a new name,
+`farhelm-conversation-v3.ts`, with its hash pinned, so running Pi sessions keep the old file. Notes left as they are:
+
+- Two outcomes hit their complexity gates and went back to you as pending: the setup and uninstall race, and the
+  template catalog cap. Their findings stay in the review queue.
+- A host actor running on another thread can still publish a client just after shutdown withdraws, as host removal
+  already can.
+- The Pi reporter now checks the session file when the report runs rather than when the event fires, as the OMP reporter
+  does.
+
+#### Checks
+
+These two plans were landed together, supervisor-and-test-followups first with helm-supervisor-small-fixes on top.
+
+- Run now, on the two stacked after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the
+  test-delay checker (291 delays, none without a reason), `cargo clippy --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor and helm unit tests with the hook-identity,
+  session-lifecycle and terminal-tabs end-to-end tests, through the recorder with pinned tmux 3.7c, nextest 0.9.148,
+  four slots and no retries (run `8af684a9`: 2293 of 2294, the one failure described in supervisor-and-test-followups'
+  notes, then the ticker tests after its fix in run `32ad57a7`, 58 of 58); the supervisor's reporter asset tests (10 of
+  10); and on Chromium and WebKit with one worker and no retries the spawn and real-agent specs, which start the browser
+  test stack whose launcher changed (run `9cacf976`, 18 passed, the four opt-in real-agent tests skipped as designed).
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
