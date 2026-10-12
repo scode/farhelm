@@ -79,3 +79,45 @@ the executor independently completed the checks above. Implementation and valida
 the prescribed scope, acceptance and cold-reader roles delegated. Native tools did not expose exact model attribution or
 token usage; private orchestration evidence records that gap. Commit/PR wording and this report also received their
 required cold reads before delivery.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1936. The rebase met no conflicts.
+
+#### A fix made while landing
+
+In #1936, before it merged: the Replace retry kept its key only when the browser's own request failed, and treated every
+error reply from the helm as settled. But the helm forwards the create to the host, and when that hop loses its reply
+the helm answers with an error that deliberately carries no "definitely unaccepted" marker, because the replacement may
+already exist; the same holds for "created X but could not remove the original", where the helm supports finishing the
+job with the same key. Dropping the key there would start a second agent on retry, which the agreed outcome rules out. A
+Replace refusal now ends the intent only when it is a consumed sign-in refusal or the helm marks the create definitely
+unaccepted, the rule the launcher's create already follows; keeping a key whose create never ran is harmless, since the
+helm treats an unknown key as new. The unit test covers the marker, the replace spec's deliberate refusals now carry it,
+and the changelog fragment now says a retry no longer starts a second agent rather than that it always recovers the
+replacement.
+
+#### Review before merging
+
+Otherwise no findings. The omitted-image note is drawn as plain text, has no live region, and changes nothing about what
+is uploaded or pasted; the terminal change only adds the original file name to paste entries. Notes left as they are:
+
+- The note also appears on ordinary image-file pastes when the copy puts the picture on the clipboard as well, which on
+  a Mac is likely the most common image paste; the report raises this as an open question.
+- The sidebar keeps one retry slot, so opening Replace on another row between a lost reply and its retry starts a new
+  key for the first row.
+- The unnamed-clipboard-image wording is no longer covered by a browser test, and the first Replace retry test's cleanup
+  stops at the first failure.
+- The uninstall item from this plan stays pending, with its finding in the review queue.
+
+#### Checks
+
+- Run now, after the fix: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the test-delay checker (295
+  delays, none without a reason), `cargo clippy --all-targets -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI unit tests through the recorder (run `8e93c1c0`, 457 of 457);
+  the UI JavaScript tests (238 of 238); and on Chromium and WebKit with one worker and no retries the replace,
+  terminal-attachments, header, terminal-create-idempotency and terminal-links specs (run `7f0b81e8`, 164 passed).
+- An earlier start of the same checks was stopped during its UI unit tests to take the fix; it is not counted.
+- Between those runs and the merge, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
