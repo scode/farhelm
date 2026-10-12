@@ -106,3 +106,40 @@ entries needed complete removal, and the nested-runtime timeout needed parent-li
 fixture also now proves its real failed-exit premise. The reviewer accepted the caller's post-response signal starting a
 connected observation window and two agreed discards; its narrow follow-up found no issue in the runtime correction. The
 commit and PR wording cold read passed. Implementation and validation stayed with the executor.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1927. The rebase met the review queue index, where e2e-oracle-and-cleanup-fixes had
+removed adjacent entries; both sets of removals were kept and the index still matches its files.
+
+#### A fix made while landing
+
+In #1927, before it merged, a blocker in the shared test-state cleanup. The plan made the sweep keep a dead run's
+directory unless `tmux kill-server` succeeded on every socket in it. But tmux never deletes its socket file when its
+server exits (sessions ending, `kill-server`, a crash or SIGKILL all leave it), and `kill-server` on such a socket
+fails. So every dead run whose server had already exited would have been kept forever, and re-contacted on every sweep:
+the disk leak this crate was built to stop. A socket nothing listens on now counts as a confirmed kill without running
+tmux; a socket that accepts the connection but never answers still keeps its directory for the next sweep. The plan's
+test is flipped to show a dead run is reaped, a new test shows a never-answering listener is kept, and a comment that
+contradicted the retention rule is corrected.
+
+#### Review before merging
+
+Apart from that, no findings. Every change in the product files sits inside their test modules, and the repaired helm
+and supervisor tests observe what their names claim. Notes left as they are:
+
+- If the silent-supervisor stand-in panics on a leaked frame, the test's send to it fails first and hides that panic.
+- On ext4 the recreated-checkout test will usually skip its reused-inode branch, since the inode and coarse birth time
+  are reused immediately; the separate planted-mismatch test still covers the rule.
+- The prompt test polls the pane in its own loop rather than the shared helper.
+- The macOS process-withholding test has never run on macOS.
+
+#### Checks
+
+- Run now, after the fix: `cargo fmt --all -- --check`, `dprint check`, the test-delay checker (289 delays, none without
+  a reason) and `cargo clippy --all-targets -- -D warnings`; and the test-state, helm and supervisor unit tests through
+  the recorder with pinned tmux 3.7c, nextest 0.9.148, four slots and no retries (run `d0e16003`, 2218 of 2218,
+  including both cleanup tests).
+- Between that run and the merge, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
