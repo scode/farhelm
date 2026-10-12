@@ -93,3 +93,52 @@ exact manual test selection and product context for the remaining systemd issue.
 Private galaxy-brain session evidence reuses `29405ad6-d9d8-4919-8d82-c1a7afa9b9f2`. Native tools do not expose
 independently reported model attribution, effort or token usage. Those remain evidence gaps, including omitted dedicated
 wording launch events recorded as a gap; no cost claim is made.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1933. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+All in #1933, before it merged:
+
+- Automatic tab closes moved off the ticker onto their own tasks, but only the number a single pass may start stayed
+  bounded; every tick and every pane-death wake could start four more, so a mass exit across many sessions could run
+  dozens of closes and their tmux and process scans at once, breaking the documented bound on the supervisor's tmux
+  concurrency. A new host-wide limit now caps closes running at once at the same four; a start that finds no room is
+  skipped, never awaited, and the dead tab stays hidden until a later pass, exactly as for a busy session.
+- Two comments that still described the old single-reaper design and the old concurrency bound are corrected.
+- The tests' helper for "the automatic close finished" treated pane absence as completion, but the close still sweeps
+  markers and detaches afterwards; it now also waits for every session's claim to be released. That exposed an order
+  problem in the new teardown test, where a pending explicit close takes the claim as soon as the automatic close
+  releases it: the first run with the helper change failed there (run ), and the test now lets the explicit close settle
+  before waiting.
+
+#### Review before merging
+
+Apart from those, no findings. The automatic close takes the session's claim synchronously before it starts, so no pass
+or sibling tab can start a duplicate; lock order is unchanged; sampling never waits on a close; and the new test would
+hang on the old code. Notes left as they are:
+
+- The forged-marker test now runs one pass, so a regression in excluding the agent's own window would fail by timeout
+  rather than with its clear message.
+- The opt-in real-Claude spawn test's settings restores still run in the test body, which a timeout can skip; this plan
+  only changed its comments.
+- While an automatic close holds a session's claim, a work-start the sampler sees on that session is written on a later
+  pass, as for any busy claim.
+
+#### Checks
+
+These two plans were landed together, supervisor-and-test-followups first with helm-supervisor-small-fixes on top.
+
+- Run now, on the two stacked after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the
+  test-delay checker (291 delays, none without a reason), `cargo clippy --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor and helm unit tests with the hook-identity,
+  session-lifecycle and terminal-tabs end-to-end tests, through the recorder with pinned tmux 3.7c, nextest 0.9.148,
+  four slots and no retries (run `8af684a9`: 2293 of 2294, the one failure described in supervisor-and-test-followups'
+  notes, then the ticker tests after its fix in run `32ad57a7`, 58 of 58); the supervisor's reporter asset tests (10 of
+  10); and on Chromium and WebKit with one worker and no retries the spawn and real-agent specs, which start the browser
+  test stack whose launcher changed (run `9cacf976`, 18 passed, the four opt-in real-agent tests skipped as designed).
+- Between those runs and the merges, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
