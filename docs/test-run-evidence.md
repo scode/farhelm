@@ -117,7 +117,7 @@ exists, including when required tmux validation refuses the command.
 
 ## Recorded nextest runs
 
-Use `--runner nextest` from the checkout root with Python 3.11 or newer and exactly cargo-nextest 0.9.143 on `PATH`
+Use `--runner nextest` from the checkout root with Python 3.11 or newer and exactly cargo-nextest 0.9.148 on `PATH`
 (macOS still needs Python 3.13 for the recorder's wait-ownership contract):
 
 ```console

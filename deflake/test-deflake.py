@@ -154,7 +154,7 @@ class ReportParsing(unittest.TestCase):
         self.assertNotIn("tail", excerpt)
 
     def test_nextest_excerpt_reads_the_status_line_format(self):
-        """The pinned nextest (0.9.143) delimits failure output with status lines.
+        """The pinned nextest (0.9.143 onward) delimits failure output with status lines.
 
         The first successful eval sweep showed the excerpt falling back to a
         line grep, which repeated the FAIL line and lost the panic message.

@@ -825,7 +825,7 @@ class RecorderTest(unittest.TestCase):
             f"#!{PYTHON}\n"
             "import json, os, pathlib, sys, tomllib\n"
             "if sys.argv[1:] == ['nextest', '--version']:\n"
-            "    print('cargo-nextest 0.9.143 (fixture)'); sys.exit(0)\n"
+            "    print('cargo-nextest 0.9.148 (fixture)'); sys.exit(0)\n"
             "tool = pathlib.Path(sys.argv[sys.argv.index('--tool-config-file') + 1].split(':', 1)[1])\n"
             "store = pathlib.Path(tomllib.loads(tool.read_text())['store']['dir'])\n"
             "store.mkdir()\n"

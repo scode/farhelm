@@ -428,7 +428,7 @@ def nextest_excerpt(output: str, test_name: str) -> str:
     stdout/stderr at the end of the run under `--- STDERR: <binary> <test> ---`
     headers. The LAST such header for the test is that final reprint.
     """
-    # Two header shapes, by nextest version. The pinned 0.9.143 prints a
+    # Two header shapes, by nextest version. The pinned 0.9.143 onward prints a
     # status line `FAIL [ 0.015s ] ( 1/103) <binary id> <test name>` followed
     # by indented `stdout ───` / `stderr ───` sections; older releases print
     # `--- STDERR: <binary id> <test name> ---` (or `STDOUT + STDERR:`). The
