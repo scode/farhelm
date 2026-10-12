@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     tomllib = None
 
 
-VERSION = "0.9.143"
+VERSION = "0.9.148"
 THREADS = 4
 TERMINATION_GRACE = 10.0
 CONFIG_LIMIT = 64 * 1024

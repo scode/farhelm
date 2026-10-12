@@ -1,6 +1,6 @@
 # Process-per-test execution makes in-process slot semaphores local to one
 # test. Keep the shared resource budget here, where it covers every binary.
-nextest-version = { required = "0.9.143" }
+nextest-version = { required = "0.9.148" }
 # Setup scripts are still experimental in nextest. The exact version pin above
 # is what makes relying on one safe: the feature cannot change under this
 # config without the pin changing too.
