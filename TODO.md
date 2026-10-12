@@ -185,9 +185,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   new `farhelm` through folders it opened and checked, an installation id and generation for the updater, flushes before
   renames, and uninstall in today's order. After four review rounds by gpt-6.1-sol, gpt-6-astra and Opus 5.5, all three
   are satisfied with it as a basis for implementation, and the macOS primitives it relies on were checked on a real Mac
-  (https://snippets.scode.org/s/farhelm-mac-lock-flush-probe-results/). Still to settle before building: the page's four
-  "Decisions for you", and getting there from today's installer (older releases' tools, the old lock folder), which the
-  design deliberately leaves out. FAT, ExFAT and network volumes are out of scope.
+  (https://snippets.scode.org/s/farhelm-mac-lock-flush-probe-results/). The migration from today's installer is in scope
+  and in the design (section 7, one release, reviewed against v0.23.0 to v0.27.0 by the same three reviewers). Still to
+  settle before building: the page's open "Decisions for you". FAT, ExFAT and network volumes are out of scope.
 
 ## Doc todo
 
