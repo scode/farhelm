@@ -108,3 +108,33 @@ Private galaxy-brain evidence uses session `29405ad6-d9d8-4919-8d82-c1a7afa9b9f2
 tools exposed no actual model attribution, reasoning effort or token usage; those remain evidence gaps. Some
 activation/local-decision events were recorded after implementation began and describe recording time, not reconstructed
 start times.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1930. The rebase met the review queue index, where the plans that landed before it had
+removed adjacent entries; all removals were kept and the index still matches its files.
+
+#### Review before merging
+
+No findings. Each repaired test observes what its finding said it missed, and every test restores the shared helm state
+(preferences, hosts, sessions, held requests) even on failure. Notes left as they are:
+
+- In the provisioning retarget test, a failure inside its stand-in for the helm surfaces as a test timeout rather than
+  its own message.
+- When only a sidebar test's owned-fixture cleanup fails, the report may show just "owned fixture cleanup failed"
+  without saying which step, depending on how Playwright prints the aggregated error.
+
+#### Checks
+
+This plan, which changes only browser tests, was held back while product plans landed: ui-layout-and-escaping-fixes,
+which edits two of the same specs, then supervisor-and-test-followups, helm-supervisor-small-fixes,
+triage-bookkeeping-round-two and dev-tooling-robustness-fixes.
+
+- Run first, on main before those: `dprint check`, the test-delay checker, and on Chromium and WebKit with one worker
+  and no retries the provisioning, terminal-multihost, terminal-tabs, terminal and work-start-order specs (run
+  `75729759`, 394 passed) and the three changed sidebar tests (run `14e172c0`, 6 passed).
+- Run again after rebasing onto ui-layout-and-escaping-fixes, which changed the provisioning and terminal-tabs specs:
+  those two specs on both engines (run `1fcbec68`, 178 passed), and `dprint check`. The other plans that landed in
+  between change no browser spec this plan touches except the spawn and real-agent specs, which this plan does not run.
+
+Nothing in the report above was made untrue by the landing.
