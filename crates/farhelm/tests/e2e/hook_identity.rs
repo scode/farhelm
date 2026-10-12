@@ -1358,6 +1358,15 @@ fn a_hook_with_no_supervisor_is_silent_and_leaves_its_report() {
 /// fragment, so a hook that gave up for any OTHER reason would also finish
 /// silently and in budget. `timeout stdin` is what says the budget stopped
 /// a read that was still blocked, which is the whole claim.
+///
+/// The seven-second observer relies on the child's debug-only five-second
+/// budget override. Cargo builds the test and its CLI in the same profile;
+/// release keeps the production thirty-second budget and reports this ignored
+/// rather than timing out a correctly waiting child or weakening the proof.
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "requires the debug-only hook budget override"
+)]
 #[farhelm_testtrace::test]
 fn a_hook_whose_stdin_is_never_closed_still_finishes_in_budget() {
     let state = farhelm_teststate::tempdir().expect("state dir");

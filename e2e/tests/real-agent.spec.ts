@@ -16,6 +16,10 @@
 //
 // The LAST test drives a real `claude` invocation end to end (trust
 // dialog through detected reply) and is gated on `FARHELM_REAL_AGENT=1`.
+// Making real Claude usable in the stack's private login home (login and any
+// configuration) is the maintainer's job; the repository handles no credentials.
+// That flag also makes structured specs selecting claude reach the real CLI,
+// so limit the run to the two real-agent tests with a title filter.
 // Real agents need vendor auth and network CI does not have and must
 // never depend on, so it SKIPS LOUDLY (a visible reason, both on the
 // skip itself and as a `console.log` CI's dot reporter will not eat)
@@ -24,7 +28,7 @@
 // available (see e.g. `crates/farhelm/tests/e2e/harness.rs`). Real-agent
 // smoke stays manual per SPEC_impl.md's testing section; this test is
 // what makes the next manual round a
-// `FARHELM_REAL_AGENT=1 npx playwright test real-agent.spec.ts` away
+// `FARHELM_REAL_AGENT=1 npx playwright test real-agent.spec.ts -g 'drives a real'` away
 // instead of a re-discovery.
 import { expect, test } from "./helpers/evidence";
 import { answerYolo } from "./helpers/term";

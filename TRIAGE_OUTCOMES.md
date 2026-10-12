@@ -12764,7 +12764,8 @@
   holds one tab's cleanup in its shutdown phase and proves another session still receives a fresh sample. If this needs
   significantly more than moving the close off the sampling pass (a new scheduler, a change to the lifecycle-claim
   design), stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
+- Execution: complete; jj change `rymmyqmqlsrsxywswpzuxusmkwqkvxou`; bookmark
+  `plan/supervisor-and-test-followups/01-followups`; https://github.com/scode/farhelm/pull/1933/changes.
 
 ## plain-replace-loses-retry-identity.md
 
@@ -12806,7 +12807,10 @@
   any other failure as inconclusive (retried later or treated as supported). If that is not a few-line change, record
   this outcome as discarded during execution (Execution `complete`: gate tripped, with the reason) instead. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
+- Execution: complete; gate tripped: the probe discards systemd-run's unknown-option error text; reliable classification
+  needs more than the authorized few-line check; discarded per the recorded decision; jj change
+  `rymmyqmqlsrsxywswpzuxusmkwqkvxou`; bookmark `plan/supervisor-and-test-followups/01-followups`;
+  https://github.com/scode/farhelm/pull/1933/changes.
 
 ## uninstall-forgotten-success.md
 
@@ -12968,7 +12972,8 @@
 - Decision: on 2026-10-11 the user accepted the recommendation: a one-line debug-only gate on the test.
 - Completion criteria: the test is compiled or run only where the override exists, with a comment saying why, so a
   release-profile run neither fails nor silently weakens it. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
+- Execution: complete; jj change `rymmyqmqlsrsxywswpzuxusmkwqkvxou`; bookmark
+  `plan/supervisor-and-test-followups/01-followups`; https://github.com/scode/farhelm/pull/1933/changes.
 
 ## constructor-font-regression-observes-mutable-value-construction.md
 
@@ -12998,4 +13003,5 @@
   making the real `claude` usable for the test user (logins, any configuration) is the maintainer's job, stated in one
   sentence where the opt-in is documented. Both tests stay opt-in and keep their loud skip. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/supervisor-and-test-followups.md`.
+- Execution: complete; jj change `rymmyqmqlsrsxywswpzuxusmkwqkvxou`; bookmark
+  `plan/supervisor-and-test-followups/01-followups`; https://github.com/scode/farhelm/pull/1933/changes.

@@ -11,6 +11,10 @@
 // FARHELM_REAL_AGENT=1 because vendor credentials and network access are
 // intentionally absent from CI, and it emits the same visible skip line as
 // real-agent.spec.ts when ungated.
+// Making real Claude usable in the stack's private login home (login and any
+// configuration) is the maintainer's job; the repository handles no credentials.
+// The flag also exposes real Claude to structured specs selecting that harness,
+// so limit opted-in runs to the two real-agent tests with a title filter.
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";

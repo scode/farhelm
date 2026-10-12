@@ -49,8 +49,8 @@ use super::terminals::{
     resolve_terminal_for_close, tabs_from_pane_states,
 };
 use super::ticker::{
-    ACTIVITY_STAMP_QUANTUM, ActivitySample, SAMPLING_ADMISSION_PERMITS, TICKER_INTERVAL,
-    start_ticker,
+    ACTIVITY_STAMP_QUANTUM, ActivitySample, REAP_BUDGET_PER_TICK, SAMPLING_ADMISSION_PERMITS,
+    TICKER_INTERVAL, start_ticker,
 };
 use super::uploads::UploadHandle;
 use crate::agent_kind::IntegrationSnapshot;
@@ -812,6 +812,10 @@ fault_hooks! {
     tab_open_fault: TabOpenFault,
     /// See [`TabSettleGate`]. `None` in production.
     tab_settle_gate: TabSettleGate,
+    /// Hold a resolved tab close immediately before process teardown. Tests
+    /// prove sampling continues while the close owns its lifecycle claim;
+    /// a sleep would race the production kill grace instead of establishing it.
+    tab_close_gate: SinkReservationGate,
     /// See [`DeletedSessionCleanupGate`]. `None` in production.
     deleted_session_cleanup_gate: DeletedSessionCleanupGate,
     /// See [`ReplacementFault`]. `None` in production.
@@ -4319,10 +4323,21 @@ pub struct Supervisor {
     /// sequential: what this actually bounds is a future second caller,
     /// and what it BUYS today is a limiter a test can exhaust in order to
     /// prove that request admission is unaffected by a wedged sampler.
-    /// Total tmux concurrency therefore becomes one more than
-    /// `HANDLER_ADMISSION_PERMITS` rather than exactly it, which is a
-    /// rounding error next to the failure mode it removes.
+    /// Total tmux concurrency from the handlers and the sampler therefore
+    /// becomes one more than `HANDLER_ADMISSION_PERMITS` rather than exactly
+    /// it, which is a rounding error next to the failure mode it removes.
+    /// Automatic tab reaps run on their own tasks and add at most
+    /// [`Self::tab_reap_inflight`]'s permits on top.
     pub(crate) sampling_admission: Arc<tokio::sync::Semaphore>,
+    /// Caps automatic tab closes running at once across the whole host.
+    ///
+    /// Each sample pass may start [`REAP_BUDGET_PER_TICK`] closes and does
+    /// not wait for them, so without this cap a mass exit across many
+    /// sessions would stack a fresh batch of tmux and process-scan work on
+    /// every tick and every pane-death wake. A start that finds no permit
+    /// is skipped, never awaited: the dead tab stays hidden and the next
+    /// pass retries it, exactly as for a session whose claim is busy.
+    pub(crate) tab_reap_inflight: Arc<tokio::sync::Semaphore>,
     /// Per-supervisor state purely so integration tests can shorten
     /// these; see [`SupervisorTimeouts`].
     pub(crate) timeouts: SupervisorTimeouts,
@@ -5458,6 +5473,7 @@ impl Supervisor {
                 DIRECTORY_BROWSE_WORKER_PERMITS,
             )),
             sampling_admission: Arc::new(tokio::sync::Semaphore::new(SAMPLING_ADMISSION_PERMITS)),
+            tab_reap_inflight: Arc::new(tokio::sync::Semaphore::new(REAP_BUDGET_PER_TICK)),
             timeouts,
             seams,
             ownership,
@@ -12628,22 +12644,49 @@ impl Supervisor {
         self.close_tab_claimed(lifecycle, session_id, tab_id).await
     }
 
-    /// [`Self::close_tab`] for the ticker's automatic reap of exited tabs:
-    /// `None`, without closing anything, when another operation holds the
-    /// session's lifecycle claim right now.
+    /// Start an owned automatic close without waiting for its teardown.
+    ///
+    /// `None` means the session's lifecycle claim is already held, or the
+    /// host already runs [`Self::tab_reap_inflight`]'s cap of closes. A started
+    /// task keeps that claim through the ordinary close, so later passes
+    /// cannot start duplicate work, even for another tab in the same session.
     ///
     /// The reap runs inside the ticker's serial sample pass, so waiting for
     /// a Stop, Restart or Delete here would freeze status for every session
     /// on the host (SPEC.md "Waiting between operations on one host"). A
     /// busy session's dead tabs stay hidden and are reaped on a later tick.
-    /// A user's explicit close keeps [`Self::close_tab`]'s waiting claim.
-    pub(crate) async fn try_close_tab(
-        self: &Arc<Self>,
-        session_id: &str,
-        tab_id: &str,
-    ) -> Option<Result<(), RequestError>> {
+    /// Completion hints and failures belong to the task, since the ticker
+    /// resumes sampling immediately. Ticker shutdown stops new starts but
+    /// leaves these closes running until runtime drop, just like an explicit
+    /// close whose caller disconnected. Planned output shutdown shares the
+    /// close's attachment lock and cleanup barriers; it does not admit new sinks.
+    /// A user's explicit close still waits for [`Self::close_tab`]'s result.
+    pub(crate) fn try_close_tab(self: &Arc<Self>, session_id: &str, tab_id: &str) -> Option<()> {
+        let permit = Arc::clone(&self.tab_reap_inflight)
+            .try_acquire_owned()
+            .ok()?;
         let lifecycle = self.lifecycle_locks.try_claim(session_id)?;
-        Some(self.close_tab_claimed(lifecycle, session_id, tab_id).await)
+        let sup = Arc::clone(self);
+        let session_id = session_id.to_string();
+        let tab_id = tab_id.to_string();
+        tokio::spawn(async move {
+            let _permit = permit;
+            match sup.close_tab_claimed(lifecycle, &session_id, &tab_id).await {
+                Ok(()) => info!(session = %session_id, tab = %tab_id,
+                    "reaped a terminal tab whose shell exited"),
+                Err(e) if e.kind == ErrorKind::NotFound => debug!(
+                    session = %session_id, tab = %tab_id, error = %e.message,
+                    "an exited tab vanished before its reap — a manual close or \
+                     the open path's own cleanup won the race"
+                ),
+                Err(e) => warn!(session = %session_id, tab = %tab_id, error = %e.message,
+                    "reaping an exited tab failed; if its window survives the next tick \
+                     retries, otherwise only the close's scope and marker sweeps remain \
+                     to catch leftover processes"
+                ),
+            }
+        });
+        Some(())
     }
 
     /// The close itself, run under a lifecycle claim the caller already
@@ -12749,6 +12792,9 @@ impl Supervisor {
                     ),
                 ));
             }
+        }
+        if let Some(gate) = self.seams.faults.tab_close_gate() {
+            gate().await;
         }
         // Read once, while the window still exists, and used for both reap
         // passes: the second runs after `kill-window`, when there is no
