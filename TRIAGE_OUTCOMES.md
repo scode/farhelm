@@ -11365,7 +11365,7 @@
   (new scheduling machinery, a refactor of the dialog or of the host mutation wrapper, or a test seam that cannot be
   added simply), stop and bring it back to the user unfixed. Do not touch the vendored terminal library. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## stored-template-commands-bypass-safe-display-seeding.md
 
@@ -11443,7 +11443,7 @@
   mitigations (such as the spacing of "sessions changed" refreshes) may stay; the change does not ask for their removal.
   Make no code change to the frame reader. Remove this feedback file and its index entry, and those of the two items
   above, in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## header-actions-skip-listing-read.md
 
@@ -11464,7 +11464,7 @@
   the way the sidebar's own actions do. Add browser or component coverage if it fits without new machinery. Stop and
   bring it back to the user if routing the request needs more than a small callback. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## build-mismatch-turns-unattended-mounts-into-displacing.md
 
@@ -11483,7 +11483,7 @@
   user's explicit action. Keep forbidden unattended mounts and intentional takeover as separate states. Add a regression
   test if it fits the existing terminal-tab browser specs. Stop and bring it back to the user if this needs more than a
   contained change to the mount decision. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## seen-state-queue-acknowledge-newer-choice-sending-it.md
 
@@ -11499,7 +11499,7 @@
 - Completion criteria: a choice recorded after a write was sent is always sent before the queue reports completion, even
   when it equals the value in flight, using the same mechanism as the preference queue. Add a unit test for the
   equal-valued case. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## uninstall-race-first-time-service-setup.md
 
@@ -11518,7 +11518,7 @@
   definitions pointing at a removed executable while uninstall reports success. Add a focused test if one fits the
   existing setup/uninstall tests without new machinery. Stop and bring it back to the user if this needs a redesign of
   the lock layout. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## failed-sink-record-hides-older-reaper.md
 
@@ -11567,7 +11567,7 @@
   or its timer directly, or by asserting no further mount attempts after removal). If that needs a new test-only hook in
   production code, record `discard` instead; if it needs more than a contained test change, stop and bring it back to
   the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## sibling-close-concurrency-test-executes-both-closes-sequentially.md
 
@@ -11579,7 +11579,7 @@
 - Completion criteria: the test holds tab A's close in flight while tab B's close is issued and completes, so a global
   serialization guard would fail it. Same gate as the sibling entry: a needed production test hook means `discard`, any
   other complication goes back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## short-writer-timeout-masks-shutdown-drain-regression.md
 
@@ -11594,7 +11594,7 @@
   longer than the drain bound and asserting shutdown completes within the drain bound. If the flood cannot be reached
   that way without a production test hook, record `discard`; other complications go back to the user. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## sink-healing-witness-consume-queued-output.md
 
@@ -11608,7 +11608,7 @@
 - Completion criteria: the post-heal witness is fresh output produced after healing (for example a new marker written
   after the heal, or draining the queue before the check), so pre-kill output cannot satisfy it. Same gate as the
   sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## ignored-transcript-feeder-write-errors-conceal-missing-input.md
 
@@ -11620,7 +11620,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: feeder write errors fail the test, and a sentinel after the query proves input arrived before the
   stripped-query assertion is trusted. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md
 
@@ -11632,7 +11632,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the scripted peer keeps reading until the connection closes and the test asserts no
   `DeleteSession` arrived. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## replay-refusal-tests-do-directly-observe-absence-delete-replace-with-overrides.md
 
@@ -11643,7 +11643,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: same as the plain-Replace sibling, applied to the Replace-with test; the two can share one
   change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## recreation-test-assumes-distinct-birth-timestamps.md
 
@@ -11656,7 +11656,7 @@
 - Completion criteria: the test checks its own premise (the recreated directory's birth time actually differs) and
   reports a premise skip instead of a failure when it does not. Same gate as the sibling entry. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## no-directory-created-assertion-requires-directory-exist.md
 
@@ -11669,7 +11669,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test's documentation and assertions agree with the actual contract (no checkout directory
   invented; an empty archive directory may exist). Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## prompt-classification-test-finish-waiting-prompt-appears.md
 
@@ -11681,7 +11681,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test waits for the dialog text to appear in the pane before counting the quiet streak. Same
   gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## shutdown-race-test-establish-intended-interleaving.md
 
@@ -11694,7 +11694,7 @@
 - Completion criteria: the test holds the reconcile at the store read, shuts down, then releases it, so the intended
   interleaving is forced. If holding it needs a new test-only hook in production code, record `discard`; other
   complications go back to the user. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## logging-test-establish-refresh-completed.md
 
@@ -11706,7 +11706,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test advances one interval at a time and waits for each refresh publication before checking
   the log. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## restart-test-requires-screen-content-restart-correctly.md
 
@@ -11721,7 +11721,7 @@
 - Completion criteria: run the test narrowly first to learn whether it fails, passes or skips today, and record that.
   Then check the first marker before the restart and wait for the second marker on its own afterwards, with the comment
   corrected. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## environment-value-parsed-output-complete.md
 
@@ -11733,7 +11733,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the value is parsed only from a complete line (or after `FAKE-AGENT READY`), the same shape as
   the fixed `directory-witness-read-pwd-writes-it.md`. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## persistence-assertion-rejects-legitimately-newer-activity-timestamp.md
 
@@ -11745,7 +11745,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the assertion accepts a stored value at least as new as the advanced one. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## macos-environment-test-accepts-failed-observations-success.md
 
@@ -11757,7 +11757,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test requires at least one successful argv-only observation of the live process before it
   accepts the withheld environment. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## retarget-test-failing-deliver-old-target-plan.md
 
@@ -11770,7 +11770,7 @@
 - Completion criteria: the test captures the old target's reply, delivers it late, waits until it has been received, and
   only then asserts that nothing was shown. Same gate as the sibling entry. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## unreachable-operation-test-prove-absence-queued-work.md
 
@@ -11782,7 +11782,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: after the host reconnects and before cleanup, the test asserts the agent is still running. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## process-death-falsely-inferred-proc-read-errors.md
 
@@ -11793,7 +11793,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: only ENOENT or ESRCH counts as gone; any other read error fails the check. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## work-order-progress-reads-observe-empty-file-during.md
 
@@ -11804,7 +11804,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: an empty read is retried rather than taken as 0, or the producer writes through a rename. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## held-synthetic-delete-handlers-delay-failure-teardown.md
 
@@ -11816,7 +11816,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: every held handler is released in a `finally` (or equivalent) so teardown never waits on it;
   check the other variants the finding names. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## shared-silence-observers-have-same-premature-success-boundary.md
 
@@ -11829,7 +11829,7 @@
 - Completion criteria: the silence window is measured from after the request under test has been answered. If it needs
   coordination across many callers beyond a contained harness change, bring it back to the user. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## omp-child-report-fixtures-bypass-nested-runtime-check.md
 
@@ -11841,7 +11841,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the fixture spawns its child under the pane so the tests reach and exercise the nested-runtime
   check. Same gate as the sibling entry. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## busy-pane-assertion-depends-another-panes-readiness.md
 
@@ -11852,7 +11852,7 @@
   2026-10-11 to fix this class with a complexity gate ("Fix, skip hard ones").
 - Completion criteria: the test also waits for the busy pane to produce output, reusing the existing helper. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## wedged-browser-teardown-test-pass-browser-cleanup-finishes.md
 
@@ -11864,7 +11864,7 @@
   correct) as "Fix, skip hard ones": discard where the fix needs a new test-only hook in production code. Telling
   handler completion apart from the queue-overflow Detach needs such a completion seam.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## wedged-browser-test-accepts-detach-handler-completion.md
 
@@ -11873,7 +11873,7 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## wedged-browser-test-accepts-independent-cleanup-signal.md
 
@@ -11883,7 +11883,7 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## wedged-browser-test-may-encounter-queue-backpressure-blocked.md
 
@@ -11893,7 +11893,7 @@
 - Decision: as for `wedged-browser-teardown-test-pass-browser-cleanup-finishes.md` ("Fix, skip hard ones"; the fix needs
   a production completion seam).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## concurrent-first-use-barrier-guarantees-disputed-interleaving.md
 
@@ -11904,7 +11904,7 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## replacement-tests-overstate-immediate-list-no-delete-evidence.md
 
@@ -11915,7 +11915,7 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## shutdown-race-test-releases-sink-shutdown-starts.md
 
@@ -11926,7 +11926,7 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## host-identity-race-test-pass-exercising-competing-writes.md
 
@@ -11936,7 +11936,7 @@
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard where the fix needs a new
   test-only hook in production code.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## stop-recovery-test-fail-wrong-listing-request.md
 
@@ -11945,7 +11945,7 @@
   reader to go idle, so an earlier pending read could take the injected failure. Speculative.
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## client-task-scheduling-mistaken-server-side-overlap.md
 
@@ -11954,7 +11954,7 @@
   regression that serializes Stop on the server and an unlikely wake order on the client.
 - Decision: on 2026-10-11 the user chose "Fix, skip hard ones" for this class: discard the purely speculative ones.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## screenshot-runs-collide-through-shared-fleet-auth.md
 
@@ -11969,7 +11969,7 @@
   responsibility, and tooling need not handle overlapping runs in one checkout. No code change. Remove this feedback
   file and its index entry, together with `shared-authentication-files-causing-concurrent-run-interference.md`,
   `concurrent-starts-bypass-sweep-serialization.md` and `publisher-copy-race.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## shared-authentication-files-causing-concurrent-run-interference.md
 
@@ -11980,7 +11980,7 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## concurrent-starts-bypass-sweep-serialization.md
 
@@ -11992,7 +11992,7 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## publisher-copy-race.md
 
@@ -12003,7 +12003,7 @@
   `screenshot-runs-collide-through-shared-fleet-auth.md` ("two runs in the same checkout is out of scope").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `screenshot-runs-collide-through-shared-fleet-auth.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## classification-counts-runner-failures-deterministic-test-failures.md
 
@@ -12016,7 +12016,7 @@
 - Completion criteria: a rerun counts as a test failure only when the rerun's report shows the test itself ran and
   failed; otherwise the verdict is unclassified. If the fix is not small, record `discard` instead during execution.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## ambiguous-claim-orphaned-next-pick.md
 
@@ -12042,7 +12042,7 @@
 - Completion criteria: the smoke check confirms the launched helm is still alive before and after the request and looks
   for a Farhelm-specific marker in the body. If the fix is not small, record `discard` instead during execution. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## replaced-evidence-repeated-continuity-receipts-retain-passing.md
 
@@ -12052,7 +12052,7 @@
 - Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest".
 - Completion criteria: the digests are computed from the same bytes that were validated. If the fix is not small, record
   `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## duplicate-scenario-titles-silently-conflate-distinct-sessions.md
 
@@ -12063,7 +12063,7 @@
   rest".
 - Completion criteria: scenario validation refuses duplicate session titles, like its sibling checks. If the fix is not
   small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## preview-ready-identity.md
 
@@ -12076,7 +12076,7 @@
 - Completion criteria: the readiness check identifies the docs preview server specifically (for example its process or a
   response marker). If the fix is not small, record `discard` instead during execution. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## diagnostic-writers-survive-their-deadline-accumulate-across.md
 
@@ -12088,7 +12088,7 @@
   rest".
 - Completion criteria: a diagnostic write past its deadline neither spins nor leaves a thread per call. If the fix is
   not small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## guest-addresses-account-names-inject-ssh-configuration.md
 
@@ -12100,7 +12100,7 @@
 - Completion criteria: guest addresses carrying a scope suffix or whitespace are refused before they reach the ssh
   configuration. If the fix is not small, record `discard` instead during execution. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## unbounded-test-discovery-tmux-binaries.md
 
@@ -12112,7 +12112,7 @@
   rest".
 - Completion criteria: the version probe has a short deadline and skips a candidate that does not answer. If the fix is
   not small, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## deflake-duplicates-bounded-evidence-into-unlimited-logs.md
 
@@ -12125,7 +12125,7 @@
 - Completion criteria: the per-phase logs are capped (or classification reads a bounded tail), keeping the evidence the
   classifier needs. If the fix is not small, record `discard` instead during execution. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dev-tooling-robustness-fixes.md`.
 
 ## retained-failed-tags-become-mandatory-upgrade-test-inputs.md
 
@@ -12136,7 +12136,7 @@
 - Decision: on 2026-10-11 the user said for release tooling: "fix everything small that's a legit bug, discard rest". It
   fails safe, and a fix needs planning from the published release inventory, which is not small.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## save-followed-immediately-delete-restores-outdated-local.md
 
@@ -12150,7 +12150,7 @@
   cross-host attackes, must not be silently discarded."
 - Completion criteria: the Delete handler refuses while the list is reloading. Only if this is a one- or two-line guard;
   otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## cancelled-lock-waiters-leave-permanent-registry-entries.md
 
@@ -12162,7 +12162,7 @@
   complexity gate".
 - Completion criteria: dead entries are pruned (for example when a lock is looked up or released). Only if the fix is a
   few lines; otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## shutdown-leaves-retained-supervisor-clients-active.md
 
@@ -12174,7 +12174,7 @@
   reuses the retirement code host removal already has.
 - Completion criteria: shutdown retires published clients the way host removal does. Only if the fix is a few lines;
   otherwise record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## template-discovery-fails-permanently-once-reply-exceeds.md
 
@@ -12189,7 +12189,7 @@
 - Completion criteria: saving a template is refused when it would push the catalog past a total size that still fits a
   reply. If the cap is not cheap, bring it back to the user rather than discarding it. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## dropping-upload-guard-outside-tokio-runtime-skips.md
 
@@ -12199,7 +12199,7 @@
 - Decision: on 2026-10-11 the user chose to fix only super-cheap findings without a reachable trigger and discard the
   rest; this one touches no security boundary.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## oversized-successful-agent-reply-becomes-internal.md
 
@@ -12211,7 +12211,7 @@
   denial of service by a malicious or arbitrarily broken host is acceptable; a wrong error message to that host's own
   agent breaks no security boundary.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## unbounded-aggregate-capture-replies.md
 
@@ -12220,7 +12220,7 @@
   bounded only by 12,000 history lines times the terminal width. No harmful case was measured.
 - Decision: on 2026-10-11 the user chose to discard findings without a demonstrated trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## hostnotfound-refresh-keeps-serving.md
 
@@ -12230,7 +12230,7 @@
   without stopping its connection.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## legacy-launch-validation-could-prevent-startup.md
 
@@ -12241,7 +12241,7 @@
   `restart-with-skips-create-validation.md` kept load-time strictness and fixed the writer instead.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## service-start-timing-could-evade-restart-detection.md
 
@@ -12251,7 +12251,7 @@
   success, but no such start has been shown.
 - Decision: on 2026-10-11 the user chose to discard findings without a reachable trigger unless super cheap.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## watchdog-logs-rather-recovering-window.md
 
@@ -12261,7 +12261,7 @@
 - Decision: on 2026-10-11 the user chose to discard findings of this kind unless super cheap; changing it means the
   persistent-channel design the module docs rejected.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## detached-terminal-cleanup-tasks-wait-writer-capacity.md
 
@@ -12274,7 +12274,7 @@
   helm/desktop in the face of a malicous or arbitrairly broken host is acceptable").
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## cancelled-attach-retain-abandoned-terminal-channel.md
 
@@ -12288,7 +12288,7 @@
   broken host is acceptable). Related existing principle: SPEC_impl.md "Supervisor metadata retention and nonresponse".
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `repeated-buffer-copying-amplifies-tiny-frame-traffic.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## history-fixture-enables-yolo-installing-restoration-guard.md
 
@@ -12302,7 +12302,7 @@
 - Completion criteria: the restore is armed before the setting can change, so any failure after the write still restores
   it. Stop and bring it back to the user if it needs more than a contained test change. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## keyboard-launch-fixture-has-same-separate-setup-ownership.md
 
@@ -12312,7 +12312,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling, for the keyboard-launch test. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## history-fixtures-policy-restoration-skip-remaining-cleanup.md
 
@@ -12322,7 +12322,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: a failed restore does not skip the remaining cleanup steps (each runs and failures are reported
   together). Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md
 
@@ -12332,7 +12332,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling, for the keyboard-launch teardown. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## readiness-failure-leave-systemd-probe-child-running.md
 
@@ -12343,7 +12343,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: the child is owned for cleanup from the moment it is spawned (for example `kill_on_drop` set
   before spawning, guard armed before the readiness wait). Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## pipe-scan-assertion-failures-leave-fixture-processes-running.md
 
@@ -12353,7 +12353,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: kill-and-reap guards are armed right after each spawn. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## stop-escalation-fixtures-cleanup-own-whole-stubborn-tree.md
 
@@ -12365,7 +12365,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: the marker-based cleanup guard is armed right after create, owning the whole fixture tree. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## dispatch-overlap-fixture-has-same-incomplete-cleanup-armed.md
 
@@ -12375,7 +12375,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: same as that sibling; the two can share one change. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## busy-selection-test-loses-source-second-creation-fails.md
 
@@ -12386,7 +12386,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: each acquired session and route is owned by cleanup as soon as it exists. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/browser-oracle-and-fixture-fixes.md`.
 
 ## cleanup-leaves-orphan-tmux-processes-kill-failure.md
 
@@ -12397,7 +12397,7 @@
 - Decision: as for `history-fixture-enables-yolo-installing-restoration-guard.md` ("Fix all, with gate").
 - Completion criteria: a directory whose kill was skipped or failed is kept so the next sweep retries it, and the
   comment matches the behavior. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/unit-test-oracle-fixes.md`.
 
 ## live-processes-reported-dead-macos.md
 
@@ -12413,7 +12413,7 @@
   back to the user if the gate affects CI or release selections beyond a contained change. Remove this feedback file and
   its index entry, together with `child-discovery-always-times-out-macos.md`,
   `unavailable-process-scan-certifies-no-marked-processes.md` and `pid-cleanup-guard-inert-macos.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## child-discovery-always-times-out-macos.md
 
@@ -12424,7 +12424,7 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## unavailable-process-scan-certifies-no-marked-processes.md
 
@@ -12435,7 +12435,7 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## pid-cleanup-guard-inert-macos.md
 
@@ -12446,7 +12446,7 @@
   Linux").
 - Completion criteria: no separate change; remove this feedback file and its index entry in the same change as
   `live-processes-reported-dead-macos.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/e2e-oracle-and-cleanup-fixes.md`.
 
 ## browser-children-retain-detached-descendants-every-platform.md
 
@@ -12456,7 +12456,7 @@
 - Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting the documented non-Linux limitations of the
   browser harness.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## descendant-surviving-markeddecoy-destruction.md
 
@@ -12465,7 +12465,7 @@
   separate child exists, and any survivor is test-owned and gone after two minutes on a non-procfs platform.
 - Decision: on 2026-10-11 the user chose "Gate e2e to Linux", accepting non-Linux harness limitations.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## host-actions-disappear-supported-sidebar-widths.md
 
@@ -12478,7 +12478,7 @@
 - Completion criteria: at the minimum supported sidebar width, the ⋯ menu stays reachable with the longest status (the
   status shrinks or wraps). If the fix is not simple, record `discard` instead during execution. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## ended-session-status-pushes-header-actions-beyond-promised.md
 
@@ -12491,7 +12491,7 @@
 - Completion criteria: the status badge shrinks with an ellipsis (full text in a tooltip) so all actions stay visible
   from 650 px for ended and failed sessions, and the header width test covers an ended session. If the fix is not
   simple, record `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## delayed-provisioning-confirmations-make-two-dialogs-mutually.md
 
@@ -12503,7 +12503,7 @@
 - Completion criteria: Settings cannot open while an uninstall plan is pending (or closes when the confirmation
   arrives), so two dialogs never lock each other. If the fix is not simple, record `discard` instead during execution.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## session-refresh-failures-silently-retain-apparently-current.md
 
@@ -12515,7 +12515,7 @@
 - Completion criteria: a persistently failing detail refresh shows a "could not refresh" notice in the session view,
   reusing the existing notice infrastructure, and clears it on the next success. If the fix is not simple, record
   `discard` instead during execution. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## interrupted-paired-writes-still-split-service-state.md
 
@@ -12528,7 +12528,7 @@
 - Completion criteria: SPEC.md's "Concurrent and interrupted runs" says that a run killed between two adjacent atomic
   writes may leave state that rerunning the same command repairs, and that this is the expected recovery. No code
   change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## provisioning-update-replaces-binary-before-setup-guard.md
 
@@ -12539,7 +12539,7 @@
 - Decision: on 2026-10-11 the user chose "Accept, fix cheap ones" for operator-caused setup races.
 - Completion criteria: SPEC.md states that moving a remote host to non-panel setup while a panel operation is in flight
   is best effort, and a visible failure is enough. No code change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## automatic-updates-overwrite-newer-manual-installation.md
 
@@ -12551,7 +12551,7 @@
 - Completion criteria: an automatic update re-checks the installed version under the install lock and does not replace a
   newer one. If that is not cheap, record `discard` instead during execution. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## uninstall-dryrun-locks.md
 
@@ -12564,7 +12564,7 @@
 - Completion criteria: SPEC.md's dry-run wording says the reported blockers are ownership and ambiguity refusals; locks
   held at preview time are covered by the generic warning and the real run's clear refusal. No code change. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md
 
@@ -12577,7 +12577,7 @@
   calls out the caveat."
 - Completion criteria: the getter reads move inside the existing guard, as in the OMP reporter. Stop and bring it back
   to the user if it is not that simple. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
 
 ## partial-templates-cannot-retain-non-yolo-approval-choices.md
 
@@ -12591,7 +12591,7 @@
   re-checks the choice against the agent type). If that is not simple, leave the code and instead add the caveat
   (approval-only templates need the agent type set) to the website's OMP and Goose sections. Remove this feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## omp-context-changes-initial-eligibility-check.md
 
@@ -12601,7 +12601,7 @@
 - Decision: on 2026-10-11 the user chose to fix only simple issues for these harnesses and to document known issues
   likely to matter to typical users; this one is neither.
 - Completion criteria: remove this feedback file and its index entry, without code, spec or website changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/review-queue-discards.md`.
 
 ## snapshot-root.md
 
@@ -12618,7 +12618,7 @@
   user-instigated kernel-level overrides, or uncommon filesystems like FAT; Farhelm adds no complexity to defend against
   these. No code change. Remove this feedback file and its index entry, together with
   `archive-rename-move-replacement-directory.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## archive-rename-move-replacement-directory.md
 
@@ -12629,7 +12629,7 @@
   of its managed paths; out-of-band replacement is unsupported).
 - Completion criteria: no code change; remove this feedback file and its index entry in the same change as
   `snapshot-root.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-trust-and-tooling-spec.md`.
 
 ## template-supplied-session-names-rendered-raw.md
 
@@ -12642,7 +12642,7 @@
 - Completion criteria: `check_template_shape` also refuses control and invisible formatting characters in the template's
   session-name field, on every save path. Stop and bring it back to the user if it is not a contained change. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
 
 ## rename-editor-conceals-title-characters-editable-title-editable-title-seed.md
 
@@ -12654,4 +12654,4 @@
 - Completion criteria: Rename seeds its input with the escaped title and keeps the original bytes unless the user edits
   the field, reusing the launcher's existing escaped-seed pattern for titles. Stop and bring it back to the user if it
   is not a contained change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
