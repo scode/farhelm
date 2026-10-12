@@ -1,4 +1,13 @@
 # Small prebuilt parsers keep the source convention check independent of a Rust build.
+#
+# tree-sitter stays on 0.25.2 because 0.26.0 corrupts memory and crashes the checker with a segfault: its
+# Point.row/Point.column getters return a borrowed reference, so line and column numbers above 256 (Python frees
+# those, unlike smaller cached ints) are released too early. On this repo it crashed on 83 of 335 test sources and
+# parsed all of them under 0.25.2 (checked 2026-10-11). The fix is
+# https://github.com/tree-sitter/py-tree-sitter/pull/466, merged 2026-07-08 but in no release as of 2026-10-11; the
+# crash report is https://github.com/tree-sitter/py-tree-sitter/issues/472. Upgrade once a release contains the fix,
+# and confirm `check-test-sleeps.py --inventory` prints the same output under both versions. The grammars below are
+# already their latest releases.
 tree-sitter==0.25.2
 tree-sitter-rust==0.24.2
 tree-sitter-typescript==0.23.2
