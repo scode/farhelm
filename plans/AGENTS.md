@@ -455,9 +455,12 @@ its open PRs. Record the pick and its reasoning in the executor log.
 2. Apply the clean-main boundary, then run `queue status` and pick (Picking above). Nothing picked: the round is over.
 3. Claim. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
    `claiming` to the executor log, then `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first:
-   pick again, reusing the analysis you already have for the remaining candidates. Exit 3 is ambiguous: run
-   `queue status`; if the line carries your id, the claim landed. Otherwise leave `claiming (uncertain)` in the executor
-   log and pick again; step 1 settles it on the next start, since a late landing is still possible.
+   pick again, reusing the analysis you already have for the remaining candidates. Exit 3 is ambiguous: settle it before
+   claiming anything else, by the exit-3 rule under States. Run `queue status`; if the line carries your id, the claim
+   landed. If it still shows `pending`, run the same `claim` again with the same id and settle that result the same way.
+   If it shows someone else's claim, the plan is theirs: clear the entry from the executor log and pick again. Never
+   move on with a claim still uncertain: the executor log records one claim, so a second pick would lose track of the
+   first, and a first claim that landed late would then sit in flight with nobody working on it.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
    claim back (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the
    unclaim just moved.
