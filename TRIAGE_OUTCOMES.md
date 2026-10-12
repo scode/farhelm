@@ -12571,7 +12571,12 @@
 - Completion criteria: an automatic update re-checks the installed version under the install lock and does not replace a
   newer one. If that is not cheap, record `discard` instead during execution. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/helm-supervisor-small-fixes.md`.
+- Decision (user, 2026-10-11, supersedes the decision above): asked whether this guard would clash with the separate
+  work making the Mac installer and updater race-free as a whole (TODO.md `Near term`, "Make the Mac installer
+  race-free"), which is in progress elsewhere, the user agreed to discard it as superseded by that work, so no plan
+  builds a guard the redesign would then replace.
+- Execution: `complete`; superseded by that TODO.md entry. The feedback file and its index entry were removed in the
+  same change, and the outcome is dropped from `plans/queue/helm-supervisor-small-fixes.md` by a planning PR.
 
 ## uninstall-dryrun-locks.md
 
@@ -12676,3 +12681,255 @@
   the field, reusing the launcher's existing escaped-seed pattern for titles. Stop and bring it back to the user if it
   is not a contained change. Remove this feedback file and its index entry.
 - Execution: planned in `plans/queue/ui-layout-and-escaping-fixes.md`.
+
+## tab-cleanup-blocks-status-sampling.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. Automatic cleanup of an exited terminal tab runs inside the supervisor's periodic
+  status pass and, once it has the session's lifecycle claim, waits for the whole close, both process sweeps and the
+  5-second kill grace included, before agent screens are sampled. A tab whose leftover background process ignores TERM
+  and HUP therefore leaves every session on that host with stale status for about 5 s per tab (about 20 s for four). The
+  pane-death path waits the same way. SPEC.md "Waiting between operations on one host" forbids session status waiting on
+  teardown grace periods, and `ticker-waits-on-lifecycle-claim.md` was fixed under the same rule.
+- Decision: on 2026-10-11 the user accepted the recommendation, fix code with a complexity gate. It was held back from
+  the no-question batch because the fix is a moderate concurrency change rather than a small one.
+- Completion criteria: automatic tab cleanup runs as owned, bounded background work independent of status sampling,
+  keeping each session's lifecycle guard and never starting a duplicate close job for the same tab. A regression test
+  holds one tab's cleanup in its shutdown phase and proves another session still receives a fresh sample. If this needs
+  significantly more than moving the close off the sampling pass (a new scheduler, a change to the lifecycle-claim
+  design), stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## plain-replace-loses-retry-identity.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading, not reproduced. The UI mints a new creation key on every Replace call and does not
+  keep it when the outcome is unknown, so a retry after a lost reply reaches the supervisor as an unseen key and starts
+  a second replacement agent in the same folder while the source still exists. SPEC.md says one intended create yields
+  one session, a retry after a timeout included; `retrying-through-unchanged-permission-choice-launch-duplicate.md` was
+  fixed for the same reason. Duplicate agents are established; lost work is not.
+- Decision: on 2026-10-11 the user accepted the recommendation, fix code with a complexity gate.
+- Completion criteria: an unresolved Replace keeps its creation key and replacement intent, and retrying it reuses that
+  key, so a lost reply followed by a retry yields exactly one replacement session; a deliberate new Replace after an
+  acknowledged result still gets a new key. Cover the header and sidebar Replace paths with a test of the lost-reply
+  retry if it fits existing machinery. If this needs more than retaining the key in the UI's existing operation state,
+  stop and bring it back to the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## upload-cancellation-drops-final-reply.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by reading. An upload into a session that is being deleted, while the helm's connection to that
+  host is backed up, never completes or fails: the supervisor deliberately drops the reply once its queue is full or the
+  upload was cancelled (a side effect of the `send-upload-ignores-cancellation.md` fix), and the helm's waits have no
+  timeout of their own. The target session is gone anyway and nothing is lost.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it: a rare trigger, and nothing is lost.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## unrelated-probe-failure-disables-argument-expansion-protection.md
+
+- Outcome: `fix code`.
+- Assessment: mechanism confirmed by reading; trigger not reproduced. The supervisor's startup check for systemd's
+  no-expansion flag caches "unsupported" after any non-timeout failure followed by a successful plain retry, so one
+  transient error from the systemd user manager leaves launches whose paths contain `$` failing or expanded until the
+  supervisor restarts. Filed highest conservatively; a wrong-path launch is not established.
+- Decision: on 2026-10-11 the user accepted the recommendation: fix it only if it is a one-line check, otherwise
+  discard.
+- Completion criteria: the probe concludes the flag is unsupported only from systemd's unknown-option error, and treats
+  any other failure as inconclusive (retried later or treated as supported). If that is not a few-line change, record
+  this outcome as discarded during execution (Execution `complete`: gate tripped, with the reason) instead. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## uninstall-forgotten-success.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. The GUI announces "Farhelm was removed" whenever the host leaves the list; the
+  failure check that would withdraw the notice lives in the host row, which unmounts with it. When another window
+  forgets the host while an uninstall from this window is failing, this window reports success while Farhelm stays
+  installed. Host Remove exists only in the GUI, so the trigger needs two GUIs.
+- Decision: on 2026-10-11 the user accepted the recommendation and added: "fix complexity gated. if the SPEC doesn't say
+  already, we do not generally expend any serious complexity to support concurrent GUIs against the same helm." SPEC.md
+  "One GUI at a time" already says that ("do not add significant machinery to keep concurrent GUIs consistent"), so no
+  spec change is needed.
+- Completion criteria: when the GUI never observed the uninstall finish, the notice says the outcome is unknown rather
+  than that Farhelm was removed. If this needs more than a small change to the notice logic, stop and bring it back to
+  the user unfixed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## newer-completed-run-leaves-older-update-permanently.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by reading. When a host row sees a different update run complete than the one it tracks
+  (normally one started from another window), it neither adopts nor clears its own, so the row stays busy and refuses
+  Update and Settings until the panel is remounted or the page reloaded.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it under SPEC.md "One GUI at a time"; a reload
+  clears it.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## aggregate-identity-skew-creates-false-host-match.md
+
+- Outcome: `discard`.
+- Assessment: incorrect as filed. The reviewer refuted its own simple claim: the helm's session aggregation reads host
+  identity and snapshot in a fail-safe order, and `a_retarget_between_the_identity_read_and_the_snapshot_fails_safe`
+  covers it. No harmful transition was named.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it as refuted. It was surfaced rather than
+  discarded silently because it touches a cross-host security boundary, per the user's rule that such findings are never
+  dropped without them seeing it.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## deletes-timed-out-sink-shutdown-leaks-output-client.md
+
+- Outcome: `discard`.
+- Assessment: confirmed shape by reading. If Delete's 5-second wait for a session's output client expires, Delete kills
+  the tmux session anyway and the client keeps retrying until the supervisor restarts. The code documents the limit as
+  reached only when tmux is not answering, which FILTER.md's hung-tmux filter covers; the abrupt-close consequence is
+  covered by SPEC_impl.md's output-client teardown principle. An independent reviewer declined to drop it as covered on
+  2026-10-11 because the "only when hung" premise is a code comment, not spec text.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## live-panes-process-read-error-degrades-pid-only-identity.md
+
+- Outcome: `other`.
+- Assessment: partly correct. When reading a live pane's process identity fails, conversation attribution falls back to
+  matching by process number alone. A failed read on a live pane in practice means the process is exiting, the dead-pane
+  case the spec already handles by number alone, and a wrong binding would also need process-number reuse and a stale
+  report passing the generation check.
+- Decision: on 2026-10-11 the user accepted the recommendation to treat it as covered by SPEC_impl.md's acceptance of
+  process-number reuse inside a short window (decided 2026-10-05).
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## failed-confirmation-discard-session-despite-failed-process.md
+
+- Outcome: `other`.
+- Assessment: confirmed by reading. When a database failure interrupts a create's confirmation, a process-sweep error is
+  only added to the error message and the session record is abandoned whenever the tmux kill succeeds, so a detached
+  process that survived can keep running with no session left to Delete. The trigger is a local storage failure, which
+  SPEC.md "Healthy local filesystems" accepts; the mechanism is a sibling of the 2026-10-02 decision on
+  `create-rollback-orphans-unconfirmed-scope.md` ("a cleanup Farhelm cannot confirm fails visibly and keeps the
+  session").
+- Decision: on 2026-10-11 the user accepted the recommendation to fold it into the existing Maybe-later TODO.md entry
+  about requiring a systemd user manager and unconfirmed create rollbacks, which shares the site and the remedy.
+- Completion criteria: that TODO.md entry names this case (a create whose database confirmation fails while a process
+  sweep also failed keeps the session so it can be deleted). Remove this feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## recently-modified-image-png-gets-generated-attachment.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct. When a paste carries both a file and an image entry, the paste logic drops images named
+  like the clipboard's generated rendering (`image.png`, modified within 5 s), because copying `holiday.png` puts both
+  the file and a fresh `image.png` rendering on the clipboard. A genuine file named `image.png` pasted with another file
+  looks identical and is silently left out. Nothing on disk is lost; the code comment wrongly claims every real file is
+  uploaded.
+- Decision: on 2026-10-11 the user chose, instead of the recommended discard: "show omitted note with reason".
+- Completion criteria: when the duplicate-rendering heuristic leaves an item out of a paste, the user sees a visible
+  note naming what was omitted and why (it looked like the clipboard's generated copy of another pasted file), and the
+  misleading code comment is corrected. The deduplication itself is unchanged. Add a test if it fits existing paste
+  tests. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## probe-reregister-drops-terminals.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by reading. Probing or re-adding a host that is already connected and healthy always forces a
+  reconnect, so its open terminals disconnect briefly and then reconnect on their own. The sub-claim that it rewrites
+  the row during an update is unverified.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it as self-healing.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## session-detail-drains-full-list.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by reading. Each fleet change makes every open session view re-read its detail, and the helm
+  serves that from a whole-host list read: extra load, no wrong behavior. SPEC.md assumes tens of sessions with
+  whole-list reads.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it: no user-visible harm at the intended
+  scale.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## tab-reap-budget-starved-by-failures.md
+
+- Outcome: `discard`.
+- Assessment: likely by reading. The supervisor closes at most four exited tabs per pass and counts failed attempts
+  against that limit in a stable order, so four or more tabs whose close keeps failing starve cleanup of every other
+  exited tab on the host. The realistic trigger is a broken systemd user manager; exited tabs are already hidden from
+  listings.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it: a broken user manager means a broken host
+  (the 2026-10-02 decision in `ticker-retries-unkillable-tab-reaps.md`).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## feed-retained-browser-sign-in-interruption-falsely-represents.md
+
+- Outcome: `discard`.
+- Assessment: likely; socket survival not verified at runtime. In the web UI, losing browser storage mid-page replaces
+  the approval feed with the sign-in prompt while the feed's connection stays open, so the helm still counts a window as
+  present and a command approval waits up to 9 minutes instead of being refused at once. Signing in again shows the
+  request. The desktop app is unaffected.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it: rare, bounded, and it recovers on sign-in.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## window-restoration-uses-wrong-display-scale-macos.md
+
+- Outcome: `other`.
+- Assessment: likely by reading; not run on macOS. On a Mac whose displays use different scaling, the desktop app
+  converts the saved size with the new window's scale and the position through the current scale, so it can reopen at
+  the wrong size or place and save that geometry again on close. SPEC_impl.md's window-persistence paragraph already
+  says a real macOS display check is still needed.
+- Decision: on 2026-10-11 the user chose: "queue up as maybe later todo that requires work on a real mac".
+- Completion criteria: a Maybe later entry in TODO.md describes the mixed-scale restore problem and says it needs work
+  and verification on a real Mac with displays of different scaling. Remove this feedback file and its index entry in
+  the same change.
+- Execution: `pending`.
+
+## release-builds-fail-held-stdin-hook-test.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading. The hook budget override the test relies on exists only under
+  `cfg(debug_assertions)`, and the test's 7 s silence deadline is shorter than the 30 s production budget, so
+  `cargo test --release` fails it spuriously. Nothing runs the tests in release mode today.
+- Decision: on 2026-10-11 the user accepted the recommendation: a one-line debug-only gate on the test.
+- Completion criteria: the test is compiled or run only where the override exists, with a comment saying why, so a
+  release-profile run neither fails nor silently weakens it. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## constructor-font-regression-observes-mutable-value-construction.md
+
+- Outcome: `discard`.
+- Assessment: confirmed. The browser terminal-font test reads the terminal's current font setting after mount, which a
+  later correction may already have changed, so it can miss the regression it names.
+- Decision: on 2026-10-11 the user accepted the recommendation to discard it: TODO.md's "Make the bundled terminal font
+  a hard requirement" removes the code under test. Same basis as `terminal-font-promise-leak.md`.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## opt-in-real-agent-smoke-launches-fake-claude-executable.md
+
+- Outcome: `fix code`.
+- Assessment: likely by static reading; not run. The browser test stack (`e2e/start-stack.sh`) always installs a fake
+  `claude` wrapper first on PATH in its private login profile, and the opt-in real-agent tests launch plain `claude`, so
+  with `FARHELM_REAL_AGENT=1` they start the fake and fail visibly; they never pass falsely. The finding names the
+  real-agent test in `e2e/tests/real-agent.spec.ts`; the real-Claude spawn test in `e2e/tests/spawn.spec.ts` runs on the
+  same stack and is expected to be broken the same way. Both test Farhelm itself (the command-launch path finding
+  `claude` through the login shell, browser terminal input past the trust dialog and paste detection, and agent-spawned
+  sessions with approval), which `scripts/agent-tui.py` cannot replace because it runs the agent with no helm,
+  supervisor or browser.
+- Decision: on 2026-10-11 the user asked for an explanation, then chose: "fix, but maintainer responsiblity to set up
+  credentials, no complexity in the repo for it. keep them opt in".
+- Completion criteria: with `FARHELM_REAL_AGENT=1`, the stack does not put the fake `claude` ahead of the real one, so
+  both opt-in tests launch the real `claude`; ordinary runs keep the fake. The repository adds no credential handling:
+  making the real `claude` usable for the test user (logins, any configuration) is the maintainer's job, stated in one
+  sentence where the opt-in is documented. Both tests stay opt-in and keep their loud skip. Remove this feedback file
+  and its index entry.
+- Execution: `pending`.

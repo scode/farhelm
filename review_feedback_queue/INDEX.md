@@ -31,8 +31,6 @@ None open.
 - `build-mismatch-turns-unattended-mounts-into-displacing.md` — Build mismatch can turn automatic recovery into an
   unsolicited takeover.
 - `plain-replace-loses-retry-identity.md` — Retrying plain Replace can launch another replacement session.
-- `automatic-updates-overwrite-newer-manual-installation.md` — A delayed automatic update can undo a newer manual
-  installation.
 - `newer-completed-run-leaves-older-update-permanently.md` — An old update can remain busy after a newer run has
   completed.
 - `delayed-provisioning-confirmations-make-two-dialogs-mutually.md` — A delayed uninstall confirmation can disable both
@@ -191,8 +189,6 @@ None open.
   writer capacity.
 - `pi-getter-serialization-exceptions-escaping-silent-hook-boundary.md` — A failed Pi callback could leave Resume
   pointing at an earlier conversation.
-- `live-panes-process-read-error-degrades-pid-only-identity.md` — A live-pane identity read failure could admit an old
-  report by process number alone.
 - `deletes-timed-out-sink-shutdown-leaks-output-client.md` — Delete could leave a still-tracked output client retrying
   after timeout.
 - `diagnostic-writers-survive-their-deadline-accumulate-across.md` — Diagnostic timeouts leave writers running across
