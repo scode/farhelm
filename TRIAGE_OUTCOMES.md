@@ -12054,7 +12054,9 @@
 - Completion criteria: the instructions require settling an uncertain claim (confirm or release it) before claiming
   another plan. If the fix is not small, record `discard` instead during execution. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: `complete`; executed directly rather than through the planning system, because the fix edits
+  `plans/AGENTS.md`, which plan PRs may not touch (user, 2026-10-11: "yes" to a direct PR). Change `loxxuyoqxxlm` on
+  bookmark `fix/plans-uncertain-claim`; [draft PR #1924](https://github.com/scode/farhelm/pull/1924/changes).
 
 ## release-smoke-mistake-another-listener-child.md
 

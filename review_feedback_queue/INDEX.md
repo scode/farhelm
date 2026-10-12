@@ -127,7 +127,6 @@ None open.
   shutdown-drain bound.
 - `window-restoration-uses-wrong-display-scale-macos.md` — macOS window restore applies the new display's scale to saved
   geometry.
-- `ambiguous-claim-orphaned-next-pick.md` — An uncertain plan claim could be stranded when the executor claims another.
 - `shutdown-leaves-retained-supervisor-clients-active.md` — Manager shutdown could leave retained clients active in a
   surviving runtime.
 - `replay-refusal-tests-do-directly-observe-absence-delete-plain-replace.md` — Plain Replace refusal tests could miss an
