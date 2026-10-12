@@ -9,7 +9,7 @@ triage.
 
 ## Highest priority: security or data loss
 
-- `installer-startup-prune.md` — An interrupted update can prune a version whose supervisor is starting.
+None open.
 
 ## High priority: material UX degradation
 

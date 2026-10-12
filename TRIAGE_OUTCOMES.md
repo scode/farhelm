@@ -7088,6 +7088,15 @@
   version's folder before replacing the app and have pruning also keep the most recently modified other version, using
   mtime as state; (3) leave it. Whichever is chosen, a run must read an existing marker before writing its own, and the
   existing interrupted-after-each-step installer test gains a step. Not yet scheduled.
+- Decision (user, 2026-10-11, supersedes the decision above): the user first chose option (1) and asked for three
+  adversarial reviews (gpt-6.1-sol, gpt-6-astra and Opus 5.5, all at high effort) of whether it closes the remaining
+  installer races. All three found it does not: a one-version marker forgets the first of two interrupted updates, the
+  same startup race exists without any interruption, and an older uninstaller rejects the new file. The user then asked
+  for a complete race-free design, which went through four review rounds until all three reviewers were satisfied, and
+  had its macOS primitives checked on a real Mac. The user chose to take it out of review triage and work on it as its
+  own TODO.md `Near term` entry, "Make the Mac installer race-free", which links the design.
+- Execution: `complete`; superseded by that TODO.md entry. The feedback file and its index entry were removed in the
+  same change.
 
 ## template-empty-name.md
 
