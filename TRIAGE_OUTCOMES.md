@@ -12820,7 +12820,8 @@
   timeout of their own. The target session is gone anyway and nothing is lost.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: a rare trigger, and nothing is lost.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## unrelated-probe-failure-disables-argument-expansion-protection.md
 
@@ -12865,7 +12866,8 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it under SPEC.md "One GUI at a time"; a reload
   clears it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## aggregate-identity-skew-creates-false-host-match.md
 
@@ -12877,7 +12879,8 @@
   discarded silently because it touches a cross-host security boundary, per the user's rule that such findings are never
   dropped without them seeing it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## deletes-timed-out-sink-shutdown-leaks-output-client.md
 
@@ -12889,7 +12892,8 @@
   2026-10-11 because the "only when hung" premise is a code comment, not spec text.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## live-panes-process-read-error-degrades-pid-only-identity.md
 
@@ -12917,7 +12921,9 @@
 - Completion criteria: that TODO.md entry names this case (a create whose database confirmation fails while a process
   sweep also failed keeps the session so it can be deleted). Remove this feedback file and its index entry in the same
   change.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; finding retained in TODO.md's Maybe later entry "Require a systemd
+  user manager on Linux, with no fallback"; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## recently-modified-image-png-gets-generated-attachment.md
 
@@ -12942,7 +12948,8 @@
   the row during an update is unverified.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it as self-healing.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## session-detail-drains-full-list.md
 
@@ -12953,7 +12960,8 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: no user-visible harm at the intended
   scale.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## tab-reap-budget-starved-by-failures.md
 
@@ -12965,7 +12973,8 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: a broken user manager means a broken host
   (the 2026-10-02 decision in `ticker-retries-unkillable-tab-reaps.md`).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## feed-retained-browser-sign-in-interruption-falsely-represents.md
 
@@ -12976,7 +12985,8 @@
   request. The desktop app is unaffected.
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: rare, bounded, and it recovers on sign-in.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## window-restoration-uses-wrong-display-scale-macos.md
 
@@ -12989,7 +12999,9 @@
 - Completion criteria: a Maybe later entry in TODO.md describes the mixed-scale restore problem and says it needs work
   and verification on a real Mac with displays of different scaling. Remove this feedback file and its index entry in
   the same change.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; finding retained in TODO.md's Maybe later entry "Fix Mac window
+  restoration across display scales"; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## release-builds-fail-held-stdin-hook-test.md
 
@@ -13011,7 +13023,8 @@
 - Decision: on 2026-10-11 the user accepted the recommendation to discard it: TODO.md's "Make the bundled terminal font
   a hard requirement" removes the code under test. Same basis as `terminal-font-promise-leak.md`.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-bookkeeping-round-two.md`.
+- Execution: complete; jj change `yvsvnnmzxvxmzskvnplxzxuzswvmkvku`; bookmark
+  `plan/triage-bookkeeping-round-two/01-bookkeeping`; https://github.com/scode/farhelm/pull/1931/changes.
 
 ## opt-in-real-agent-smoke-launches-fake-claude-executable.md
 
