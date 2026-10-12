@@ -108,3 +108,56 @@ maintainer decision and found no public-repository hygiene violation; the execut
 Private state is in `farhelm-plan-ui-layout-and-escaping-fixes-log.md` beside the checkouts. Galaxy-brain evidence
 reuses session `9317ea96-7a9d-4c8c-bdc5-c8d8cf7fc943`, referenced there. The native tools expose no independently
 reported model attribution, effort or token usage; these remain evidence gaps and support no cost claim.
+
+### Landing
+
+Landed on 2026-10-12 (UTC) as #1932. The rebase met the review queue index, where the plans that landed before it had
+removed adjacent entries; all removals were kept and the index still matches its files.
+
+#### Fixes made while landing
+
+All in #1932, before it merged:
+
+- The header's status badge may now shrink in a crowded header, but the live statuses (running, waiting, idle) draw only
+  an 8px dot, which shrinking would clip. Those three keep their size; only the worded statuses give up width.
+- Rename seeded its field with the display spelling, which turns an empty or whitespace-only title into the phrase
+  "(empty)" or "(whitespace only: N characters)". Submitting untouched was still faithful, but typing "foo" into it
+  renamed the session to "(empty)foo". The field now starts with an escape-only spelling, which leaves empty and blank
+  titles as they are; a unit test covers it.
+- An existing browser test, "rename exposes peer title and refusal characters while retaining the raw draft", expected
+  the rename field to start with the title's raw characters, which this plan's agreed outcome deliberately changed: the
+  field now starts escaped, so a title an agent set cannot hide characters from the person editing it. It failed on both
+  engines (run `0125ad28`); the plan had not run that spec. The test now expects the escaped seed and is renamed to say
+  so; the stored title still keeps its exact characters.
+
+#### Review before merging
+
+No blockers. Header Replace and Restart refresh the sidebar through its existing read gate, so no older reply can
+overwrite a newer one; the template session-name rule holds at every save path while stored templates still launch; and
+the terminal changes stay inside the mount decision, leaving the link guards, steady path hover and snapshot copy alone.
+Notes left as they are:
+
+- Settings is now disabled on every host while any host has planning in flight, including a one-click update's whole
+  run, which is wider than the agreed "while an uninstall plan is pending".
+- Restart now always takes the session's terminal, even on an up-to-date helm; this is the user's own request, and it
+  only matters in a race with another window's automatic recovery.
+- While the reload notice is showing, a tab you open yourself waits for "take control", which then reattaches every
+  terminal in the view.
+- The changelog fragment is `fixed`, though newly refusing hidden characters in a template's session name is arguably
+  `changed`; and the launch templates page does not yet say every approval choice is now offered without an agent type.
+
+#### Checks
+
+This plan was landed after its own checks in a separate workspace, while browser-oracle-and-fixture-fixes and the next
+product plans were checked and landed in the main checkout; supervisor-and-test-followups and helm-supervisor-small-
+fixes landed on main in between and touch only the supervisor, helm and test stack, which this plan does not.
+
+- Run now, after the first two fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the test-delay
+  checker, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop`; the UI, protocol and helm unit tests through the recorder (run
+  `1a63c0f2`, 1639 of 1639); the UI JavaScript tests (238 of 238); the docs website build; and on Chromium and WebKit
+  with one worker and no retries the header, provisioning, templates, terminal-tabs, ui-plan-regressions, terminal-links
+  and terminal-replay-rename specs (run `0125ad28`: 320 passed, the rename test failed as described).
+- After the test fix: the terminal-replay-rename spec on both engines (run `c867c880`, 44 passed).
+
+Nothing in the report above was made untrue by the landing.
