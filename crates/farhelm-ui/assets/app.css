@@ -2580,9 +2580,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .app-settings-dialog[aria-label="settings"] .host-settings-help {
   margin: 0;
 }
-/* Feedback opts into the host frame while keeping its editors and attached
-   values scoped: app settings shares the base dialog but must not inherit
-   this layout. Only the body scrolls, leaving send and dismiss reachable. */
+/* Feedback shares the pinned frame with settings, but its editors and
+   attached values stay scoped here. Only its body scrolls, leaving send
+   and dismiss reachable. */
 .feedback-dialog { width: min(560px, 100%); }
 .feedback-glyph { width: 28px; height: 28px; }
 .feedback-dialog .host-settings-body { gap: 16px; }
@@ -2880,6 +2880,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 16px;
 }
 .app-settings-dialog[aria-label="settings"] .app-settings-choice > span { min-width: 0; }
+.app-settings-dialog[aria-label="settings"] .host-settings-mark svg { width: 28px; height: 28px; }
 /* The folder field is shared by Settings and inline checkout setup; the
    command field is Settings-only. Both keep independent explicit saves and
    layout independent of the launcher's label/form direction rules. */

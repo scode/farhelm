@@ -398,12 +398,16 @@ fn commands_help(commands_without_asking: bool) -> &'static str {
 ///
 /// Registered hosts retain their own mark, status and reported version. An
 /// add flow has no host yet, so it uses the default host mark. A supplied
-/// summary replaces the status line, with or without a host. Titles remain caller-rendered markup so peer values keep
+/// tile replaces that mark for an application-wide dialog; it changes only
+/// the presentation, leaving host identity and closing behavior to the caller.
+/// A supplied summary replaces the status line, with or without a host.
+/// Titles remain caller-rendered markup so peer values keep
 /// their escaping and direction isolation. Dismiss runs the caller's cancel
 /// path; this header must not decide when an operation permits cancellation.
 #[component]
 pub(crate) fn HostDialogHeader(
     host: Option<Host>,
+    tile: Option<Element>,
     title: Element,
     summary: Option<String>,
     dismiss_label: String,
@@ -420,13 +424,17 @@ pub(crate) fn HostDialogHeader(
     rsx! {
         div { class: "host-settings-header",
             div { class: "host-settings-mark", "aria-hidden": "true",
-                match host.as_ref() {
-                    Some(host) => match host.kind {
-                        HostKind::Local => rsx! { LocalHostIcon {} },
-                        HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
-                        HostKind::Unrecognized => rsx! {},
-                    },
-                    None => rsx! { HostMark {} },
+                if let Some(tile) = tile {
+                    {tile}
+                } else {
+                    match host.as_ref() {
+                        Some(host) => match host.kind {
+                            HostKind::Local => rsx! { LocalHostIcon {} },
+                            HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
+                            HostKind::Unrecognized => rsx! {},
+                        },
+                        None => rsx! { HostMark {} },
+                    }
                 }
             }
             div { class: "host-settings-heading",

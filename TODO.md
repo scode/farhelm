@@ -149,12 +149,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
   as a non-goal for v1, so this needs a SPEC change alongside it.
 
-- **Pin the app settings dialog's header and footer, and add an × close.** The settings dialog opened from the gear at
-  the top of the sidebar has grown (host choices, checkout folder, post-clone command, and more) until it runs past the
-  bottom of the window, and its close button only appears once you scroll down to it. Give it a header and footer that
-  stay in the same place and are always visible, with only the settings between them scrolling, and an × close button at
-  the top like the host settings dialog has. Plan: `plans/queue/app-settings-pinned.md`.
-
 - **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
   from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
   `grok` 1.0.50, started as Farhelm starts it with no YOLO choice (`grok --no-leader`), showed "always-approve" in its
