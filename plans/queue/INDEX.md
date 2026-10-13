@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 9af1b7] `codex-resident-launcher.md` — capture a Codex session's conversation through a launcher named `codex` that stays running as Codex's parent, by pinning the first reporting Codex process
 - [in-flight d7bc5d] `feedback-dialog-polish.md` — restyle the send feedback dialog to match the approved mockup: header with ×, dark fields, quiet labels, pinned footer
-- [pending] `open-links-in-browser.md` — let agents on remote hosts open links in the user's browser through BROWSER, an approval card, and two per-host "open links without asking" settings
+- [in-flight 6bfd94] `open-links-in-browser.md` — let agents on remote hosts open links in the user's browser through BROWSER, an approval card, and two per-host "open links without asking" settings
