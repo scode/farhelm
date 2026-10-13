@@ -1253,21 +1253,24 @@ ordinary Enter rule applies), for an agent that reports by its first prompt (Pi 
 reply, which can take as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm
 could not add its conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok
 conversation record that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation
-reporter does not match the running Farhelm, the one refused conversation report that notifies. Every other refused
-report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or delete, or
-turned away by a passing error) is the system working and never notifies. A launch that still carries a conversation
-Farhelm captured earlier is never told Restart cannot resume it, because Restart can. After a supervisor restart, a
-launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches stored before this
-behavior was introduced stay unchecked. Each notification says what happened and what the user can do about it, or, when
-nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning names the agent and
-when it normally reports its conversation, using the same timing as Restart's explanation. It says Restart cannot resume
-until that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it
-invites feedback from the help (?) menu. There is at most one notification of each problem per launch of the session's
-agent. The warning that the agent never reported its conversation and the warning that Restart stopped offering to
-resume are marked resolved when Restart can resume that launch's conversation again, including after a supervisor
-restart. The other two kinds and notifications from earlier launches stay as they are. If a resolved problem returns in
-the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it;
-repeated checks while it remains unresolved do not repeat it.
+reporter does not match the running Farhelm, the one refused conversation report that notifies; and a Codex launch whose
+first conversation report came from a nested Codex process, corrected when a recorded Codex ancestor reports. That
+correction says which conversation a Restart before now would have resumed and that Farhelm now follows the conversation
+of the Codex process that started it, without claiming no further ancestor can correct it. Every other refused report
+(from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or delete, or turned
+away by a passing error) is the system working and never notifies. A launch that still carries a conversation Farhelm
+captured earlier is never told Restart cannot resume it, because Restart can. After a supervisor restart, a launch that
+received the hook starts its silent-hook clock at the next qualifying Enter; launches stored before this behavior was
+introduced stay unchecked. Each notification says what happened and what the user can do about it, or, when nothing can
+be done, what they lose; it never points at a log. The silent-conversation-hook warning names the agent and when it
+normally reports its conversation, using the same timing as Restart's explanation. It says Restart cannot resume until
+that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it invites
+feedback from the help (?) menu. There is at most one notification of each problem per launch of the session's agent.
+The warning that the agent never reported its conversation and the warning that Restart stopped offering to resume are
+marked resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The
+other kinds and notifications from earlier launches stay as they are. If a resolved problem returns in the same launch,
+its existing notification reopens at the top as new and unread, even if the user had cleared it; repeated checks while
+it remains unresolved do not repeat it.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
@@ -1584,14 +1587,22 @@ file without following symlinks and requires its session ID to match. A failed c
 which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
 launches fresh under that request.
 
-Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
-process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
-process ancestry alone cannot distinguish threads sharing a process. The durable locator keeps runtime session identity
-separate from persistent thread identity, and resume uses the latter. Custom Codex homes work through the exact reported
-path; Farhelm does not search another home or choose a newer file. A legitimate reported `/clear` switches the current
-identity even when its transcript is not yet persisted: the old conversation stops being offered, and only the new
-conversation's exact file may make it resumable. A later attributed `Stop` for that same runtime confirms a pending
-clear once the file exists; it cannot select another conversation or recheck an already resumable binding. Selection and
+Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's owned pane.
+Later reports must come from that process, not a Codex process below it that inherited its credential. Resident
+launchers and other processes above it are accepted. If a recorded Codex ancestor later reports a verified conversation,
+Farhelm corrects the pin and resume target to that ancestor and posts a notification once per launch, explaining what a
+Restart before correction would have resumed. An ancestor's source-less `Stop` can make this correction too; an
+unverified record changes nothing, and a not-yet-resumable ancestor `Stop` is acknowledged without effect. A dead pin is
+released for a new Codex whose ancestry does not include the pinned process, after considering ancestor correction; a
+descendant whose report still contains the pinned process stays refused even after that process exits. The pin survives
+a supervisor restart but clears on every relaunch and is not restored by an aborted relaunch. Farhelm also verifies the
+exact reported transcript's root-session metadata; process ancestry alone cannot distinguish threads sharing a process.
+The durable locator keeps runtime session identity separate from persistent thread identity, and resume uses the latter.
+Custom Codex homes work through the exact reported path; Farhelm does not search another home or choose a newer file. A
+legitimate reported `/clear` switches the current identity even when its transcript is not yet persisted: the old
+conversation stops being offered, and only the new conversation's exact file may make it resumable. A later attributed
+`Stop` for that same runtime confirms a pending clear once the file exists; unless it is correcting a pin from a
+recorded ancestor, it cannot select another conversation or recheck an already resumable binding. Selection and
 confirmation both survive a supervisor outage and are applied in that order. Codex sessions launched before this
 subscription was added must be relaunched before conversations begun with `/clear` can become resumable. An unrelated
 rejected report leaves the foreground identity untouched. Compaction preserves the conversation, and a verified new

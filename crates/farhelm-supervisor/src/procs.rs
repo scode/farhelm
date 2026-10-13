@@ -65,7 +65,7 @@ mod codex;
 mod grok;
 mod omp;
 pub(crate) use claude::claude_corridor;
-pub(crate) use codex::codex_corridor;
+pub(crate) use codex::{CodexAttribution, codex_corridor};
 pub(crate) use grok::grok_corridor;
 pub(crate) use omp::omp_corridor;
 
@@ -220,7 +220,7 @@ pub(crate) fn read_environ(pid: u32) -> Option<Vec<u8>> {
 }
 
 /// A PID paired with the kernel token that distinguishes it from PID reuse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProcessIdentity {
     pub(crate) pid: u32,
     pub(crate) start: u64,
@@ -2553,8 +2553,12 @@ mod tests {
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
         let emitter = codex_corridor(&chain).expect("a direct hook child must be admitted");
-        assert_eq!(emitter.pid, 10, "the emitter is the one Codex image");
-        assert_eq!(emitter.start, 10_000);
+        assert_eq!(
+            emitter.emitter.pid, 10,
+            "the emitter is the one Codex image"
+        );
+        assert_eq!(emitter.emitter.start, 10_000);
+        assert!(emitter.ancestors.is_empty());
     }
 
     /// The vendor shape: `sh -c` directly invoking the hook command. Both
@@ -2576,12 +2580,12 @@ mod tests {
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
         let emitter = codex_corridor(&chain).expect("a hook trampoline must be admitted");
-        assert_eq!(emitter.pid, 10);
+        assert_eq!(emitter.emitter.pid, 10);
     }
 
-    /// The pane anchor is accepted by position: a wrapper that IS the
-    /// pane root (here the login shell the pane reports) is
-    /// the owned foreground, not an intermediary.
+    /// A shell above Codex is launch ancestry, including when it owns the pane.
+    /// The emitter remains the native Codex below it; the shell does not need
+    /// the hook-side trampoline shape.
     #[farhelm_testtrace::test]
     fn a_wrapper_above_the_runtime_is_the_pane_anchor_not_an_intermediary() {
         let chain = vec![
@@ -2592,19 +2596,21 @@ mod tests {
         codex_corridor(&chain).expect("the pane anchor must not need trampoline shape");
     }
 
-    /// The anchor exemption must not admit arbitrary surviving launch
-    /// ancestry. A package wrapper below a separate pane shell is an
-    /// intermediary even when the only native Codex is its direct child.
+    /// Launch ancestry above the emitter may contain arbitrary intermediaries.
+    /// Package managers and shells there launch Codex rather than report for it;
+    /// the durable admission pin supplies the nested-process boundary.
     #[farhelm_testtrace::test]
-    fn a_package_wrapper_below_a_separate_pane_anchor_is_refused() {
+    fn a_package_wrapper_above_codex_is_launch_ancestry() {
         let chain = vec![
             corridor_link(13, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(12, "/opt/test/bin/codex", &["codex"]),
             corridor_link(11, "/usr/bin/node", &["node", "codex.js"]),
             corridor_link(10, "/bin/bash", &["bash", "launch.sh"]),
         ];
-        let refusal = codex_corridor(&chain).expect_err("only the pane anchor is exempt");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution =
+            codex_corridor(&chain).expect("launch wrappers above the emitter are accepted");
+        assert_eq!(attribution.emitter.pid, 12);
+        assert!(attribution.ancestors.is_empty());
     }
 
     /// A reporter that is not the hook invocation cannot report, even with
@@ -2787,7 +2793,7 @@ mod tests {
             ];
             let emitter = codex_corridor(&chain)
                 .expect("a quoted-path trampoline must be admitted: {command}");
-            assert_eq!(emitter.pid, 10);
+            assert_eq!(emitter.emitter.pid, 10);
         }
     }
 
@@ -2810,17 +2816,45 @@ mod tests {
         }
     }
 
-    /// The pre-existing nested rule, preserved: two Codex images refuse no
-    /// matter how clean the rest of the chain is.
+    /// A resident launcher named codex must not be mistaken for the emitter.
+    /// Retain it as an ancestor so child-first admission can later correct.
     #[farhelm_testtrace::test]
-    fn a_second_codex_image_still_refuses() {
-        let chain = vec![
+    fn a_second_codex_image_is_recorded_as_an_ancestor() {
+        let direct = vec![
             corridor_link(13, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(12, "/opt/test/bin/codex", &["codex"]),
             corridor_link(11, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal = codex_corridor(&chain).expect_err("nested Codex must be refused");
-        assert!(refusal.contains("nested Codex"), "{refusal}");
+        let mut trampoline = direct.clone();
+        trampoline.insert(
+            1,
+            corridor_link(
+                14,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "/opt/test/bin/farhelm internal hook --vendor codex",
+                ],
+            ),
+        );
+        for chain in [direct, trampoline] {
+            let attribution = codex_corridor(&chain).expect("the inner Codex emitted this hook");
+            assert_eq!(
+                attribution.emitter,
+                ProcessIdentity {
+                    pid: 12,
+                    start: 12_000
+                }
+            );
+            assert_eq!(
+                attribution.ancestors,
+                [ProcessIdentity {
+                    pid: 11,
+                    start: 11_000
+                }]
+            );
+        }
     }
 
     /// No Codex image at all still refuses: the corridor never admits on

@@ -27,14 +27,16 @@
 //!   stopped matching.
 //! - [`NotificationKind::ReporterMismatch`]: OMP admission, when the launch's
 //!   recorded reporter does not match this build.
+//! - [`NotificationKind::CodexPinCorrected`]: Codex admission, after a recorded
+//!   ancestor's verified record corrects a child-first conversation choice.
 //!
 //! # The wording rule
 //!
 //! The maintainer's rule (the plan's M5): every text names something the
 //! user can actually do, or, when there is nothing, says plainly what they
-//! lose. Never a pointer to a log. What the user loses in every case here is
-//! the same thing, Restart's ability to resume the conversation, so each text
-//! says so in those words.
+//! lose. Never a pointer to a log. Tracking failures explain Restart's lost
+//! ability to resume; a corrected Codex selection explains which conversation
+//! an earlier Restart would have resumed instead.
 
 use super::core::Supervisor;
 use crate::store::StoredSessionNotification;
@@ -61,14 +63,18 @@ pub(crate) enum NotificationKind {
     /// A launch whose conversation reporter does not match this build, so
     /// its reports cannot be accepted.
     ReporterMismatch,
+    /// A verified Codex ancestor corrected a conversation selected by its child.
+    /// The warning preserves what a Restart before correction would have used.
+    CodexPinCorrected,
 }
 
 impl NotificationKind {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
         Self::ReporterMismatch,
+        Self::CodexPinCorrected,
     ];
 
     /// Whether Resume becoming available ends this warning's condition.
@@ -77,7 +83,7 @@ impl NotificationKind {
     fn resolves_on_resume(self) -> bool {
         match self {
             Self::HookSilent | Self::ResumeWithdrawn => true,
-            Self::HookNotAdded | Self::ReporterMismatch => false,
+            Self::HookNotAdded | Self::ReporterMismatch | Self::CodexPinCorrected => false,
         }
     }
 
@@ -90,7 +96,9 @@ impl NotificationKind {
             // a launch that carries a captured conversation (a Restart keeps
             // the one it resumed).
             NotificationKind::HookSilent | NotificationKind::HookNotAdded => true,
-            NotificationKind::ResumeWithdrawn | NotificationKind::ReporterMismatch => false,
+            NotificationKind::ResumeWithdrawn
+            | NotificationKind::ReporterMismatch
+            | NotificationKind::CodexPinCorrected => false,
         }
     }
 
@@ -102,9 +110,16 @@ impl NotificationKind {
             NotificationKind::HookNotAdded => "hook_not_added",
             NotificationKind::ResumeWithdrawn => "resume_withdrawn",
             NotificationKind::ReporterMismatch => "reporter_mismatch",
+            NotificationKind::CodexPinCorrected => "codex_pin_corrected",
         }
     }
 }
+
+/// Describe the correction without promising that no further ancestor can report.
+/// The notification remains unresolved so the store posts it once per launch.
+pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Codex conversation \
+    started by another Codex process in this session. A Restart before now would have resumed \
+    that conversation. Farhelm now follows the conversation of the Codex process that started it.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///

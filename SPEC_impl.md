@@ -1960,12 +1960,11 @@ file is introduced.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
-  Codex report, the anchored chain must contain exactly one native executable whose basename is `codex`. The pane anchor
-  itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not. This
-  deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
+  Codex report, the innermost native executable whose basename is `codex` is the emitter. Any processes above it are
+  launch ancestry, including resident Codex-named launchers, scripts, shells and package managers. The supported process
   chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter must
   spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
-  still accepts older hooks), and every other non-Codex link except the pane anchor must be a narrow shell trampoline
+  still accepts older hooks), and every link between that reporter and the emitter must be a narrow shell trampoline
   directly invoking it (`sh -c '<farhelm> internal hook …'` — the shape vendor hook runners produce) as exactly one
   simple command: any unquoted control operator, redirection, substitution, or other executable shell syntax refuses
   even when the hook comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime
@@ -1974,6 +1973,22 @@ file is introduced.
   Unavailable process evidence refuses the report without changing the current identity. This is attribution under
   inherited credentials, not a security boundary against the same Unix user. Renamed native executables are not
   recognized.
+
+  The first admitted selecting report pins its emitter and records the Codex-image ancestors above it, each by PID and
+  kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
+  separately from the conversation locator. Schema 31 defaults existing rows to NULL without backfill; admission reads
+  the pin under the capture claim and writes it in the same CAS as the conversation, fencing the complete prior binding
+  and exact previous pin. No in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later
+  reports must come from the pinned emitter. A recorded Codex ancestor takes precedence: its verified record
+  independently selects and corrects both pin and conversation, never inheriting the child's file or persistent thread.
+  A correction records the once-per-launch Codex correction notification in the same transaction as adoption;
+  notification-write failure rolls back the correction, and reload restores it even if publication was interrupted. It
+  does not resolve on capture because it records the prior mistaken target. An unverified ancestor changes nothing, and
+  its unready Stop is acknowledged without effect. A pin whose process is gone, reused or non-running releases for a
+  fresh emitter only if the pin is absent from the new report's chain; descendants cannot inherit authority after its
+  exit. Unavailable process evidence does not release it. Rows already running across an upgrade start unpinned: a
+  nested child's first selecting report after upgrade may pin it, and the root's next report corrects and notifies.
+  There is no upgrade suppression.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -1984,11 +1999,13 @@ file is introduced.
 
   An attributed `SessionStart` with a recognized source selects the conversation. A foreground `clear` may install a
   pending locator before the exact file is available, withdrawing the discarded conversation immediately. A source-less
-  `Stop` can confirm only an ownership-proven, unready locator with no established thread, for the same runtime and
-  compatible exact path; it may fill an absent path. Ready or previously withdrawn bindings return before vendor I/O.
-  Codex 0.162.0 was run for two actual turns around `/clear`: both Stop callbacks named existing root transcripts, clear
-  changed both runtime and path, and the old header remained intact. An opt-in real-agent test pins callback-time
-  availability; deterministic fixtures cover a clear whose first callback precedes the file.
+  `Stop` from the pinned process can confirm only an ownership-proven, unready locator with no established thread, for
+  the same runtime and compatible exact path; it may fill an absent path. Its ready or previously withdrawn bindings
+  return before vendor I/O. A recorded ancestor's Stop instead verifies its own record as a selection and corrects only
+  when resumable. A Stop acknowledged without effect writes no pin. Codex 0.162.0 was run for two actual turns around
+  `/clear`: both Stop callbacks named existing root transcripts, clear changed both runtime and path, and the old header
+  remained intact. An opt-in real-agent test pins callback-time availability; deterministic fixtures cover a clear whose
+  first callback precedes the file.
 
   Report transactions share a capture-only per-session claim and read the current durable binding while holding it. This
   is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher. A repeated report
@@ -2044,19 +2061,20 @@ file is introduced.
   parents within the depth and argv budgets, re-checked because the chain is now file input. Every launch runs a new
   pane process, so anchoring is also what ties a report to its launch, for every vendor. The per-kind step applies its
   own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
-  reporter; any other session-hosting runtime or unclassified intermediary refuses. Codex's instance is exactly one
-  native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only; Grok's adds the required `--no-leader`
-  option to its one native image. Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O
-  (the report file's discriminator check re-applied against the fenced resolution, plus raw event/source/agent-identity
-  validation before diagnostic sanitation); the unbounded capture claim (one shared session-keyed `capture_locks`
-  registry for report admission and readiness refresh, never the lifecycle claim; slow waits are logged for diagnostics)
-  and a reload comparing kind, generation, and the complete prior binding; the mutation-free runtime and vendor-root
-  proofs over the recorded chain (evidence recorded when the report was made cannot change during verification, so there
-  is no repeat walk); the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source,
-  and readiness reset together; and the mirror of only the committed result into the matching current-generation entry
-  under the same claim. Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh
-  and report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version
-  beside the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
+  reporter; any other session-hosting runtime or unclassified intermediary below the emitter refuses. Codex attributes
+  its hook-shaped reporter through shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry
+  above it, and applies its durable process pin. Grok retains exactly one native image with the required `--no-leader`
+  option. Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O (the report file's
+  discriminator check re-applied against the fenced resolution, plus raw event/source/agent-identity validation before
+  diagnostic sanitation); the unbounded capture claim (one shared session-keyed `capture_locks` registry for report
+  admission and readiness refresh, never the lifecycle claim; slow waits are logged for diagnostics) and a reload
+  comparing kind, generation, and the complete prior binding; the mutation-free runtime and vendor-root proofs over the
+  recorded chain (evidence recorded when the report was made cannot change during verification, so there is no repeat
+  walk); the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source, and readiness
+  reset together; and the mirror of only the committed result into the matching current-generation entry under the same
+  claim. Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and
+  report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside
+  the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
   rejected report never triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain
   their durable generation/binding fences; they do not all acquire this capture claim. The report claim has no time
   limit because every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
@@ -2995,8 +3013,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   it, except when `FARHELM_AGENT_HOOKS` turned hooks off for that agent, which is the user's own choice, and except for
   a kind that adds no hook at all), a Codex or Grok record whose verification withdrew the resume offer (recorded only
   after the withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's
-  final check before a Restart both record it), and an OMP launch whose recorded reporter is older than this build's or
-  whose installed reporter file is there with different contents (a missing or unreadable file records nothing). The
+  final check before a Restart both record it), an OMP launch whose recorded reporter is older than this build's or
+  whose installed reporter file is there with different contents (a missing or unreadable file records nothing), and a
+  Codex process pin corrected after a verified recorded ancestor replaces a child-first conversation. The correction
+  records the consequence for Restart before adoption and remains unresolved, giving one notification per launch. The
   first two say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation,
   checked in the same statement as the insert, which is also what closes the race between a report's commit and the
   tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an

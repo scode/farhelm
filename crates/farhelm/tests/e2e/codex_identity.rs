@@ -199,6 +199,336 @@ async fn send_and_wait(
     wait_for_marker_line(stream, seen, from, marker).await;
 }
 
+/// Run a synthetic native Codex through a declared start and resume command.
+/// Returning a live session is not readiness: callers attach after replay and
+/// wait for the fixture's complete marker before depending on its process tree.
+async fn launch_pin_fixture(
+    h: &Harness,
+    work: &std::path::Path,
+    records: &std::path::Path,
+    codex: &std::path::Path,
+    extra: &[String],
+) -> farhelm_proto::SessionInfo {
+    let mut start = vec![
+        codex.to_string_lossy().into_owned(),
+        "fake-agent".into(),
+        "--script".into(),
+        "codex-conversation".into(),
+        "--record-home".into(),
+        records.to_string_lossy().into_owned(),
+        "--hook-binary".into(),
+        farhelm_bin().to_owned(),
+    ];
+    start.extend_from_slice(extra);
+    let mut resume: Vec<_> = start
+        .iter()
+        .filter(|arg| arg.as_str() != "--defer-startup")
+        .cloned()
+        .collect();
+    start.push("{farhelm_args}".into());
+    resume.extend([
+        "--resume-id".into(),
+        "{conversation}".into(),
+        "{farhelm_args}".into(),
+    ]);
+    h.client
+        .create_session_with_extras(
+            &work.to_string_lossy(),
+            declared_command(
+                &shell_words::join(start),
+                farhelm_proto::LaunchHarness::Codex,
+                Some(&shell_words::join(resume)),
+            ),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create Codex pin fixture")
+}
+
+/// A resident native launcher and its child must both exist in the owned pane.
+/// The live tmux root and process relationship distinguish this from an exec
+/// wrapper that could pass the old exactly-one-image attribution rule.
+async fn assert_resident_launcher(h: &Harness, id: &str, transcript: &[u8]) {
+    let text = String::from_utf8_lossy(transcript);
+    let line = complete_marker(&text, "CODEX-LAUNCHER:").expect("complete live launcher witness");
+    let fields: Vec<_> = line.split(':').collect();
+    let launcher: u32 = fields[0].parse().expect("launcher PID");
+    let child: u32 = fields[1].parse().expect("child PID");
+    assert_eq!(fields[2], "codex");
+    assert_ne!(launcher, child);
+    let row = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .unwrap()
+        .session(id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &["display-message", "-p", "-t", &row.pane, "#{pane_pid}"],
+    )
+    .await;
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .unwrap(),
+        launcher
+    );
+    let output = tokio::process::Command::new("ps")
+        .args(["-o", "ppid=,pgid=", "-p", &child.to_string()])
+        .output()
+        .await
+        .expect("inspect owned child");
+    assert!(
+        output.status.success(),
+        "the Codex child must still be alive"
+    );
+    let relation: Vec<u32> = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(|n| n.parse().unwrap())
+        .collect();
+    assert_eq!(relation[0], launcher);
+    let output = tokio::process::Command::new("ps")
+        .args(["-o", "pgid=", "-p", &launcher.to_string()])
+        .output()
+        .await
+        .expect("inspect owned launcher");
+    assert!(
+        output.status.success(),
+        "the resident launcher must still be alive"
+    );
+    assert_eq!(
+        relation[1],
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u32>()
+            .unwrap()
+    );
+}
+
+/// Conversation capture and Restart work through a launcher that remains alive.
+/// The child reports through real hooks, its descendants cannot replace the
+/// admitted conversation, and resumed history proves Restart used the saved
+/// target through the configured launcher rather than launching fresh.
+#[farhelm_testtrace::test]
+async fn resident_codex_launcher_captures_and_resumes_its_child() {
+    let h = harness().await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let records = farhelm_teststate::tempdir().unwrap();
+    let images = farhelm_teststate::tempdir().unwrap();
+    let launcher_dir = images.path().join("launcher");
+    let child_dir = images.path().join("child");
+    std::fs::create_dir(&launcher_dir).unwrap();
+    std::fs::create_dir(&child_dir).unwrap();
+    let launcher = native_codex_image(&launcher_dir);
+    let child = native_codex_image(&child_dir);
+    let session = launch_pin_fixture(
+        &h,
+        work.path(),
+        records.path(),
+        &launcher,
+        &[
+            "--resident-child-image".into(),
+            child.to_string_lossy().into_owned(),
+        ],
+    )
+    .await;
+    let (channel, replay, mut stream) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .unwrap();
+    let mut seen = replay;
+    wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-CONVERSATION READY:").await;
+    wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-LAUNCHER:").await;
+    assert_resident_launcher(&h, &session.id, &seen).await;
+    let root = marker_id(&seen, "CODEX-CONVERSATION READY:");
+    wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+    let before = durable_binding(h.state.path(), &session.id).await;
+    assert_eq!(before.1, 1);
+    assert_eq!(before.2.as_deref(), Some("hook"));
+    assert!(before.0.as_ref().unwrap().contains(&root));
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "remember launcher-history",
+        "CODEX-REMEMBERED:",
+    )
+    .await;
+    let from = seen.len();
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "nested-persisted",
+        "CODEX-NESTED:",
+    )
+    .await;
+    let nested = marker_id(&seen[from..], "CODEX-NESTED:persisted:");
+    let log = h
+        .state
+        .path()
+        .join("hook-log")
+        .join(format!("{}.log", session.id));
+    assert_hook_reply_since(&h.sup, &log, 0, &nested, "startup", "pinned process").await;
+    assert_eq!(durable_binding(h.state.path(), &session.id).await, before);
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume
+    );
+    assert!(
+        listed(&h.client, &session.id)
+            .await
+            .notifications
+            .is_empty()
+    );
+    h.client.restart_session(&session.id, true).await.unwrap();
+    drop(stream);
+    let (channel, replay, mut stream) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .unwrap();
+    let mut seen = replay;
+    wait_for_after(
+        &mut stream,
+        &mut seen,
+        &format!("CODEX-CONVERSATION RESUMED:{root}"),
+        &format!("CODEX-CONVERSATION READY:{root}:"),
+        30,
+    )
+    .await;
+    wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-LAUNCHER:").await;
+    assert_resident_launcher(&h, &session.id, &seen).await;
+    send_and_wait(
+        &h.client,
+        channel,
+        &mut stream,
+        &mut seen,
+        "recall",
+        "CODEX-RECALL:launcher-history",
+    )
+    .await;
+    serving.stop().await;
+}
+
+/// A child-first real hook is corrected by either of the parent's supported callbacks.
+/// The child reports valid persisted evidence while startup is deliberately
+/// deferred, then the parent's own transcript is selected and Restart resumes
+/// its history. This constructs the outage/upgrade ordering that normal first
+/// prompt reporting would otherwise prevent.
+#[farhelm_testtrace::test]
+async fn child_first_codex_capture_corrects_and_resumes_the_parent() {
+    for (command, marker) in [
+        ("report-startup", "CODEX-STARTUP-REPORTED:"),
+        ("stop", "CODEX-STOP:"),
+    ] {
+        let h = harness().await;
+        let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+        let work = farhelm_teststate::tempdir().unwrap();
+        let records = farhelm_teststate::tempdir().unwrap();
+        let images = farhelm_teststate::tempdir().unwrap();
+        let codex = native_codex_image(images.path());
+        let session = launch_pin_fixture(
+            &h,
+            work.path(),
+            records.path(),
+            &codex,
+            &["--defer-startup".into()],
+        )
+        .await;
+        let (channel, replay, mut stream) = h
+            .client
+            .attach_live(&session.id, WIDE_COLS, ROWS)
+            .await
+            .unwrap();
+        let mut seen = replay;
+        wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-CONVERSATION READY:").await;
+        let root = marker_id(&seen, "CODEX-CONVERSATION READY:");
+        assert_eq!(durable_binding(h.state.path(), &session.id).await.0, None);
+        send_and_wait(
+            &h.client,
+            channel,
+            &mut stream,
+            &mut seen,
+            "remember parent-history",
+            "CODEX-REMEMBERED:",
+        )
+        .await;
+        let from = seen.len();
+        send_and_wait(
+            &h.client,
+            channel,
+            &mut stream,
+            &mut seen,
+            "nested-persisted",
+            "CODEX-NESTED:",
+        )
+        .await;
+        let child = marker_id(&seen[from..], "CODEX-NESTED:persisted:");
+        assert_ne!(child, root);
+        wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
+        assert!(
+            durable_binding(h.state.path(), &session.id)
+                .await
+                .0
+                .unwrap()
+                .contains(&child)
+        );
+        send_and_wait(&h.client, channel, &mut stream, &mut seen, command, marker).await;
+        let log = h
+            .state
+            .path()
+            .join("hook-log")
+            .join(format!("{}.log", session.id));
+        let verdict = supervisor_verdict(&h.sup, &log, 0, &root, None).await;
+        assert!(verdict.contains(" acked "), "{verdict}");
+        let binding = durable_binding(h.state.path(), &session.id).await;
+        assert!(binding.0.as_ref().unwrap().contains(&root));
+        assert_eq!(binding.1, 1);
+        assert_eq!(binding.2.as_deref(), Some("hook"));
+        let notifications = listed(&h.client, &session.id).await.notifications;
+        assert_eq!(notifications.len(), 1);
+        assert!(notifications[0].text.contains("A Restart before now"));
+        assert!(!notifications[0].resolved);
+        h.client.restart_session(&session.id, true).await.unwrap();
+        drop(stream);
+        let (channel, replay, mut stream) = h
+            .client
+            .attach_live(&session.id, WIDE_COLS, ROWS)
+            .await
+            .unwrap();
+        let mut seen = replay;
+        wait_for_after(
+            &mut stream,
+            &mut seen,
+            &format!("CODEX-CONVERSATION RESUMED:{root}"),
+            &format!("CODEX-CONVERSATION READY:{root}:"),
+            30,
+        )
+        .await;
+        send_and_wait(
+            &h.client,
+            channel,
+            &mut stream,
+            &mut seen,
+            "recall",
+            "CODEX-RECALL:parent-history",
+        )
+        .await;
+        serving.stop().await;
+    }
+}
+
 /// A descendant must not win the first report merely because no foreground
 /// binding exists yet. The root is live in its owned pane and the child's
 /// transcript is valid, so the observed intermediary refusal distinguishes
@@ -663,8 +993,8 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     }
 
     // Shell-launched native Codex: shell script, nested image, hook —
-    // all three live. Two Codex images refuse this regardless of the
-    // shell between them.
+    // all three live. The admitted pin refuses this descendant regardless
+    // of the launch ancestry between the two native Codex processes.
     {
         let log_offset = std::fs::read(&shell_log)
             .expect("read prior hook outcomes")

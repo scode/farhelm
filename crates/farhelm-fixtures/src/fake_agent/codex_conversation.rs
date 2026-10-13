@@ -29,6 +29,12 @@ const CHILD_FLAG: &str = "--codex-child";
 pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     let root = record_home.context("codex-conversation needs --record-home")?;
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(index) = args.iter().position(|arg| arg == "--resident-child-image") {
+        let image = args
+            .get(index + 1)
+            .context("resident launcher needs its child image")?;
+        return resident_launcher(image, &args, index);
+    }
     let hook_binary = required_path(&args, HOOK_BINARY_FLAG)?;
     let child = option_value(&args, CHILD_FLAG)?;
     let resume_id = option_value(&args, RESUME_ID_FLAG)?;
@@ -37,6 +43,39 @@ pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     }
     let defer_startup = args.iter().any(|arg| arg == "--defer-startup");
     root_conversation(&root, &hook_binary, resume_id.as_deref(), defer_startup)
+}
+
+/// Keep a distinct native launcher alive above Codex, forwarding its launch contract.
+/// No exec or process-group change is allowed: the two codex images must share
+/// the pane's foreground group and inherited hooks, just as a resident launcher
+/// does. The mode flag is consumed here so the child runs the ordinary fixture.
+fn resident_launcher(
+    image: &std::ffi::OsStr,
+    args: &[std::ffi::OsString],
+    index: usize,
+) -> anyhow::Result<()> {
+    let forwarded: Vec<_> = args
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(i, _)| *i != index && *i != index + 1)
+        .map(|(_, arg)| arg)
+        .collect();
+    let mut child = Command::new(image)
+        .args(forwarded)
+        .spawn()
+        .context("spawn resident launcher's Codex child")?;
+    println!(
+        "CODEX-LAUNCHER:{}:{}:{}",
+        std::process::id(),
+        child.id(),
+        kernel_executable_basename()?
+    );
+    std::io::stdout().flush()?;
+    let status = child
+        .wait()
+        .context("wait for resident launcher's Codex child")?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 /// Keep one foreground process alive while commands trigger the state
@@ -203,7 +242,7 @@ fn nested_from_root(
 /// would.
 ///
 /// Why a shell descendant matters separately from a native one: the
-/// native child is refused by counting two Codex images; the shell child
+/// native child is refused by the admitted process pin; the shell child
 /// carries no second runtime, pinning that the corridor classifies the
 /// intermediaries themselves rather than either proof carrying the whole
 /// boundary. Both cases below are valid in every respect EXCEPT

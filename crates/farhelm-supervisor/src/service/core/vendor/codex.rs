@@ -55,12 +55,11 @@ impl Supervisor {
             "the exact Codex transcript is missing or inconsistent; nothing was relaunched — refresh the session").into())
     }
 
-    /// Codex admission, the completed two-proof design: foreground
-    /// native-runtime attribution over the recorded chain, excluding nested
-    /// runtimes,
-    /// then exact root record validation excluding same-process vendor
-    /// threads — wired through the shared claim, CAS, and mirror
-    /// discipline rather than its own.
+    /// Admit a verified record only for this launch's pinned Codex process.
+    /// First admission pins; a recorded Codex ancestor can correct a child-first
+    /// pin, while a dead pin releases for a fresh process outside its chain.
+    /// The capture claim and durable CAS keep process authority and the exact
+    /// conversation binding together across reports, reloads and relaunches.
     pub(in crate::service::core) async fn report_codex_conversation(
         &self,
         id: &str,
@@ -124,14 +123,65 @@ impl Supervisor {
         }
         let enrichment =
             hook_event_name.as_ref().and_then(serde_json::Value::as_str) == Some("Stop");
+        // Attribution must precede Stop's confirmation-only returns: a recorded
+        // ancestor's Stop is a selection of its own record, not an enrichment
+        // of the child conversation we previously followed by mistake.
+        let attribution = crate::procs::codex_corridor(&chain)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
+        let stored_pin = self.store.codex_report_pin(id).await.map_err(|_| {
+            RequestError::new(
+                ErrorKind::Internal,
+                "could not read the Codex reporting-process pin",
+            )
+        })?;
+        let pin = stored_pin
+            .as_deref()
+            .map(serde_json::from_str::<crate::agent_kind::codex::CodexReportPin>)
+            .transpose()
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    "the Codex reporting-process pin is invalid",
+                )
+            })?;
+        use crate::agent_kind::codex::PinDecision;
+        let decision = match pin.as_ref() {
+            None => PinDecision::Accept,
+            Some(pin) => {
+                let initial = pin.judge(&attribution, true, &chain);
+                if initial == PinDecision::Refuse {
+                    // Unavailable evidence is not proof that the pin exited.
+                    // Only a gone/reused/non-running process releases authority.
+                    let live = crate::procs::read_process(pin.process.pid)
+                        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?
+                        .is_some_and(|(_, start, state)| {
+                            start == pin.process.start
+                                && state == crate::procs::ProcessState::Running
+                        });
+                    pin.judge(&attribution, live, &chain)
+                } else {
+                    initial
+                }
+            }
+        };
+        if decision == PinDecision::Refuse {
+            if enrichment {
+                return Ok(());
+            }
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "a Codex process below or different from the pinned process cannot report for this launch",
+            ));
+        }
+        let correction = decision == PinDecision::Correct;
         let mut locator = crate::agent_kind::codex::CodexLocator::reported(
             conversation,
             transcript_path,
             hook_event_name,
         )
         .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
-        if enrichment {
-            // Stop is confirmation, never selection. An already-ready binding
+        if enrichment && !correction {
+            // The pinned process's Stop is confirmation. An already-ready binding
             // is rejected here before any transcript read, including after its
             // file disappears. Only Restart decides that offer is stale.
             let Some(previous) = row
@@ -167,21 +217,16 @@ impl Supervisor {
         // file to another persistent thread. Keep that expectation even
         // after Restart has withdrawn readiness; a legitimate clear/new
         // names a different runtime or path and can establish a new binding.
-        if let Some(previous) = row
-            .captured_conversation
-            .as_deref()
-            .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
+        if !correction
+            && let Some(previous) = row
+                .captured_conversation
+                .as_deref()
+                .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
             && previous.runtime_session_id == locator.runtime_session_id
             && previous.session_file == locator.session_file
         {
             locator.thread_id = previous.thread_id;
         }
-        // The recorded chain was anchored at the current pane before
-        // admission; the corridor decides which process in it emitted the
-        // report. Evidence recorded when the report was made cannot change
-        // during verification, so there is no second walk to compare.
-        let emitter = crate::procs::codex_corridor(&chain)
-            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         locator.verify().await.map_err(|error| {
             RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -198,7 +243,7 @@ impl Supervisor {
             ));
         }
         info!(target: LOG_TARGET,
-            session = %id, generation, emitter_pid = emitter.pid,
+            session = %id, generation, emitter_pid = attribution.emitter.pid,
             runtime_session = %locator.runtime_session_id,
             persistent_thread = ?locator.thread_id, resumable = locator.resumable,
             "attributed a Codex foreground conversation report"
@@ -206,9 +251,25 @@ impl Supervisor {
         conversation = locator
             .encode()
             .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        let replacement_pin = if decision == PinDecision::Accept
+            && pin
+                .as_ref()
+                .is_some_and(|pin| pin.process == attribution.emitter)
+        {
+            // A repeated report must not erase ancestors recorded by the winning
+            // report merely because later process evidence ends at another anchor.
+            stored_pin
+                .clone()
+                .expect("the accepted pin was loaded from storage")
+        } else {
+            serde_json::to_string(&crate::agent_kind::codex::CodexReportPin::from_attribution(
+                &attribution,
+            ))
+            .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?
+        };
         // Step 4: the atomic CAS over the COMPLETE prior binding —
-        // generation plus exact locator plus proof version — committing
-        // identity, locator, provenance 1, source, readiness, and the
+        // generation plus exact locator plus proof version plus process pin — committing
+        // identity, locator, pin, provenance 1, source, readiness, and the
         // ambiguity reset together. Only this transaction may
         // establish version 1.
         //
@@ -228,16 +289,26 @@ impl Supervisor {
             // preserves the exact binding that authorized verification.
             _ => {
                 self.store
-                    .admit_ownership_proven_conversation(
-                        id,
-                        generation,
-                        row.captured_conversation.as_deref(),
-                        row.capture_ownership_version,
+                    .admit_codex_conversation(
+                        &row,
+                        stored_pin.as_deref(),
                         &conversation,
+                        &replacement_pin,
+                        correction.then_some((
+                            crate::service::notifications::NotificationKind::CodexPinCorrected
+                                .as_str(),
+                            crate::service::notifications::CODEX_PIN_CORRECTED_TEXT,
+                        )),
                     )
                     .await
             }
         };
-        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)?;
+        // The warning committed with the correction. A crash before this mirror
+        // only delays its visibility: the next supervisor reloads the durable row.
+        if correction && self.reload_notification_cell(id).await {
+            self.hint_sessions_changed();
+        }
+        Ok(())
     }
 }

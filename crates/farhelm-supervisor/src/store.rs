@@ -85,7 +85,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 30;
+const SCHEMA_VERSION: i64 = 31;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1556,7 +1556,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  omp_launch_program TEXT,
                  session_launch     TEXT,
                  launch_hooked      INTEGER NOT NULL DEFAULT 0,
-                 launch_boot_ended  INTEGER NOT NULL DEFAULT 0
+                 launch_boot_ended  INTEGER NOT NULL DEFAULT 0,
+                 codex_report_pin TEXT
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1616,7 +1617,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 30;
+             PRAGMA user_version = 31;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2281,6 +2282,18 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 29 to 30")?;
         version = 30;
+    }
+    if version == 30 {
+        // A conversation is not evidence of its reporting process. Old rows
+        // remain unpinned until an admitted report establishes that evidence.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN codex_report_pin TEXT;
+             PRAGMA user_version = 31;
+             COMMIT;",
+        )
+        .context("migrating schema from version 30 to 31")?;
+        version = 31;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -4043,6 +4056,8 @@ impl SessionStore {
     ///   yet.
     /// - boot-finality proof clears because a new shim can write. A definitive
     ///   abort restores that proof with the prior external run's facts.
+    /// - Codex's process pin clears: it authorizes one launch's reports, not
+    ///   the conversation Resume carries forward. An abort does not restore it.
     /// - the captured identity, its ownership and its source are KEPT: every
     ///   restart resumes, and preserves the exact identity it will enter,
     ///   whether historical or reported.
@@ -4130,14 +4145,15 @@ impl SessionStore {
                     let (state, exit_code, annotation, error_detail) =
                         LastOutcome::Launching.columns();
                     // The capture columns are left alone: the relaunch resumes the
-                    // conversation they name. The OMP launch-provenance columns
-                    // clear — they describe the launch, not the conversation, so a
+                    // conversation they name. The Codex pin and OMP launch-provenance
+                    // columns clear — they describe the launch, not the conversation, so a
                     // resume must not inherit them. Its hook flag clears for
                     // the same reason: the new spawn decides injection afresh.
                     tx.execute(
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
-                 omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0 \
+                 omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0, \
+                 codex_report_pin = NULL \
                  WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -4183,7 +4199,7 @@ impl SessionStore {
     /// is the truth and this one's prior run is ancient history.
     ///
     /// Identity is not restored: a relaunch never clears it.
-    /// The OMP reporter asset and launch program also stay cleared: they
+    /// The Codex reporting-process pin, OMP reporter asset and launch program stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, pane, and scope selection describe
     /// the prior run; they and its boot-finality proof are restored together.
@@ -4879,8 +4895,9 @@ impl SessionStore {
     /// Commit an ownership-proven identity: conversation, exact locator,
     /// proof version and source, atomically.
     ///
-    /// The ONLY writer that establishes `capture_ownership_version = 1`,
-    /// and only the authoritative admission path calls it, after the
+    /// Together with [`Self::admit_codex_conversation`], this is the only
+    /// admission writer that establishes `capture_ownership_version = 1`.
+    /// Only the authoritative admission path calls it, after the
     /// kind's live runtime proof, vendor root proof, and repeat
     /// attribution have all passed mutation-free. The CAS compares the
     /// COMPLETE prior binding — generation plus exact locator plus proof
@@ -4924,6 +4941,66 @@ impl SessionStore {
                 },
             )
             .await
+    }
+
+    /// Read Codex's launch pin without adding a second in-memory copy.
+    /// Admission reads this under its capture claim alongside the session row;
+    /// the write below fences both snapshots against concurrent lifecycle changes.
+    pub(crate) async fn codex_report_pin(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let id = id.to_owned();
+        self.conn
+            .call(
+                "Codex pin read task panicked",
+                move |conn: &mut Connection| {
+                    conn.query_row(
+                        "SELECT codex_report_pin FROM sessions WHERE id = ?1",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .context("reading the Codex reporting-process pin")
+                },
+            )
+            .await
+    }
+
+    /// Adopt a verified Codex conversation and its process pin in one CAS.
+    /// A correction's `(kind, text)` notification commits in that same transaction:
+    /// this one-shot transition cannot reconstruct a lost warning on a later pass.
+    /// The row snapshot and exact previous pin are both preconditions. A failed
+    /// adoption cannot pin a process, and a concurrent correction cannot be
+    /// overwritten by evidence verified against the earlier conversation.
+    pub(crate) async fn admit_codex_conversation(
+        &self,
+        expected: &StoredSession,
+        expected_pin: Option<&str>,
+        replacement: &str,
+        replacement_pin: &str,
+        correction_notification: Option<(&str, &str)>,
+    ) -> anyhow::Result<bool> {
+        let id = expected.id.clone();
+        let generation = expected.generation;
+        let conversation = expected.captured_conversation.clone();
+        let version = expected.capture_ownership_version;
+        let pin = expected_pin.map(str::to_owned);
+        let replacement = replacement.to_owned();
+        let replacement_pin = replacement_pin.to_owned();
+        let correction_notification =
+            correction_notification.map(|(kind, text)| (kind.to_owned(), text.to_owned()));
+        self.conn.call("Codex admission task panicked", move |conn: &mut Connection| {
+            let tx = conn.transaction().context("beginning Codex admission")?;
+            let changed = tx.execute(
+                "UPDATE sessions SET captured_conversation = ?6, conversation_source = 'hook', \
+                 capture_ownership_version = 1, codex_report_pin = ?7 \
+                 WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
+                 AND capture_ownership_version = ?4 AND codex_report_pin IS ?5",
+                rusqlite::params![id, generation, conversation, version, pin, replacement, replacement_pin],
+            ).context("admitting a Codex conversation and reporting-process pin")?;
+            if changed > 0 && let Some((kind, text)) = correction_notification {
+                record_notification_within(&tx, &id, generation, &kind, &text, now_unix(), false)?;
+            }
+            tx.commit().context("committing Codex admission and correction notification")?;
+            Ok(changed > 0)
+        }).await
     }
 
     /// Record one OMP launch's provenance: which gated reporter asset it
@@ -5036,54 +5113,17 @@ impl SessionStore {
                 "session notification record task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let tx = conn.transaction()?;
-                    let reopened = tx.execute(
-                        "UPDATE session_notifications SET \
-                         seq = (SELECT MAX(seq) + 1 FROM session_notifications WHERE session_id = ?1), \
-                         recorded_at = ?4, text = ?5, resolved_at = NULL \
-                         WHERE session_id = ?1 AND generation = ?2 AND kind = ?3 \
-                         AND resolved_at IS NOT NULL \
-                         AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
-                                     AND (?6 = 0 OR captured_conversation IS NULL))",
-                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
-                    ).context("reopening a session notification")?;
-                    // Reopening adds no row, so it must not trim history.
-                    if reopened > 0 {
-                        tx.commit()?;
-                        return Ok(true);
-                    }
-                    let added = tx
-                        .execute(
-                            "INSERT OR IGNORE INTO session_notifications \
-                             (session_id, seq, kind, generation, recorded_at, text) \
-                             SELECT ?1, \
-                                    COALESCE((SELECT MAX(seq) FROM session_notifications \
-                                              WHERE session_id = ?1), 0) + 1, \
-                                    ?3, ?2, ?4, ?5 \
-                             WHERE EXISTS (SELECT 1 FROM sessions \
-                                           WHERE id = ?1 AND generation = ?2 \
-                                           AND (?6 = 0 OR captured_conversation IS NULL))",
-                            rusqlite::params![
-                                id,
-                                generation,
-                                kind,
-                                recorded_at,
-                                text,
-                                unless_captured
-                            ],
-                        )
-                        .context("recording a session notification")?;
-                    if added > 0 {
-                        tx.execute(
-                            "DELETE FROM session_notifications WHERE session_id = ?1 \
-                             AND seq NOT IN (SELECT seq FROM session_notifications \
-                                             WHERE session_id = ?1 \
-                                             ORDER BY seq DESC LIMIT ?2)",
-                            rusqlite::params![id, farhelm_proto::SESSION_NOTIFICATION_CAP as i64],
-                        )
-                        .context("dropping a session's oldest notifications")?;
-                    }
+                    let changed = record_notification_within(
+                        &tx,
+                        &id,
+                        generation,
+                        &kind,
+                        &text,
+                        recorded_at,
+                        unless_captured,
+                    )?;
                     tx.commit()?;
-                    Ok(added > 0)
+                    Ok(changed)
                 },
             )
             .await
@@ -5601,6 +5641,61 @@ impl SessionStore {
             )
             .await
     }
+}
+
+/// Record a warning within its caller's atomic operation, retaining the common policy.
+/// Codex correction cannot rediscover a lost warning after its pin moves, so it
+/// uses this helper before committing adoption. Ordinary warnings use the same
+/// sequence, recurrence and bounded-history rules in their own transaction.
+fn record_notification_within(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    generation: i64,
+    kind: &str,
+    text: &str,
+    recorded_at: i64,
+    unless_captured: bool,
+) -> anyhow::Result<bool> {
+    let reopened = tx.execute(
+                        "UPDATE session_notifications SET \
+                         seq = (SELECT MAX(seq) + 1 FROM session_notifications WHERE session_id = ?1), \
+                         recorded_at = ?4, text = ?5, resolved_at = NULL \
+                         WHERE session_id = ?1 AND generation = ?2 AND kind = ?3 \
+                         AND resolved_at IS NOT NULL \
+                         AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
+                                     AND (?6 = 0 OR captured_conversation IS NULL))",
+                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
+                    ).context("reopening a session notification")?;
+    // Reopening adds no row, so it must not trim history.
+    if reopened > 0 {
+        return Ok(true);
+    }
+    let added = tx
+        .execute(
+            "INSERT OR IGNORE INTO session_notifications \
+                             (session_id, seq, kind, generation, recorded_at, text) \
+                             SELECT ?1, \
+                                    COALESCE((SELECT MAX(seq) FROM session_notifications \
+                                              WHERE session_id = ?1), 0) + 1, \
+                                    ?3, ?2, ?4, ?5 \
+                             WHERE EXISTS (SELECT 1 FROM sessions \
+                                           WHERE id = ?1 AND generation = ?2 \
+                                           AND (?6 = 0 OR captured_conversation IS NULL))",
+            rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
+        )
+        .context("recording a session notification")?;
+    if added > 0 {
+        tx.execute(
+            "DELETE FROM session_notifications WHERE session_id = ?1 \
+                             AND seq NOT IN (SELECT seq FROM session_notifications \
+                                             WHERE session_id = ?1 \
+                                             ORDER BY seq DESC LIMIT ?2)",
+            rusqlite::params![id, farhelm_proto::SESSION_NOTIFICATION_CAP as i64],
+        )
+        .context("dropping a session's oldest notifications")?;
+    }
+
+    Ok(added > 0)
 }
 
 /// The create-reservation half of deleting a session, shared by the real
@@ -7232,6 +7327,257 @@ mod tests {
         );
     }
 
+    /// Schema 31 adds no process authority to an existing captured conversation.
+    /// Populated migration and reopen distinguish preserving historical data
+    /// from merely accepting an empty database; the next real admission pins it.
+    #[farhelm_testtrace::test]
+    async fn codex_pin_migration_preserves_old_capture_without_backfill() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        let mut row = launching_row("old-codex");
+        row.captured_conversation = Some("historical-locator".into());
+        row.capture_ownership_version = 1;
+        row.conversation_source = Some("hook".into());
+        store.insert_session(row, None).await.unwrap();
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE sessions DROP COLUMN codex_report_pin; PRAGMA user_version = 30;",
+            )
+            .unwrap();
+        for _ in 0..2 {
+            let reopened = SessionStore::open(&path, true).await.unwrap();
+            let row = reopened.session("old-codex").await.unwrap().unwrap();
+            assert_eq!(
+                row.captured_conversation.as_deref(),
+                Some("historical-locator")
+            );
+            assert_eq!(row.capture_ownership_version, 1);
+            assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+            assert_eq!(reopened.codex_report_pin("old-codex").await.unwrap(), None);
+        }
+    }
+
+    /// A pin and its admitted binding survive reopen but never a new generation.
+    /// Stale pin or binding snapshots cannot partially adopt, and aborting a
+    /// relaunch restores external-run facts without restoring process authority.
+    #[farhelm_testtrace::test]
+    async fn codex_pin_cas_reload_and_relaunch_share_the_launch_contract() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        store
+            .insert_session(launching_row("pinned"), None)
+            .await
+            .unwrap();
+        let initial = store.session("pinned").await.unwrap().unwrap();
+        let pin = r#"{"process":{"pid":41,"start":99},"ancestors":[]}"#;
+        assert!(
+            store
+                .admit_codex_conversation(&initial, None, "first", pin, None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .admit_codex_conversation(&initial, None, "stale", "other-pin", None)
+                .await
+                .unwrap()
+        );
+        let row = store.session("pinned").await.unwrap().unwrap();
+        assert!(
+            !store
+                .admit_codex_conversation(&row, Some("stale-pin"), "wrong", "other-pin", None)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            Some(pin)
+        );
+        assert_eq!(
+            store
+                .session("pinned")
+                .await
+                .unwrap()
+                .unwrap()
+                .captured_conversation
+                .as_deref(),
+            Some("first")
+        );
+        drop(store);
+        let store = SessionStore::open(&path, true).await.unwrap();
+        assert_eq!(
+            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            Some(pin)
+        );
+        let basis = OfferBasis {
+            captured_conversation: Some("first".into()),
+            capture_ownership_version: 1,
+        };
+        let RelaunchDecision::Claimed(claim) =
+            store.begin_relaunch("pinned", basis, false).await.unwrap()
+        else {
+            panic!("relaunch should claim the current offer")
+        };
+        assert_eq!(store.codex_report_pin("pinned").await.unwrap(), None);
+        assert!(
+            store
+                .abort_relaunch("pinned", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.codex_report_pin("pinned").await.unwrap(), None);
+        assert!(
+            !store
+                .admit_codex_conversation(&row, Some(pin), "late", pin, None)
+                .await
+                .unwrap()
+        );
+        let current = store.session("pinned").await.unwrap().unwrap();
+        assert!(
+            store
+                .admit_codex_conversation(&current, None, "new-launch", "new-pin", None)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            Some("new-pin")
+        );
+    }
+
+    /// A correction's warning cannot be lost after its process authority moves.
+    /// A real SQLite insert failure rolls back the prior successful UPDATE;
+    /// successful adoption and its once-per-launch warning both survive reopen.
+    #[farhelm_testtrace::test]
+    async fn codex_pin_correction_notification_is_atomic_and_survives_reopen() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        store
+            .insert_session(launching_row("atomic-correction"), None)
+            .await
+            .unwrap();
+        let initial = store.session("atomic-correction").await.unwrap().unwrap();
+        assert!(
+            store
+                .admit_codex_conversation(&initial, None, "child", "child-pin", None)
+                .await
+                .unwrap()
+        );
+        let child = store.session("atomic-correction").await.unwrap().unwrap();
+        let notification = Some(("codex_pin_corrected", "earlier Restart followed the child"));
+        {
+            let conn = store.conn.lock();
+            conn.execute_batch("CREATE TRIGGER refuse_correction_warning BEFORE INSERT ON session_notifications
+                WHEN NEW.kind = 'codex_pin_corrected' BEGIN SELECT RAISE(ABORT, 'controlled warning failure'); END;").unwrap();
+        }
+        // The trigger sees a correction insert only after the binding UPDATE.
+        // Its error must undo that UPDATE as well as leave the notification absent.
+        assert!(
+            store
+                .admit_codex_conversation(
+                    &child,
+                    Some("child-pin"),
+                    "parent",
+                    "parent-pin",
+                    notification
+                )
+                .await
+                .is_err()
+        );
+        let after = store.session("atomic-correction").await.unwrap().unwrap();
+        assert_eq!(after.captured_conversation, child.captured_conversation);
+        assert_eq!(
+            after.capture_ownership_version,
+            child.capture_ownership_version
+        );
+        assert_eq!(after.conversation_source, child.conversation_source);
+        assert_eq!(
+            store
+                .codex_report_pin("atomic-correction")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("child-pin")
+        );
+        assert!(
+            store
+                .session_notifications("atomic-correction")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .conn
+            .lock()
+            .execute_batch("DROP TRIGGER refuse_correction_warning;")
+            .unwrap();
+        assert!(
+            !store
+                .admit_codex_conversation(&initial, None, "stale", "stale-pin", notification)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .session_notifications("atomic-correction")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .admit_codex_conversation(
+                    &child,
+                    Some("child-pin"),
+                    "parent",
+                    "parent-pin",
+                    notification
+                )
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let store = SessionStore::open(&path, true).await.unwrap();
+        let parent = store.session("atomic-correction").await.unwrap().unwrap();
+        assert_eq!(parent.captured_conversation.as_deref(), Some("parent"));
+        assert_eq!(
+            store
+                .codex_report_pin("atomic-correction")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("parent-pin")
+        );
+        let warnings = store
+            .session_notifications("atomic-correction")
+            .await
+            .unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].text, "earlier Restart followed the child");
+        assert!(!warnings[0].resolved);
+        assert!(
+            store
+                .admit_codex_conversation(
+                    &parent,
+                    Some("parent-pin"),
+                    "higher-parent",
+                    "higher-pin",
+                    notification
+                )
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .session_notifications("atomic-correction")
+                .await
+                .unwrap(),
+            warnings
+        );
+    }
+
     /// A relaunch preserves the captured identity together with its
     /// ownership provenance, and refuses when the provenance it was offered
     /// against has moved.
@@ -7327,7 +7673,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
+                "ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; PRAGMA user_version = 28;",
             )
             .unwrap();
             assert!(
@@ -7358,7 +7704,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE sessions DROP COLUMN launch_boot_ended; PRAGMA user_version = 29;",
+                "ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; PRAGMA user_version = 29;",
             )
             .unwrap();
             assert!(
@@ -9259,7 +9605,7 @@ mod tests {
         let path = dir.path().join("supervisor.db");
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
+            conn.execute_batch("ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at; PRAGMA user_version = 27;").unwrap();
             assert!(
                 conn.prepare("SELECT resolved_at FROM session_notifications")
                     .is_err(),
@@ -11589,9 +11935,9 @@ mod tests {
     /// command launch's command, a legacy launch's fields as they were.
     fn restore_pre_v26_launch_columns(conn: &Connection) {
         // These fixtures rewind a current database, unlike raw historical
-        // schemas. Remove later additive columns so the resolution, hook and
-        // boot-finality migrations exercise the same upgrade a real older database requires.
-        conn.execute_batch("ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
+        // schemas. Remove later additive columns so notification resolution,
+        // hook policy, boot finality and the Codex pin all exercise real upgrades.
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN codex_report_pin; ALTER TABLE sessions DROP COLUMN launch_boot_ended; ALTER TABLE sessions DROP COLUMN launch_hooked; ALTER TABLE session_notifications DROP COLUMN resolved_at;")
             .expect("restore pre-resolution notifications");
         let rows: Vec<(String, String)> = conn
             .prepare("SELECT id, session_launch FROM sessions")

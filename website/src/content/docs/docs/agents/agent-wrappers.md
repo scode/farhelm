@@ -92,6 +92,14 @@ refused, the hook log records a `refused conflict` line from the supervisor, and
 launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
 staying in the chain, so it adds no level.
 
+Codex also works through a wrapper that stays running, including one named `codex` itself. Farhelm follows the first
+Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another
+Codex process started inside the session reports first, Farhelm may briefly follow its conversation. When the Codex
+process that started it reports, Farhelm switches to that conversation and tells you in the session's notifications what
+a **restart** before the switch would have resumed. If the followed Codex exits and you start a fresh one in the same
+terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
+supply the conversation **restart** needs.
+
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop
