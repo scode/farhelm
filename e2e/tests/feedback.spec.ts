@@ -32,6 +32,7 @@ test.afterEach(async ({ request }) => {
   await resetPreferences(request);
 });
 
+/** Open through the user's toggle and wait for its menu before choosing an item. */
 async function openHelpMenu(page: Page) {
   const toggle = page.getByRole("button", { name: "help", exact: true });
   await toggle.click();
@@ -40,6 +41,7 @@ async function openHelpMenu(page: Page) {
   return { toggle, menu };
 }
 
+/** Exercise the help-menu entry so dialog checks include its real mounting and focus lifecycle. */
 async function openFeedbackDialog(page: Page) {
   const { menu } = await openHelpMenu(page);
   await menu.locator('[data-bar-menu-item="send feedback"]').click();
@@ -47,6 +49,89 @@ async function openFeedbackDialog(page: Page) {
   await expect(dialog).toBeVisible();
   return dialog;
 }
+
+/**
+ * The frame keeps actions reachable while only the fields scroll. These are
+ * geometry and rendered-style assertions, because Chromium and WebKit have
+ * different native field defaults and can both report a clipped button as visible.
+ */
+test("feedback uses dark fields and pinned chrome at normal and short heights", async ({ page }, testInfo) => {
+  await page.goto("/");
+  const dialog = await openFeedbackDialog(page);
+  const message = dialog.locator(".feedback-message");
+  await expect(message).toBeFocused();
+  await page.evaluate(() => document.fonts.ready);
+  const well = await dialog.evaluate((node) => {
+    const probe = document.createElement("span");
+    probe.style.background = "var(--well)";
+    node.append(probe);
+    const value = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return value;
+  });
+  await expect(message).toHaveCSS("background-color", well);
+  await expect(dialog.locator(".feedback-contact")).toHaveCSS("background-color", well);
+  await expect(message).toHaveCSS("font-size", "13px");
+  await expect(dialog.locator(".feedback-field").first()).toHaveCSS("font-size", "12px");
+  await expect(dialog.locator(".host-settings-title")).toHaveCSS("font-size", "14px");
+  await expect(dialog.locator(".feedback-send")).toBeDisabled();
+  await expect(dialog.locator(".feedback-send")).toHaveCSS("opacity", "1");
+  await expect(dialog.locator(".feedback-hint")).toHaveText("nothing is sent until you press send");
+  const cancel = (await dialog.locator(".feedback-cancel").boundingBox())!;
+  const send = (await dialog.locator(".feedback-send").boundingBox())!;
+  const hint = (await dialog.locator(".feedback-hint").boundingBox())!;
+  expect(send.x - (cancel.x + cancel.width)).toBeGreaterThanOrEqual(8);
+  expect(send.y).toBe(cancel.y);
+  expect(send.height).toBe(cancel.height);
+  expect(hint.y).toBeLessThan(send.y + send.height);
+  expect(hint.y + hint.height).toBeGreaterThan(send.y);
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-empty.png") });
+
+  await message.fill("Feedback in a short window.");
+  await dialog.locator(".feedback-contact").fill("contact@example.test");
+  await expect(dialog.locator(".feedback-send")).toBeEnabled();
+  await page.setViewportSize({ width: 600, height: 320 });
+  const body = dialog.locator(".host-settings-body");
+  await expect.poll(() => body.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await expect(body).toHaveCSS("overflow-y", /^(auto|scroll)$/);
+  // Overflow alone can be clipped content. Start at the top, then prove
+  // the offset moved before treating the unchanged frame as a pinned one.
+  await body.evaluate((node) => { node.scrollTop = 0; });
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+  const header = (await dialog.locator(".host-settings-header").boundingBox())!;
+  const footer = (await dialog.locator(".host-settings-footer").boundingBox())!;
+  expect(header.y).toBeGreaterThanOrEqual(0);
+  expect(footer.y + footer.height).toBeLessThanOrEqual(320);
+  await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => body.evaluate((node) => node.scrollTop), {
+    message: "body scrolling must reveal fields while the frame stays pinned",
+  }).toBeGreaterThan(0);
+  expect((await dialog.locator(".host-settings-header").boundingBox())!.y).toBe(header.y);
+  expect((await dialog.locator(".host-settings-footer").boundingBox())!.y).toBe(footer.y);
+  // Hit-testing proves the pinned controls remain usable, not merely painted.
+  for (const selector of [".feedback-dismiss", ".feedback-send"]) {
+    expect(await dialog.locator(selector).evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    }), selector).toBe(true);
+  }
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-short.png") });
+  // The shared answer row stacks on phone widths. The hint may wrap, but
+  // must not overlap either answer or push the footer beyond the viewport.
+  await page.setViewportSize({ width: 380, height: 460 });
+  await expect(dialog.locator(".host-dialog-answers")).toHaveCSS("flex-direction", "column-reverse");
+  const narrowHint = (await dialog.locator(".feedback-hint").boundingBox())!;
+  const narrowAnswers = (await dialog.locator(".host-dialog-answers").boundingBox())!;
+  const beside = narrowHint.x + narrowHint.width <= narrowAnswers.x;
+  const above = narrowHint.y + narrowHint.height <= narrowAnswers.y;
+  expect(beside || above, "wrapping reassurance must leave the answer row clear").toBe(true);
+  const narrowFooter = (await dialog.locator(".host-settings-footer").boundingBox())!;
+  expect(narrowFooter.y + narrowFooter.height).toBeLessThanOrEqual(460);
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-narrow.png") });
+  await dialog.locator(".feedback-dismiss").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+});
 
 /** Route every feedback POST to `answer`, recording each JSON body sent. */
 async function interceptFeedback(page: Page, answer: (route: Route) => Promise<void>) {
@@ -264,8 +349,9 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
 
   await dialog.locator(".feedback-message").fill("The sidebar is great.\nSecond line.");
   await dialog.locator(".feedback-contact").fill("someone@example.com");
-  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback", exact: true });
+  const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback", exact: true });
   await expect(reuse).toBeVisible();
+  await expect(dialog.locator(".app-settings-choice")).toHaveCSS("font-size", "13px");
   await page.evaluate(() => document.fonts.ready);
   await dialog.screenshot({ path: testInfo.outputPath("feedback-reuse-layout.png") });
   const reuseLayout = await reuse.evaluate((input) => {
@@ -293,6 +379,7 @@ test("send feedback sends exactly what the dialog shows, then thanks and closes"
 
   await send.click();
   await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks");
+  await expect(dialog.locator(".feedback-thanks")).toHaveCSS("font-size", "13px");
   // The announcement lives in a status region outside the dialog. While the
   // dialog is open that region is inert (modal isolation), so it must stay
   // empty until the dialog has closed, or the change would go unannounced.
@@ -323,7 +410,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
   const sent = await interceptFeedback(page, (route) => route.fulfill({ status: 204 }));
   await page.goto("/");
   let dialog = await openFeedbackDialog(page);
-  const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
+  const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback" });
   await expect(reuse).toHaveCount(0);
   const contact = "  contact@example.test  ";
   await dialog.locator(".feedback-contact").fill(contact);
@@ -336,7 +423,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
 
   dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
-  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "re-use for future feedback" })).toBeChecked();
   await patchPreferences(request, { feedback_contact: "other-client@example.test" });
   expect((await readPreferences(request)).feedback_contact).toBe("other-client@example.test");
   await dialog.locator(".feedback-message").fill("Keep my contact.");
@@ -346,7 +433,7 @@ test("successful feedback remembers the sent contact and writes it again from a 
   await page.reload();
   dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue(contact);
-  await expect(dialog.getByRole("checkbox", { name: "Re-use for future feedback" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "re-use for future feedback" })).toBeChecked();
   await dialog.locator(".feedback-cancel").click();
 });
 
@@ -364,7 +451,7 @@ test("successful feedback clears contact when reuse is unchecked or the field is
     await page.goto("/");
     const dialog = await openFeedbackDialog(page);
     await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
-    const reuse = dialog.getByRole("checkbox", { name: "Re-use for future feedback" });
+    const reuse = dialog.getByRole("checkbox", { name: "re-use for future feedback" });
     await expect(reuse).toBeChecked();
     if (choice === "unchecked") {
       await reuse.uncheck();
@@ -404,7 +491,7 @@ test("failed feedback and cancel preserve remembered contact without a preferenc
   const dialog = await openFeedbackDialog(page);
   await expect(dialog.locator(".feedback-contact")).toHaveValue("remembered@example.test");
   await dialog.locator(".feedback-contact").fill("new@example.test");
-  await dialog.getByRole("checkbox", { name: "Re-use for future feedback" }).uncheck();
+  await dialog.getByRole("checkbox", { name: "re-use for future feedback" }).uncheck();
   await dialog.locator(".feedback-message").fill("Keep memory if sending fails.");
   await dialog.locator(".feedback-send").click();
   await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback");
@@ -427,7 +514,7 @@ test("failed feedback and cancel preserve remembered contact without a preferenc
  * reached at all gets a plain sentence too, never the HTTP client's own
  * error text. A retry that succeeds then sends the same text.
  */
-test("a failed send keeps the text and says it failed", async ({ page }) => {
+test("a failed send keeps the text and says it failed", async ({ page }, testInfo) => {
   const answers = [
     (route: Route) =>
       route.fulfill({
@@ -454,6 +541,8 @@ test("a failed send keeps the text and says it failed", async ({ page }) => {
   );
   await expect(message).toHaveValue("Keep this text.");
   await expect(send).toBeEnabled();
+  await expect(dialog.locator(".feedback-hint")).toHaveText("nothing was sent");
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-failed.png") });
 
   await send.click();
   await expect(dialog.getByRole("alert")).toContainText(
@@ -468,6 +557,8 @@ test("a failed send keeps the text and says it failed", async ({ page }) => {
 
   await send.click();
   await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks");
+  await expect(dialog.locator(".feedback-hint")).toHaveCount(0);
+  await dialog.screenshot({ path: testInfo.outputPath("feedback-sent.png") });
   expect(sent).toHaveLength(4);
   for (const body of sent) expect((body as { message: string }).message).toBe("Keep this text.");
 });
@@ -478,13 +569,13 @@ test("a failed send keeps the text and says it failed", async ({ page }) => {
  * drops the send with no word on whether it arrived and loses the typed text,
  * which SPEC.md promises a failed send keeps; Cancel used to close
  * unconditionally, and Escape checked the sending flag of the render before
- * Send. Specifies, for Cancel and for Escape (whose modal fallback clicks
+ * Send. Specifies, for Cancel, header dismiss and Escape (whose modal fallback clicks
  * Cancel): with the send held, Send then the close in one synchronous block
  * leaves the dialog open with its text; the held send then fails and the text
  * is still there, and that same close then closes the dialog. (Cancel before
  * any Send is covered by the blank-message test below.)
  */
-test("a close queued behind send waits for the send", async ({ page }) => {
+test("a close queued behind send waits for the send", async ({ page }, testInfo) => {
   let release!: () => void;
   const sent = await interceptFeedback(page, async (route) => {
     await new Promise<void>((resolve) => (release = resolve));
@@ -496,7 +587,7 @@ test("a close queued behind send waits for the send", async ({ page }) => {
   });
   await page.goto("/");
 
-  for (const [round, close] of ["cancel", "escape"].entries()) {
+  for (const [round, close] of ["cancel", "dismiss", "escape"].entries()) {
     const dialog = await openFeedbackDialog(page);
     const message = dialog.locator(".feedback-message");
     await message.fill(`Keep this text (${close}).`);
@@ -507,14 +598,18 @@ test("a close queued behind send waits for the send", async ({ page }) => {
     const closeWasLive = await dialog.evaluate((node, how) => {
       const send = node.querySelector<HTMLButtonElement>(".feedback-send")!;
       const cancel = node.querySelector<HTMLButtonElement>(".feedback-cancel")!;
+      const dismiss = node.querySelector<HTMLButtonElement>(".feedback-dismiss")!;
       send.click();
       // Still enabled: the render that disables it has not happened, which
       // is the window this test exists for. Focus inside the dialog, so the
       // Escape reaches the dialog's own handler and not only the modal's
       // fallback.
-      const live = cancel.isConnected && !cancel.disabled && node.contains(document.activeElement);
+      const control = how === "dismiss" ? dismiss : cancel;
+      const live = control.isConnected && !control.disabled && node.contains(document.activeElement);
       if (how === "cancel") {
         cancel.click();
+      } else if (how === "dismiss") {
+        dismiss.click();
       } else {
         node.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       }
@@ -524,6 +619,10 @@ test("a close queued behind send waits for the send", async ({ page }) => {
     await expect.poll(() => sent.length, { message: "the send reached the route" }).toBe(round + 1);
     await expect(dialog.getByRole("button", { name: "sending…", exact: true })).toBeVisible();
     await expect(dialog, `${close} behind send leaves the dialog open`).toBeVisible();
+    await expect(dialog.locator(".feedback-cancel")).toBeDisabled();
+    await expect(dialog.locator(".feedback-dismiss")).toBeDisabled();
+    await expect(dialog.locator(".feedback-hint")).toHaveCount(0);
+    if (round === 0) await dialog.screenshot({ path: testInfo.outputPath("feedback-sending.png") });
 
     release();
     await expect(dialog.getByRole("alert")).toContainText("Couldn't send feedback");
@@ -532,13 +631,15 @@ test("a close queued behind send waits for the send", async ({ page }) => {
     // With no send in flight, the same close works.
     if (close === "cancel") {
       await dialog.locator(".feedback-cancel").click();
+    } else if (close === "dismiss") {
+      await dialog.locator(".feedback-dismiss").click();
     } else {
       await message.focus();
       await page.keyboard.press("Escape");
     }
     await expect(dialog).toHaveCount(0);
   }
-  expect(sent).toHaveLength(2);
+  expect(sent).toHaveLength(3);
 });
 
 /**

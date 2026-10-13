@@ -130,8 +130,8 @@ enum SendState {
 ///
 /// Every user close path asks this of the LIVE state when it runs, not of the
 /// render it was drawn in: Send sets the state synchronously, and a Cancel
-/// click or Escape queued right behind it in the same event burst still runs
-/// before the render that disables Cancel. The modal's own Escape fallback
+/// click, header dismiss or Escape queued right behind it in the same event
+/// burst still runs before the render that disables Cancel. The modal's own Escape fallback
 /// only clicks Cancel, so Cancel's handler covers it.
 fn may_close(state: &SendState) -> bool {
     *state != SendState::Sending
@@ -246,13 +246,15 @@ pub(crate) fn FeedbackDialog(
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
-                class: "app-settings-dialog feedback-dialog",
+                class: "app-settings-dialog feedback-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "send feedback",
                 tabindex: "-1",
                 onmounted: move |_| install_dialog_with_selector(
-                    DIALOG_SELECTOR, "textarea", Some(".feedback-cancel"),
+                    DIALOG_SELECTOR,
+                    "textarea",
+                    Some(".feedback-cancel"),
                 ),
                 // Closing while a send is in flight would cancel it with no
                 // word on whether it arrived and lose the text, so Escape
@@ -260,106 +262,189 @@ pub(crate) fn FeedbackDialog(
                 // timeout), reading the live state (`may_close`). Cancel is
                 // also natively disabled meanwhile, once that render lands.
                 onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing() && may_close(&state.peek()) {
+                    if event.key() == Key::Escape && !event.is_composing()
+                        && may_close(&state.peek())
+                    {
                         on_close.call(());
                     }
                 },
-                h2 { class: "host-settings-title", "send feedback" }
-                if state() == SendState::Sent {
-                    p { class: "feedback-thanks", "{THANKS}" }
-                } else {
-                    p { class: "host-settings-help",
-                        "This goes privately to Farhelm's maintainer, not to a public issue tracker. Nothing is sent until you press send."
-                    }
-                    label { class: "feedback-field",
-                        "message"
-                        textarea {
-                            class: "feedback-message",
-                            // Feedback can contain commands or paths too; the
-                            // app's no-correction policy includes this prose box.
-                            autocomplete: "off",
-                            autocorrect: "off",
-                            autocapitalize: "none",
-                            spellcheck: "false",
-                            rows: "5",
-                            required: true,
-                            disabled: sending,
-                            value: "{message}",
-                            oninput: move |event| message.set(event.value()),
-                        }
-                    }
-                    label { class: "feedback-field",
-                        "how to reach you (optional)"
-                        input {
-                            r#type: "text",
-                            class: "feedback-contact",
-                            // Offer the user's saved address without rewriting
-                            // an address or another contact they type.
-                            autocomplete: "email",
-                            autocorrect: "off",
-                            autocapitalize: "none",
-                            spellcheck: "false",
-                            disabled: sending,
-                            value: "{contact}",
-                            oninput: move |event| contact.set(event.value()),
-                        }
-                    }
-                    if !is_blank(&contact.read()) {
-                        label {
-                            class: "app-settings-choice",
-                            "data-tooltip": "reuse: remember this contact on the helm after a successful send, for the desktop app and web UI",
-                            input {
-                                r#type: "checkbox",
-                                class: "feedback-reuse",
-                                checked: remember(),
-                                disabled: sending,
-                                onchange: move |event| remember.set(event.checked()),
+                // Reuse the host frame's geometry, not its host-specific
+                // header component. Every dismiss path still asks the live
+                // send state, including clicks queued before disabling renders.
+                div { class: "host-settings-header",
+                    div { class: "host-settings-mark", "aria-hidden": "true",
+                        svg {
+                            class: "feedback-glyph",
+                            view_box: "0 0 32 32",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.6",
+                            stroke_linejoin: "round",
+                            path { d: "M5 5h22a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3H16l-6 5v-5H5a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z" }
+                            circle {
+                                cx: "10",
+                                cy: "13.5",
+                                r: "1.4",
+                                fill: "currentColor",
+                                stroke: "none",
                             }
-                            "Re-use for future feedback"
+                            circle {
+                                cx: "16",
+                                cy: "13.5",
+                                r: "1.4",
+                                fill: "currentColor",
+                                stroke: "none",
+                            }
+                            circle {
+                                cx: "22",
+                                cy: "13.5",
+                                r: "1.4",
+                                fill: "currentColor",
+                                stroke: "none",
+                            }
                         }
                     }
-                    div { class: "feedback-attached",
-                        p { class: "host-settings-help", "Sent with it, and nothing else:" }
-                        dl {
-                            dt { "version" }
-                            dd { class: "feedback-version peer-value", dir: "ltr", "{version}" }
-                            dt { "app" }
-                            dd { class: "feedback-surface", "{surface_label(surface)}" }
-                            dt { "operating system" }
-                            dd { class: "feedback-os peer-value", dir: "ltr", "{os}" }
-                        }
-                    }
-                    if let Some(problem) = size_problem {
-                        p { class: "feedback-error", role: "alert", "{problem}" }
-                    }
-                    if let SendState::Failed(reason) = state() {
-                        p { class: "feedback-error", role: "alert",
-                            "{reason} Your text is still here, so you can try again or copy it."
-                        }
-                    }
-                }
-                div { class: "host-settings-actions",
-                    if state() != SendState::Sent {
-                        button {
-                            r#type: "button",
-                            class: "btn btn-primary feedback-send",
-                            "data-tooltip": "send: deliver this message privately to the maintainer",
-                            disabled: !can_send,
-                            onclick: send,
-                            if sending { "sending…" } else { "send" }
+                    div { class: "host-settings-heading",
+                        h2 { class: "host-settings-title", "send feedback" }
+                        div { class: "host-settings-summary",
+                            "goes privately to Farhelm's maintainer, not a public tracker"
                         }
                     }
                     button {
                         r#type: "button",
-                        class: "btn btn-neutral feedback-cancel",
-                        "data-tooltip": if state() == SendState::Sent { "close: your message was sent" } else { "cancel: close without sending" },
+                        class: "host-settings-dismiss feedback-dismiss",
+                        aria_label: "close send feedback",
+                        "data-tooltip": "close: leave this feedback dialog",
                         disabled: sending,
                         onclick: move |_| {
                             if may_close(&state.peek()) {
                                 on_close.call(());
                             }
                         },
-                        if state() == SendState::Sent { "close" } else { "cancel" }
+                        "×"
+                    }
+                }
+                div { class: "host-settings-body",
+                    if state() == SendState::Sent {
+                        p { class: "feedback-thanks", "{THANKS}" }
+                    } else {
+                        label { class: "feedback-field",
+                            "message"
+                            textarea {
+                                class: "feedback-message",
+                                // Feedback can contain commands or paths too; the
+                                // app's no-correction policy includes this prose box.
+                                autocomplete: "off",
+                                autocorrect: "off",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                rows: "5",
+                                required: true,
+                                disabled: sending,
+                                value: "{message}",
+                                oninput: move |event| message.set(event.value()),
+                            }
+                        }
+                        label { class: "feedback-field",
+                            "how to reach you (optional)"
+                            input {
+                                r#type: "text",
+                                class: "feedback-contact",
+                                // Offer the user's saved address without rewriting
+                                // an address or another contact they type.
+                                autocomplete: "email",
+                                autocorrect: "off",
+                                autocapitalize: "none",
+                                spellcheck: "false",
+                                disabled: sending,
+                                value: "{contact}",
+                                oninput: move |event| contact.set(event.value()),
+                            }
+                        }
+                        if !is_blank(&contact.read()) {
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "reuse: remember this contact on the helm after a successful send, for the desktop app and web UI",
+                                input {
+                                    r#type: "checkbox",
+                                    class: "feedback-reuse",
+                                    checked: remember(),
+                                    disabled: sending,
+                                    onchange: move |event| remember.set(event.checked()),
+                                }
+                                "re-use for future feedback"
+                            }
+                        }
+                        div { class: "feedback-attached",
+                            p { class: "host-settings-help", "sent with it, and nothing else" }
+                            dl {
+                                dt { "version" }
+                                dd {
+                                    class: "feedback-version peer-value",
+                                    dir: "ltr",
+                                    "{version}"
+                                }
+                                dt { "app" }
+                                dd { class: "feedback-surface", "{surface_label(surface)}" }
+                                dt { "operating system" }
+                                dd {
+                                    class: "feedback-os peer-value",
+                                    dir: "ltr",
+                                    "{os}"
+                                }
+                            }
+                        }
+                        if let Some(problem) = size_problem {
+                            p { class: "feedback-error", role: "alert", "{problem}" }
+                        }
+                        if let SendState::Failed(reason) = state() {
+                            p { class: "feedback-error", role: "alert",
+                                "{reason} Your text is still here, so you can try again or copy it."
+                            }
+                        }
+                    }
+                }
+                div { class: "host-settings-actions host-settings-footer",
+                    if matches!(state(), SendState::Editing | SendState::Failed(_)) {
+                        span { class: "feedback-hint",
+                            if matches!(state(), SendState::Failed(_)) {
+                                "nothing was sent"
+                            } else {
+                                "nothing is sent until you press send"
+                            }
+                        }
+                    }
+                    div { class: "host-dialog-answers",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral feedback-cancel",
+                            "data-tooltip": if state() == SendState::Sent { "close: your message was sent" } else { "cancel: close without sending" },
+                            disabled: sending,
+                            onclick: move |_| {
+                                if may_close(&state.peek()) {
+                                    on_close.call(());
+                                }
+                            },
+                            if state() == SendState::Sent {
+                                "close"
+                            } else {
+                                "cancel"
+                            }
+                        }
+                        if state() != SendState::Sent {
+                            button {
+                                r#type: "button",
+                                class: "btn btn-primary feedback-send",
+                                "data-tooltip": "send: deliver this message privately to the maintainer",
+                                disabled: !can_send,
+                                onclick: send,
+                                if sending {
+                                    "sending…"
+                                } else {
+                                    "send"
+                                }
+                            }
+                        }
                     }
                 }
             }
