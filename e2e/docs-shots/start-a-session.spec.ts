@@ -284,6 +284,9 @@ test("host menu", async ({ page, request }) => {
 });
 
 test("host yolo setting", async ({ page, request }) => {
+  // Tall enough that the Permissions section is not clipped by the dialog's
+  // scrolling body.
+  await page.setViewportSize({ width: 1600, height: 1700 });
   const { scenario, director } = await open(page, request);
   const remote = scenario.hosts.find((host) => host.kind === "remote");
   if (!remote) throw new Error("the docs scenario needs a remote host for this shot");

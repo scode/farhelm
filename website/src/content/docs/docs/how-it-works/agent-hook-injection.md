@@ -48,9 +48,9 @@ Claude and Codex offer a session-start hook — a command they run whenever a co
 the conversation id. Codex also runs a `Stop` hook at the end of a turn to confirm a new transcript that was not ready
 when `/clear` began. It cannot change an already saved conversation. Grok's three configured lifecycle hooks split the
 job: `SessionStart` selects the UUID, while `UserPromptSubmit` and `Stop` can supply or refresh the exact saved-record
-path for that same selection. For Codex and Grok, Farhelm also requires foreground-process attribution and vendor-owned
-record evidence: another process can inherit the credential without becoming the conversation in your terminal. No
-status, control operation, or extra permission rides on the identity report.
+path for that same selection. For Codex and Grok, Farhelm also requires the report to come from the agent process it
+follows in your terminal, plus vendor-owned record evidence: another process can inherit the credential without becoming
+the conversation in your terminal. No status, control operation, or extra permission rides on the identity report.
 
 Goose exposes the same fact as `AGENT_SESSION_ID` to its MCP extensions. Pi exposes it to extensions together with its
 optional persisted session file. OMP exposes it to extensions through separate session events — `session_start`,
@@ -88,7 +88,7 @@ Codex talking, not the reporter.
 
 ## Which launches get a reporter
 
-Codex has additional process-chain restrictions even when its flags are in place; see
+Codex must run as a native executable named `codex`, even when its flags are in place; see
 [Codex's gotchas](/docs/agents/codex/#gotchas-and-quirks). Grok has its own native process and `--no-leader`
 requirements in [the Grok guide](/docs/agents/grok/#setup).
 
@@ -165,8 +165,8 @@ against Codex 0.149.0, 0.149.1, and 0.155.1. On 0.155.1, `/clear` also switches 
 while compaction retains it. On a version that accepts the flags but does not fire the hook, the hook log stays absent
 and Farhelm gains no exact Codex resume target.
 
-Codex's native executable must be named `codex`; a wrapper may launch it, but renaming the native executable makes
-foreground attribution unavailable. Farhelm verifies the exact root transcript named by the hook, including when
+Codex's native executable must be named `codex`; a wrapper may launch it, but if you rename the native executable,
+Farhelm cannot tell which process is Codex. Farhelm verifies the exact root transcript named by the hook, including when
 `CODEX_HOME` points somewhere else. Farhelm follows the first Codex process whose conversation it accepts, even through
 launchers that stay running above it. A nested invocation cannot replace a conversation already reported by its parent.
 If the nested invocation reports first, a verified report from the Codex process that started it switches Farhelm to

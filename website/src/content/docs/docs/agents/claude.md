@@ -16,3 +16,6 @@ specific to Claude.
   Farhelm can follow its conversation, and so restart it, only when Claude is the program the session started or one
   level below it. A deeper chain of wrappers still runs Claude normally, but **restart** stays greyed out.
   [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps tracking working.
+- On a Linux host, Claude's own way of opening links does not reach your browser through Farhelm. Ask it to run
+  `farhelm agent open-url -- <url>` instead
+  ([Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session)).

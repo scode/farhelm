@@ -31,6 +31,8 @@ Use **+ add field** for each choice the template should make, then **save**. Onl
 applied; a field you remove with **✕** is left alone. A **default** value resets that choice to the agent's default,
 which is different from leaving it out. An empty model input means the default model; otherwise you can type any model,
 with suggestions when the template sets an **agent type**. Approvals and other offered choices follow that agent type.
+Without an agent type, every approval choice is offered, and applying the template is refused if the chosen agent does
+not offer that choice.
 
 The destination can be a directory or a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
 chosen with the same **folder** and **managed checkout** control as the launcher. The editor explains that each session

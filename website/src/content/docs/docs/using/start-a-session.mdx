@@ -195,6 +195,10 @@ The directory and the command apply to every host. To give one host a directory 
 [The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options. A host given its
 own directory or command there keeps it whatever **settings** says.
 
+Farhelm owns the managed checkouts it makes, the directory they go into, and their trash. Work in a checkout as usual,
+but do not restore a backup or filesystem snapshot over them, and keep them on an ordinary filesystem rather than one
+like FAT: Farhelm does not detect such changes.
+
 ## When a launch fails
 
 What you see depends on how far the launch got. When Farhelm can tell before starting anything that the launch will not

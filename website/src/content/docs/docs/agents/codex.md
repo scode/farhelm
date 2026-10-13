@@ -22,3 +22,5 @@ specific to Codex.
   follow its conversation even when the launcher stays running as Codex's parent. It must forward Farhelm's arguments
   and environment, and the native Codex executable must still be named `codex`. Put the launcher in the resume command
   too, so **restart** goes through it. [Agent wrappers](/docs/agents/agent-wrappers/) has the details.
+- On a remote host, Codex's browser sign-in reports that it opened the link before you answer the card, so it cannot
+  tell when you deny it. A sign-in that redirects back to `localhost` on the host still cannot finish from your browser.
