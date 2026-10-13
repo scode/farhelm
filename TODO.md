@@ -200,7 +200,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   conversation hook reports: the supervisor only accepts a Codex report whose process chain from the pane down to
   `codex` has no launch wrapper in between (SPEC_impl.md, "Codex attribution and exact-record validation"), so Farhelm
   never learns which conversation such a session is in. Claude already tolerates a one-level wrapper. Make the hook work
-  for Codex wrappers too. The maintainer knows the details of the wrapper case this needs to cover.
+  for Codex wrappers too. The maintainer knows the details of the wrapper case this needs to cover. Plan:
+  `plans/queue/codex-resident-launcher.md`.
 
 - **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
