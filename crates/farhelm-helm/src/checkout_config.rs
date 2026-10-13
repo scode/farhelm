@@ -1984,6 +1984,8 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
+                 ALTER TABLE hosts DROP COLUMN links_without_asking;
+                 ALTER TABLE hosts DROP COLUMN local_links_without_asking;
                  PRAGMA user_version = 26;",
             )
             .unwrap();
