@@ -181,6 +181,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
+- **Check for updates by clicking the version readout.** In the desktop app, the version readout in the sidebar's top
+  bar is plain text unless an update is waiting, in which case clicking it opens the Restart to update / What's new
+  menu. Make clicking it while no update waits start a check, exactly as "check for updates" in the `?` menu does, with
+  the same inline progress and outcome beside the readout. Clicking it while an update waits keeps opening its menu.
+  Where there is no updater (the web UI, a build from main), the readout stays plain text.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
