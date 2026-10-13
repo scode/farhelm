@@ -98,6 +98,11 @@ test("remove dialog", async ({ page, request }) => {
 });
 
 test("app settings", async ({ page, request }) => {
+  // Tall enough that every section fits without scrolling: Settings scrolls
+  // its sections under a fixed heading and close button, so at the
+  // scenario's height the sounds section sits below the fold and its
+  // callout would point at the close button instead.
+  await page.setViewportSize({ width: 1600, height: 1500 });
   const { director } = await open(page, request);
   await page.locator(".app-settings-toggle").click();
   const dialog = page.locator(".app-settings-dialog");

@@ -431,3 +431,72 @@ test("v0.27.0 host remove dialog", async ({ page, request }) => {
   );
   await shot(page, name, [dialog], { maxWidth: 930 });
 });
+
+// v0.28.0. A remote host's settings gained two link permissions (#1948), and
+// Settings was regrouped under a heading and close button that stay in view
+// (#1949). The link approval card itself is not photographed: a real one
+// needs an agent asking to open a link, which no shot may set off, and a
+// staged card would be a rewrite docs/docs-shots/SPEC.md does not allow.
+
+/** v0.28.0: a remote host's permissions to open links without asking. */
+test("v0.28.0 link permissions", async ({ page, request }) => {
+  const name = `${PAGE}/v0-28-0-link-permissions`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { scenario, director } = await open(page, request);
+  const dialog = await openRemoteHostSettings(page, scenario);
+  const permissions = dialog.getByRole("region", { name: "Permissions" });
+  const links = permissions.getByRole("checkbox", { name: "Open links without asking", exact: true });
+  const local = permissions.getByRole("checkbox", { name: "Open local-network links without asking", exact: true });
+  await expect(links).not.toBeChecked();
+  await expect(local).not.toBeChecked();
+  // Both in the left margin, beside the switch each explains: to the right,
+  // the crop would pass the docs' text column and cut them off. The two
+  // switches sit closer together than the callouts are tall, so one is moved
+  // up and the other down until they clear each other.
+  await director.callout(
+    permissions.locator("label").filter({ has: page.locator(".host-links-without-asking-toggle") }),
+    "On: agents on this host open public links in your browser without asking. The web UI still needs one click on open.",
+    { side: "left", dy: -30 },
+  );
+  await director.callout(
+    permissions.locator("label").filter({ has: page.locator(".host-local-links-without-asking-toggle") }),
+    "Links to your own machine or private network have their own switch. Both start off.",
+    { side: "left", dy: 30 },
+  );
+  await shot(page, name, [permissions], { maxWidth: 930 });
+});
+
+/** v0.28.0: Settings in sections, with its heading and close button pinned. */
+test("v0.28.0 app settings", async ({ page, request }) => {
+  const name = `${PAGE}/v0-28-0-app-settings`;
+  skipFrozenReleaseShot(name);
+  // Short enough that the settings scroll, which is when the pinned heading
+  // and close button matter.
+  await page.setViewportSize({ width: 1300, height: 820 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const body = dialog.locator(".host-settings-body");
+  await expect
+    .poll(() => body.evaluate((el) => el.scrollHeight > el.clientHeight), {
+      message: "premise: the settings overflow the window",
+    })
+    .toBe(true);
+  // All in the left margin, level with what each explains.
+  await director.callout(
+    dialog.locator(".host-settings-header"),
+    "The heading and its close button stay in view while you scroll.",
+    { side: "left" },
+  );
+  await director.callout(
+    body.getByRole("region", { name: "managed checkouts" }).locator("h3"),
+    "Settings come in sections: hosts, managed checkouts, sounds and, in the Mac app, updates.",
+    { side: "left" },
+  );
+  await director.callout(
+    dialog.locator(".host-settings-footer"),
+    "So does close at the bottom. Switches save as you flip them.",
+    { side: "left" },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
