@@ -78,3 +78,55 @@ changed could lose its descendant fence; a correction could lose its warning aft
 still described the old rule. The fixes keep the complete ancestry fence, save adoption and warning atomically, and
 correct the stale documentation. The same reviewer's follow-up found no remaining issues. Its source review is separate
 from the observed runtime passes above. Commit and PR wording also passed the required cold read.
+
+### Landing
+
+Landed on 2026-10-13 (UTC) as #1945. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+All in #1945, before it merged:
+
+- The supervisor's populated v17 upgrade test still expected the migrated database to end at schema version 30; this
+  plan's new column takes it to 31. That test lives outside the files the plan changed, and the plan's own runs did not
+  include it; the combined run below failed there (run `d6cee2c4`, 2482 of 2483). It now expects 31 and names the Codex
+  pin among the migrations it passes through.
+- SPEC.md said a dead pin is released for a new Codex "outside its recorded chain", which reads as "not the pin or its
+  ancestors"; the code releases it for any new Codex whose ancestry does not include the pinned process, as a launcher
+  restarting Codex needs. The sentence now says that.
+- A list in SPEC_impl.md's notifications paragraph had gained a second "and"; it is removed.
+
+#### For the release
+
+Once a supervisor opens its database with this build, the database is at schema version 31 and older builds refuse to
+open it, so that supervisor cannot be downgraded in place. The release risk report should carry this.
+
+#### Review before merging
+
+No blockers. The migration only adds a nullable column and backfills nothing; the pin stores each process's start token,
+so a reused process ID, a zombie or another user's process counts as dead, and unreadable process information refuses
+rather than releasing a pin; a correction must come from a recorded ancestor, which a process cannot fabricate; writes
+are a single compare-and-swap, so a stale snapshot cannot land; and the harness-specific behaviour stays in the named
+per-harness places. The end-to-end tests launch Codex through a real resident launcher and would fail on the old code.
+Notes left as they are:
+
+- Sessions already running when the supervisor is upgraded start unpinned. Until the root Codex's next SessionStart, a
+  nested `codex exec` it runs can be followed until the root's next Stop corrects it, with one notification; a Restart
+  in that window resumes the nested conversation. The implementation spec accepts this.
+- A refused nested Stop is logged as acknowledged in the hook log rather than as a refusal.
+- One fallback in the Codex process-chain check is now unreachable.
+- The correction notification describes the conversation rather than naming it, slightly short of SPEC.md's "says which
+  conversation".
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the test-delay checker,
+  `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`; the supervisor, helm,
+  fixtures and CLI unit tests with the Codex-identity, hook-identity, restart-with-resume, session-lifecycle and
+  agent-relay end-to-end tests, through the recorder with pinned tmux 3.7c, nextest 0.9.148, four slots and no retries
+  (run `d6cee2c4`: 2482 of 2483, the failure described above); then, after the fix, the supervisor's store and migration
+  tests (run `f4eff3ce`, 116 of 116), the supervisor's lint, formatting, and the docs website build.
+- Not run: macOS, and a real Codex: the end-to-end tests use the fixture Codex.
+- Between those runs and the merge, main changed only review-queue documentation.
+
+Nothing in the report above was made untrue by the landing.
