@@ -155,13 +155,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   stay in the same place and are always visible, with only the settings between them scrolling, and an × close button at
   the top like the host settings dialog has. Plan: `plans/queue/app-settings-pinned.md`.
 
-- **Spruce up the feedback window.** The "send feedback" dialog works but looks unfinished. From a screenshot of it: the
-  message and contact fields are bright white boxes on the dark dialog, unlike the dark fields everywhere else in the
-  app; the field labels ("message", "how to reach you (optional)") are in larger type than the dialog's own heading;
-  "send" and "cancel" sit flush against each other with no gap, and a disabled "send" barely reads as a button; and
-  there is no × close at the top. Give it a general pass so it looks like the rest of the app. Details to be worked out.
-  Plan: `plans/queue/feedback-dialog-polish.md`.
-
 - **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
   from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
   `grok` 1.0.50, started as Farhelm starts it with no YOLO choice (`grok --no-leader`), showed "always-approve" in its

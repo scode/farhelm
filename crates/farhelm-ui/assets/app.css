@@ -2580,25 +2580,58 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .app-settings-dialog[aria-label="settings"] .host-settings-help {
   margin: 0;
 }
-/* The feedback dialog (feedback.rs): two labelled fields stacked full width,
-   then the attached values as a two-column list so the user can read exactly
-   what goes with the message. Errors use the same danger colour as the
-   other inline refusals. */
+/* Feedback opts into the host frame while keeping its editors and attached
+   values scoped: app settings shares the base dialog but must not inherit
+   this layout. Only the body scrolls, leaving send and dismiss reachable. */
+.feedback-dialog { width: min(560px, 100%); }
+.feedback-glyph { width: 28px; height: 28px; }
+.feedback-dialog .host-settings-body { gap: 16px; }
+.feedback-dialog .app-settings-choice { font-size: 13px; }
+.feedback-dialog .host-settings-footer { justify-content: flex-end; }
+.feedback-dialog .feedback-hint { margin-right: auto; }
+.feedback-dialog .feedback-dismiss:disabled { color: var(--fg-2); cursor: default; }
 .feedback-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: var(--fg-0);
+  color: var(--fg-1);
+  font-size: 12px;
 }
 .feedback-field textarea,
 .feedback-field input {
   width: 100%;
   box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--fg-0);
   font: inherit;
+  font-size: 13px;
+}
+/* The accent border is extra emphasis only: the sheet-wide keyboard focus
+   ring still draws, so these fields stay visibly focusable like every other. */
+.feedback-field textarea:focus,
+.feedback-field input:focus {
+  border-color: var(--accent);
 }
 .feedback-field textarea {
   resize: vertical;
   min-height: 6em;
+}
+.feedback-attached {
+  padding: 10px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+/* Keep the disabled action legible as a button; the shared btn rule fades
+   whole controls and would also fade its outline and recessed fill. */
+.feedback-dialog .feedback-send:disabled {
+  opacity: 1;
+  background: var(--bg-1);
+  border-color: var(--border);
+  color: var(--fg-2);
 }
 .feedback-attached > .host-settings-help {
   margin: 0 0 6px;
@@ -2626,6 +2659,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .feedback-thanks {
   margin: 0;
   color: var(--fg-0);
+  font-size: 13px;
 }
 
 /* Templates keeps the list and draft in bounded columns. minmax(0, ...)
