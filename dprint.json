@@ -13,8 +13,7 @@
     "plans/queue/INDEX.md",
     "plans/REPORTS.md",
     "CHANGELOG.md",
-    "releasing/changelog.d/*.md",
-    "releasing/drafts/**"
+    "releasing/changelog.d/*.md"
   ],
   "plugins": [
     "npm:@dprint/json@0.25.2",
